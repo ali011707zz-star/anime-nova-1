@@ -1,3 +1,4 @@
+import { SafePosterImage } from "@/components/SafePosterImage";
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   View, Text, Image, ScrollView,
@@ -594,9 +595,16 @@ export default function AnimeDetailScreen() {
 
         {/* ── Cover (Physical Right) + Title & Badges ── */}
         <View style={[d.infoRow, tvMode && d.tvInfoRow]}>
-          {anime.coverImage?.large ? (
-            <Image source={{ uri: anime.coverImage.extraLarge || anime.coverImage.large }} style={[d.cover, tvMode && d.tvCover]} />
-          ) : null}
+          <SafePosterImage
+            uri={anime.coverImage?.extraLarge || anime.coverImage?.large}
+            fallbackUris={[
+              anime.coverImage?.large,
+              anime.bannerImage,
+              anime.id ? `https://img.anili.st/media/${anime.id}` : undefined,
+            ]}
+            style={[d.cover, tvMode && d.tvCover]}
+            resizeMode="cover"
+          />
           <View style={d.infoText}>
             <Text style={[d.titleMain, d.titleArabicMain, tvMode && d.tvTitleMain]} numberOfLines={2}>
               {arabicTitle || anime.title?.english || anime.title?.romaji || "عنوان غير متاح"}

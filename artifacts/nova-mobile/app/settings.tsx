@@ -581,26 +581,26 @@ function AuthSheetInner({ open, onClose, onLogin, onLinkDevice }: {
   const tvMode = isTvDevice();
 
   const handleGoogleLogin = async () => {
+    if (tvMode) {
+      Alert.alert(
+        "تسجيل الدخول لشاشات التلفاز",
+        "أجهزة Android TV لا تدعم متصفح Google المباشر لسياسات الأمان. استخدم ميزة «ربط التلفاز بالرمز» لمزامنة حسابك من الهاتف فوراً في ثوانٍ بدون كلمة مرور.",
+        [
+          { text: "إلغاء", style: "cancel" },
+          { text: "الانتقال لرمز الربط الآن", onPress: onLinkDevice },
+        ]
+      );
+      return;
+    }
     if (!googleRequest) {
-      if (tvMode) {
-        onLinkDevice();
-        return;
-      }
       setError("تسجيل الدخول بـ Google غير مهيأ لهذه النسخة");
       return;
     }
     setError("");
     try {
-      const res = await promptGoogleAsync();
-      if (tvMode && res?.type === "error") {
-        setError("تعذّر فتح متصفح Google على هذا التلفاز. يمكنك استخدام «لدي رمز ربط» للدخول الفوري من هاتفك.");
-      }
+      await promptGoogleAsync();
     } catch {
-      if (tvMode) {
-        setError("لا يتوفر متصفح متوافق مع Google على هذا التلفاز. اضغط «لدي رمز ربط» بالأسفل للدخول الفوري.");
-      } else {
-        setError("تعذّر فتح تسجيل الدخول عبر Google. حاول مرة أخرى.");
-      }
+      setError("تعذّر فتح تسجيل الدخول عبر Google. حاول مرة أخرى.");
     }
   };
 
@@ -688,12 +688,24 @@ function AuthSheetInner({ open, onClose, onLogin, onLinkDevice }: {
   const { theme } = useApp();
   const isWhite = theme === "white";
 
-  return (
-    <Modal transparent animationType={tvMode ? "none" : "slide"} onRequestClose={onClose}>
-      <Pressable style={ts.overlay} onPress={onClose} focusable={false} />
-      <View
+  const modalContent = (
+    <View
+      testID={tvMode ? "nova-tv-modal-root" : undefined}
         style={[
           ts.bottomSheet,
+          tvMode && {
+            position: "absolute",
+            top: 20,
+            bottom: 20,
+            left: "4%",
+            right: "4%",
+            maxWidth: 680,
+            alignSelf: "center",
+            borderRadius: 24,
+            borderWidth: 2,
+            elevation: 20,
+            zIndex: 999999,
+          },
           {
             paddingBottom: 0,
             backgroundColor: isWhite ? "#FFFFFF" : "#0E0C1A",
@@ -808,12 +820,77 @@ function AuthSheetInner({ open, onClose, onLogin, onLinkDevice }: {
 
           {GOOGLE_ONLY && (
             <View style={{ gap: 14 }}>
+              {/* On TV: Put the TV Link button FIRST as the primary recommended login method */}
+              {tvMode && (
+                <View style={{ gap: 10, marginBottom: 4 }}>
+                  <View style={{
+                    padding: 12,
+                    borderRadius: 14,
+                    backgroundColor: isWhite ? "rgba(2,132,199,0.12)" : "rgba(6,182,212,0.14)",
+                    borderWidth: 1.5,
+                    borderColor: isWhite ? "#0284C7" : "rgba(6,182,212,0.50)",
+                  }}>
+                    <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 7, marginBottom: 4 }}>
+                      <Ionicons name="flash" size={16} color={isWhite ? "#0284C7" : "#22d3ee"} />
+                      <Text style={{ fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: isWhite ? "#0369A1" : "#22d3ee" }}>
+                        الطريقة الموصى بها للتلفاز: ربط الحساب بالرمز
+                      </Text>
+                    </View>
+                    <Text style={{ fontSize: 11, fontFamily: "Cairo_600SemiBold", color: isWhite ? "#334155" : "rgba(255,255,255,0.72)", lineHeight: 18, textAlign: "right" }}>
+                      افتح التطبيق بهاتفك المسجّل بحساب Google ← الإعدادات ← الملف الشخصي ← «ربط جهاز جديد» ← أدخل الرمز هنا لمزامنة مفضلاتك وسجلك فوراً!
+                    </Text>
+                  </View>
+
+                  <Pressable
+                    testID="nova-tv-preferred-focus"
+                    hasTVPreferredFocus={tvMode && open}
+                    onPress={onLinkDevice}
+                    disabled={loading}
+                    focusable={tvMode}
+                    accessibilityRole="button"
+                    accessibilityLabel="ربط التلفاز بالرمز المكوّن من 6 أرقام"
+                    style={({ focused, pressed }) => [
+                      {
+                        flexDirection: ROW_RTL,
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        paddingHorizontal: 16,
+                        paddingVertical: 14,
+                        borderRadius: 16,
+                        borderWidth: 2,
+                        borderColor: isWhite ? "#0284C7" : "#06B6D4",
+                        backgroundColor: isWhite ? "#0284C7" : "#0891B2",
+                        elevation: 6,
+                      },
+                      tvFocusStyle(focused),
+                      pressed && { opacity: 0.85 },
+                    ]}
+                  >
+                    <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 10 }}>
+                      <Ionicons name="keypad" size={20} color="#FFFFFF" />
+                      <Text style={{ fontSize: 14.5, fontFamily: "Cairo_800ExtraBold", color: "#FFFFFF" }}>
+                        إدخال رمز الربط (6 أرقام) الآن
+                      </Text>
+                    </View>
+                    <Ionicons name="arrow-back" size={18} color="#FFFFFF" style={{ transform: [{ scaleX: -1 }] }} />
+                  </Pressable>
+
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginVertical: 6 }}>
+                    <View style={{ flex: 1, height: 1, backgroundColor: isWhite ? "#E2E8F0" : "rgba(255,255,255,0.10)" }} />
+                    <Text style={{ fontSize: 11, fontFamily: "Cairo_700Bold", color: isWhite ? "#94A3B8" : "rgba(255,255,255,0.40)" }}>
+                      أو الدخول المباشر بحساب Google
+                    </Text>
+                    <View style={{ flex: 1, height: 1, backgroundColor: isWhite ? "#E2E8F0" : "rgba(255,255,255,0.10)" }} />
+                  </View>
+                </View>
+              )}
+
               {/* Google Button */}
               <Pressable
                 onPress={handleGoogleLogin}
                 disabled={loading}
                 focusable={tvMode}
-                hasTVPreferredFocus={tvMode && open}
+                hasTVPreferredFocus={!tvMode && open}
                 accessibilityRole="button"
                 accessibilityLabel="المتابعة باستخدام Google"
                 style={({ focused, pressed }) => [
@@ -1066,6 +1143,20 @@ function AuthSheetInner({ open, onClose, onLogin, onLinkDevice }: {
            )}
         </ScrollView>
       </View>
+  );
+  if (tvMode) {
+    if (!open) return null;
+    return (
+      <View style={[StyleSheet.absoluteFillObject, { backgroundColor: "rgba(0,0,0,0.85)", zIndex: 999999, elevation: 999999, justifyContent: "center", alignItems: "center" }]}>
+        <Pressable style={StyleSheet.absoluteFillObject} onPress={onClose} focusable={false} />
+        {modalContent}
+      </View>
+    );
+  }
+  return (
+    <Modal transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={ts.overlay} onPress={onClose} focusable={false} />
+      {modalContent}
     </Modal>
   );
 }
@@ -1547,9 +1638,8 @@ function TvLinkSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
     }
   };
 
-  return (
-    <Modal visible={open} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={{ flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end" }}>
+  const sheetBody = (
+      <View testID={tvMode ? "nova-tv-modal-root" : undefined} style={{ flex: 1, backgroundColor: colors.overlay, justifyContent: tvMode ? "center" : "flex-end", alignItems: tvMode ? "center" : "stretch" }}>
         <View style={{ maxHeight: "92%", backgroundColor: colors.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, borderWidth: 1, borderColor: colors.border }}>
           <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingTop: 18, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: colors.border }}>
             <Pressable onPress={onClose} style={{ width: 36, height: 36, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.input }}>
@@ -1665,6 +1755,20 @@ function TvLinkSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
           </ScrollView>
         </View>
       </View>
+  );
+
+  if (tvMode) {
+    if (!open) return null;
+    return (
+      <View style={[StyleSheet.absoluteFillObject, { zIndex: 999999, elevation: 999999 }]}>
+        {sheetBody}
+      </View>
+    );
+  }
+
+  return (
+    <Modal visible={open} animationType="slide" transparent onRequestClose={onClose}>
+      {sheetBody}
     </Modal>
   );
 }

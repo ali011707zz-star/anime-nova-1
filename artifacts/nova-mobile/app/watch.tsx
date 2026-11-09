@@ -1,3 +1,4 @@
+import { SafePosterImage } from "@/components/SafePosterImage";
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   View, Text, Image, ScrollView, ActivityIndicator,
@@ -922,7 +923,9 @@ export default function WatchScreen() {
     (anilistId && anilistId !== "0" ? anilistId : "") ||
     (anime && anime !== "0" ? anime : "");
   const cover      = useLocalSearchParams<{ cover?: string }>().cover;
-  const coverUrl   = safeDecodeURIComponent(cover);
+  const rawCoverUrl = safeDecodeURIComponent(cover);
+  const coverFallbackUri = anime && anime !== "0" ? `https://img.anili.st/media/${anime}` : undefined;
+  const coverUrl   = rawCoverUrl || coverFallbackUri || "";
   const historyTotalEps = watchHistory.find(
     (item) => item.animeId === Number(anime) && item.ep === epNum,
   )?.totalEps;
@@ -2771,12 +2774,22 @@ export default function WatchScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <RewardedAdPrompt />
-      {coverUrl ? <Image source={{ uri: coverUrl }} style={[StyleSheet.absoluteFill, { opacity: 0.08 }]} blurRadius={Platform.OS === "ios" ? 28 : 10} resizeMode="cover" /> : null}
+      {coverUrl ? (
+        <SafePosterImage
+          uri={coverUrl}
+          fallbackUris={[coverFallbackUri]}
+          style={[StyleSheet.absoluteFill, { opacity: 0.08 }]}
+          blurRadius={Platform.OS === "ios" ? 28 : 10}
+          resizeMode="cover"
+        />
+      ) : null}
       <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colors.background, opacity: 0.93 }]} />
 
       {/* ── Header ── */}
       <View style={[d.header, tvMode && d.tvHeader, { paddingTop: topPad + 4 }]}>
         <Pressable onPress={handleBack} focusable={tvMode}
+          testID="nova-tv-header-action"
+          hasTVPreferredFocus={false}
           style={({ focused }) => [d.headerBack, tvMode && d.tvHeaderActionBtn, tvMode && tvFocusStyle(focused)]}>
           <Ionicons name="chevron-forward" size={tvMode ? 25 : 19} color={colors.textPrimary} />
         </Pressable>
@@ -2788,6 +2801,8 @@ export default function WatchScreen() {
         </View>
         <View style={d.headerLeft}>
           <Pressable disabled={!canGoPrevEpisode} onPress={onRiftPrevEpisode} focusable={tvMode}
+            testID="nova-tv-header-action"
+            hasTVPreferredFocus={false}
             style={({ focused }) => [d.epNavBtn, tvMode && d.tvEpNavBtn, !canGoPrevEpisode && { opacity: 0.22 }, tvMode && tvFocusStyle(focused)]}>
             <Ionicons name="chevron-forward" size={tvMode ? 22 : 12} color={colors.textSecondary} />
             <Text style={[d.epNavText, tvMode && d.tvEpNavText]}>السابقة</Text>
@@ -2796,12 +2811,16 @@ export default function WatchScreen() {
             disabled={!canGoNextEpisode}
             onPress={onRiftNextEpisode}
             focusable={tvMode}
+            testID="nova-tv-header-action"
+            hasTVPreferredFocus={false}
             style={({ focused }) => [d.epNavBtn, tvMode && d.tvEpNavBtn, { borderColor: colors.accentBorder, backgroundColor: colors.accentSurface },
               !canGoNextEpisode && { opacity: 0.22 }, tvMode && tvFocusStyle(focused)]}>
             <Text style={[d.epNavText, tvMode && d.tvEpNavText, { color: colors.accent }]}>التالية</Text>
             <Ionicons name="chevron-back" size={tvMode ? 22 : 12} color={colors.accent} />
           </Pressable>
           <Pressable onPress={refreshAllSources} focusable={tvMode}
+            testID="nova-tv-header-action"
+            hasTVPreferredFocus={false}
             style={({ focused }) => [d.headerRefreshBtn, tvMode && d.tvHeaderActionBtn, tvMode && tvFocusStyle(focused)]}>
             <Ionicons name="refresh" size={tvMode ? 24 : 13} color={colors.accent} />
           </Pressable>
@@ -2818,12 +2837,15 @@ export default function WatchScreen() {
 
         {/* ── Info card ── */}
         <View style={[d.infoCard, tvMode && d.tvInfoCard]}>
-          {coverUrl ? (
-              <View style={[d.infoPosterWrap, tvMode && d.tvInfoPosterWrap]}>
-                <View style={[d.infoPosterGlow, tvMode && d.tvInfoPosterGlow]} />
-                <Image source={{ uri: coverUrl }} style={[d.infoPoster, tvMode && d.tvInfoPoster]} resizeMode="cover" />
-            </View>
-          ) : null}
+          <View style={[d.infoPosterWrap, tvMode && d.tvInfoPosterWrap]}>
+            <View style={[d.infoPosterGlow, tvMode && d.tvInfoPosterGlow]} />
+            <SafePosterImage
+              uri={coverUrl}
+              fallbackUris={[coverFallbackUri, anime ? `https://img.anili.st/media/${anime}` : undefined]}
+              style={[d.infoPoster, tvMode && d.tvInfoPoster]}
+              resizeMode="cover"
+            />
+          </View>
           <View style={d.infoMeta}>
             <Text style={[d.infoTitle, tvMode && d.tvInfoTitle]} numberOfLines={2}>{displayTitle}</Text>
             {arEpTitle && arEpTitle !== `الحلقة ${epNum}` ? (
@@ -3007,7 +3029,6 @@ export default function WatchScreen() {
                         const isFailed   = status === "failed";
                         const shouldPreferTvFocus = Boolean(
                           tvMode &&
-                          focusMemoryReady &&
                           (pickerFocusKey
                             ? pickerFocusKey === slotKey
                             : firstAvailableKey === slotKey)
@@ -3015,6 +3036,7 @@ export default function WatchScreen() {
                         return (
                           <Pressable
                             key={slot.site}
+                            testID={shouldPreferTvFocus ? "nova-tv-preferred-focus" : undefined}
                             onPress={() => handlePickSite(slot.site, qk)}
                             focusable={tvMode}
                             hasTVPreferredFocus={shouldPreferTvFocus}
@@ -3250,16 +3272,16 @@ function createWatchStyles(colors: ThemePalette) {
 
   /* Info card */
   infoCard:      { flexDirection: ROW_RTL, alignItems: "flex-start", gap: 14, backgroundColor: colors.card, borderRadius: 18, borderWidth: 1, borderColor: colors.border, padding: 14 },
-  tvInfoCard:    { padding: 18, gap: 16, borderRadius: 18 },
+  tvInfoCard:    { padding: 10, paddingHorizontal: 16, gap: 12, borderRadius: 14 },
   infoPosterWrap:{ width: 72, height: 102, position: "relative", alignItems: "center", justifyContent: "center" },
-  tvInfoPosterWrap: { width: 96, height: 136 },
+  tvInfoPosterWrap: { width: 56, height: 80 },
   infoPosterGlow:{ position: "absolute", width: 80, height: 110, borderRadius: 20, backgroundColor: colors.accentSurface },
-  tvInfoPosterGlow: { width: 92, height: 128, borderRadius: 15 },
+  tvInfoPosterGlow: { width: 54, height: 76, borderRadius: 10 },
   infoPoster:    { width: 72, height: 102, borderRadius: 12, borderWidth: 1, borderColor: colors.accentBorder },
-  tvInfoPoster: { width: 96, height: 136, borderRadius: 14, borderWidth: 1 },
-  infoMeta:      { flex: 1, gap: 8, paddingTop: 2 },
+  tvInfoPoster: { width: 56, height: 80, borderRadius: 10, borderWidth: 1 },
+  infoMeta:      { flex: 1, gap: 6, paddingTop: 1 },
   infoTitle:     { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, textAlign: "right", lineHeight: 22 },
-  tvInfoTitle: { fontSize: 19, lineHeight: 28 },
+  tvInfoTitle: { fontSize: 16, lineHeight: 22 },
   infoEpRow:     { flexDirection: ROW_RTL, gap: 8, flexWrap: "wrap" },
   infoEpBadge:   { flexDirection: ROW_RTL, alignItems: "center", gap: 5, backgroundColor: colors.accentSurface, borderRadius: 8, borderWidth: 1, borderColor: colors.accentBorder, paddingHorizontal: 10, paddingVertical: 5 },
   tvInfoEpBadge: { gap: 6, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 },
