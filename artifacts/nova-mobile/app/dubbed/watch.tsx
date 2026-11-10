@@ -760,12 +760,13 @@ export default function DubbedWatchScreen() {
           title={`${title || ""} · ${season || ""}`}
           episode={episodeNumber}
           initialPosition={resumeTime}
+          totalEpisodes={totalEpsCount}
           onToggleOrientation={onToggleOrientation}
           onProgress={onProgress}
           onBack={handleBack}
           onError={retryAfterPlaybackError}
           onNextEpisode={nextEpRef ? () => navigateToEpisode(nextEpRef) : undefined}
-          onPrevEpisode={prevEpRef ? () => navigateToEpisode(prevEpRef) : undefined}
+          onPreviousEpisode={prevEpRef ? () => navigateToEpisode(prevEpRef) : undefined}
         />
       </>
     );

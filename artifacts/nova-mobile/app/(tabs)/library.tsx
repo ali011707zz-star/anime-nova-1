@@ -390,7 +390,7 @@ export default function LibraryScreen() {
                 onPress={() => {
                   if (item.mangaId) {
                     router.push({
-                      pathname: "/manga/[id]" as any,
+                      pathname: "/manga/[id]",
                       params: {
                         id: item.mangaId,
                         title: item.title,
