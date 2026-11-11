@@ -666,7 +666,7 @@ export default function DubbedCombinedLibrary() {
         <div className="px-4 pt-4 pb-3 flex items-center gap-3">
           <button onClick={() => navigate("/")}
             className="w-9 h-9 shrink-0 flex items-center justify-center rounded-xl bg-white/5 border border-white/8 active:scale-90 transition-transform">
-            <ChevronDown className="w-4 h-4 text-white/70 rotate-90" />
+            <ChevronRight className="w-4 h-4 text-white/70" />
           </button>
           <div className="flex-1">
             <h1 className="text-lg font-black font-['Cairo'] text-white">رسوم متحركة مدبلجة ومترجمة</h1>
@@ -717,7 +717,35 @@ export default function DubbedCombinedLibrary() {
       </div>
 
       {/* ── Content ── */}
-      <div className="px-4 pt-5">
+      <div className="px-4 pt-4">
+        <div className="mb-4 p-3.5 rounded-2xl border text-right flex flex-col sm:flex-row items-center justify-between gap-3"
+          style={{ background: "rgba(124,58,237,0.08)", borderColor: "rgba(124,58,237,0.25)" }}>
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-violet-500/20 border border-violet-400/30 flex items-center justify-center shrink-0 text-violet-300">
+              <Tv className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="text-xs sm:text-sm font-black text-white font-['Cairo']">
+                قسم الكرتون والأنيميشن وسبيستون متاح بالكامل داخل التطبيق
+              </p>
+              <p className="text-[11px] text-white/60 font-['Cairo'] mt-0.5">
+                حمّل تطبيق التلفاز عبر كود Downloader: <strong className="text-violet-300 font-mono">2576388</strong> أو نزّل نسخة الهاتف
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
+            <a href="/Anime-Nova.apk?v=1.0.6" download
+              className="flex-1 sm:flex-initial px-3.5 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold font-['Cairo'] text-center">
+              تطبيق الهاتف
+            </a>
+            <a href="/nova.apk" download
+              className="flex-1 sm:flex-initial px-3.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-xs font-bold font-['Cairo'] text-center">
+              تطبيق التلفاز
+            </a>
+          </div>
+        </div>
+      </div>
+      <div className="px-4">
         <AnimatePresence mode="wait">
           <motion.div key={tab} initial={{ opacity: 0 }} animate={{ opacity: 1 }}
             exit={{ opacity: 0 }} transition={{ duration: 0.1 }}>

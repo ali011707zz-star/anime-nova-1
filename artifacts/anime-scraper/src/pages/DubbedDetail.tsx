@@ -121,10 +121,6 @@ export default function DubbedDetail() {
   };
 
   const handleEpisodeClick = (episode: Episode) => {
-    if (isCarateenEntry) {
-      navigate(watchUrl(episode));
-      return;
-    }
     setExclusiveEpisode(episode.number);
   };
 
@@ -283,7 +279,7 @@ export default function DubbedDetail() {
                 onClick={() => handleEpisodeClick(ep)}
                 role="button"
                 tabIndex={0}
-                aria-label={`${isCarateenEntry ? "مشاهدة" : "فتح تنبيه"} الحلقة ${ep.number}`}
+                aria-label={`فتح تنبيه الحلقة ${ep.number}`}
                 data-testid={`dubbed-episode-exclusive-${ep.number}`}
                 className={`flex items-center gap-3 p-3 rounded-2xl border cursor-pointer active:bg-white/8 transition-colors ${
                   watched ? "bg-white/3 border-white/4 opacity-55" : "bg-[#111116] border-white/6"
@@ -354,7 +350,7 @@ export default function DubbedDetail() {
       </div>
     </main>
     <AppOnlyEpisodeDialog
-      open={!isCarateenEntry && exclusiveEpisode !== null}
+      open={exclusiveEpisode !== null}
       episodeLabel={`الحلقة ${exclusiveEpisode ?? ""}`}
       onClose={() => setExclusiveEpisode(null)}
     />

@@ -229,9 +229,63 @@ export default function Manga() {
             </button>
           </div>
         ) : items.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-24 gap-3 text-center">
-            <BookOpen className="w-10 h-10 opacity-40" />
-            <p className="text-[14px] font-bold">لا توجد نتائج مطابقة</p>
+          <div className="p-6 sm:p-8 rounded-3xl border text-center space-y-4 shadow-xl my-8"
+            style={{
+              backgroundColor: "var(--bg-surface, #111317)",
+              borderColor: "rgba(6, 182, 212, 0.25)",
+            }}>
+            <div className="w-14 h-14 rounded-2xl bg-cyan-500/15 border border-cyan-400/30 flex items-center justify-center mx-auto text-cyan-400">
+              <BookOpen className="w-7 h-7" />
+            </div>
+            <div>
+              <span className="inline-block px-3 py-1 rounded-full text-[11px] font-black bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 mb-2 font-['Cairo']">
+                محتوى حصري
+              </span>
+              <h4 className="text-lg sm:text-xl font-black text-white font-['Cairo']">
+                المانجا والمانهوا حصرياً في تطبيق Anime NOVA
+              </h4>
+              <p className="text-xs sm:text-sm text-white/70 max-w-lg mx-auto leading-relaxed mt-1.5 font-['Cairo']">
+                حمّل التطبيق الآن واستمتع بمكتبة ضخمة من فصول المانجا والمانهوا المترجمة بجودة فائقة وبدون إعلانات.
+              </p>
+            </div>
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+              <a
+                href="/Anime-Nova.apk?v=1.0.6"
+                download
+                className="w-full sm:w-auto px-6 py-3 rounded-2xl text-xs sm:text-sm font-black text-white bg-gradient-to-l from-cyan-600 to-cyan-500 flex items-center justify-center gap-2 shadow-lg shadow-cyan-900/30 active:scale-95 transition-transform font-['Cairo']"
+              >
+                <Download className="w-4 h-4" />
+                تحميل تطبيق الهاتف (Android)
+              </a>
+              <a
+                href="/nova.apk"
+                download
+                className="w-full sm:w-auto px-6 py-3 rounded-2xl text-xs sm:text-sm font-black text-white bg-white/10 hover:bg-white/15 border border-white/15 flex items-center justify-center gap-2 active:scale-95 transition-transform font-['Cairo']"
+              >
+                <Tv className="w-4 h-4 text-cyan-400" />
+                تحميل تطبيق التلفاز (TV APK)
+              </a>
+            </div>
+            <div
+              className="mt-4 p-4 rounded-2xl border text-right max-w-md mx-auto"
+              style={{
+                backgroundColor: "rgba(6, 182, 212, 0.06)",
+                borderColor: "rgba(6, 182, 212, 0.22)",
+              }}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Tv className="w-5 h-5 text-cyan-400 shrink-0" />
+                  <div>
+                    <p className="text-xs font-bold text-white font-['Cairo']">كود تلفزيون أندرويد عبر Downloader</p>
+                    <p className="text-[10px] text-white/50 font-['Cairo']">اكتب هذا الرمز داخل تطبيق Downloader على التلفاز</p>
+                  </div>
+                </div>
+                <span className="px-3 py-1.5 rounded-xl bg-cyan-400 text-black font-black font-mono text-base tracking-wider shadow">
+                  2576388
+                </span>
+              </div>
+            </div>
           </div>
         ) : (
           <>

@@ -177,6 +177,30 @@ export default function Stats() {
             >
               <ChevronRight className="w-5 h-5" />
             </button>
+            <div className="flex-1 text-right">
+              <h1 className="text-[20px] font-black leading-tight">الإحصائيات العالمية</h1>
+              <p className="text-[11px] font-semibold mt-0.5" style={{ color: "var(--text-muted, #94A3B8)" }}>
+                ترتيب الأنميات الأعلى تقييماً عالمياً حسب الفئة
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                if (searchOpen) {
+                  setQuery("");
+                  setSearchOpen(false);
+                } else {
+                  setSearchOpen(true);
+                }
+              }}
+              aria-label="بحث في الإحصائيات"
+              className="w-10 h-10 rounded-xl border flex items-center justify-center shrink-0"
+              style={{
+                backgroundColor: "var(--bg-surface, #111317)",
+                borderColor: "var(--border-subtle, rgba(255,255,255,0.08))",
+              }}
+            >
+              {searchOpen ? <X className="w-4 h-4" /> : <Search className="w-4 h-4" />}
+            </button>
           </div>
 
           {searchOpen && (

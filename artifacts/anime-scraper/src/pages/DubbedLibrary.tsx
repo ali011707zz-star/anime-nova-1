@@ -125,7 +125,7 @@ export default function DubbedLibrary() {
       <div className="sticky top-0 z-20 bg-[#09090B]/97 backdrop-blur-xl border-b border-white/5">
         <div className="px-4 pt-4 pb-3 flex items-center gap-3">
           <button onClick={() => navigate("/")} className="w-9 h-9 shrink-0 flex items-center justify-center rounded-xl bg-white/5 border border-white/8 active:scale-90 transition-transform">
-            <ChevronDown className="w-4 h-4 text-white/70 rotate-90" />
+            <ChevronRight className="w-4 h-4 text-white/70" />
           </button>
           <div className="flex-1">
             <h1 className="text-lg font-black font-['Cairo'] text-white">كرتون مدبلج</h1>

@@ -13,7 +13,7 @@ export default defineConfig(async ({ mode }) => {
   return {
     base: basePath,
     define: {
-      "__GOOGLE_CLIENT_ID__": JSON.stringify(process.env.GOOGLE_CLIENT_ID || ""),
+      "__GOOGLE_CLIENT_ID__": JSON.stringify(process.env.GOOGLE_CLIENT_ID || "413058110781-r8otf4jg4v1e7akp4ujii01brj3hv8kg.apps.googleusercontent.com"),
       "__GITHUB_CLIENT_ID__": JSON.stringify(process.env.GITHUB_CLIENT_ID || ""),
     },
     plugins: [

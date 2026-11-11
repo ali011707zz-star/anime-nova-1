@@ -1,7 +1,7 @@
 import { API_BASE } from "@/lib/apiBase";
 import { useState, useEffect } from "react";
 import { useRoute, useLocation, useSearch } from "wouter";
-import { ChevronRight, BookOpen, Star, Loader2, X, ChevronLeft } from "lucide-react";
+import { ChevronRight, BookOpen, Star, Loader2, X, ChevronLeft, Tv, Download } from "lucide-react";
 
 export default function MangaDetail() {
   const [, params] = useRoute("/manga/:id");
@@ -90,7 +90,7 @@ export default function MangaDetail() {
     >
       {/* Top Bar */}
       <div
-        className="sticky top-0 z-20 backdrop-blur-xl border-b px-4 py-3 flex items-center justify-between gap-3"
+        className="sticky top-0 z-20 backdrop-blur-xl border-b px-4 py-3 flex items-center gap-3"
         style={{
           backgroundColor: "var(--bg-base, #090A0C)",
           borderColor: "var(--border-subtle, rgba(255,255,255,0.08))",
@@ -99,13 +99,13 @@ export default function MangaDetail() {
         <button
           onClick={() => navigate("/manga")}
           aria-label="رجوع"
-          className="w-10 h-10 rounded-xl border flex items-center justify-center shrink-0"
+          className="w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 active:scale-95 transition-transform"
           style={{
             backgroundColor: "var(--bg-surface, #111317)",
             borderColor: "var(--border-subtle, rgba(255,255,255,0.08))",
           }}
         >
-          <ChevronRight className="w-5 h-5" />
+          <ChevronRight className="w-5 h-5 text-white/80" />
         </button>
         <h1 className="text-[16px] font-bold truncate flex-1 text-right">{title}</h1>
       </div>
@@ -181,14 +181,78 @@ export default function MangaDetail() {
 
             {chapters.length === 0 ? (
               <div
-                className="p-8 rounded-2xl border text-center"
+                className="p-6 sm:p-8 rounded-3xl border text-center space-y-4 shadow-xl"
                 style={{
                   backgroundColor: "var(--bg-surface, #111317)",
-                  borderColor: "var(--border-subtle, rgba(255,255,255,0.08))",
-                  color: "var(--text-muted, #94A3B8)",
+                  borderColor: "rgba(6, 182, 212, 0.25)",
                 }}
               >
-                لا توجد فصول مرفوعة حالياً لهذا العمل.
+                <div className="w-14 h-14 rounded-2xl bg-cyan-500/15 border border-cyan-400/30 flex items-center justify-center mx-auto text-cyan-400">
+                  <BookOpen className="w-7 h-7" />
+                </div>
+                <div>
+                  <span className="inline-block px-3 py-1 rounded-full text-[11px] font-black bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 mb-2 font-['Cairo']">
+                    محتوى حصري للتطبيق
+                  </span>
+                  <h4 className="text-lg sm:text-xl font-black text-white font-['Cairo']">
+                    المانجا والمانهوا حصرياً في تطبيق Anime NOVA
+                  </h4>
+                  <p className="text-xs sm:text-sm text-white/70 max-w-lg mx-auto leading-relaxed mt-1.5 font-['Cairo']">
+                    حمّل التطبيق الآن واستمتع بقراءة فصول {title} وجميع أعمال المانجا والمانهوا الحصرية بجودة عالية وسرعة فائقة.
+                  </p>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+                  <a
+                    href="/Anime-Nova.apk?v=1.0.6"
+                    download
+                    className="w-full sm:w-auto px-6 py-3 rounded-2xl text-xs sm:text-sm font-black text-white bg-gradient-to-l from-cyan-600 to-cyan-500 flex items-center justify-center gap-2 shadow-lg shadow-cyan-900/30 active:scale-95 transition-transform font-['Cairo']"
+                  >
+                    <Download className="w-4 h-4" />
+                    تحميل تطبيق الهاتف (Android)
+                  </a>
+                  <a
+                    href="/nova.apk"
+                    download
+                    className="w-full sm:w-auto px-6 py-3 rounded-2xl text-xs sm:text-sm font-black text-white bg-white/10 hover:bg-white/15 border border-white/15 flex items-center justify-center gap-2 active:scale-95 transition-transform font-['Cairo']"
+                  >
+                    <Tv className="w-4 h-4 text-cyan-400" />
+                    تحميل تطبيق التلفاز (TV APK)
+                  </a>
+                </div>
+
+                {/* Downloader TV Code Box */}
+                <div
+                  className="mt-4 p-4 rounded-2xl border text-right max-w-md mx-auto"
+                  style={{
+                    backgroundColor: "rgba(6, 182, 212, 0.06)",
+                    borderColor: "rgba(6, 182, 212, 0.22)",
+                  }}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <Tv className="w-5 h-5 text-cyan-400 shrink-0" />
+                      <div>
+                        <p className="text-xs font-bold text-white font-['Cairo']">كود تلفزيون أندرويد عبر Downloader</p>
+                        <p className="text-[10px] text-white/50 font-['Cairo']">اكتب هذا الرمز داخل تطبيق Downloader على التلفاز</p>
+                      </div>
+                    </div>
+                    <span className="px-3 py-1.5 rounded-xl bg-cyan-400 text-black font-black font-mono text-base tracking-wider shadow">
+                      2576388
+                    </span>
+                  </div>
+                  <div className="mt-2.5 pt-2 border-t border-cyan-400/15 flex items-center justify-between text-[11px] font-['Cairo']">
+                    <span className="text-white/60">رابط التحميل المباشر:</span>
+                    <a
+                      href="https://aftv.news/2576388"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-mono text-cyan-300 underline hover:text-white"
+                    >
+                      aftv.news/2576388
+                    </a>
+                  </div>
+                </div>
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">

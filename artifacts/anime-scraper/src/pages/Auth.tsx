@@ -12,7 +12,8 @@ declare const __GITHUB_CLIENT_ID__: string;
 
 /** فتح Google OAuth مباشرةً */
 async function signInWithGoogle() {
-  const clientId = __GOOGLE_CLIENT_ID__;
+  const GOOGLE_CLIENT_ID_FALLBACK = "413058110781-r8otf4jg4v1e7akp4ujii01brj3hv8kg.apps.googleusercontent.com";
+  const clientId = (typeof __GOOGLE_CLIENT_ID__ !== "undefined" && __GOOGLE_CLIENT_ID__) ? __GOOGLE_CLIENT_ID__ : GOOGLE_CLIENT_ID_FALLBACK;
   if (!clientId) {
     alert("تسجيل الدخول بـ Google غير مفعّل حالياً. يرجى استخدام البريد الإلكتروني.");
     return;

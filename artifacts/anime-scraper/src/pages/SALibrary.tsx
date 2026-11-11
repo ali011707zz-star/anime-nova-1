@@ -172,7 +172,7 @@ export default function SALibrary() {
         <div className="px-4 pt-4 pb-3 flex items-center gap-3">
           <button onClick={() => navigate("/")}
             className="w-9 h-9 shrink-0 flex items-center justify-center rounded-xl bg-white/5 border border-white/8 active:scale-90 transition-transform">
-            <ChevronDown className="w-4 h-4 text-white/70 rotate-90" />
+            <ChevronRight className="w-4 h-4 text-white/70" />
           </button>
           <div className="flex-1">
             <div className="flex items-center gap-1.5">

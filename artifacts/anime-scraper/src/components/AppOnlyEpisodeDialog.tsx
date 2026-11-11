@@ -1,4 +1,4 @@
-import { Download, Smartphone, X } from "lucide-react";
+import { Download, Smartphone, Tv, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 type AppOnlyEpisodeDialogProps = {
@@ -74,31 +74,62 @@ export default function AppOnlyEpisodeDialog({
 
             <p className="relative mt-5 text-[13px] leading-7 text-white/65 font-['Cairo']">
               {episodeLabel} متاحة للمشاهدة داخل تطبيق Anime NOVA فقط.
-              حمّل التطبيق واستمتع بالمشاهدة بجودة أفضل وتجربة أسرع.
+              حمّل التطبيق على هاتفك أو شاشة التلفاز واستمتع بالمشاهدة بجودة كاملة وسرعة فائقة.
             </p>
 
-            {downloadUrl ? (
-              <a
-                href={downloadUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="relative mt-5 flex h-12 items-center justify-center gap-2 rounded-2xl bg-gradient-to-l from-violet-700 to-violet-500 text-[13px] font-black text-white shadow-lg shadow-violet-900/30 transition-transform active:scale-[0.98]"
-                data-testid="link-download-app"
-              >
-                <Download className="h-4 w-4" />
-                تنزيل تطبيق Anime NOVA
-              </a>
-            ) : (
-              <button
-                type="button"
-                disabled
-                className="relative mt-5 flex h-12 w-full cursor-not-allowed items-center justify-center gap-2 rounded-2xl border border-violet-300/15 bg-violet-500/10 text-[12px] font-black text-violet-200/55"
-                data-testid="button-download-app-pending"
-              >
-                <Download className="h-4 w-4" />
-                رابط تنزيل التطبيق سيُضاف قريباً
-              </button>
-            )}
+            {/* Mobile Download */}
+            <a
+              href={downloadUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="relative mt-5 flex h-12 items-center justify-center gap-2 rounded-2xl bg-gradient-to-l from-violet-700 to-violet-500 text-[13px] font-black text-white shadow-lg shadow-violet-900/30 transition-transform active:scale-[0.98]"
+              data-testid="link-download-app"
+            >
+              <Download className="h-4 w-4" />
+              تنزيل تطبيق الهاتف (Android APK)
+            </a>
+
+            {/* Android TV Downloader Box */}
+            <div
+              className="relative mt-3 p-3.5 rounded-2xl border text-right"
+              style={{
+                backgroundColor: "rgba(139,92,246,0.08)",
+                borderColor: "rgba(139,92,246,0.25)",
+              }}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-8 h-8 rounded-xl bg-violet-500/20 border border-violet-400/30 flex items-center justify-center shrink-0 text-violet-300">
+                    <Tv className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-black text-white font-['Cairo']">كود تلفزيون أندرويد (Downloader)</p>
+                    <p className="text-[10px] text-white/50 font-['Cairo']">اكتب الرمز في تطبيق Downloader على التلفاز</p>
+                  </div>
+                </div>
+                <span className="px-3 py-1 rounded-xl bg-violet-500 text-white font-black font-mono text-sm tracking-widest shadow">
+                  2576388
+                </span>
+              </div>
+              <div className="mt-2.5 pt-2 border-t border-violet-500/15 flex items-center justify-between text-[11px] font-['Cairo']">
+                <a
+                  href="/nova.apk"
+                  download
+                  className="text-violet-300 hover:text-white font-bold flex items-center gap-1 underline"
+                >
+                  <Download className="w-3 h-3" />
+                  تحميل نسخة التلفاز مباشرة
+                </a>
+                <a
+                  href="https://aftv.news/2576388"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-mono text-white/60 hover:text-white"
+                >
+                  aftv.news/2576388
+                </a>
+              </div>
+            </div>
 
             <button
               type="button"
