@@ -5,7 +5,7 @@
 import { API_BASE } from "@/lib/apiBase";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useLocation, useSearch } from "wouter";
-import { Search, X, ChevronDown, Loader2 } from "lucide-react";
+import { Search, X, ChevronDown, ChevronRight, Tv, Loader2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   catalogBadge,

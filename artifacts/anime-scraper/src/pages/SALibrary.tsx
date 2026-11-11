@@ -1,7 +1,7 @@
 import { API_BASE } from "@/lib/apiBase";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useLocation } from "wouter";
-import { Search, X, Loader2, ChevronDown, Zap } from "lucide-react";
+import { Search, X, Loader2, ChevronDown, ChevronRight, Zap } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import SEO from "@/components/SEO";
 

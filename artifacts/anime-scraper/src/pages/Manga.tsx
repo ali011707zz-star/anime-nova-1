@@ -1,7 +1,7 @@
 import { API_BASE } from "@/lib/apiBase";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Link, useLocation, useSearch } from "wouter";
-import { Search, X, ChevronRight, BookOpen, Star, Loader2 } from "lucide-react";
+import { Search, X, ChevronRight, BookOpen, Star, Loader2, Tv, Download } from "lucide-react";
 import { motion } from "framer-motion";
 
 type MangaTabId = "manga" | "manhwa" | "ongoing" | "completed";
