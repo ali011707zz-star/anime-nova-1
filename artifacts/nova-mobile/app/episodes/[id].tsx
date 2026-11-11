@@ -1,3 +1,4 @@
+import { SafePosterImage } from "@/components/SafePosterImage";
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   View, Text, TextInput, Image, FlatList,
@@ -956,9 +957,16 @@ export default function EpisodeListScreen() {
             {/* Cover (Right) + info + progress */}
             <View style={[ep_s.heroBottom, tvMode && width >= 700 && ep_s.tvHeroBottom]}>
               <View style={[ep_s.heroContent, tvMode && width >= 700 && ep_s.tvHeroContent]}>
-                {selectedAnime?.coverImage?.large ? (
-                  <Image source={{ uri: selectedAnime.coverImage.large }} style={[ep_s.heroCover, tvMode && width >= 700 && ep_s.tvHeroCover]} />
-                ) : null}
+                <SafePosterImage
+                  uri={selectedAnime?.coverImage?.extraLarge || selectedAnime?.coverImage?.large}
+                  fallbackUris={[
+                    selectedAnime?.coverImage?.large,
+                    selectedAnime?.bannerImage,
+                    selectedAnimeId ? `https://img.anili.st/media/${selectedAnimeId}` : undefined,
+                  ]}
+                  style={[ep_s.heroCover, tvMode && width >= 700 && ep_s.tvHeroCover]}
+                  resizeMode="cover"
+                />
                 <View style={[ep_s.heroInfo, tvMode && width >= 700 && ep_s.tvHeroInfo]}>
                   <Text style={[ep_s.heroTitle, tvMode && width >= 700 && ep_s.tvHeroTitle]} numberOfLines={1}>
                     {extractArabicTitle(selectedAnime?.synonyms)

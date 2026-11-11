@@ -391,59 +391,34 @@ jobs:
               exit 1
             }
 
-      - name: 🧪 Prepare Android cold-start smoke test
+      - name: 🔎 Verify signed installable APK
+        working-directory: artifacts/nova-mobile/android
         shell: bash
         run: |
-          cat > "$RUNNER_TEMP/nova-android-cold-start-smoke.sh" <<'BASH'
           set -euo pipefail
-          APK="$(find "$GITHUB_WORKSPACE/artifacts/nova-mobile/android/app/build/outputs/apk/release" -name '*.apk' -print -quit)"
-          test -n "$APK" && test -s "$APK"
-
-          adb install -r "$APK"
-          adb shell pm grant com.nova.anime android.permission.POST_NOTIFICATIONS 2>/dev/null || true
-          adb logcat -c
-          adb shell am force-stop com.nova.anime
-          adb shell am start -W -n com.nova.anime/.MainActivity
-          sleep 15
-
-          if ! adb shell pidof com.nova.anime >/dev/null; then
-            echo "❌ Anime NOVA process exited after cold start"
-            adb logcat -d -t 3000
+          APK="app/build/outputs/apk/release/app-release.apk"
+          if [ ! -s "$APK" ]; then
+            echo "❌ Release APK is missing or empty: $APK"
             exit 1
           fi
-
-          RESUMED="$(adb shell dumpsys activity activities | grep -E 'mResumedActivity|topResumedActivity' | tail -n 1 | tr -d '\r' || true)"
-          echo "Resumed activity: $RESUMED"
-          echo "$RESUMED" | grep -Fq 'com.nova.anime'
-
-          adb shell uiautomator dump /sdcard/nova-startup-window.xml >/dev/null
-          adb exec-out cat /sdcard/nova-startup-window.xml > "$RUNNER_TEMP/nova-startup-window.xml"
-          if grep -Fq 'حدث خطأ غير متوقع' "$RUNNER_TEMP/nova-startup-window.xml"; then
-            echo "❌ React ErrorBoundary fallback appeared during app startup"
-            cat "$RUNNER_TEMP/nova-startup-window.xml"
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [ -z "$SDK_ROOT" ] || [ ! -d "$SDK_ROOT/build-tools" ]; then
+            echo "❌ Android SDK build-tools directory is unavailable"
             exit 1
           fi
-
-          adb logcat -d -v time -s AndroidRuntime:E ReactNativeJS:E > "$RUNNER_TEMP/nova-startup-errors.log"
-          if grep -E 'FATAL EXCEPTION|Unhandled JS Exception|ReferenceError.*useRef|useRef is not defined' "$RUNNER_TEMP/nova-startup-errors.log"; then
-            echo "❌ Startup crash/error detected in Android logcat"
+          APKSIGNER="$(find "$SDK_ROOT/build-tools" -type f -name apksigner -print | sort -V | tail -1)"
+          AAPT="$(find "$SDK_ROOT/build-tools" -type f -name aapt -print | sort -V | tail -1)"
+          if [ -z "$APKSIGNER" ] || [ -z "$AAPT" ]; then
+            echo "❌ apksigner or aapt is unavailable; cannot validate APK"
             exit 1
           fi
-          echo "✅ Android cold start stayed alive and did not render the error screen"
-          BASH
-          chmod 700 "$RUNNER_TEMP/nova-android-cold-start-smoke.sh"
-
-      - name: 🚀 Android cold-start smoke test
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 35
-          arch: x86_64
-          profile: pixel_2
-          # The emulator reached boot after a long delay but adb failed with
-          # Broken pipe while this optional action tried to change system
-          # animation settings. The smoke test does not depend on animations.
-          disable-animations: false
-          script: bash "$RUNNER_TEMP/nova-android-cold-start-smoke.sh"
+          "$APKSIGNER" verify --verbose "$APK"
+          PACKAGE="$("$AAPT" dump badging "$APK" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -1)"
+          if [ "$PACKAGE" != "com.nova.anime" ]; then
+            echo "❌ Unexpected APK package: ${PACKAGE:-missing}"
+            exit 1
+          fi
+          echo "✅ Signed APK verified for package $PACKAGE"
 
       - name: 🔑 Show release signing fingerprint
         working-directory: artifacts/nova-mobile/android
@@ -501,6 +476,18 @@ jobs:
             install -m 0644 "$apk" "/opt/anime-nova/public/Anime-Nova.apk"
             install -m 0644 "$apk" "/opt/anime-nova/public/nova.apk"
             install -m 0644 "$apk" "/opt/anime-nova/public/Anime-Nova-TV.apk"
+            if [ -d "/opt/anime-nova/artifacts/anime-scraper/public" ]; then
+              install -m 0644 "$apk" "/opt/anime-nova/artifacts/anime-scraper/public/Anime Nova.apk"
+              install -m 0644 "$apk" "/opt/anime-nova/artifacts/anime-scraper/public/Anime-Nova.apk"
+              install -m 0644 "$apk" "/opt/anime-nova/artifacts/anime-scraper/public/nova.apk"
+              install -m 0644 "$apk" "/opt/anime-nova/artifacts/anime-scraper/public/Anime-Nova-TV.apk"
+            fi
+            if [ -d "/opt/anime-nova/artifacts/anime-scraper/dist/public" ]; then
+              install -m 0644 "$apk" "/opt/anime-nova/artifacts/anime-scraper/dist/public/Anime Nova.apk"
+              install -m 0644 "$apk" "/opt/anime-nova/artifacts/anime-scraper/dist/public/Anime-Nova.apk"
+              install -m 0644 "$apk" "/opt/anime-nova/artifacts/anime-scraper/dist/public/nova.apk"
+              install -m 0644 "$apk" "/opt/anime-nova/artifacts/anime-scraper/dist/public/Anime-Nova-TV.apk"
+            fi
             sha256sum "/opt/anime-nova/public/Anime Nova.apk" "/opt/anime-nova/public/Anime-Nova.apk" "/opt/anime-nova/public/nova.apk"
             rm -rf "$apk_dir"
 

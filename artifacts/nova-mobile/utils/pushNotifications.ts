@@ -137,6 +137,15 @@ async function registerPushNotificationsOnce(forceTokenRefresh = false): Promise
     console.info(useDirectFcm ? "[push] native FCM token obtained" : `[push] Expo token obtained projectId=${id}`);
 
     phase = "Token Registration";
+    let storedUserId: string | undefined;
+    try {
+      const rawUser = await AsyncStorage.getItem("nova-mobile-user");
+      if (rawUser) {
+        const parsedUser = JSON.parse(rawUser);
+        if (parsedUser?.id) storedUserId = String(parsedUser.id).trim();
+      }
+    } catch { /* ignore */ }
+
     let response: Response | undefined;
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       try {
@@ -146,6 +155,7 @@ async function registerPushNotificationsOnce(forceTokenRefresh = false): Promise
           body: JSON.stringify({
             token,
             ...(previousToken && previousToken !== token ? { previousToken } : {}),
+            ...(storedUserId ? { userId: storedUserId } : {}),
             platform: Platform.OS,
             appVersion: Constants.expoConfig?.version || "1.0.0",
           }),

@@ -2981,22 +2981,20 @@ export default function WatchScreen() {
           {/* تظهر بطاقات المصادر تدريجيًا أثناء الفحص، ثم تكتمل
               القائمة عند وصول [DONE] من مرحلة availability. */}
             {(() => {
-              let firstAvailableKey: string | null = activePreferredSlotKey;
-              if (!firstAvailableKey) {
-                for (const qk of Q_KEYS) {
-                  const pickerDefs = STATIC_PICKER[qk] || [];
-                  const matchingSites = Object.entries(availableSlots)
-                    .filter(([, tiers]) => !!tiers[qk])
-                    .map(([site]) => site)
-                    .sort((a, b) => {
-                      const ai = pickerDefs.findIndex(def => def.site === a);
-                      const bi = pickerDefs.findIndex(def => def.site === b);
-                      return (ai < 0 ? Number.MAX_SAFE_INTEGER : ai) - (bi < 0 ? Number.MAX_SAFE_INTEGER : bi);
-                    });
-                  if (matchingSites.length > 0) {
-                    firstAvailableKey = pickerSlotKey(matchingSites[0], qk);
-                    break;
-                  }
+              let firstAvailableKey: string | null = null;
+              for (const qk of Q_KEYS) {
+                const pickerDefs = STATIC_PICKER[qk] || [];
+                const matchingSites = Object.entries(availableSlots)
+                  .filter(([, tiers]) => !!tiers[qk])
+                  .map(([site]) => site)
+                  .sort((a, b) => {
+                    const ai = pickerDefs.findIndex(def => def.site === a);
+                    const bi = pickerDefs.findIndex(def => def.site === b);
+                    return (ai < 0 ? Number.MAX_SAFE_INTEGER : ai) - (bi < 0 ? Number.MAX_SAFE_INTEGER : bi);
+                  });
+                if (matchingSites.length > 0) {
+                  firstAvailableKey = pickerSlotKey(matchingSites[0], qk);
+                  break;
                 }
               }
 
@@ -3060,17 +3058,12 @@ export default function WatchScreen() {
                         return (
                           <Pressable
                             key={slot.site}
-                            ref={shouldPreferTvFocus ? preferredSlotViewRef : undefined}
                             testID={shouldPreferTvFocus ? "nova-tv-preferred-focus" : undefined}
                             onPress={() => handlePickSite(slot.site, qk)}
                             focusable={tvMode}
                             hasTVPreferredFocus={shouldPreferTvFocus}
                             onFocus={() => {
-                              if (tvMode) {
-                                userFocusedServerRef.current = true;
-                                lockedFirstSlotKeyRef.current = slotKey;
-                                rememberFocus(slotKey);
-                              }
+                              if (tvMode) rememberFocus(slotKey);
                             }}
                             accessibilityRole="button"
                             accessibilityLabel={`تشغيل سيرفر ${slot.tag} بجودة ${qk}`}

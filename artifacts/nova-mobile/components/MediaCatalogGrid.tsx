@@ -359,7 +359,7 @@ export function MediaCatalogGrid({
     }
   };
 
-  const renderItem = ({ item }: { item: CatalogMedia }) => {
+  const renderItem = ({ item, index }: { item: CatalogMedia; index: number }) => {
     const arTitle = getArabicTitleForItem(item);
     const enTitle = item.title?.english || item.title?.romaji || item.title?.native || "";
     const title = arTitle || enTitle || mangaOriginLabel(item.countryOfOrigin, item.source);
@@ -375,12 +375,14 @@ export function MediaCatalogGrid({
 
     return (
       <Pressable
-        testID={`catalog-item-${item.id}`}
+        testID={tvMode && index === 0 ? "nova-tv-preferred-focus" : `catalog-item-${item.id}`}
+        hasTVPreferredFocus={tvMode && index === 0}
         onPress={() => openMedia(item)}
         focusable={tvMode}
-        style={[
+        style={({ focused }) => [
           styles.card,
-          { width: cardWidth },
+          { width: cardWidth, borderRadius: 14, padding: tvMode ? 3 : 0 },
+          tvMode && tvFocusStyle(focused),
         ]}
       >
         <View style={[styles.poster, { height: posterHeight, backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -457,7 +459,12 @@ export function MediaCatalogGrid({
         <View style={styles.message}>
           <Ionicons name="cloud-offline-outline" size={28} color={colors.textMuted} />
           <Text style={[styles.messageText, { color: colors.textSecondary }]}>تعذر تحميل العناوين</Text>
-          <Pressable onPress={() => void loadPage(1, false)} style={[styles.retryButton, { borderColor: colors.border }]}>
+          <Pressable
+            onPress={() => void loadPage(1, false)}
+            focusable={tvMode}
+            hasTVPreferredFocus={tvMode}
+            style={({ focused }) => [styles.retryButton, { borderColor: colors.border }, tvMode && tvFocusStyle(focused)]}
+          >
             <Text style={[styles.retryText, { color: colors.textPrimary }]}>إعادة المحاولة</Text>
           </Pressable>
         </View>

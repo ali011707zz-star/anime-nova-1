@@ -44,20 +44,39 @@ export async function notifyCommentTargets(input: {
   comment: any;
   actorUserId: string;
   actorName: string;
-}): Promise<void> {
+  allowSelfNotify?: boolean;
+  directTargetUserId?: string | null;
+  animeTitle?: string | null;
+  isAdminReply?: boolean;
+}): Promise<{ targetUsers: number; delivered: number }> {
   const targetIds = new Set<string>();
-  const parentId = input.comment.parent_id;
+  const parentId = input.comment?.parent_id;
+
+  if (input.directTargetUserId) {
+    const directId = String(input.directTargetUserId).trim();
+    if (
+      directId &&
+      directId !== "admin" &&
+      (input.allowSelfNotify || directId !== String(input.actorUserId))
+    ) {
+      targetIds.add(directId);
+    }
+  }
 
   if (parentId) {
     const parents = await sbSelect("comments", { id: `eq.${parentId}` }, { limit: 1 });
     const parentUserId = parents[0]?.user_id;
-    if (parentUserId && String(parentUserId) !== String(input.actorUserId)) {
+    if (
+      parentUserId &&
+      String(parentUserId) !== "admin" &&
+      (input.allowSelfNotify || String(parentUserId) !== String(input.actorUserId))
+    ) {
       targetIds.add(String(parentUserId));
     }
   }
 
   const handles = new Set<string>();
-  const text = String(input.comment.text || "");
+  const text = String(input.comment?.text || "");
   const mentionPattern = /@([a-zA-Z0-9_.]{3,32})/g;
   let match: RegExpExecArray | null;
   while ((match = mentionPattern.exec(text)) !== null) handles.add(match[1].toLowerCase());
@@ -65,29 +84,52 @@ export async function notifyCommentTargets(input: {
   for (const username of handles) {
     const users = await sbSelect("users", { username: `eq.${username}` }, { limit: 1 });
     const mentionedUserId = users[0]?.id;
-    if (mentionedUserId && String(mentionedUserId) !== String(input.actorUserId)) {
+    if (
+      mentionedUserId &&
+      String(mentionedUserId) !== "admin" &&
+      (input.allowSelfNotify || String(mentionedUserId) !== String(input.actorUserId))
+    ) {
       targetIds.add(String(mentionedUserId));
     }
   }
 
-  if (!targetIds.size) return;
-  await Promise.all([...targetIds].map((userId) =>
+  if (!targetIds.size) {
+    console.info(`[comments] notifyCommentTargets: no target userIds for comment=${input.comment?.id}`);
+    return { targetUsers: 0, delivered: 0 };
+  }
+
+  const snippet = text.trim().slice(0, 120);
+  const titlePrefix = input.animeTitle ? `${input.animeTitle}` : "";
+  const epLabel = input.comment?.episode_number != null ? ` · الحلقة ${input.comment.episode_number}` : "";
+  const notificationTitle = input.isAdminReply
+    ? `💬 رد من إدارة Anime NOVA${titlePrefix ? ` (${titlePrefix}${epLabel})` : ""}`
+    : (parentId || input.directTargetUserId ? "💬 رد جديد على تعليقك" : "💬 تم ذكرك في تعليق");
+  const notificationBody = snippet
+    ? `${input.actorName || "مستخدم"}: ${snippet}`
+    : `${input.actorName || "مستخدم"} أرسل لك إشعارًا في التعليقات`;
+
+  const counts = await Promise.all([...targetIds].map((userId) =>
     sendMobilePush({
       userId,
-      eventKey: `comment:${String(input.comment.id)}:${userId}`,
-      title: parentId ? "رد جديد على تعليقك" : "تم ذكرك في تعليق",
-      body: `${input.actorName || "مستخدم"} أرسل لك إشعارًا في التعليقات`,
+      eventKey: `comment:${String(input.comment?.id || Date.now())}:${userId}`,
+      title: notificationTitle,
+      body: notificationBody,
       data: {
-        type: parentId ? "comment-reply" : "comment-mention",
-        commentId: String(input.comment.id),
-        animeId: input.comment.anime_id ?? null,
-        episode: input.comment.episode_number ?? null,
+        type: parentId || input.directTargetUserId ? "comment-reply" : "comment-mention",
+        commentId: String(input.comment?.id || ""),
+        animeId: input.comment?.anime_id ?? null,
+        tmdbId: input.comment?.tmdb_id ?? null,
+        episode: input.comment?.episode_number ?? null,
       },
     }).catch((error: any) => {
       console.warn(`[comments] push failed: ${error?.message || String(error)}`);
       return 0;
     }),
   ));
+
+  const delivered = counts.reduce((sum, n) => sum + (Number(n) || 0), 0);
+  console.info(`[comments] notifyCommentTargets comment=${input.comment?.id} targets=${targetIds.size} delivered=${delivered}`);
+  return { targetUsers: targetIds.size, delivered };
 }
 
 /* ─────────────────────────────────────────

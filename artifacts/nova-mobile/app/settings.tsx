@@ -25,6 +25,7 @@ import { CrashEntry, getCrashLog } from "@/utils/crashLogger";
 import {
   getPushNotificationsStatus,
   setPushNotificationsEnabled,
+  registerPushNotifications,
 } from "@/utils/pushNotifications";
 
 const THEMES: { label: string; value: string; dot: string; desc: string }[] = [
@@ -519,6 +520,7 @@ function AuthSheetInner({ open, onClose, onLogin, onLinkDevice }: {
       };
       await setUserAuthToken(d.authToken);
       await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(u));
+      void registerPushNotifications();
       onLogin(u);
       onClose();
     } catch {
@@ -581,26 +583,19 @@ function AuthSheetInner({ open, onClose, onLogin, onLinkDevice }: {
   const tvMode = isTvDevice();
 
   const handleGoogleLogin = async () => {
+    if (tvMode) {
+      onLinkDevice();
+      return;
+    }
     if (!googleRequest) {
-      if (tvMode) {
-        onLinkDevice();
-        return;
-      }
       setError("تسجيل الدخول بـ Google غير مهيأ لهذه النسخة");
       return;
     }
     setError("");
     try {
-      const res = await promptGoogleAsync();
-      if (tvMode && res?.type === "error") {
-        setError("تعذّر فتح متصفح Google على هذا التلفاز. يمكنك استخدام «لدي رمز ربط» للدخول الفوري من هاتفك.");
-      }
+      await promptGoogleAsync();
     } catch {
-      if (tvMode) {
-        setError("لا يتوفر متصفح متوافق مع Google على هذا التلفاز. اضغط «لدي رمز ربط» بالأسفل للدخول الفوري.");
-      } else {
-        setError("تعذّر فتح تسجيل الدخول عبر Google. حاول مرة أخرى.");
-      }
+      setError("تعذّر فتح تسجيل الدخول عبر Google. حاول مرة أخرى.");
     }
   };
 
@@ -620,6 +615,7 @@ function AuthSheetInner({ open, onClose, onLogin, onLinkDevice }: {
         const u: MobileUser = { email: d.email || email, displayName: d.displayName || d.username || email.split("@")[0], id: d.id || "" };
         await setUserAuthToken(d.authToken || null);
         await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(u));
+        void registerPushNotifications();
         onLogin(u); onClose();
       }
     } catch { setError("تعذّر الوصول للخادم"); }
@@ -675,6 +671,7 @@ function AuthSheetInner({ open, onClose, onLogin, onLinkDevice }: {
         const u: MobileUser = { email: d.email || email, displayName: d.displayName || d.username || name || email.split("@")[0], id: d.id || "" };
         await setUserAuthToken(d.authToken || null);
         await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(u));
+        void registerPushNotifications();
         onLogin(u); onClose();
       }
     } catch { setError("تعذّر الوصول للخادم"); }
@@ -688,12 +685,24 @@ function AuthSheetInner({ open, onClose, onLogin, onLinkDevice }: {
   const { theme } = useApp();
   const isWhite = theme === "white";
 
-  return (
-    <Modal transparent animationType={tvMode ? "none" : "slide"} onRequestClose={onClose}>
-      <Pressable style={ts.overlay} onPress={onClose} focusable={false} />
-      <View
+  const modalContent = (
+    <View
+      testID={tvMode ? "nova-tv-modal-root" : undefined}
         style={[
           ts.bottomSheet,
+          tvMode && {
+            position: "absolute",
+            top: 20,
+            bottom: 20,
+            left: "4%",
+            right: "4%",
+            maxWidth: 680,
+            alignSelf: "center",
+            borderRadius: 24,
+            borderWidth: 2,
+            elevation: 20,
+            zIndex: 999999,
+          },
           {
             paddingBottom: 0,
             backgroundColor: isWhite ? "#FFFFFF" : "#0E0C1A",
@@ -808,12 +817,77 @@ function AuthSheetInner({ open, onClose, onLogin, onLinkDevice }: {
 
           {GOOGLE_ONLY && (
             <View style={{ gap: 14 }}>
+              {/* On TV: Put the TV Link button FIRST as the primary recommended login method */}
+              {tvMode && (
+                <View style={{ gap: 10, marginBottom: 4 }}>
+                  <View style={{
+                    padding: 12,
+                    borderRadius: 14,
+                    backgroundColor: isWhite ? "rgba(2,132,199,0.12)" : "rgba(6,182,212,0.14)",
+                    borderWidth: 1.5,
+                    borderColor: isWhite ? "#0284C7" : "rgba(6,182,212,0.50)",
+                  }}>
+                    <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 7, marginBottom: 4 }}>
+                      <Ionicons name="flash" size={16} color={isWhite ? "#0284C7" : "#22d3ee"} />
+                      <Text style={{ fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: isWhite ? "#0369A1" : "#22d3ee" }}>
+                        الطريقة الموصى بها للتلفاز: ربط الحساب بالرمز
+                      </Text>
+                    </View>
+                    <Text style={{ fontSize: 11, fontFamily: "Cairo_600SemiBold", color: isWhite ? "#334155" : "rgba(255,255,255,0.72)", lineHeight: 18, textAlign: "right" }}>
+                      افتح التطبيق بهاتفك المسجّل بحساب Google ← الإعدادات ← الملف الشخصي ← «ربط جهاز جديد» ← أدخل الرمز هنا لمزامنة مفضلاتك وسجلك فوراً!
+                    </Text>
+                  </View>
+
+                  <Pressable
+                    testID="nova-tv-preferred-focus"
+                    hasTVPreferredFocus={tvMode && open}
+                    onPress={onLinkDevice}
+                    disabled={loading}
+                    focusable={tvMode}
+                    accessibilityRole="button"
+                    accessibilityLabel="ربط التلفاز بالرمز المكوّن من 6 أرقام"
+                    style={({ focused, pressed }) => [
+                      {
+                        flexDirection: ROW_RTL,
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        paddingHorizontal: 16,
+                        paddingVertical: 14,
+                        borderRadius: 16,
+                        borderWidth: 2,
+                        borderColor: isWhite ? "#0284C7" : "#06B6D4",
+                        backgroundColor: isWhite ? "#0284C7" : "#0891B2",
+                        elevation: 6,
+                      },
+                      tvFocusStyle(focused),
+                      pressed && { opacity: 0.85 },
+                    ]}
+                  >
+                    <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 10 }}>
+                      <Ionicons name="keypad" size={20} color="#FFFFFF" />
+                      <Text style={{ fontSize: 14.5, fontFamily: "Cairo_800ExtraBold", color: "#FFFFFF" }}>
+                        إدخال رمز الربط (6 أرقام) الآن
+                      </Text>
+                    </View>
+                    <Ionicons name="arrow-back" size={18} color="#FFFFFF" style={{ transform: [{ scaleX: -1 }] }} />
+                  </Pressable>
+
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginVertical: 6 }}>
+                    <View style={{ flex: 1, height: 1, backgroundColor: isWhite ? "#E2E8F0" : "rgba(255,255,255,0.10)" }} />
+                    <Text style={{ fontSize: 11, fontFamily: "Cairo_700Bold", color: isWhite ? "#94A3B8" : "rgba(255,255,255,0.40)" }}>
+                      أو الدخول المباشر بحساب Google
+                    </Text>
+                    <View style={{ flex: 1, height: 1, backgroundColor: isWhite ? "#E2E8F0" : "rgba(255,255,255,0.10)" }} />
+                  </View>
+                </View>
+              )}
+
               {/* Google Button */}
               <Pressable
                 onPress={handleGoogleLogin}
                 disabled={loading}
                 focusable={tvMode}
-                hasTVPreferredFocus={tvMode && open}
+                hasTVPreferredFocus={!tvMode && open}
                 accessibilityRole="button"
                 accessibilityLabel="المتابعة باستخدام Google"
                 style={({ focused, pressed }) => [
@@ -1066,6 +1140,20 @@ function AuthSheetInner({ open, onClose, onLogin, onLinkDevice }: {
            )}
         </ScrollView>
       </View>
+  );
+  if (tvMode) {
+    if (!open) return null;
+    return (
+      <View style={[StyleSheet.absoluteFillObject, { backgroundColor: "rgba(0,0,0,0.85)", zIndex: 999999, elevation: 999999, justifyContent: "center", alignItems: "center" }]}>
+        <Pressable style={StyleSheet.absoluteFillObject} onPress={onClose} focusable={false} />
+        {modalContent}
+      </View>
+    );
+  }
+  return (
+    <Modal transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={ts.overlay} onPress={onClose} focusable={false} />
+      {modalContent}
     </Modal>
   );
 }
@@ -1492,6 +1580,9 @@ function TvLinkSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
   const [loading, setLoading] = useState(false);
   const [loadingDevices, setLoadingDevices] = useState(false);
   const [error, setError] = useState("");
+  const [tvInputCode, setTvInputCode] = useState("");
+  const [approvingTv, setApprovingTv] = useState(false);
+  const [approveSuccess, setApproveSuccess] = useState("");
 
   const loadDevices = useCallback(async () => {
     setLoadingDevices(true);
@@ -1509,8 +1600,40 @@ function TvLinkSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
     setCode("");
     setExpiresAt("");
     setError("");
+    setTvInputCode("");
+    setApproveSuccess("");
     void loadDevices();
   }, [open, loadDevices]);
+
+  const approveTvCodeFromPhone = async () => {
+    const cleaned = tvInputCode.replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x0660)).replace(/\D/g, "").slice(0, 6);
+    if (cleaned.length !== 6 || approvingTv) {
+      setError("أدخل رمز التلفاز المكوّن من 6 أرقام");
+      return;
+    }
+    setApprovingTv(true);
+    setError("");
+    setApproveSuccess("");
+    try {
+      const response = await secureFetch(`${base}/api/device-link/tv-session/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: cleaned }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setError(data.error || "رمز التلفاز غير صحيح أو منتهي الصلاحية");
+        return;
+      }
+      setTvInputCode("");
+      setApproveSuccess("تم تسجيل الدخول على التلفاز بنجاح!");
+      void loadDevices();
+    } catch {
+      setError("تعذّر الاتصال بالخادم");
+    } finally {
+      setApprovingTv(false);
+    }
+  };
 
   const createCode = async () => {
     if (loading) return;
@@ -1547,9 +1670,8 @@ function TvLinkSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
     }
   };
 
-  return (
-    <Modal visible={open} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={{ flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end" }}>
+  const sheetBody = (
+      <View testID={tvMode ? "nova-tv-modal-root" : undefined} style={{ flex: 1, backgroundColor: colors.overlay, justifyContent: tvMode ? "center" : "flex-end", alignItems: tvMode ? "center" : "stretch" }}>
         <View style={{ maxHeight: "92%", backgroundColor: colors.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, borderWidth: 1, borderColor: colors.border }}>
           <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingTop: 18, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: colors.border }}>
             <Pressable onPress={onClose} style={{ width: 36, height: 36, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.input }}>
@@ -1565,6 +1687,68 @@ function TvLinkSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
           </View>
 
           <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 38 }} showsVerticalScrollIndicator={false}>
+            {!tvMode && (
+              <View style={{ borderRadius: 20, padding: 18, marginBottom: 16, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border }}>
+                <Text style={{ fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, textAlign: "right" }}>
+                  إدخال الرمز الظاهر على التلفاز
+                </Text>
+                <Text style={{ fontSize: 11, fontFamily: "Cairo_400Regular", color: colors.textSecondary, lineHeight: 20, textAlign: "right", marginTop: 4 }}>
+                  إذا ضغطت على «المتابعة باستخدام Google» في التلفاز، اكتب الرمز المكوّن من 6 أرقام الظاهر على شاشة التلفاز هنا لتسجيل دخوله فوراً:
+                </Text>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginTop: 12 }}>
+                  <Pressable
+                    onPress={() => void approveTvCodeFromPhone()}
+                    disabled={approvingTv || tvInputCode.length < 6}
+                    style={{
+                      height: 48,
+                      paddingHorizontal: 18,
+                      borderRadius: 14,
+                      backgroundColor: colors.accent,
+                      opacity: approvingTv || tvInputCode.length < 6 ? 0.55 : 1,
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    {approvingTv ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <Text style={{ color: "#fff", fontSize: 12.5, fontFamily: "Cairo_800ExtraBold" }}>تأكيد التلفاز</Text>
+                    )}
+                  </Pressable>
+                  <TextInput
+                    value={tvInputCode}
+                    onChangeText={val => {
+                      setTvInputCode(val.replace(/\D/g, "").slice(0, 6));
+                      setError("");
+                      setApproveSuccess("");
+                    }}
+                    placeholder="000000"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="number-pad"
+                    maxLength={6}
+                    textAlign="center"
+                    style={{
+                      flex: 1,
+                      height: 48,
+                      borderRadius: 14,
+                      borderWidth: 1,
+                      borderColor: colors.border,
+                      backgroundColor: colors.input,
+                      color: colors.textPrimary,
+                      fontSize: 20,
+                      letterSpacing: 6,
+                      fontFamily: "Cairo_800ExtraBold",
+                    }}
+                  />
+                </View>
+                {!!approveSuccess && (
+                  <Text style={{ fontSize: 11.5, fontFamily: "Cairo_700Bold", color: colors.success, textAlign: "right", marginTop: 8 }}>
+                    {approveSuccess}
+                  </Text>
+                )}
+              </View>
+            )}
+
             <View style={{ borderRadius: 20, padding: 18, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder }}>
                <Text style={{ fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: colors.accent, textAlign: "right" }}>رمز ربط الجهاز</Text>
               <Text style={{ fontSize: 11, fontFamily: "Cairo_400Regular", color: colors.textSecondary, lineHeight: 20, textAlign: "right", marginTop: 5 }}>
@@ -1665,6 +1849,20 @@ function TvLinkSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
           </ScrollView>
         </View>
       </View>
+  );
+
+  if (tvMode) {
+    if (!open) return null;
+    return (
+      <View style={[StyleSheet.absoluteFillObject, { zIndex: 999999, elevation: 999999 }]}>
+        {sheetBody}
+      </View>
+    );
+  }
+
+  return (
+    <Modal visible={open} animationType="slide" transparent onRequestClose={onClose}>
+      {sheetBody}
     </Modal>
   );
 }

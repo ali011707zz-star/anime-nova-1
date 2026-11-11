@@ -132,7 +132,8 @@ function formatChapterNumber(ch: MangaChapter): string {
 function buildWebtoonReaderHtml(
   pages: MangaPageData[],
   chapterLabel: string,
-  nextChapterLabel: string | null
+  nextChapterLabel: string | null,
+  apiBase: string = getBaseUrl()
 ): string {
   const pagesJson = JSON.stringify(pages.map((p) => p.url));
   const safeChapterLabel = String(chapterLabel || "الفصل")
@@ -310,8 +311,8 @@ function buildWebtoonReaderHtml(
 
       let retries = 0;
       function loadImg(cacheBust, useProxy) {
-        const base = useProxy && url.indexOf("/api/manga/img-proxy") === -1
-          ? "${getBaseUrl()}/api/manga/img-proxy?url=" + encodeURIComponent(url)
+        const base = useProxy && url.indexOf("/api/manga/image-proxy") === -1 && url.indexOf("/api/manga/img-proxy") === -1
+          ? "${apiBase}/api/manga/image-proxy?url=" + encodeURIComponent(url)
           : url;
         img.src = cacheBust
           ? base + (base.indexOf("?") !== -1 ? "&" : "?") + "retry=" + cacheBust
@@ -1937,7 +1938,8 @@ export default function MangaDetailScreen() {
                     : buildWebtoonReaderHtml(
                         chapterPages,
                         activeChapter ? `الفصل ${formatChapterNumber(activeChapter)}` : "الفصل",
-                        nextChapter ? formatChapterNumber(nextChapter) : null
+                        nextChapter ? formatChapterNumber(nextChapter) : null,
+                        getBaseUrl()
                       ),
                 baseUrl:
                   currentSource === "manhwa"

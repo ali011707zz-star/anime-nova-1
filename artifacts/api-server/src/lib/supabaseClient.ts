@@ -10,10 +10,18 @@ import pg from "pg";
 const { Pool } = pg;
 
 let _pool: pg.Pool | null = null;
-// Device linking can be deployed before its Supabase migration is applied.
-// Keep a narrowly scoped PostgreSQL fallback so the feature remains usable
-// without changing the storage behavior of other tables.
+// Device linking and push delivery tables live in the VPS PostgreSQL database
+// when their Supabase migration has not been applied. Once a table returns 404
+// from PostgREST (or is known to live in PG), route directly to PostgreSQL so
+// background workers do not log 404 PGRST205 on every cycle.
 const DEVICE_STORAGE_TABLES = new Set(["device_link_codes", "linked_devices", "mobile_push_tokens", "mobile_push_deliveries"]);
+const pgOnlyDeviceTables = new Set<string>();
+
+function shouldUseSupabaseForTable(table: string): boolean {
+  if (!isSupabaseReady()) return false;
+  if (pgOnlyDeviceTables.has(table) && isPgReady()) return false;
+  return true;
+}
 
 function getPool(): pg.Pool {
   if (!_pool) {
@@ -250,7 +258,7 @@ export async function sbSelect<T = any>(
   let lastError: Error | null = null;
 
   // Supabase path
-  if (isSupabaseReady()) {
+  if (shouldUseSupabaseForTable(table)) {
     try {
       const params: Record<string, string | number | undefined> = {
         ...filters,
@@ -263,7 +271,11 @@ export async function sbSelect<T = any>(
       if (!res.ok) {
         const err = await res.text();
         lastError = new Error(`Supabase ${res.status}: ${err.slice(0, 200)}`);
-        console.error(`[sb] sbSelect "${table}" ${res.status}:`, err.slice(0, 200));
+        if (res.status === 404 && allowDeviceStorageFallback) {
+          pgOnlyDeviceTables.add(table);
+        } else {
+          console.error(`[sb] sbSelect "${table}" ${res.status}:`, err.slice(0, 200));
+        }
         // Device-link/push tables may intentionally live in the VPS
         // PostgreSQL fallback until their Supabase migration is applied.
         // Keep reads consistent with sbInsert/sbPatch: any client/schema
@@ -330,7 +342,7 @@ export async function sbCount(
   table: string,
   filters: Record<string, string | number | undefined> = {},
 ): Promise<number> {
-  if (isSupabaseReady()) {
+  if (shouldUseSupabaseForTable(table)) {
     try {
       const params: Record<string, string | number | undefined> = {
         ...filters,
@@ -417,7 +429,7 @@ export async function sbInsert<T = any>(
   };
 
   // Supabase path
-  if (isSupabaseReady()) {
+  if (shouldUseSupabaseForTable(table)) {
     try {
       const url = `${getSbUrl()}/rest/v1/${table}`;
       const res = await fetch(url, {
@@ -428,6 +440,10 @@ export async function sbInsert<T = any>(
       });
       if (!res.ok) {
         const errText = await res.text();
+        if (res.status === 404 && DEVICE_STORAGE_TABLES.has(table) && isPgReady()) {
+          pgOnlyDeviceTables.add(table);
+          return pgInsert();
+        }
         console.error(`[sb] sbInsert "${table}" ${res.status}:`, errText.slice(0, 200));
         // عند خطأ 4xx (عمود ناقص، مخطط قديم) — جرّب PostgreSQL كـ fallback
         if (res.status >= 400 && res.status < 500 && isPgReady()) {
@@ -496,7 +512,7 @@ export async function sbInsertIgnore(
     }
   };
 
-  if (isSupabaseReady()) {
+  if (shouldUseSupabaseForTable(table)) {
     try {
       const url = `${getSbUrl()}/rest/v1/${table}?on_conflict=${encodeURIComponent(columns.join(","))}`;
       const response = await fetch(url, {
@@ -510,6 +526,10 @@ export async function sbInsertIgnore(
         return Array.isArray(data) ? data.length > 0 : Boolean(data);
       }
       const errorText = await response.text();
+      if (response.status === 404 && DEVICE_STORAGE_TABLES.has(table) && isPgReady()) {
+        pgOnlyDeviceTables.add(table);
+        return pgInsert();
+      }
       console.error(`[sb] sbInsertIgnore "${table}" ${response.status}:`, errorText.slice(0, 200));
       if (response.status === 409) return false;
       if (response.status >= 400 && response.status < 500 && DEVICE_STORAGE_TABLES.has(table) && isPgReady()) {
@@ -536,7 +556,7 @@ export async function sbUpsert<T = any>(
   const allowDeviceStorageFallback = DEVICE_STORAGE_TABLES.has(table) && isPgReady();
 
   // Supabase path
-  if (isSupabaseReady()) {
+  if (shouldUseSupabaseForTable(table)) {
     try {
       const h = { ...sbHeaders(), "Prefer": `resolution=merge-duplicates,return=representation` };
       const qs = onConflict ? `?on_conflict=${encodeURIComponent(onConflict)}` : "";
@@ -559,10 +579,10 @@ export async function sbUpsert<T = any>(
             console.error(`[sb] sbUpsert "${table}" compatible retry ${retry.status}:`, retryErr.slice(0, 200)); return null;
           }
         }
-        console.error(`[sb] sbUpsert "${table}" ${res.status}:`, err.slice(0, 200));
         if (res.status === 404 && allowDeviceStorageFallback) {
-          console.warn(`[sb] sbUpsert "${table}" Supabase 404 — falling back to PostgreSQL`);
+          pgOnlyDeviceTables.add(table);
         } else {
+          console.error(`[sb] sbUpsert "${table}" ${res.status}:`, err.slice(0, 200));
           return null;
         }
       }
@@ -620,7 +640,7 @@ export async function sbPatch<T = any>(
   const allowDeviceStorageFallback = DEVICE_STORAGE_TABLES.has(table) && isPgReady();
 
   // Supabase path
-  if (isSupabaseReady()) {
+  if (shouldUseSupabaseForTable(table)) {
     try {
       const params: Record<string, string | number | undefined> = {};
       for (const [k, v] of Object.entries(filter)) params[k] = String(v);
@@ -633,7 +653,11 @@ export async function sbPatch<T = any>(
       });
       if (!res.ok) {
         const err = await res.text();
-        console.error(`[sb] sbPatch "${table}" ${res.status}:`, err.slice(0, 200));
+        if (res.status === 404 && allowDeviceStorageFallback) {
+          pgOnlyDeviceTables.add(table);
+        } else {
+          console.error(`[sb] sbPatch "${table}" ${res.status}:`, err.slice(0, 200));
+        }
         if (!(res.status >= 400 && res.status < 500 && allowDeviceStorageFallback)) return null;
       } else {
         const result = await res.json();
@@ -672,7 +696,7 @@ export async function sbDelete(
   const allowDeviceStorageFallback = DEVICE_STORAGE_TABLES.has(table) && isPgReady();
 
   // Supabase path
-  if (isSupabaseReady()) {
+  if (shouldUseSupabaseForTable(table)) {
     try {
       const params: Record<string, string | number | undefined> = {};
       for (const [k, v] of Object.entries(filter)) params[k] = String(v);
@@ -683,6 +707,9 @@ export async function sbDelete(
         signal: AbortSignal.timeout(10000),
       });
       if (res.ok) return true;
+      if (res.status === 404 && allowDeviceStorageFallback) {
+        pgOnlyDeviceTables.add(table);
+      }
       if (!(res.status >= 400 && res.status < 500 && allowDeviceStorageFallback)) return false;
     } catch (e: any) {
       console.error(`[sb] sbDelete "${table}":`, e.message);

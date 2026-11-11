@@ -823,10 +823,9 @@ router.post("/admin/comments/:id/reply", async (req: Request, res: Response) => 
         ? cleanText
         : cleanText;
 
-    const inserted = await sbInsert<any>("comments", {
+    const baseReplyRow = {
       user_id:           eu?.id ? String(eu.id) : "admin",
       username:          adminDisplayName,
-      user_handle:       "admin",
       avatar_url:        null,
       anime_id:          target.anime_id ?? null,
       tmdb_id:           target.tmdb_id ?? null,
@@ -836,22 +835,50 @@ router.post("/admin/comments/:id/reply", async (req: Request, res: Response) => 
       likes:             0,
       parent_id:         rootParentId,
       reply_to_username: target.username || null,
-    });
+    };
 
-    const created = inserted[0];
+    let inserted = await sbInsert<any>("comments", {
+      ...baseReplyRow,
+      user_handle: "admin",
+    });
+    if (!inserted) {
+      inserted = await sbInsert<any>("comments", baseReplyRow);
+    }
+
+    const created = Array.isArray(inserted) ? inserted[0] : inserted;
+    let pushStats = { targetUsers: 0, delivered: 0 };
     if (created) {
-      void notifyCommentTargets({
+      let resolvedAnimeTitle = customAnimeTitle;
+      if (!resolvedAnimeTitle) {
+        const titleMap = await resolveCommentAnimeTitles([target]).catch(() => new Map<string, string>());
+        const animeIdStr = target.anime_id != null ? String(target.anime_id) : "";
+        const tmdbIdStr = target.tmdb_id != null ? String(target.tmdb_id).trim() : "";
+        resolvedAnimeTitle =
+          (animeIdStr && titleMap.get(animeIdStr)) ||
+          (tmdbIdStr && (titleMap.get(`tmdb:${tmdbIdStr}`) || titleMap.get(tmdbIdStr))) ||
+          "";
+      }
+
+      pushStats = await notifyCommentTargets({
         comment: { ...created, parent_id: target.id },
-        actorUserId: eu?.id ? String(eu.id) : "admin",
+        actorUserId: "admin",
         actorName: adminDisplayName,
+        allowSelfNotify: true,
+        directTargetUserId: target.user_id ? String(target.user_id) : null,
+        animeTitle: resolvedAnimeTitle || null,
+        isAdminReply: true,
       }).catch((err: any) => {
         console.warn("[admin/comments reply push]", err?.message || String(err));
+        return { targetUsers: 0, delivered: 0 };
       });
     }
 
     return res.status(201).json({
       ok: true,
-      message: "تم إرسال رد الإدارة بنجاح ✓",
+      message: pushStats.delivered > 0
+        ? `تم إرسال رد الإدارة وإشعار الهاتف (${pushStats.delivered}) بنجاح ✓`
+        : "تم إرسال رد الإدارة بنجاح ✓",
+      pushDelivered: pushStats.delivered,
       comment: created || null,
     });
   } catch (err) {

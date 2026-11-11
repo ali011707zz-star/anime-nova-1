@@ -107,14 +107,20 @@ export default function ScheduleScreen() {
       <View style={styles.tabContainer}>
         <Pressable
           onPress={() => setActiveTab("schedule")}
-          style={[styles.tabButton, activeTab === "schedule" ? styles.tabActive : styles.tabInactive]}
+          focusable={tvMode}
+          style={({ focused }) => [
+            styles.tabButton,
+            activeTab === "schedule" ? styles.tabActive : styles.tabInactive,
+            tvMode && tvFocusStyle(focused),
+          ]}
         >
           <Ionicons name="calendar" size={14} color={activeTab === "schedule" ? "#fff" : colors.mutedForeground} />
           <Text style={activeTab === "schedule" ? styles.tabActiveText : styles.tabInactiveText}>جدول الأسبوع</Text>
         </Pressable>
         <Pressable
-          onPress={() => router.push("/(tabs)/latest" as any)}
-          style={[styles.tabButton, styles.tabInactive]}
+          onPress={() => router.push("/latest" as any)}
+          focusable={tvMode}
+          style={({ focused }) => [styles.tabButton, styles.tabInactive, tvMode && tvFocusStyle(focused)]}
         >
           <Ionicons name="flash" size={14} color="#eab308" />
           <Text style={styles.tabInactiveText}>آخر الحلقات المضافة</Text>
@@ -136,13 +142,15 @@ export default function ScheduleScreen() {
                 key={day}
                 onPress={() => setSelectedDay(i)}
                 focusable={tvMode}
+                hasTVPreferredFocus={tvMode && isSelected}
+                testID={tvMode && isSelected ? "nova-tv-preferred-focus" : undefined}
                 style={({ focused }) => [
                   styles.dayBtn,
-                  tvMode && tvFocusStyle(focused),
                   {
                     backgroundColor: isSelected ? "#06b6d4" : "rgba(39, 39, 42, 0.85)",
                     borderColor: isSelected ? "#06b6d4" : "rgba(255, 255, 255, 0.12)",
                   },
+                  tvMode && tvFocusStyle(focused),
                 ]}
               >
                 <Text

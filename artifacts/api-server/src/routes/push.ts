@@ -102,11 +102,19 @@ router.post(["/push/register", "/register"], async (req: Request, res: Response)
       }
     }
 
+    const resolvedUserId =
+      getMobileUserId(req) ||
+      (req.session as any)?.userId ||
+      (req.session as any)?.emailUserId ||
+      (typeof req.body?.userId === "string" && /^[0-9a-fA-F-]{10,}$/.test(req.body.userId.trim())
+        ? req.body.userId.trim()
+        : undefined);
+
     const saved = await sbUpsert(
       "mobile_push_tokens",
       {
         token,
-        user_id: getMobileUserId(req) ?? null,
+        ...(resolvedUserId ? { user_id: resolvedUserId } : {}),
         platform,
         app_version: appVersion,
         last_seen_at: new Date().toISOString(),
@@ -118,7 +126,7 @@ router.post(["/push/register", "/register"], async (req: Request, res: Response)
       console.warn(`[push] registration unavailable platform=${platform} version=${appVersion || "unknown"}`);
       return res.status(503).json({ error: "Push registration unavailable" });
     }
-    console.log(`[push] registered device platform=${platform} version=${appVersion || "unknown"}`);
+    console.log(`[push] registered device platform=${platform} version=${appVersion || "unknown"}${resolvedUserId ? ` user=${resolvedUserId.slice(0, 8)}` : ""}`);
   } catch (error: any) {
     console.error("[push] registration failed:", error?.message || String(error));
     return res.status(503).json({ error: "Push registration unavailable" });
@@ -163,7 +171,7 @@ function cleanErrorCode(value: unknown): string {
 }
 
 function isRetryableExpoError(code: string): boolean {
-  return TRANSIENT_EXPO_ERRORS.has(code) || code === "InvalidCredentials" || code === "MismatchSenderId";
+  return TRANSIENT_EXPO_ERRORS.has(code);
 }
 
 async function patchDelivery(row: PushDeliveryRow, values: Record<string, unknown>): Promise<boolean> {
@@ -222,7 +230,8 @@ async function deferDelivery(
   options: { status?: DeliveryStatus; delayMs?: number; clearTicket?: boolean } = {},
 ): Promise<void> {
   const attempts = (row.attempts || 0) + 1;
-  const status = options.status || (isRetryableExpoError(code) ? "retry" : "failed");
+  const requestedStatus = options.status || (isRetryableExpoError(code) ? "retry" : "failed");
+  const status: DeliveryStatus = attempts >= 12 && requestedStatus === "retry" ? "failed" : requestedStatus;
   const updated = await patchDelivery(row, {
     status,
     attempts,

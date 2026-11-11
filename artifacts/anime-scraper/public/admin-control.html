@@ -327,12 +327,12 @@ $("commentsList").onclick=async e=>{
     if(!text){$("commentError").textContent="اكتب نص الرد أولاً";return}
     btn.disabled=true;
     try{
-      await api(`/api/admin/comments/${encodeURIComponent(id)}/reply`,{
+      const res=await api(`/api/admin/comments/${encodeURIComponent(id)}/reply`,{
         method:"POST",
         body:JSON.stringify({text,animeTitle:btn.dataset.animeTitle||""}),
       });
       if(input)input.value="";
-      $("commentFeedback").textContent="تم إرسال رد الإدارة على التعليق بنجاح ✓";
+      $("commentFeedback").textContent=res?.message||"تم إرسال رد الإدارة على التعليق بنجاح ✓";
       await Promise.all([loadComments(true),loadStats()]);
     }catch(x){
       $("commentError").textContent=x.message;

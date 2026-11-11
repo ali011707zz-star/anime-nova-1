@@ -70,19 +70,26 @@ export function AnimeFilterSheet({
   const styles = createStyles(colors);
   const numberedYears = years.filter((item) => /^\d{4}$/.test(item));
 
-  const section = (title: string, options: AnimeFilterOption[], value: string, onChange: (next: string) => void, grid = false) => (
+  const section = (title: string, options: AnimeFilterOption[], value: string, onChange: (next: string) => void, grid = false, isFirstSection = false) => (
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>{title}</Text>
       <View style={[styles.chips, grid && styles.sortGrid]}>
-        {options.map((option) => {
+        {options.map((option, idx) => {
           const selected = value === option.value;
           return (
             <Pressable
               key={`${title}-${option.value || "all"}`}
               accessibilityRole="button"
               accessibilityState={{ selected }}
+              hasTVPreferredFocus={isFirstSection && idx === 0}
+              testID={isFirstSection && idx === 0 ? "nova-tv-preferred-focus" : undefined}
               onPress={() => onChange(option.value)}
-              style={[styles.chip, grid && styles.sortChip, selected && styles.chipSelected]}
+              style={({ focused }) => [
+                styles.chip,
+                grid && styles.sortChip,
+                selected && styles.chipSelected,
+                focused && styles.tvChipFocused,
+              ]}
             >
               <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
                 {option.label}
@@ -105,10 +112,13 @@ export function AnimeFilterSheet({
       <View style={styles.overlay}>
         <Pressable
           accessibilityLabel="إغلاق الفلاتر"
+          focusable={false}
+          accessible={false}
           onPress={onClose}
           style={StyleSheet.absoluteFill}
         />
         <View
+          testID="nova-tv-modal-root"
           style={[
             styles.sheet,
             {
@@ -124,11 +134,11 @@ export function AnimeFilterSheet({
               <Pressable
                 accessibilityLabel="إغلاق"
                 onPress={onClose}
-                style={styles.closeButton}
+                style={({ focused }) => [styles.closeButton, focused && styles.tvChipFocused]}
               >
                 <Ionicons name="close" size={19} color={colors.textPrimary} />
               </Pressable>
-              <Pressable onPress={onReset} style={styles.resetButton}>
+              <Pressable onPress={onReset} style={({ focused }) => [styles.resetButton, focused && styles.tvChipFocused]}>
                 <Text style={styles.resetText}>إعادة ضبط</Text>
               </Pressable>
             </View>
@@ -141,7 +151,7 @@ export function AnimeFilterSheet({
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
-            {section("الترتيب حسب", sortOptions, sort, onSortChange, true)}
+            {section("الترتيب حسب", sortOptions, sort, onSortChange, true, true)}
             {section("الموسم", seasonOptions, season, onSeasonChange)}
             {section("الحالة", statusOptions, status, onStatusChange)}
             {section("النوع", formatOptions, format, onFormatChange)}
@@ -162,7 +172,11 @@ export function AnimeFilterSheet({
                       accessibilityRole="button"
                       accessibilityState={{ selected }}
                       onPress={() => onYearChange(value)}
-                      style={[styles.yearChip, selected && styles.chipSelected]}
+                      style={({ focused }) => [
+                        styles.yearChip,
+                        selected && styles.chipSelected,
+                        focused && styles.tvChipFocused,
+                      ]}
                     >
                       <Text style={[styles.yearText, selected && styles.chipTextSelected]}>
                         {item}
@@ -175,7 +189,7 @@ export function AnimeFilterSheet({
           </ScrollView>
 
           <View style={styles.footer}>
-            <Pressable onPress={onClose} style={styles.applyButton}>
+            <Pressable onPress={onClose} style={({ focused }) => [styles.applyButton, focused && styles.tvChipFocused]}>
               <Text style={styles.applyText}>عرض النتائج ({resultCount} أنمي)</Text>
             </Pressable>
           </View>
@@ -263,6 +277,7 @@ const createStyles = (colors: ThemePalette) => StyleSheet.create({
   },
   sortChip: { width: "48%" },
   chipSelected: { backgroundColor: colors.destructive, borderColor: colors.destructive },
+  tvChipFocused: { borderColor: "#38BDF8", borderWidth: 2.5 },
   chipText: {
     color: colors.textPrimary,
     fontSize: 12,

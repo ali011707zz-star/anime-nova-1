@@ -150,12 +150,14 @@ export function RewardedAdPrompt() {
               disabled={busy}
               onPress={() => void confirm()}
               focusable={tvMode}
-              style={({ pressed }) => [
+              hasTVPreferredFocus={tvMode}
+              testID={tvMode ? "nova-tv-preferred-focus" : undefined}
+              style={({ pressed, focused }) => [
                 styles.confirm,
                 { backgroundColor: colors.button, borderColor: colors.accentBorder },
                 busy && styles.disabled,
                 pressed && styles.pressed,
-                tvMode && tvFocusStyle(false),
+                tvMode && tvFocusStyle(focused),
               ]}
             >
               {busy ? (

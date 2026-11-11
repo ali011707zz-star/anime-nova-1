@@ -58,7 +58,7 @@ export default function TabLayout() {
                   {...(props as any)}
                   focusable={true}
                   style={({ focused }) => [
-                    typeof rawStyle === "function" ? rawStyle({ pressed: false }) : rawStyle,
+                    typeof rawStyle === "function" ? (rawStyle as any)({ pressed: false }) : rawStyle,
                     styles.tvTabButton,
                     focused && styles.tvTabDpadFocused,
                   ]}

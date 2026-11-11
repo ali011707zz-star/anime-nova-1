@@ -1,3 +1,4 @@
+import { SafePosterImage } from "@/components/SafePosterImage";
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   View, Text, Image, ScrollView,
@@ -189,7 +190,8 @@ function CharCard({ e, animeId, animeTitle, favIds, onToggle, tvMode = false, co
         {/* Heart button — tap to toggle favourite */}
         <Pressable
           onPress={() => onToggle({ id: n.id, name: n.name?.full || "", image: n.image?.large, animeId, animeTitle })}
-          style={[d.charHeartBtn, isFav && d.charHeartBtnActive]}
+          focusable={tvMode}
+          style={({ focused }) => [d.charHeartBtn, isFav && d.charHeartBtnActive, tvMode && tvFocusStyle(focused)]}
           hitSlop={6}
         >
           <Ionicons name={isFav ? "heart" : "heart-outline"} size={12} color={isFav ? "#fff" : "rgba(255,255,255,0.90)"} />
@@ -559,7 +561,7 @@ export default function AnimeDetailScreen() {
       <View style={[d.topBar, tvMode && d.tvTopBar]}>
         <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")}
           focusable={tvMode}
-          hasTVPreferredFocus={tvMode}
+          testID="nova-tv-header-action"
           onFocus={() => rememberDetailFocus("back")}
           style={({ focused }) => [d.topBarBack, tvMode && d.tvTopBarBack, tvMode && tvFocusStyle(focused)]}>
           <Ionicons name="chevron-forward" size={tvMode ? 26 : 20} color={colors.textPrimary} />
@@ -594,9 +596,16 @@ export default function AnimeDetailScreen() {
 
         {/* ── Cover (Physical Right) + Title & Badges ── */}
         <View style={[d.infoRow, tvMode && d.tvInfoRow]}>
-          {anime.coverImage?.large ? (
-            <Image source={{ uri: anime.coverImage.extraLarge || anime.coverImage.large }} style={[d.cover, tvMode && d.tvCover]} />
-          ) : null}
+          <SafePosterImage
+            uri={anime.coverImage?.extraLarge || anime.coverImage?.large}
+            fallbackUris={[
+              anime.coverImage?.large,
+              anime.bannerImage,
+              anime.id ? `https://img.anili.st/media/${anime.id}` : undefined,
+            ]}
+            style={[d.cover, tvMode && d.tvCover]}
+            resizeMode="cover"
+          />
           <View style={d.infoText}>
             <Text style={[d.titleMain, d.titleArabicMain, tvMode && d.tvTitleMain]} numberOfLines={2}>
               {arabicTitle || anime.title?.english || anime.title?.romaji || "عنوان غير متاح"}
@@ -657,6 +666,8 @@ export default function AnimeDetailScreen() {
               },
             } as any)}
             focusable={tvMode}
+            hasTVPreferredFocus={tvMode}
+            testID={tvMode ? "nova-tv-preferred-focus" : undefined}
             onFocus={() => rememberDetailFocus("watch")}
             style={({ focused }) => [d.watchBtn, tvMode && d.tvWatchBtn, { width: "100%" }, tvMode && tvFocusStyle(focused)]}
           >
@@ -950,14 +961,15 @@ export default function AnimeDetailScreen() {
       {/* ── Rating bottom sheet ── */}
       <Modal visible={showRating} animationType={tvMode ? "none" : "slide"} transparent onRequestClose={() => setShowRating(false)}>
         <View style={d.ratingOverlay}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowRating(false)} />
-          <View style={d.ratingSheet}>
+          <Pressable style={StyleSheet.absoluteFill} focusable={false} accessible={false} onPress={() => setShowRating(false)} />
+          <View style={d.ratingSheet} testID="nova-tv-modal-root">
             <Text style={d.ratingTitle}>أضف تقييمك</Text>
             <Text style={d.ratingSub}>اختر تقييمك من 1 إلى 10</Text>
             <View style={d.ratingBtns}>
               {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
                 <Pressable key={n} onPress={() => submitRating(n)}
                   focusable={tvMode}
+                  hasTVPreferredFocus={tvMode && (myRating > 0 ? n === myRating : n === 8)}
                   style={({ focused }) => [d.ratingNum, n <= (myRating) && d.ratingNumActive, tvMode && tvFocusStyle(focused)]}>
                   <Text style={[d.ratingNumText, n <= myRating && d.ratingNumTextActive]}>{n}</Text>
                 </Pressable>

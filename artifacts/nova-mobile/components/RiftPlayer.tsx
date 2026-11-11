@@ -184,6 +184,7 @@ type Props = {
   onToggleOrientation?: () => void;
   onNextEpisode?: () => void;
   onPrevEpisode?: () => void;
+  onPreviousEpisode?: () => void;
   onEpisodeSelect?: (ep: number) => void;
   onProgress?: (pos: number, dur: number) => void;
   initialPosition?: number;
@@ -193,6 +194,7 @@ type Props = {
   subEnabled?: boolean;
   autoPlayNext?: boolean;
   totalEps?: number;
+  totalEpisodes?: number;
   episodeTitle?: string;
   /** يُستدعى عند فشل جميع المصادر المتاحة */
   onError?: () => void;
