@@ -1,11 +1,16 @@
 import { Router, type Request, type Response } from "express";
 import { setConfig, resetTransporter, initEmailService } from "../auth/emailService.js";
 import { getEmailUser } from "../auth/emailAuth.js";
-import { sbSelect, sbPatch, sbDelete } from "../lib/supabaseClient.js";
+import { sbSelect, sbSelectAll, sbCount, sbInsert, sbPatch, sbDelete } from "../lib/supabaseClient.js";
 import { SETUP_SQL, getTableStatus } from "../lib/supabaseMigrate.js";
 import { setDbConfig, clearDbConfigCache } from "../lib/dbConfig.js";
 import { checkAppSecret } from "../lib/security.js";
 import { isWebAdmin } from "./webAdmin.js";
+import {
+  notifyCommentTargets,
+  getCachedCommentAnimeTitles,
+  rememberCommentAnimeTitle,
+} from "./comments.js";
 
 // دالة مساعدة للتحقق من secret أو صلاحيات الأدمن
 async function hasRelayAccess(req: Request): Promise<boolean> {
@@ -381,73 +386,497 @@ router.delete("/admin/users/:id", async (req: Request, res: Response) => {
   }
 });
 
+function getRiyadhStartOfDayMs(nowMs = Date.now()): number {
+  const riyadhOffsetMs = 3 * 60 * 60_000;
+  const riyadhDate = new Date(nowMs + riyadhOffsetMs);
+  return Date.UTC(
+    riyadhDate.getUTCFullYear(),
+    riyadhDate.getUTCMonth(),
+    riyadhDate.getUTCDate(),
+    0, 0, 0, 0,
+  ) - riyadhOffsetMs;
+}
+
+async function resolveCommentAnimeTitles(commentRows: any[]): Promise<Map<string, string>> {
+  const titleMap = new Map<string, string>();
+  const cached = await getCachedCommentAnimeTitles();
+  for (const [k, v] of cached.entries()) {
+    if (v) titleMap.set(String(k), v);
+  }
+
+  const neededAnimeIds = new Set<string>();
+  const neededTmdbIds = new Set<string>();
+  for (const r of commentRows) {
+    if (r.anime_id != null) {
+      const k = String(r.anime_id);
+      if (!titleMap.has(k)) neededAnimeIds.add(k);
+    }
+    if (r.tmdb_id != null && String(r.tmdb_id).trim()) {
+      const k = String(r.tmdb_id).trim();
+      if (!titleMap.has(`tmdb:${k}`) && !titleMap.has(k)) neededTmdbIds.add(k);
+    }
+  }
+
+  if (neededAnimeIds.size > 0 || neededTmdbIds.size > 0) {
+    const [viewsRes, sessionsRes, historyRes, favsRes, metaArRes] = await Promise.allSettled([
+      sbSelect<any>("analytics_episode_views", { order: "viewed_at.desc" }, { select: "anime_id,anime_title", limit: 1000 }),
+      sbSelect<any>("analytics_sessions", { order: "last_seen_at.desc" }, { select: "anime_id,anime_title", limit: 1000 }),
+      sbSelect<any>("watch_history", { order: "watched_at.desc" }, { select: "anime_id,tmdb_id,anime_title", limit: 1000 }),
+      sbSelect<any>("favorites", {}, { select: "anime_id,title", limit: 1000 }),
+      sbSelect<any>("anime_meta_ar", {}, { select: "source_id,source_type,title_ar", limit: 1000 }),
+    ]);
+
+    const rememberPair = (rawId: any, rawTitle: any, prefix = "") => {
+      const id = String(rawId ?? "").trim();
+      const title = String(rawTitle ?? "").trim();
+      if (!id || !title || title === "التعليقات" || title === "أنمي") return;
+      const key = prefix ? `${prefix}${id}` : id;
+      if (!titleMap.has(key)) {
+        titleMap.set(key, title);
+        void rememberCommentAnimeTitle(key, title);
+      }
+      if (!prefix && !titleMap.has(id)) {
+        titleMap.set(id, title);
+        void rememberCommentAnimeTitle(id, title);
+      }
+    };
+
+    if (metaArRes.status === "fulfilled") {
+      for (const r of metaArRes.value) {
+        rememberPair(r.source_id, r.title_ar);
+        if (r.source_type && r.source_type !== "anime") {
+          rememberPair(r.source_id, r.title_ar, "tmdb:");
+        }
+      }
+    }
+    if (viewsRes.status === "fulfilled") {
+      for (const r of viewsRes.value) rememberPair(r.anime_id, r.anime_title);
+    }
+    if (sessionsRes.status === "fulfilled") {
+      for (const r of sessionsRes.value) rememberPair(r.anime_id, r.anime_title);
+    }
+    if (historyRes.status === "fulfilled") {
+      for (const r of historyRes.value) {
+        if (r.anime_id != null) rememberPair(r.anime_id, r.anime_title);
+        if (r.tmdb_id != null) {
+          rememberPair(r.tmdb_id, r.anime_title, "tmdb:");
+          rememberPair(r.tmdb_id, r.anime_title);
+        }
+      }
+    }
+    if (favsRes.status === "fulfilled") {
+      for (const r of favsRes.value) rememberPair(r.anime_id, r.title);
+    }
+  }
+
+  // Batch-resolve any remaining numeric AniList IDs via AniList GraphQL
+  const missingAnilistIds = [...neededAnimeIds]
+    .filter((id) => !titleMap.has(id) && /^\d+$/.test(id))
+    .map((id) => Number(id))
+    .filter((n) => Number.isInteger(n) && n > 0)
+    .slice(0, 50);
+
+  if (missingAnilistIds.length > 0) {
+    try {
+      const gqlRes = await fetch("https://graphql.anilist.co", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          query: `query ($ids: [Int]) { Page(perPage: 50) { media(id_in: $ids) { id title { userPreferred english romaji } } } }`,
+          variables: { ids: missingAnilistIds },
+        }),
+        signal: AbortSignal.timeout(6000),
+      });
+      if (gqlRes.ok) {
+        const payload: any = await gqlRes.json().catch(() => null);
+        const mediaList: any[] = payload?.data?.Page?.media || [];
+        for (const m of mediaList) {
+          const idStr = String(m?.id || "");
+          const resolvedTitle = String(
+            m?.title?.userPreferred || m?.title?.english || m?.title?.romaji || "",
+          ).trim();
+          if (idStr && resolvedTitle) {
+            titleMap.set(idStr, resolvedTitle);
+            await rememberCommentAnimeTitle(idStr, resolvedTitle);
+          }
+        }
+      }
+    } catch { /* ignore AniList timeout */ }
+  }
+
+  return titleMap;
+}
+
 // حالة الخادم للمدير
 router.get("/admin/stats", async (req: Request, res: Response) => {
   if (!(await isAdmin(req)))
     return res.status(401).json({ error: "غير مصرّح" });
 
   try {
-    // Analytics must not disappear just because an unrelated legacy table
-    // (for example source_cache) is absent from the production REST schema.
-    // The old all-or-nothing Promise.all made the dashboard show dashes for
-    // every card when any one query failed.
-    const [allUsersResult, cacheRowsResult, entitlementsResult, sessionsResult, episodeViewsResult, tableStatusResult] = await Promise.allSettled([
-      sbSelect("users", { select: "id" }, { limit: 1000 }),
+    const [
+      allUsersResult,
+      cacheRowsResult,
+      entitlementsResult,
+      allSessionsResult,
+      episodeViewsResult,
+      episodeViewsCountResult,
+      commentsCountResult,
+      tableStatusResult,
+    ] = await Promise.allSettled([
+      sbSelectAll<any>("users", {}, { select: "id", maxRows: 10000 }),
       sbSelect("source_cache", { select: "cache_key" }, { limit: 1000 }),
       loadEntitlements(),
-      sbSelect<any>("analytics_sessions", { last_seen_at: `gte.${new Date(Date.now() - 5 * 60_000).toISOString()}` }, { limit: 10000 }),
-      sbSelect<any>("analytics_episode_views", { order: "viewed_at.desc" }, { limit: 10000 }),
+      sbSelectAll<any>("analytics_sessions", { order: "last_seen_at.desc" }, {
+        select: "session_key,platform,visitor_id,user_id,anime_id,anime_title,episode_number,last_seen_at",
+        maxRows: 25000,
+      }),
+      sbSelectAll<any>("analytics_episode_views", { order: "viewed_at.desc" }, {
+        select: "event_key,platform,visitor_id,user_id,anime_id,anime_title,episode_number,viewed_at",
+        maxRows: 50000,
+      }),
+      sbCount("analytics_episode_views"),
+      sbCount("comments"),
       getTableStatus(),
     ]);
+
     const valueOr = <T,>(result: PromiseSettledResult<T>, fallback: T): T =>
       result.status === "fulfilled" ? result.value : fallback;
+
     const allUsers = valueOr(allUsersResult, [] as any[]);
     const cacheRows = valueOr(cacheRowsResult, [] as any[]);
     const entitlements = valueOr(entitlementsResult, new Map<string, Entitlement>());
-    const sessions = valueOr(sessionsResult, [] as any[]);
+    const allSessions = valueOr(allSessionsResult, [] as any[]);
     const episodeViews = valueOr(episodeViewsResult, [] as any[]);
+    const exactEpisodeViewsCount = valueOr(episodeViewsCountResult, 0);
+    const totalComments = valueOr(commentsCountResult, 0);
     const tableStatus = valueOr(tableStatusResult, {});
 
-    const byPlatform = (platform: string) => sessions.filter((s) => s.platform === platform);
+    const nowMs = Date.now();
+    const activeCutoffMs = nowMs - 5 * 60_000;
+    const activeSessions = allSessions.filter((s) => {
+      const ts = Date.parse(String(s.last_seen_at || ""));
+      return Number.isFinite(ts) && ts >= activeCutoffMs;
+    });
+
+    const byPlatform = (platform: string) => activeSessions.filter((s) => s.platform === platform);
     const viewsByPlatform = (platform: string) => episodeViews.filter((v) => v.platform === platform);
     const uniqueActiveUsers = (rows: any[]) => new Set(
       rows.map((s) => s.user_id ? `user:${s.user_id}` : `visitor:${s.platform}:${s.visitor_id}`),
     ).size;
-    const dayAgo = Date.now() - 24 * 60 * 60_000;
-    const viewsToday = episodeViews.filter((v) => new Date(v.viewed_at).getTime() >= dayAgo);
-    const topMap = new Map<string, { title: string; episode: number; views: number }>();
+
+    // حساب إجمالي المستخدمين والأجهزة (المسجلين + الزوار الذين يستخدمون التطبيق بدون حساب قوقل)
+    const registeredUserIds = new Set(allUsers.map((u: any) => String(u.id)).filter(Boolean));
+    const guestVisitorsAll = new Set<string>();
+    const guestMobileVisitors = new Set<string>();
+    const guestWebVisitors = new Set<string>();
+    const allMobileDevices = new Set<string>();
+    const allWebVisitors = new Set<string>();
+
+    const recordVisitorRow = (row: any) => {
+      const platform = String(row.platform || "mobile");
+      const visitorId = String(row.visitor_id || "").trim();
+      const userId = row.user_id ? String(row.user_id).trim() : "";
+      if (visitorId) {
+        if (platform === "mobile") allMobileDevices.add(visitorId);
+        else if (platform === "web") allWebVisitors.add(visitorId);
+      }
+      if (!userId && visitorId) {
+        guestVisitorsAll.add(`${platform}:${visitorId}`);
+        if (platform === "mobile") guestMobileVisitors.add(visitorId);
+        else if (platform === "web") guestWebVisitors.add(visitorId);
+      }
+    };
+
+    for (const s of allSessions) recordVisitorRow(s);
+    for (const v of episodeViews) recordVisitorRow(v);
+
+    const registeredCount = registeredUserIds.size || allUsers.length;
+    const guestUsersCount = guestVisitorsAll.size;
+    const totalAppUsers = registeredCount + guestUsersCount;
+
+    const riyadhStartMs = getRiyadhStartOfDayMs(nowMs);
+    const dayAgoMs = nowMs - 24 * 60 * 60_000;
+    const viewsTodayRiyadh = episodeViews.filter((v) => {
+      const ts = Date.parse(String(v.viewed_at || ""));
+      return Number.isFinite(ts) && ts >= riyadhStartMs;
+    });
+    const viewsLast24h = episodeViews.filter((v) => {
+      const ts = Date.parse(String(v.viewed_at || ""));
+      return Number.isFinite(ts) && ts >= dayAgoMs;
+    });
+
+    const topMap = new Map<string, { animeId: string; title: string; episode: number; views: number }>();
     for (const row of episodeViews) {
       const key = `${row.anime_id}:${row.episode_number}`;
-      const current = topMap.get(key) || { title: row.anime_title || row.anime_id, episode: Number(row.episode_number), views: 0 };
+      const current = topMap.get(key) || {
+        animeId: String(row.anime_id || ""),
+        title: String(row.anime_title || row.anime_id || "بدون عنوان"),
+        episode: Number(row.episode_number) || 1,
+        views: 0,
+      };
+      if ((!current.title || current.title === current.animeId) && row.anime_title) {
+        current.title = String(row.anime_title);
+      }
       current.views++;
       topMap.set(key, current);
     }
 
+    const totalConfirmedViews = Math.max(exactEpisodeViewsCount, episodeViews.length);
     const premiumCount = [...entitlements.values()].filter((v) => v.plan === "premium").length;
+
     return res.json({
-      totalUsers:   allUsers.length,
-      premiumUsers: premiumCount,
-      freeUsers:    Math.max(0, allUsers.length - premiumCount),
-      cacheEntries: cacheRows.length,
+      totalUsers:       registeredCount,
+      guestUsers:       guestUsersCount,
+      guestMobileUsers: guestMobileVisitors.size,
+      guestWebUsers:    guestWebVisitors.size,
+      mobileDevicesCount: allMobileDevices.size,
+      webVisitorsCount:   allWebVisitors.size,
+      totalAppUsers,
+      totalComments,
+      premiumUsers:     premiumCount,
+      freeUsers:        Math.max(0, registeredCount - premiumCount),
+      cacheEntries:     cacheRows.length,
       analytics: {
-        activeUsers: uniqueActiveUsers(sessions),
-        activeWeb: uniqueActiveUsers(byPlatform("web")),
-        activeMobile: uniqueActiveUsers(byPlatform("mobile")),
-        watchingNow: sessions.filter((s) => s.anime_id && s.episode_number !== null).length,
-        watchingWeb: byPlatform("web").filter((s) => s.anime_id).length,
-        watchingMobile: byPlatform("mobile").filter((s) => s.anime_id).length,
-        episodeViews: episodeViews.length,
-        episodeViewsToday: viewsToday.length,
-        episodeViewsWeb: viewsByPlatform("web").length,
+        activeUsers:        uniqueActiveUsers(activeSessions),
+        activeWeb:          uniqueActiveUsers(byPlatform("web")),
+        activeMobile:       uniqueActiveUsers(byPlatform("mobile")),
+        watchingNow:        activeSessions.filter((s) => s.anime_id && s.episode_number !== null).length,
+        watchingWeb:        byPlatform("web").filter((s) => s.anime_id && s.episode_number !== null).length,
+        watchingMobile:     byPlatform("mobile").filter((s) => s.anime_id && s.episode_number !== null).length,
+        episodeViews:       totalConfirmedViews,
+        episodeViewsToday:  viewsTodayRiyadh.length,
+        episodeViews24h:    viewsLast24h.length,
+        episodeViewsWeb:    viewsByPlatform("web").length,
         episodeViewsMobile: viewsByPlatform("mobile").length,
-        topEpisodes: [...topMap.values()].sort((a, b) => b.views - a.views).slice(0, 5),
-        lastEventAt: episodeViews[0]?.viewed_at || null,
-        sampledLimit: 10000,
-        ready: tableStatus.analytics_sessions === true && tableStatus.analytics_episode_views === true,
+        totalSessions:      allSessions.length,
+        uniqueDevices:      allMobileDevices.size + allWebVisitors.size,
+        mobileDevices:      allMobileDevices.size,
+        webVisitors:        allWebVisitors.size,
+        guestUsers:         guestUsersCount,
+        totalAppUsers,
+        topEpisodes:        [...topMap.values()].sort((a, b) => b.views - a.views).slice(0, 8),
+        lastEventAt:        episodeViews[0]?.viewed_at || null,
+        sampledLimit:       50000,
+        ready:              tableStatus.analytics_sessions !== false && tableStatus.analytics_episode_views !== false,
       },
     });
   } catch (err) {
+    console.error("[admin/stats]", err);
     return res.status(500).json({ error: "خطأ في الخادم" });
+  }
+});
+
+// ── إدارة التعليقات والرد المباشر من لوحة الإدارة ───────────────────────────
+
+router.get("/admin/comments", async (req: Request, res: Response) => {
+  if (!(await isAdmin(req)))
+    return res.status(401).json({ error: "غير مصرّح" });
+
+  try {
+    const q = String(req.query.q || "").trim().toLowerCase();
+    const filterMode = String(req.query.filter || "all").trim();
+    const limit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 500);
+
+    const rows = await sbSelectAll<any>("comments", { order: "created_at.desc" }, { maxRows: 500 });
+    const userIds = Array.from(
+      new Set(
+        rows
+          .map((r) => String(r.user_id || "").trim())
+          .filter((id) => id && id !== "admin" && /^[0-9a-fA-F-]{10,}$/.test(id)),
+      ),
+    );
+
+    const profiles = new Map<string, any>();
+    if (userIds.length > 0) {
+      try {
+        const users = await sbSelect<any>("users", { id: `in.(${userIds.join(",")})` }, { limit: userIds.length });
+        for (const u of users) profiles.set(String(u.id), u);
+      } catch { /* ignore */ }
+    }
+
+    const titleMap = await resolveCommentAnimeTitles(rows);
+
+    const formatItem = (r: any) => {
+      const profile = profiles.get(String(r.user_id || ""));
+      const animeIdStr = r.anime_id != null ? String(r.anime_id) : "";
+      const tmdbIdStr = r.tmdb_id != null ? String(r.tmdb_id).trim() : "";
+      const resolvedTitle =
+        (animeIdStr && titleMap.get(animeIdStr)) ||
+        (tmdbIdStr && (titleMap.get(`tmdb:${tmdbIdStr}`) || titleMap.get(tmdbIdStr))) ||
+        (animeIdStr ? `أنمي #${animeIdStr}` : tmdbIdStr ? `عمل #${tmdbIdStr}` : "عام");
+
+      const isAdminComment =
+        String(r.user_id || "") === "admin" ||
+        String(r.user_handle || "").toLowerCase() === "admin";
+
+      return {
+        id:              String(r.id),
+        userId:          String(r.user_id || ""),
+        username:        profile?.display_name || r.username || "مستخدم",
+        rawUsername:     r.username || "مستخدم",
+        userHandle:      r.user_handle || profile?.username || null,
+        email:           profile?.email || null,
+        avatarUrl:       profile?.profile_image_custom || r.avatar_url || null,
+        animeId:         r.anime_id ?? null,
+        tmdbId:          r.tmdb_id ?? null,
+        animeType:       r.anime_type || "anime",
+        animeTitle:      resolvedTitle,
+        episodeNumber:   r.episode_number ?? null,
+        text:            String(r.text || ""),
+        likes:           Number(r.likes) || 0,
+        createdAt:       r.created_at,
+        parentId:        r.parent_id ? String(r.parent_id) : null,
+        replyToUsername: r.reply_to_username || null,
+        isAdminComment,
+      };
+    };
+
+    const allFormatted = rows.map(formatItem);
+    const byParent = new Map<string, ReturnType<typeof formatItem>[]>();
+    for (const item of allFormatted) {
+      if (item.parentId) {
+        const list = byParent.get(item.parentId) || [];
+        list.push(item);
+        byParent.set(item.parentId, list);
+      }
+    }
+    for (const list of byParent.values()) {
+      list.sort((a, b) => Date.parse(String(a.createdAt || "")) - Date.parse(String(b.createdAt || "")));
+    }
+
+    const enriched = allFormatted.map((item) => {
+      const replies = byParent.get(item.id) || [];
+      const hasAdminReply = item.isAdminComment || replies.some((rep) => rep.isAdminComment);
+      return {
+        ...item,
+        repliesCount: replies.length,
+        hasAdminReply,
+        replies,
+      };
+    });
+
+    const filtered = enriched.filter((item) => {
+      if (filterMode === "unreplied" && (item.isAdminComment || item.hasAdminReply)) return false;
+      if (filterMode === "episode" && item.episodeNumber == null) return false;
+      if (filterMode === "general" && item.episodeNumber != null) return false;
+      if (!q) return true;
+      const haystack = [
+        item.username,
+        item.rawUsername,
+        item.userHandle,
+        item.email,
+        item.animeTitle,
+        item.animeId,
+        item.tmdbId,
+        item.episodeNumber != null ? `الحلقة ${item.episodeNumber}` : "تعليق عام",
+        item.text,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(q);
+    });
+
+    const unrepliedCount = enriched.filter((c) => !c.parentId && !c.isAdminComment && !c.hasAdminReply).length;
+    const episodeCommentsCount = enriched.filter((c) => c.episodeNumber != null).length;
+
+    return res.json({
+      comments: filtered.slice(0, limit),
+      total: rows.length,
+      filteredTotal: filtered.length,
+      unrepliedCount,
+      episodeCommentsCount,
+    });
+  } catch (err) {
+    console.error("[admin/comments GET]", err);
+    return res.status(500).json({ error: "تعذّر تحميل التعليقات" });
+  }
+});
+
+router.post("/admin/comments/:id/reply", async (req: Request, res: Response) => {
+  if (!(await isAdmin(req)))
+    return res.status(401).json({ error: "غير مصرّح" });
+
+  try {
+    const targetId = String(req.params.id || "").trim();
+    const cleanText = String(req.body?.text || "").trim();
+    const customAnimeTitle = String(req.body?.animeTitle || "").trim();
+
+    if (!targetId) return res.status(400).json({ error: "معرّف التعليق مطلوب" });
+    if (!cleanText) return res.status(400).json({ error: "نص الرد مطلوب" });
+    if (cleanText.length > 1000) return res.status(400).json({ error: "الرد طويل جداً (الحد الأقصى 1000 حرف)" });
+
+    const targets = await sbSelect<any>("comments", { id: `eq.${targetId}` }, { limit: 1 });
+    if (!targets.length) return res.status(404).json({ error: "التعليق الأصلي غير موجود" });
+    const target = targets[0];
+
+    if (customAnimeTitle) {
+      if (target.anime_id != null) await rememberCommentAnimeTitle(target.anime_id, customAnimeTitle);
+      if (target.tmdb_id != null) await rememberCommentAnimeTitle(`tmdb:${target.tmdb_id}`, customAnimeTitle);
+    }
+
+    const eu = await getEmailUser(req);
+    const adminDisplayName = String(req.body?.adminName || eu?.display_name || "إدارة Anime NOVA").trim();
+    const rootParentId = target.parent_id ? String(target.parent_id) : String(target.id);
+    const replyText =
+      target.username && !cleanText.includes(`@${target.user_handle || target.username}`)
+        ? cleanText
+        : cleanText;
+
+    const inserted = await sbInsert<any>("comments", {
+      user_id:           eu?.id ? String(eu.id) : "admin",
+      username:          adminDisplayName,
+      user_handle:       "admin",
+      avatar_url:        null,
+      anime_id:          target.anime_id ?? null,
+      tmdb_id:           target.tmdb_id ?? null,
+      anime_type:        target.anime_type || "anime",
+      episode_number:    target.episode_number ?? null,
+      text:              replyText,
+      likes:             0,
+      parent_id:         rootParentId,
+      reply_to_username: target.username || null,
+    });
+
+    const created = inserted[0];
+    if (created) {
+      void notifyCommentTargets({
+        comment: { ...created, parent_id: target.id },
+        actorUserId: eu?.id ? String(eu.id) : "admin",
+        actorName: adminDisplayName,
+      }).catch((err: any) => {
+        console.warn("[admin/comments reply push]", err?.message || String(err));
+      });
+    }
+
+    return res.status(201).json({
+      ok: true,
+      message: "تم إرسال رد الإدارة بنجاح ✓",
+      comment: created || null,
+    });
+  } catch (err) {
+    console.error("[admin/comments reply POST]", err);
+    return res.status(500).json({ error: "تعذّر إرسال الرد" });
+  }
+});
+
+router.delete("/admin/comments/:id", async (req: Request, res: Response) => {
+  if (!(await isAdmin(req)))
+    return res.status(401).json({ error: "غير مصرّح" });
+
+  try {
+    const id = String(req.params.id || "").trim();
+    if (!id) return res.status(400).json({ error: "معرّف التعليق مطلوب" });
+
+    // حذف الردود التابعة أولاً ثم التعليق نفسه
+    await sbDelete("comments", { parent_id: `eq.${id}` }).catch(() => {});
+    await sbDelete("comment_likes", { comment_id: `eq.${id}` }).catch(() => {});
+    await sbDelete("comments", { id: `eq.${id}` });
+
+    return res.json({ ok: true, id, message: "تم حذف التعليق ✓" });
+  } catch (err) {
+    console.error("[admin/comments DELETE]", err);
+    return res.status(500).json({ error: "تعذّر حذف التعليق" });
   }
 });
 

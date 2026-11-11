@@ -17,6 +17,7 @@ import { RiftPlayer, type PlayerSource } from "@/components/RiftPlayer";
 import { useWatchPlayerOrientation } from "@/utils/watchOrientation";
 import { getWatchContentId, useApp } from "@/context/AppContext";
 import { getStardimaProgressKey } from "@/utils/stardimaProgress";
+import { startMobileWatchAnalytics } from "@/utils/analytics";
 
 type CatalogEpisode = {
   id: string | number;
@@ -82,6 +83,22 @@ export default function StardimaPlayerScreen() {
   const [resumeReady, setResumeReady] = useState(false);
   const [episodeSequence, setEpisodeSequence] = useState<CatalogEpisode[]>([]);
   const progressRef = useRef({ position: 0, duration: 0 });
+  const analyticsRef = useRef<ReturnType<typeof startMobileWatchAnalytics> | null>(null);
+  useEffect(() => {
+    const key = providerTitleId || episodeId || title;
+    if (!key) return;
+    const tracker = startMobileWatchAnalytics({
+      animeId: `stardima:${key}`,
+      episode: episodeNumber,
+      title,
+      source: "stardima",
+    });
+    analyticsRef.current = tracker;
+    return () => {
+      analyticsRef.current = null;
+      tracker.stop();
+    };
+  }, [providerTitleId, episodeId, episodeNumber, title]);
   const onToggleOrientation = useWatchPlayerOrientation(
     Boolean(directSource?.length),
     tvMode,
@@ -412,6 +429,7 @@ export default function StardimaPlayerScreen() {
         }}
         onProgress={(position, duration) => {
           progressRef.current = { position, duration };
+          analyticsRef.current?.markProgress(position);
         }}
         onPrevEpisode={currentEpisodeIndex > 0 || readParam(params.prevEpisodeId)
           ? () => { void openAdjacentEpisode("prev"); }

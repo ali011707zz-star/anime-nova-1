@@ -12,6 +12,9 @@ on:
 
 env:
   EXPO_PUBLIC_DOMAIN: ${{ github.event.inputs.backend_domain || 'https://animenovaa.duckdns.org' }}
+  # Google OAuth client IDs are public application identifiers.
+  EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: "413058110781-cbielvl5jhrf2bje392f8l9fnulvegp7.apps.googleusercontent.com"
+  EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: "413058110781-r8otf4jg4v1e7akp4ujii01brj3hv8kg.apps.googleusercontent.com"
   # Sentry DSN — ليست سرّاً حساساً (مصمّمة للتضمين في تطبيقات العميل)، تُستخدم
   # لالتقاط كراشات native (مثل كراش مشغّل الفيديو) التي لا يراها نظام تسجيل
   # الأعطال القديم القائم على JS فقط.
@@ -26,6 +29,10 @@ jobs:
     name: Build Android APK
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
 
     steps:
       - name: 📦 Checkout
@@ -117,6 +124,10 @@ jobs:
           fi
           echo "✅ install verified (expo bin + all config-plugin packages present)"
 
+      - name: 🧪 TypeScript typecheck
+        working-directory: artifacts/nova-mobile
+        run: pnpm run typecheck
+
       - name: 🩹 Fix react-native-video Android compatibility
         working-directory: artifacts/nova-mobile
         run: |
@@ -172,36 +183,96 @@ jobs:
                   print(f"SKIP {relative}: already compatible")
           PY
 
-      - name: 🔐 Restore Firebase Android config
+      - name: 🔥 Configure Firebase Android client for FCM
+        working-directory: artifacts/nova-mobile
         env:
           FIREBASE_GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.FIREBASE_GOOGLE_SERVICES_JSON_BASE64 }}
         run: |
           set -euo pipefail
-          if [ -z "${FIREBASE_GOOGLE_SERVICES_JSON_BASE64:-}" ]; then
-            echo "❌ Missing GitHub Actions secret: FIREBASE_GOOGLE_SERVICES_JSON_BASE64"
+          if [ -z "$FIREBASE_GOOGLE_SERVICES_JSON_BASE64" ]; then
+            echo "::error::Set FIREBASE_GOOGLE_SERVICES_JSON_BASE64 to the base64-encoded google-services.json for Android package com.nova.anime."
             exit 1
           fi
-
-          CONFIG_PATH="artifacts/nova-mobile/google-services.json"
-          printf '%s' "$FIREBASE_GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > "$CONFIG_PATH"
-          node - "$CONFIG_PATH" <<'NODE'
+          printf '%s' "$FIREBASE_GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > google-services.json
+          node <<'NODE'
           const fs = require("node:fs");
-          const config = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-          const hasProjectId = Boolean(config.project_info?.project_id);
-          const hasPackage = (config.client ?? []).some(
-            (client) => client.client_info?.android_client_info?.package_name === "com.nova.anime"
-          );
-          if (!hasProjectId || !hasPackage) {
-            throw new Error("Firebase config is invalid or does not contain the com.nova.anime Android client");
+          const app = JSON.parse(fs.readFileSync("app.json", "utf8")).expo;
+          const firebase = JSON.parse(fs.readFileSync("google-services.json", "utf8"));
+          const expectedPackage = app.android?.package;
+          const configuredPackages = (firebase.client || [])
+            .map((client) => client.client_info?.android_client_info?.package_name)
+            .filter(Boolean);
+          if (!expectedPackage || !configuredPackages.includes(expectedPackage)) {
+            console.error(`Firebase Android package mismatch. Expected ${expectedPackage || "(missing app package)"}; configured ${configuredPackages.join(", ") || "(none)"}.`);
+            process.exit(1);
           }
-          console.log("✅ Firebase Android config restored and package id verified (contents redacted)");
+          if (!firebase.project_info?.project_id || !firebase.project_info?.project_number) {
+            console.error("Firebase google-services.json is missing project_info.project_id or project_info.project_number.");
+            process.exit(1);
+          }
+          console.log(`Firebase client config validated for Android package ${expectedPackage}.`);
           NODE
-          chmod 600 "$CONFIG_PATH"
+          chmod 600 google-services.json
 
       - name: 🏗️ Expo Prebuild
         working-directory: artifacts/nova-mobile
         # Never let npx download a different Expo CLI during the build.
         run: ./node_modules/.bin/expo prebuild --platform android --clean --no-install
+
+      - name: 🔐 Configure stable release signing
+        working-directory: artifacts/nova-mobile/android
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          test -n "$ANDROID_KEYSTORE_PASSWORD"
+          test -n "$ANDROID_KEY_ALIAS"
+          test -n "$ANDROID_KEY_PASSWORD"
+
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > app/nova-release.keystore
+          chmod 600 app/nova-release.keystore
+
+          cat >> gradle.properties <<EOF
+          NOVA_RELEASE_STORE_FILE=nova-release.keystore
+          NOVA_RELEASE_STORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD
+          NOVA_RELEASE_KEY_ALIAS=$ANDROID_KEY_ALIAS
+          NOVA_RELEASE_KEY_PASSWORD=$ANDROID_KEY_PASSWORD
+          EOF
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path("app/build.gradle")
+          text = path.read_text()
+          signing_block = """        release {
+              storeFile file(NOVA_RELEASE_STORE_FILE)
+              storePassword NOVA_RELEASE_STORE_PASSWORD
+              keyAlias NOVA_RELEASE_KEY_ALIAS
+              keyPassword NOVA_RELEASE_KEY_PASSWORD
+          }
+          """
+          if "storeFile file(NOVA_RELEASE_STORE_FILE)" not in text:
+              marker = "    signingConfigs {\n"
+              if marker not in text:
+                  raise SystemExit("Could not find signingConfigs block in app/build.gradle")
+              text = text.replace(marker, marker + signing_block, 1)
+
+          old = "signingConfig signingConfigs.debug"
+          replacements = text.count(old)
+          if replacements < 1:
+              raise SystemExit("Could not find the generated release debug signing config")
+          text = text.replace(old, "signingConfig signingConfigs.release")
+          if "signingConfig signingConfigs.debug" in text:
+              raise SystemExit("Could not switch release build to the stable signing config")
+          path.write_text(text)
+          PY
+
+          echo "Stable release signing configured"
 
       # ── إصلاح Gradle/Kotlin: تثبيت 8.13 + توافق react-native-video ────────
       # RN 0.81.5 يستخدم deprecated Gradle APIs تُعتبر أخطاءً في 8.8+.
@@ -212,6 +283,30 @@ jobs:
       - name: 🔧 Fix Gradle compatibility
         working-directory: artifacts/nova-mobile/android
         run: |
+          # LevelPlay requires these Google Play Services artifacts in the app
+          # module in addition to the mediation SDK dependency.
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("app/build.gradle")
+          text = path.read_text()
+          marker = "dependencies {\n"
+          required = [
+              "    implementation 'com.google.android.gms:play-services-appset:16.0.2'",
+              "    implementation 'com.google.android.gms:play-services-ads-identifier:18.0.1'",
+              "    implementation 'com.google.android.gms:play-services-basement:18.3.0'",
+          ]
+          if marker not in text:
+              raise SystemExit("Could not find app dependencies block")
+          additions = [line for line in required if line not in text]
+          if additions:
+              text = text.replace(marker, marker + "\n".join(additions) + "\n", 1)
+              path.write_text(text)
+              print("Added LevelPlay Google Play Services dependencies")
+          else:
+              print("LevelPlay Google Play Services dependencies already present")
+          PY
+
           sed -i \
             's|distributionUrl=.*|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.13-all.zip|' \
             gradle/wrapper/gradle-wrapper.properties
@@ -258,35 +353,6 @@ jobs:
             'android.suppressUnsupportedCompileSdk=35' \
             'android.defaults.buildfeatures.buildconfig=true' >> gradle.properties
 
-          # LevelPlay 9.2.0 is pinned because 9.3+ requires Kotlin 2.0, while
-          # this project keeps Kotlin 1.9.25 for react-native-video compatibility.
-          APP_BUILD="app/build.gradle"
-          if [ ! -f "$APP_BUILD" ]; then
-            echo "❌ Generated Android app build.gradle was not found: $APP_BUILD"
-            exit 1
-          fi
-          python3 - "$APP_BUILD" <<'PY'
-          import pathlib
-          import sys
-
-          path = pathlib.Path(sys.argv[1])
-          content = path.read_text()
-          marker = "play-services-appset:16.0.2"
-          if marker in content:
-              print("SKIP LevelPlay Play Services: already present")
-          else:
-              needle = "dependencies {\n"
-              if needle not in content:
-                  raise SystemExit(f"Could not find dependencies block in {path}")
-              additions = (
-                  "dependencies {\n"
-                  "    implementation 'com.google.android.gms:play-services-appset:16.0.2'\n"
-                  "    implementation 'com.google.android.gms:play-services-ads-identifier:18.0.1'\n"
-              )
-              path.write_text(content.replace(needle, additions, 1))
-              print("OK added LevelPlay Play Services dependencies")
-          PY
-
           echo "=== gradle-wrapper.properties ==="
           cat gradle/wrapper/gradle-wrapper.properties
           echo "=== root build.gradle (last 5 lines) ==="
@@ -295,25 +361,6 @@ jobs:
           sed -n '1,35p' "$RNV_BUILD"
           echo "=== gradle.properties (last 10 lines) ==="
           tail -10 gradle.properties
-
-      - name: 🔐 Prepare Android release keystore
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-        run: |
-          set -euo pipefail
-          if [ -z "${ANDROID_KEYSTORE_BASE64:-}" ]; then
-            echo "❌ Missing GitHub Actions secret: ANDROID_KEYSTORE_BASE64"
-            exit 1
-          fi
-
-          KEYSTORE_PATH="$RUNNER_TEMP/nova-release.keystore"
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
-          if [ ! -s "$KEYSTORE_PATH" ]; then
-            echo "❌ Android release keystore is empty"
-            exit 1
-          fi
-          chmod 600 "$KEYSTORE_PATH"
-          printf 'ANDROID_KEYSTORE_FILE=%s\n' "$KEYSTORE_PATH" >> "$GITHUB_ENV"
 
       - name: 💾 Cache Gradle
         uses: actions/cache@v4
@@ -328,51 +375,7 @@ jobs:
         working-directory: artifacts/nova-mobile/android
         env:
           GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx4096m -Dorg.gradle.warning.mode=none"
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import os
-          import pathlib
-
-          required = (
-              "ANDROID_KEYSTORE_FILE",
-              "ANDROID_KEYSTORE_PASSWORD",
-              "ANDROID_KEY_ALIAS",
-              "ANDROID_KEY_PASSWORD",
-          )
-          missing = [name for name in required if not os.environ.get(name)]
-          if missing:
-              raise SystemExit("Missing Android release signing configuration: " + ", ".join(missing))
-
-          path = pathlib.Path("app/build.gradle")
-          content = path.read_text()
-          marker = "// NOVA release signing injected by CI"
-          if marker not in content:
-              signing = """
-          // NOVA release signing injected by CI
-          android {
-              signingConfigs {
-                  release {
-                      storeFile file(System.getenv("ANDROID_KEYSTORE_FILE"))
-                      storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
-                      keyAlias System.getenv("ANDROID_KEY_ALIAS")
-                      keyPassword System.getenv("ANDROID_KEY_PASSWORD")
-                  }
-              }
-              buildTypes {
-                  release {
-                      signingConfig signingConfigs.release
-                  }
-              }
-          }
-          """
-              path.write_text(content.rstrip() + "\n\n" + signing.lstrip())
-          print("✅ Release signing configured without exposing credentials")
-          PY
-
           set -o pipefail
           chmod +x gradlew
           ./gradlew assembleRelease \
@@ -388,50 +391,118 @@ jobs:
               exit 1
             }
 
-      - name: 🔎 Verify signed installable APK
-        working-directory: artifacts/nova-mobile/android
+      - name: 🧪 Prepare Android cold-start smoke test
         shell: bash
         run: |
+          cat > "$RUNNER_TEMP/nova-android-cold-start-smoke.sh" <<'BASH'
           set -euo pipefail
-          APK="app/build/outputs/apk/release/app-release.apk"
-          if [ ! -s "$APK" ]; then
-            echo "❌ Release APK is missing or empty: $APK"
+          APK="$(find "$GITHUB_WORKSPACE/artifacts/nova-mobile/android/app/build/outputs/apk/release" -name '*.apk' -print -quit)"
+          test -n "$APK" && test -s "$APK"
+
+          adb install -r "$APK"
+          adb shell pm grant com.nova.anime android.permission.POST_NOTIFICATIONS 2>/dev/null || true
+          adb logcat -c
+          adb shell am force-stop com.nova.anime
+          adb shell am start -W -n com.nova.anime/.MainActivity
+          sleep 15
+
+          if ! adb shell pidof com.nova.anime >/dev/null; then
+            echo "❌ Anime NOVA process exited after cold start"
+            adb logcat -d -t 3000
             exit 1
           fi
 
-          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-          if [ -z "$SDK_ROOT" ] || [ ! -d "$SDK_ROOT/build-tools" ]; then
-            echo "❌ Android SDK build-tools directory is unavailable"
-            exit 1
-          fi
-          APKSIGNER="$(find "$SDK_ROOT/build-tools" -type f -name apksigner -print | sort -V | tail -1)"
-          AAPT="$(find "$SDK_ROOT/build-tools" -type f -name aapt -print | sort -V | tail -1)"
-          if [ -z "$APKSIGNER" ] || [ -z "$AAPT" ]; then
-            echo "❌ apksigner or aapt is unavailable; cannot validate APK"
+          RESUMED="$(adb shell dumpsys activity activities | grep -E 'mResumedActivity|topResumedActivity' | tail -n 1 | tr -d '\r' || true)"
+          echo "Resumed activity: $RESUMED"
+          echo "$RESUMED" | grep -Fq 'com.nova.anime'
+
+          adb shell uiautomator dump /sdcard/nova-startup-window.xml >/dev/null
+          adb exec-out cat /sdcard/nova-startup-window.xml > "$RUNNER_TEMP/nova-startup-window.xml"
+          if grep -Fq 'حدث خطأ غير متوقع' "$RUNNER_TEMP/nova-startup-window.xml"; then
+            echo "❌ React ErrorBoundary fallback appeared during app startup"
+            cat "$RUNNER_TEMP/nova-startup-window.xml"
             exit 1
           fi
 
-          "$APKSIGNER" verify --verbose "$APK"
-          PACKAGE="$("$AAPT" dump badging "$APK" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -1)"
-          if [ "$PACKAGE" != "com.nova.anime" ]; then
-            echo "❌ Unexpected APK package: ${PACKAGE:-missing}"
+          adb logcat -d -v time -s AndroidRuntime:E ReactNativeJS:E > "$RUNNER_TEMP/nova-startup-errors.log"
+          if grep -E 'FATAL EXCEPTION|Unhandled JS Exception|ReferenceError.*useRef|useRef is not defined' "$RUNNER_TEMP/nova-startup-errors.log"; then
+            echo "❌ Startup crash/error detected in Android logcat"
             exit 1
           fi
+          echo "✅ Android cold start stayed alive and did not render the error screen"
+          BASH
+          chmod 700 "$RUNNER_TEMP/nova-android-cold-start-smoke.sh"
 
-          OUTPUT_NAME="AnimeNova-v${GITHUB_RUN_NUMBER}.apk"
-          cp "$APK" "$GITHUB_WORKSPACE/$OUTPUT_NAME"
-          {
-            echo "✅ **Signed APK verified:** \`$OUTPUT_NAME\`"
-            echo ""
-            echo "The downloaded Actions artifact is a ZIP. Extract it, then install the APK inside."
-          } >> "$GITHUB_STEP_SUMMARY"
+      - name: 🚀 Android cold-start smoke test
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_2
+          # The emulator reached boot after a long delay but adb failed with
+          # Broken pipe while this optional action tried to change system
+          # animation settings. The smoke test does not depend on animations.
+          disable-animations: false
+          script: bash "$RUNNER_TEMP/nova-android-cold-start-smoke.sh"
+
+      - name: 🔑 Show release signing fingerprint
+        working-directory: artifacts/nova-mobile/android
+        run: |
+          ./gradlew signingReport --no-daemon --warning-mode=none
 
       - name: 📱 Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: AnimeNova-v${{ github.run_number }}
-          path: AnimeNova-v${{ github.run_number }}.apk
+          path: artifacts/nova-mobile/android/app/build/outputs/apk/release/*.apk
           retention-days: 30
+
+      # Optional production publishing: add VPS_HOST, VPS_USER, and
+      # VPS_PASSWORD in the repository's GitHub Actions secrets. The APK
+      # remains available as an Actions artifact when these are not configured.
+      - name: 🌐 Publish APK to website
+        if: ${{ env.VPS_HOST != '' && env.VPS_USER != '' && env.VPS_PASSWORD != '' }}
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ env.VPS_HOST }}
+          username: ${{ env.VPS_USER }}
+          password: ${{ env.VPS_PASSWORD }}
+          port: 22
+          source: artifacts/nova-mobile/android/app/build/outputs/apk/release/*.apk
+          target: /tmp/anime-nova-apk-${{ github.run_id }}
+          overwrite: true
+
+      - name: 🔁 Activate website APK
+        if: ${{ env.VPS_HOST != '' && env.VPS_USER != '' && env.VPS_PASSWORD != '' }}
+        uses: appleboy/ssh-action@v1.2.2
+        env:
+          RUN_ID: ${{ github.run_id }}
+        with:
+          host: ${{ env.VPS_HOST }}
+          username: ${{ env.VPS_USER }}
+          password: ${{ env.VPS_PASSWORD }}
+          port: 22
+          envs: RUN_ID
+          script: |
+            set -eu
+            apk_dir="/tmp/anime-nova-apk-${RUN_ID}"
+            apk="$(find "$apk_dir" -type f -name '*.apk' | head -1)"
+            test -n "$apk" && test -s "$apk"
+            install -d -m 0755 /opt/anime-nova/public
+            if [ -f "/opt/anime-nova/public/Anime Nova.apk" ]; then
+              cp -p "/opt/anime-nova/public/Anime Nova.apk" \
+                "/opt/anime-nova/public/Anime Nova.apk.bak-${RUN_ID}"
+            fi
+            if [ -f "/opt/anime-nova/public/nova.apk" ]; then
+              cp -p "/opt/anime-nova/public/nova.apk" \
+                "/opt/anime-nova/public/nova.apk.bak-${RUN_ID}"
+            fi
+            install -m 0644 "$apk" "/opt/anime-nova/public/Anime Nova.apk"
+            install -m 0644 "$apk" "/opt/anime-nova/public/Anime-Nova.apk"
+            install -m 0644 "$apk" "/opt/anime-nova/public/nova.apk"
+            install -m 0644 "$apk" "/opt/anime-nova/public/Anime-Nova-TV.apk"
+            sha256sum "/opt/anime-nova/public/Anime Nova.apk" "/opt/anime-nova/public/Anime-Nova.apk" "/opt/anime-nova/public/nova.apk"
+            rm -rf "$apk_dir"
 
       - name: 📤 Upload build log (on failure)
         if: failure()

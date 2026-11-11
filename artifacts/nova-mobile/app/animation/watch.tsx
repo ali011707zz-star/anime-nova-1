@@ -349,23 +349,33 @@ export default function AnimationWatchScreen() {
   const posterUrl = params.poster ? decodeURIComponent(params.poster) : "";
   const epTitle   = params.etitle ? decodeURIComponent(params.etitle) : undefined;
 
-  const analyticsTrackerRef = useRef<ReturnType<typeof startMobileWatchAnalytics> | null>(null);
-
+  const analyticsRef = useRef<ReturnType<typeof startMobileWatchAnalytics> | null>(null);
   useEffect(() => {
     if (!tmdbId) return;
     const tracker = startMobileWatchAnalytics({
       animeId: tmdbId,
       episode: ep,
       title: titleStr,
+      source: "animation",
     });
-    analyticsTrackerRef.current = tracker;
+    analyticsRef.current = tracker;
     return () => {
+      analyticsRef.current = null;
       tracker.stop();
-      if (analyticsTrackerRef.current === tracker) analyticsTrackerRef.current = null;
     };
   }, [tmdbId, ep, titleStr]);
 
   const [screen, setScreen]       = useState<Screen>("picker");
+  useEffect(() => {
+    if (screen !== "embed") return;
+    let syntheticPos = 0;
+    analyticsRef.current?.markProgress(0);
+    const id = setInterval(() => {
+      syntheticPos += 5;
+      analyticsRef.current?.markProgress(syntheticPos);
+    }, 5_000);
+    return () => clearInterval(id);
+  }, [screen, tmdbId, ep]);
   const onToggleOrientation = useWatchPlayerOrientation(
     screen === "native" || screen === "webplayer" || screen === "embed",
     tvMode,
@@ -460,8 +470,8 @@ export default function AnimationWatchScreen() {
 
   /* ── Save progress ── */
   const handleTimeUpdate = useCallback((t: number) => {
-    analyticsTrackerRef.current?.markProgress(t);
     lastTimeRef.current = t;
+    analyticsRef.current?.markProgress(t);
     const now = Date.now();
     if (now - lastSaveTs.current < 5000) return;
     lastSaveTs.current = now;
@@ -763,7 +773,6 @@ export default function AnimationWatchScreen() {
   /* ── Handle back ── */
   const handleBack = useCallback(() => {
     if (screen === "native" || screen === "embed" || screen === "webplayer") {
-      if (lastTimeRef.current > 1) setResumeTime(Math.floor(lastTimeRef.current));
       setScreen("picker");
       return;
     }
@@ -863,13 +872,11 @@ export default function AnimationWatchScreen() {
         episodeTitle={epTitle}
         initialPosition={resumeTime}
         onBack={() => {
-          if (lastTimeRef.current > 1) setResumeTime(Math.floor(lastTimeRef.current));
           handleTimeUpdate(lastTimeRef.current);
           setScreen("picker");
         }}
         onProgress={handleTimeUpdate}
         onError={() => {
-          if (lastTimeRef.current > 1) setResumeTime(Math.floor(lastTimeRef.current));
           handleTimeUpdate(lastTimeRef.current);
           if (animSrcCacheKey) AsyncStorage.removeItem(animSrcCacheKey).catch(() => {});
           setSources([]);
@@ -916,13 +923,11 @@ export default function AnimationWatchScreen() {
         initialPosition={resumeTime}
         onToggleOrientation={onToggleOrientation}
         onBack={() => {
-          if (lastTimeRef.current > 1) setResumeTime(Math.floor(lastTimeRef.current));
           handleTimeUpdate(lastTimeRef.current);
           setScreen("picker");
         }}
         onProgress={(pos, _dur) => handleTimeUpdate(pos)}
         onError={() => {
-          if (lastTimeRef.current > 1) setResumeTime(Math.floor(lastTimeRef.current));
           handleTimeUpdate(lastTimeRef.current);
           /* ⚠️ احذف كاش المصادر التالفة — يمنع تكرار الكراش عند فتح نفس المحتوى مجدداً */
           if (animSrcCacheKey) AsyncStorage.removeItem(animSrcCacheKey).catch(() => {});

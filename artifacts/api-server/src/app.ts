@@ -336,6 +336,49 @@ export async function createApp(): Promise<Express> {
 
   // Serve built frontend in production
   const frontendDist = path.resolve(__dirname, "../../anime-scraper/dist/public");
+  const publicApkDir = "/opt/anime-nova/public";
+
+  // Serve official APK endpoints (/nova.apk for Android TV Downloader 2576388, /Anime-Nova.apk for web/mobile)
+  // with strict no-cache headers so Downloader & browsers always fetch the latest v1.0.6 build.
+  app.get(["/nova.apk", "/Anime-Nova.apk", "/Anime-Nova-TV.apk", "/Anime Nova.apk"], (req, res, next) => {
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    res.setHeader("Content-Type", "application/vnd.android.package-archive");
+    const requestedFile = decodeURIComponent(req.path.replace(/^\/+/, ""));
+    const candidates = [
+      path.join(publicApkDir, requestedFile),
+      path.join(publicApkDir, "nova.apk"),
+      path.join(publicApkDir, "Anime-Nova.apk"),
+      path.join(publicApkDir, "Anime Nova.apk"),
+      path.join(frontendDist, requestedFile),
+      path.join(frontendDist, "nova.apk"),
+      path.join(frontendDist, "Anime-Nova.apk"),
+    ];
+    const trySend = (idx: number) => {
+      if (idx >= candidates.length) {
+        next();
+        return;
+      }
+      res.sendFile(candidates[idx], (err) => {
+        if (err) trySend(idx + 1);
+      });
+    };
+    trySend(0);
+  });
+
+  app.get("/api/apk-info", (_req, res) => {
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    res.json({
+      version: "1.0.6",
+      versionCode: 7,
+      downloaderCode: "2576388",
+      downloaderShortUrl: "https://aftv.news/2576388",
+      tvDirectUrl: "https://animenovaa.duckdns.org/nova.apk?v=1.0.6",
+      mobileDirectUrl: "https://animenovaa.duckdns.org/Anime-Nova.apk?v=1.0.6",
+    });
+  });
+
   // Hashed assets (JS/CSS with content hash) → cache 1 year, immutable
   app.use("/assets", express.static(path.join(frontendDist, "assets"), {
     maxAge: "1y",

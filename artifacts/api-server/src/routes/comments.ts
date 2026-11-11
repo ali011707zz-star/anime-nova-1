@@ -40,7 +40,7 @@ function mapRow(r: any, liked: boolean, profile?: any) {
   };
 }
 
-async function notifyCommentTargets(input: {
+export async function notifyCommentTargets(input: {
   comment: any;
   actorUserId: string;
   actorName: string;
@@ -166,6 +166,41 @@ router.get("/comments", async (req: Request, res: Response) => {
   }
 });
 
+const COMMENT_TITLES_CONFIG_KEY = "comment_anime_titles";
+const commentTitlesMemCache = new Map<string, string>();
+let commentTitlesLoaded = false;
+
+export async function getCachedCommentAnimeTitles(): Promise<Map<string, string>> {
+  if (!commentTitlesLoaded) {
+    commentTitlesLoaded = true;
+    try {
+      const rows = await sbSelect("app_config", { key: `eq.${COMMENT_TITLES_CONFIG_KEY}` }, { limit: 1 });
+      if (rows[0]?.value) {
+        const parsed = JSON.parse(String(rows[0].value));
+        if (parsed && typeof parsed === "object") {
+          for (const [k, v] of Object.entries(parsed)) {
+            if (typeof v === "string" && v.trim()) commentTitlesMemCache.set(k, v.trim());
+          }
+        }
+      }
+    } catch { /* ignore */ }
+  }
+  return commentTitlesMemCache;
+}
+
+export async function rememberCommentAnimeTitle(key: string | number | null | undefined, title: string | null | undefined): Promise<void> {
+  const k = String(key || "").trim();
+  const t = String(title || "").trim();
+  if (!k || !t || t === "التعليقات" || t === "أنمي") return;
+  await getCachedCommentAnimeTitles();
+  if (commentTitlesMemCache.get(k) === t) return;
+  commentTitlesMemCache.set(k, t);
+  try {
+    const { setDbConfig } = await import("../lib/dbConfig.js");
+    await setDbConfig(COMMENT_TITLES_CONFIG_KEY, JSON.stringify(Object.fromEntries(commentTitlesMemCache)));
+  } catch { /* ignore */ }
+}
+
 /* ─────────────────────────────────────────
    POST /api/comments
 ───────────────────────────────────────── */
@@ -177,13 +212,17 @@ router.post("/comments", async (req: Request, res: Response) => {
     const {
       animeId, tmdbId, episodeNumber, text: txt,
       username, userHandle, avatarUrl, animeType,
-      parentId, replyToUsername,
+      parentId, replyToUsername, animeTitle,
     } = req.body;
 
     if ((!animeId && !tmdbId) || !txt?.trim())
       return res.status(400).json({ error: "animeId أو tmdbId + النص مطلوبان" });
     if (txt.trim().length > 1000)
       return res.status(400).json({ error: "التعليق طويل جداً (الحد 1000 حرف)" });
+
+    if (animeTitle) {
+      void rememberCommentAnimeTitle(animeId || tmdbId, String(animeTitle));
+    }
 
     const baseRow = {
       user_id:           userId,

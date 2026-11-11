@@ -83,6 +83,7 @@ const StardimaWatch      = lazy(() => import("@/pages/StardimaWatch"));
 const Updates            = lazy(() => import("@/pages/Updates"));
 const AuthPage           = lazy(() => import("@/pages/Auth"));
 const AuthCallback       = lazy(() => import("@/pages/AuthCallback"));
+const TvActivate         = lazy(() => import("@/pages/TvActivate"));
 const CommentsPage       = lazy(() => import("@/pages/Comments"));
 const Subscription       = lazy(() => import("@/pages/Subscription"));
 const EpisodeList        = lazy(() => import("@/pages/EpisodeList"));
@@ -121,6 +122,7 @@ const NO_GLOBAL_HEADER = [
   "/aw-dubbed",
   "/animation/",
   "/auth",
+  "/tv",
   "/subscription",
   "/stardima/",
 ];
@@ -265,6 +267,7 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
                 <Route path="/profile"                component={Profile} />
                 <Route path="/auth/callback"           component={AuthCallback} />
                 <Route path="/auth"                    component={AuthPage} />
+                <Route path="/tv"                      component={TvActivate} />
                 {/* Animation section hidden — disabled 2026-07-30 */}
                 <Route path="/dubbed"                          component={DubbedCombinedLibrary} />
                 <Route path="/dubbed/watch"                    component={DubbedWatch} />

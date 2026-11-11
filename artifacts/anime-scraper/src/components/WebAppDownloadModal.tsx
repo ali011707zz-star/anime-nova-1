@@ -2,7 +2,11 @@ import { Download, Smartphone, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 
-const APK_URL = "/Anime-Nova.apk";
+const APP_VERSION = "1.0.6";
+const APK_URL = `/Anime-Nova.apk?v=${APP_VERSION}`;
+const TV_APK_URL = `/nova.apk?v=${APP_VERSION}`;
+const DOWNLOADER_CODE = "2576388";
+const DOWNLOADER_SHORT_URL = "aftv.news/2576388";
 
 export function WebAppDownloadModal() {
   const [location] = useLocation();
@@ -47,10 +51,12 @@ export function WebAppDownloadModal() {
         <div className="pointer-events-none absolute -right-14 -top-16 h-44 w-44 rounded-full bg-violet-600/20 blur-3xl" />
         <div className="relative mt-3 rounded-2xl border border-cyan-400/20 bg-cyan-500/10 px-3.5 py-2.5 text-right font-['Cairo']">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-[11px] font-black text-cyan-300">📺 نسخة التلفاز (Android TV)</span>
+            <span className="text-[11px] font-black text-cyan-300">
+              📺 نسخة التلفاز (Android TV · v{APP_VERSION})
+            </span>
             <a
-              href="/nova.apk"
-              download
+              href={TV_APK_URL}
+              download="Anime-Nova-TV-v1.0.6.apk"
               className="rounded-lg bg-cyan-500/20 px-2 py-0.5 text-[10px] font-black text-cyan-200 hover:bg-cyan-500/30"
             >
               تحميل مباشر (nova.apk)
@@ -59,10 +65,17 @@ export function WebAppDownloadModal() {
           <p className="mt-1 text-[11px] font-bold text-white/75">
             كود تطبيق Downloader:{" "}
             <span className="rounded bg-black/40 px-1.5 py-0.5 font-mono text-[12px] font-black text-amber-300">
-              2576388
+              {DOWNLOADER_CODE}
             </span>{" "}
             أو الرابط:{" "}
-            <span className="font-mono text-[10.5px] text-cyan-200">aftv.news/2576388</span>
+            <a
+              href={`https://${DOWNLOADER_SHORT_URL}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-mono text-[10.5px] text-cyan-200 underline decoration-cyan-400/40 hover:text-cyan-100"
+            >
+              {DOWNLOADER_SHORT_URL}
+            </a>
           </p>
         </div>
 
@@ -80,7 +93,9 @@ export function WebAppDownloadModal() {
             <Smartphone className="h-6 w-6" />
           </div>
           <div>
-            <p className="mb-1 font-['Cairo'] text-[10px] font-bold text-violet-300/70">تجربة أفضل على الهاتف</p>
+            <p className="mb-1 font-['Cairo'] text-[10px] font-bold text-violet-300/70">
+              تجربة أفضل على الهاتف والتلفاز · الإصدار v{APP_VERSION}
+            </p>
             <h2 id="web-app-download-title" className="font-['Cairo'] text-[18px] font-black text-white">
               حمّل تطبيق Anime NOVA
             </h2>
@@ -88,16 +103,16 @@ export function WebAppDownloadModal() {
         </div>
 
         <p className="relative mt-5 font-['Cairo'] text-[13px] leading-7 text-white/65">
-          شاهد الأنمي بسرعة أفضل، واستمتع بمشغّل مخصص وتجربة مشاهدة أكثر سلاسة على هاتفك.
+          شاهد الأنمي بسرعة أفضل، واستمتع بمشغّل مخصص وتجربة مشاهدة أكثر سلاسة على هاتفك وتلفازك الذكي.
         </p>
 
         <a
           href={APK_URL}
-          download
+          download="Anime-Nova-v1.0.6.apk"
           className="relative mt-5 flex h-12 items-center justify-center gap-2 rounded-2xl bg-gradient-to-l from-violet-700 to-violet-500 font-['Cairo'] text-[13px] font-black text-white shadow-lg shadow-violet-900/30 transition-transform hover:brightness-110 active:scale-[0.98]"
         >
           <Download className="h-4 w-4" />
-          تحميل التطبيق الآن
+          تحميل التطبيق الآن (v{APP_VERSION})
         </a>
         <button
           type="button"

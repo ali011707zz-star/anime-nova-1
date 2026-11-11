@@ -323,18 +323,18 @@ export async function sbSelect<T = any>(
 /**
  * Count rows without downloading them. Supabase/PostgREST caps normal
  * responses at 1,000 rows, so counting a fetched array silently undercounts
- * large catalog tables.
+ * large catalog tables. Uses select="*" so tables without an "id" column
+ * (e.g. analytics_episode_views, analytics_sessions) work reliably.
  */
 export async function sbCount(
   table: string,
   filters: Record<string, string | number | undefined> = {},
-  options: { strict?: boolean } = {},
 ): Promise<number> {
   if (isSupabaseReady()) {
     try {
       const params: Record<string, string | number | undefined> = {
         ...filters,
-        select: "id",
+        select: "*",
         limit: 1,
       };
       const url = `${getSbUrl()}/rest/v1/${table}${buildQuery(params)}`;
@@ -343,29 +343,18 @@ export async function sbCount(
         signal: AbortSignal.timeout(10000),
       });
       const range = res.headers.get("content-range") || "";
-      const totalText = range.split("/").pop();
-      const total = totalText && totalText !== "*" ? Number(totalText) : Number.NaN;
+      const total = Number(range.split("/").pop());
       if (Number.isFinite(total)) return total;
-      if (!res.ok) {
-        if (options.strict) throw new Error(`Supabase ${res.status}: ${await res.text()}`);
-        return 0;
-      }
+      if (!res.ok) return 0;
       const rows = await res.json();
-      if (options.strict) {
-        throw new Error(`Supabase ${table} response did not include an exact Content-Range`);
-      }
       return Array.isArray(rows) ? rows.length : 0;
     } catch (e: any) {
       console.error(`[sb] sbCount "${table}":`, e.message);
-      if (options.strict) throw (e instanceof Error ? e : new Error(String(e)));
       return 0;
     }
   }
 
-  if (!isPgReady()) {
-    if (options.strict) throw new Error("No database configured");
-    return 0;
-  }
+  if (!isPgReady()) return 0;
   try {
     const { where, values } = buildWhere(filters);
     const result = await getPool().query(
@@ -375,9 +364,32 @@ export async function sbCount(
     return Number(result.rows[0]?.count || 0);
   } catch (e: any) {
     console.error(`[pg] sbCount "${table}":`, e.message);
-    if (options.strict) throw (e instanceof Error ? e : new Error(String(e)));
     return 0;
   }
+}
+
+/**
+ * Fetch all rows across multiple 1,000-row PostgREST pages up to maxRows.
+ */
+export async function sbSelectAll<T = any>(
+  table: string,
+  filters: Record<string, string | number | undefined> = {},
+  opts: { select?: string; maxRows?: number; pageSize?: number } = {},
+): Promise<T[]> {
+  const pageSize = Math.min(Math.max(opts.pageSize || 1000, 100), 1000);
+  const maxRows = Math.max(opts.maxRows || 25000, pageSize);
+  const all: T[] = [];
+  for (let offset = 0; offset < maxRows; offset += pageSize) {
+    const batch = await sbSelect<T>(table, filters, {
+      select: opts.select || "*",
+      limit: pageSize,
+      offset,
+    });
+    if (!Array.isArray(batch) || batch.length === 0) break;
+    all.push(...batch);
+    if (batch.length < pageSize) break;
+  }
+  return all;
 }
 
 // ── INSERT ────────────────────────────────────────────────────────────────

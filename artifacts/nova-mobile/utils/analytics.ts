@@ -31,6 +31,10 @@ async function send(path: string, body: Record<string, unknown>): Promise<boolea
   }
 }
 
+export function pingMobileAppPresence(): void {
+  void send("heartbeat", { watching: false, source: "app_launch" });
+}
+
 export function startMobileWatchAnalytics(input: {
   animeId: string | number;
   episode: number;
@@ -71,7 +75,7 @@ export function startMobileWatchAnalytics(input: {
     const now = Date.now();
     if (lastPosition !== null) {
       const delta = seconds - lastPosition;
-      if (delta > 0 && delta <= 5) {
+      if (delta > 0 && delta <= 15) {
         playedSeconds += delta;
         lastProgressAt = now;
       }
@@ -82,7 +86,7 @@ export function startMobileWatchAnalytics(input: {
     if (active && !watching) heartbeat(true);
     else if (active && now - lastHeartbeatAt >= 45_000) heartbeat(true);
 
-    if (!viewSent && playedSeconds >= 10 && now - lastViewAttemptAt >= 60_000) {
+    if (!viewSent && playedSeconds >= 10 && now - lastViewAttemptAt >= 15_000) {
       lastViewAttemptAt = now;
       void send("episode-view", { ...data, playedSeconds: Math.floor(playedSeconds) })
         .then((saved) => { if (saved) viewSent = true; });

@@ -150,6 +150,7 @@ export default function CommentsPage() {
         userHandle: myUsername || null,
         avatarUrl: null,
         animeType: params.type || (tmdbId ? "animation" : "anime"),
+        animeTitle: params.title || undefined,
       };
       if (animeId) body.animeId = animeId;
       if (tmdbId)  body.tmdbId = tmdbId;

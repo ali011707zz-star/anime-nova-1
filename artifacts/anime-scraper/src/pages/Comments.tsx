@@ -249,6 +249,7 @@ export default function CommentsPage() {
       const body: Record<string, any> = {
         ...(animeId ? { animeId } : {}),
         ...(tmdbId  ? { tmdbId, animeType: mediaType } : {}),
+        animeTitle: animeTitle || undefined,
         episodeNumber: isEpMode ? ep : undefined,
         text: txt, username, avatarUrl,
       };

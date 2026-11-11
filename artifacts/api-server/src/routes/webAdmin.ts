@@ -67,12 +67,12 @@ function authenticated(req: Request): boolean {
 
 function resolveAdminHtmlPath(): string {
   const candidates = [
-    path.resolve(process.cwd(), "artifacts/anime-scraper/dist/public/admin-control.html"),
     path.resolve(process.cwd(), "artifacts/anime-scraper/public/admin-control.html"),
-    path.resolve(__dirname, "../../../anime-scraper/dist/public/admin-control.html"),
+    path.resolve(process.cwd(), "artifacts/anime-scraper/dist/public/admin-control.html"),
     path.resolve(__dirname, "../../../anime-scraper/public/admin-control.html"),
-    "/opt/anime-nova/artifacts/anime-scraper/dist/public/admin-control.html",
+    path.resolve(__dirname, "../../../anime-scraper/dist/public/admin-control.html"),
     "/opt/anime-nova/artifacts/anime-scraper/public/admin-control.html",
+    "/opt/anime-nova/artifacts/anime-scraper/dist/public/admin-control.html",
   ];
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) return candidate;

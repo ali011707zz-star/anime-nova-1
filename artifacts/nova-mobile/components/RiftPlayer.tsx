@@ -2237,22 +2237,35 @@ function ExpoRiftPlayer({
     }
     schedHide();
   }, [fadeIn, schedHide, showControls, tvMode]);
+  const keepTvControlsVisibleRef = useRef(keepTvControlsVisible);
+  keepTvControlsVisibleRef.current = keepTvControlsVisible;
+
+  const skipBtnRef = useRef<View | null>(null);
+  const skipBtnFocusedRef = useRef(false);
 
   /* لا نركّب مستمع D-pad عام هنا: بعض إصدارات Android TV/Expo تبني
      الشاشة بنجاح لكن تفشل أثناء تركيب هذا المستمع native. أحداث التركيز
      التي تمر عبر TvPressable تكفي لإعادة ضبط المؤقت بدون كسر شاشة المشغل. */
-  const Pressable = useCallback((props: React.ComponentProps<typeof TvPressable>) => {
-    const { onFocus, ...pressableProps } = props;
-    return (
-      <TvPressable
-        {...pressableProps}
-        onFocus={(event: any) => {
-          keepTvControlsVisible();
-          onFocus?.(event);
-        }}
-      />
-    );
-  }, [keepTvControlsVisible]);
+  const Pressable = useMemo(
+    () =>
+      React.forwardRef<View, React.ComponentProps<typeof TvPressable> & { skipControlsWake?: boolean }>(
+        function PlayerPressable({ onFocus, skipControlsWake, ...pressableProps }, ref) {
+          return (
+            <TvPressable
+              ref={ref}
+              {...pressableProps}
+              onFocus={(event: any) => {
+                if (!skipControlsWake) {
+                  keepTvControlsVisibleRef.current();
+                }
+                onFocus?.(event);
+              }}
+            />
+          );
+        },
+      ),
+    [],
+  );
 
   useEffect(() => {
     fadeIn();
@@ -2405,6 +2418,9 @@ function ExpoRiftPlayer({
         return;
       }
       if (!showControls && (keyCode === 19 || keyCode === 20 || keyCode === 23 || keyCode === 66 || eventType === "up" || eventType === "down" || eventType === "select")) {
+        if ((keyCode === 23 || keyCode === 66 || eventType === "select") && skipBtnFocusedRef.current) {
+          return;
+        }
         fadeIn();
       }
     };
@@ -2814,6 +2830,27 @@ function ExpoRiftPlayer({
       outro: true,
     }));
   }, [skipOutro, seekSilent, skipScopeKey]);
+
+  useEffect(() => {
+    if (!tvMode || isLocked || error || isEnded) return;
+    if (!inIntroRange && !inOutroRange) {
+      skipBtnFocusedRef.current = false;
+      return;
+    }
+    const focusSkipBtn = () => {
+      try {
+        (skipBtnRef.current as any)?.focus?.();
+        (skipBtnRef.current as any)?.setNativeProps?.({ hasTVPreferredFocus: true });
+      } catch {}
+    };
+    focusSkipBtn();
+    const t1 = setTimeout(focusSkipBtn, 60);
+    const t2 = setTimeout(focusSkipBtn, 220);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [tvMode, inIntroRange, inOutroRange, isLocked, error, isEnded]);
 
   /* ─── Tap handler with double-tap detection ─── */
   const handleTap = useCallback((pageX: number) => {
@@ -3601,7 +3638,8 @@ function ExpoRiftPlayer({
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="إظهار أدوات المشغل"
-          hasTVPreferredFocus
+          hasTVPreferredFocus={!inIntroRange && !inOutroRange}
+          focusable={!inIntroRange && !inOutroRange}
           onPress={fadeIn}
           style={s.tvRevealTarget}
         >
@@ -3980,30 +4018,78 @@ function ExpoRiftPlayer({
       )}
       {/* ── أزرار تخطي المقدمة/النهاية — مستقلة تماماً عن رؤية الـ controls ── */}
       {!error && !isEnded && !isLocked && (inIntroRange || inOutroRange) && (
-        <View style={s.skipBtnRowFloat} pointerEvents="box-none">
+        <View
+          style={[
+            s.skipBtnRowFloat,
+            tvMode && { justifyContent: "center", bottom: showControls ? 152 : 54 },
+          ]}
+          pointerEvents="box-none"
+        >
           {inIntroRange && (
             <Pressable
+              ref={skipBtnRef}
+              testID={tvMode ? "nova-tv-preferred-focus" : undefined}
+              hasTVPreferredFocus={tvMode}
+              focusable={tvMode}
+              skipControlsWake={true}
+              onFocus={() => {
+                skipBtnFocusedRef.current = true;
+              }}
+              onBlur={() => {
+                skipBtnFocusedRef.current = false;
+              }}
               onPress={doSkipIntro}
-              style={[s.skipPillIntro, tvMode && s.tvSkipPill]}
+              style={({ focused }) => [
+                s.skipPillIntro,
+                tvMode && s.tvSkipPill,
+                tvMode &&
+                  focused && {
+                    borderColor: "#38BDF8",
+                    borderWidth: 3.5,
+                    backgroundColor: "#fbbf24",
+                    transform: [{ scale: 1.06 }],
+                  },
+              ]}
               hitSlop={8}
               pointerEvents="auto"
               accessibilityRole="button"
               accessibilityLabel="تخطي المقدمة"
             >
-              <Ionicons name="play-forward" size={13} color="#92400e" />
+              <Ionicons name="play-forward" size={tvMode ? 18 : 13} color="#92400e" />
               <Text style={[s.skipPillIntroText, tvMode && s.tvSkipPillText]}>تخطي المقدمة</Text>
             </Pressable>
           )}
           {inOutroRange && (
             <Pressable
+              ref={!inIntroRange ? skipBtnRef : undefined}
+              testID={tvMode && !inIntroRange ? "nova-tv-preferred-focus" : undefined}
+              hasTVPreferredFocus={tvMode && !inIntroRange}
+              focusable={tvMode}
+              skipControlsWake={true}
+              onFocus={() => {
+                skipBtnFocusedRef.current = true;
+              }}
+              onBlur={() => {
+                skipBtnFocusedRef.current = false;
+              }}
               onPress={doSkipOutro}
-              style={[s.skipPillOutro, tvMode && s.tvSkipPill]}
+              style={({ focused }) => [
+                s.skipPillOutro,
+                tvMode && s.tvSkipPill,
+                tvMode &&
+                  focused && {
+                    borderColor: "#38BDF8",
+                    borderWidth: 3.5,
+                    backgroundColor: "#7c3aed",
+                    transform: [{ scale: 1.06 }],
+                  },
+              ]}
               hitSlop={8}
               pointerEvents="auto"
               accessibilityRole="button"
               accessibilityLabel="تخطي الخاتمة"
             >
-              <Ionicons name="play-forward" size={13} color="#4c1d95" />
+              <Ionicons name="play-forward" size={tvMode ? 18 : 13} color={tvMode ? "#ffffff" : "#4c1d95"} />
               <Text style={[s.skipPillOutroText, tvMode && s.tvSkipPillText]}>تخطي النهاية</Text>
             </Pressable>
           )}

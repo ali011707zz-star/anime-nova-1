@@ -55,9 +55,19 @@ if (Platform.OS === "android") {
   try {
     DeviceEventEmitter.addListener("novaTvKeyEvent", (evt: any) => {
       const code = Number(evt?.keyCode ?? 0);
-      // Only activate D-pad mode on real directional/center remote keys (never on Back/Volume)
-      if (!hardwareDpadDetected && (code === 19 || code === 20 || code === 21 || code === 22 || code === 23)) {
+      // Activate D-pad mode on directional/center/media remote keys
+      if (
+        !hardwareDpadDetected &&
+        (code === 19 || code === 20 || code === 21 || code === 22 || code === 23 || code === 66 || code === 85)
+      ) {
         hardwareDpadDetected = true;
+        notifyTvListeners();
+      }
+    });
+    DeviceEventEmitter.addListener("novaTvDetected", (evt: any) => {
+      if (evt?.isTv && !hardwareDpadDetected) {
+        hardwareDpadDetected = true;
+        cachedHardwareTv = true;
         notifyTvListeners();
       }
     });
@@ -86,17 +96,17 @@ export async function toggleTvMode(): Promise<boolean> {
 
 export function useTvModeOverride(): [TvModeOverride, (mode: TvModeOverride) => Promise<void>] {
   ensureTvOverrideHydrated();
-  const [mode, setMode] = React.useState<TvModeOverride>(currentTvOverride);
+  const [, setTick] = React.useState(0);
 
   React.useEffect(() => {
-    const listener = () => setMode(currentTvOverride);
+    const listener = () => setTick((t) => t + 1);
     tvListeners.add(listener);
     return () => {
       tvListeners.delete(listener);
     };
   }, []);
 
-  return [mode, setTvModeOverride];
+  return [currentTvOverride, setTvModeOverride];
 }
 
 function detectAndroidTvHardware(): boolean {
@@ -131,7 +141,7 @@ function detectAndroidTvHardware(): boolean {
     .join(" ")
     .toLowerCase();
 
-  cachedHardwareTv = /\b(aft[a-z0-9]*|shield|mibox|mi\s*box|chromecast|bravia|android\s*tv|google\s*tv|smart\s*tv|tv\s*box|mecool|h96|x96|tx3|t95|tanix|beelink|ugoos|onn\.?\s*tv)\b/i.test(
+  cachedHardwareTv = /\b(aft[a-z0-9]*|shield|mibox|mi\s*box|mitv|chromecast|bravia|android\s*tv|google\s*tv|smart\s*tv|tv\s*box|mecool|h96|x96|tx3|t95|tanix|beelink|ugoos|tcl|hisense|skyworth|haier|toshiba|changhong|coocaa|konka|onn\.?\s*tv)\b/i.test(
     deviceInfo,
   );
   return cachedHardwareTv;
@@ -175,20 +185,14 @@ export function tvFocusStyle(focused: boolean, isWhite?: boolean): ViewStyle {
   const white = typeof isWhite === "boolean" ? isWhite : activeThemeIsWhite;
   if (white) {
     return {
-      borderColor: "#7C3AED",
-      borderWidth: 3.5,
-      shadowColor: "#7C3AED",
-      shadowOpacity: 0.55,
-      shadowRadius: 8,
-      shadowOffset: { width: 0, height: 2 },
-      transform: [{ scale: 1.03 }],
+      borderColor: "#0284C7",
+      borderWidth: 2.5,
       zIndex: 25,
     };
   }
   return {
     borderColor: "#38BDF8",
-    borderWidth: 3,
-    transform: [{ scale: 1.02 }],
+    borderWidth: 2.5,
     zIndex: 25,
   };
 }
@@ -197,27 +201,47 @@ export const TV_FOCUS_VIEWABILITY_CONFIG = {
   itemVisiblePercentThreshold: 65,
 };
 
-/** Scroll a virtualized list smoothly when D-pad focus reaches an off-screen item. */
+/** Scroll a virtualized list smoothly when D-pad focus reaches an item. */
 export function useTvListFocusScroll<T>(
   listRef: React.RefObject<FlatList<T> | null>,
   viewPosition = 0.35,
 ) {
+  const rafRef = React.useRef<number | null>(null);
+  const lastIndexRef = React.useRef<number>(-1);
+
+  React.useEffect(() => {
+    return () => {
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+      }
+    };
+  }, []);
+
   const scrollToFocusedIndex = React.useCallback((index: number) => {
     if (!listRef?.current || typeof index !== "number" || index < 0) return;
-    try {
-      listRef.current.scrollToIndex({
-        index,
-        animated: true,
-        viewPosition,
-      });
-    } catch {
-      try {
-        listRef.current.scrollToOffset({
-          offset: Math.max(0, index * 165),
-          animated: true,
-        });
-      } catch {}
+    if (lastIndexRef.current === index) return;
+    lastIndexRef.current = index;
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
     }
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      if (!listRef?.current) return;
+      try {
+        listRef.current.scrollToIndex({
+          index,
+          animated: true,
+          viewPosition,
+        });
+      } catch {
+        try {
+          listRef.current.scrollToOffset({
+            offset: Math.max(0, index * 165),
+            animated: true,
+          });
+        } catch {}
+      }
+    });
   }, [listRef, viewPosition]);
 
   return {
@@ -234,56 +258,55 @@ type TvPressableProps = Omit<PressableProps, "style"> & {
   onKeyDown?: (event: any) => void;
 };
 
-export function TvPressable({
-  style,
-  children,
-  hasTVPreferredFocus = false,
-  focusable,
-  onFocus,
-  onBlur,
-  ...props
-}: TvPressableProps) {
-  const tv = isTvDevice();
-  const [focused, setFocused] = React.useState(false);
-  const innerRef = React.useRef<any>(null);
+export const TvPressable = React.forwardRef<View, TvPressableProps>(function TvPressable(
+  {
+    style,
+    children,
+    hasTVPreferredFocus = false,
+    focusable,
+    onFocus,
+    onBlur,
+    ...props
+  }: TvPressableProps,
+  ref: React.ForwardedRef<View>,
+) {
+  const [tv, setTv] = React.useState<boolean>(() => isTvDevice());
+  const [focused, setFocused] = React.useState<boolean>(false);
 
   React.useEffect(() => {
-    if (!tv || !hasTVPreferredFocus) return;
-    const t1 = setTimeout(() => {
-      try { innerRef.current?.focus?.(); } catch {}
-    }, 60);
-    const t2 = setTimeout(() => {
-      try { innerRef.current?.focus?.(); } catch {}
-    }, 220);
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
+    const sync = () => {
+      const next = isTvDevice();
+      setTv((prev: boolean) => (prev !== next ? next : prev));
     };
-  }, [tv, hasTVPreferredFocus]);
+    sync();
+    tvListeners.add(sync);
+    return () => {
+      tvListeners.delete(sync);
+    };
+  }, []);
+
+  const isDisabled = Boolean(props.disabled);
 
   return (
     <Pressable
-      ref={innerRef}
+      ref={ref}
       {...props}
-      testID={tv && hasTVPreferredFocus && !props.testID ? "nova-tv-preferred-focus" : props.testID}
       unstable_pressDelay={0}
-      focusable={tv ? focusable !== false : focusable}
-      hasTVPreferredFocus={tv && hasTVPreferredFocus}
+      focusable={tv ? (isDisabled ? false : focusable !== false) : focusable}
+      hasTVPreferredFocus={tv && !isDisabled && hasTVPreferredFocus}
       hitSlop={props.hitSlop ?? 8}
       pressRetentionOffset={props.pressRetentionOffset ?? 12}
       android_disableSound={false}
       android_ripple={tv ? null : props.android_ripple}
-      onFocus={(event) => {
+      onFocus={(event: any) => {
         setFocused(true);
         onFocus?.(event);
       }}
-      onBlur={(event) => {
+      onBlur={(event: any) => {
         setFocused(false);
         onBlur?.(event);
       }}
-      style={(state) => {
-        // Both native state.focused AND React state focused are checked to ensure
-        // the focus ring never drops or flickers while navigating rapidly with remote
+      style={(state: PressableStateCallbackType) => {
         const isFocused = Boolean((state as any)?.focused || focused);
         const baseStyle = typeof style === "function" ? style({ ...state, focused: isFocused }) : style;
         return [
@@ -296,7 +319,7 @@ export function TvPressable({
       {children}
     </Pressable>
   );
-}
+});
 
 export function TvFocusGuideView({
   autoFocus: _autoFocus,

@@ -1,93 +1,92 @@
 const { withMainActivity } = require("@expo/config-plugins");
 
-const MARKER = "NOVA_PHONE_IMMERSIVE_SYSTEM_BARS";
+const MARKER = "// [nova-immersive-bars-marker]";
 
 const KOTLIN_METHODS = `
-  // ${MARKER}: Keep phone system bars hidden; fast TV focus & remote key engine.
-  private var novaTvEngineInstalled = false
+  ${MARKER}
   private var novaDpadMode = false
-  private var novaCurrentFocusedView: android.view.View? = null
+  private var novaTvEngineInstalled = false
   private var novaLastKeyRepeatMs = 0L
   private var novaCenterConsumed = false
+  private var novaCurrentFocusedView: android.view.View? = null
+  private var novaFocusRecoveryPosted = false
 
   private fun novaIsTvDevice(): Boolean {
-    if (packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_LEANBACK) ||
-        packageManager.hasSystemFeature("android.hardware.type.television")) {
-      return true
-    }
-
-    val uiModeType = resources.configuration.uiMode and
-      android.content.res.Configuration.UI_MODE_TYPE_MASK
-    if (uiModeType == android.content.res.Configuration.UI_MODE_TYPE_TELEVISION) {
-      return true
-    }
-
-    val info = listOfNotNull(
-      android.os.Build.MODEL,
-      android.os.Build.BRAND,
-      android.os.Build.MANUFACTURER,
-      android.os.Build.DEVICE
-    ).joinToString(" ").lowercase()
-    val tvKeywords = listOf(
-      "aft", "shield", "mibox", "mi box", "chromecast", "bravia",
-      "android tv", "google tv", "smart tv", "tv box", "mecool",
-      "h96", "x96", "tx3", "t95", "tanix", "beelink", "ugoos", "onn"
-    )
-    return tvKeywords.any { info.contains(it) }
+    val uiMode = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_TYPE_MASK)
+    if (uiMode == android.content.res.Configuration.UI_MODE_TYPE_TELEVISION) return true
+    val pm = packageManager
+    if (pm.hasSystemFeature(android.content.pm.PackageManager.FEATURE_LEANBACK)) return true
+    if (pm.hasSystemFeature(android.content.pm.PackageManager.FEATURE_TELEVISION)) return true
+    val device = (android.os.Build.MODEL + " " + android.os.Build.BRAND + " " + android.os.Build.MANUFACTURER).lowercase()
+    return device.contains("aft") ||
+      device.contains("shield") ||
+      device.contains("mibox") ||
+      device.contains("mi box") ||
+      device.contains("mitv") ||
+      device.contains("chromecast") ||
+      device.contains("bravia") ||
+      device.contains("android tv") ||
+      device.contains("google tv") ||
+      device.contains("smart tv") ||
+      device.contains("tv box") ||
+      device.contains("mecool") ||
+      device.contains("h96") ||
+      device.contains("x96") ||
+      device.contains("tx3") ||
+      device.contains("t95") ||
+      device.contains("tanix") ||
+      device.contains("beelink") ||
+      device.contains("ugoos") ||
+      device.contains("tcl") ||
+      device.contains("hisense") ||
+      device.contains("skyworth") ||
+      device.contains("haier") ||
+      device.contains("toshiba") ||
+      device.contains("onn")
   }
 
-  private class NovaRnFocusEvent(
-    surfaceId: Int,
-    viewId: Int,
-    private val evtName: String
-  ) : com.facebook.react.uimanager.events.Event<NovaRnFocusEvent>(surfaceId, viewId) {
-    override fun getEventName(): String = evtName
-    override fun canCoalesce(): Boolean = false
-    override fun getEventData(): com.facebook.react.bridge.WritableMap {
-      return com.facebook.react.bridge.Arguments.createMap().apply {
-        putInt("target", viewTag)
-      }
-    }
+  private fun novaDispatchRnFocusEvent(view: android.view.View, focused: Boolean) {
+    // React Native views dispatch focus/blur natively via OnFocusChangeListener
   }
 
-  private fun novaDispatchRnFocusEvent(view: android.view.View?, isFocus: Boolean) {
-    if (view == null || view.id == android.view.View.NO_ID) return
+  private fun novaScrollFocusedIntoView(focused: android.view.View) {
     try {
-      var ctx = view.context
-      while (ctx is android.content.ContextWrapper && ctx !is com.facebook.react.uimanager.ThemedReactContext) {
-        ctx = ctx.baseContext
+      // Do NOT manually scroll ReactHorizontalScrollView here: FlatList's JS scrollToIndex
+      // and Android's native requestChildFocus already handle horizontal rails. Calling
+      // requestChildRectangleOnScreen on horizontal rails caused two competing scroll animations.
+      var current: android.view.ViewParent? = focused.parent
+      while (current != null) {
+        if (current is android.widget.ScrollView) {
+          val scrollView = current
+          val childRect = android.graphics.Rect()
+          focused.getDrawingRect(childRect)
+          scrollView.offsetDescendantRectToMyCoords(focused, childRect)
+          val pad = (36 * resources.displayMetrics.density).toInt()
+          val visibleTop = scrollView.scrollY + pad
+          val visibleBottom = scrollView.scrollY + scrollView.height - pad
+          if (childRect.top < visibleTop || childRect.bottom > visibleBottom) {
+            childRect.inset(0, -pad)
+            scrollView.requestChildRectangleOnScreen(focused, childRect, false)
+          }
+          break
+        }
+        current = current.parent
       }
-      val themedCtx = ctx as? com.facebook.react.uimanager.ThemedReactContext ?: return
-      val surfaceId = com.facebook.react.uimanager.UIManagerHelper.getSurfaceId(themedCtx)
-      val dispatcher = com.facebook.react.uimanager.UIManagerHelper.getEventDispatcherForReactTag(themedCtx, view.id) ?: return
-      val evtName = if (isFocus) "topFocus" else "topBlur"
-      dispatcher.dispatchEvent(NovaRnFocusEvent(surfaceId, view.id, evtName))
     } catch (_: Throwable) {}
   }
 
-  private fun novaScrollFocusedIntoView(view: android.view.View) {
-    try {
-      val rect = android.graphics.Rect(0, 0, view.width, view.height)
-      val padY = (view.height * 0.25f).toInt().coerceIn(20, 72)
-      rect.inset(0, -padY)
-      view.requestRectangleOnScreen(rect, true)
-    } catch (_: Throwable) {}
-  }
-
-
-  private fun novaIsDescendantOf(child: android.view.View?, parent: android.view.View?): Boolean {
-    if (child == null || parent == null) return false
-    var cur: android.view.View? = child
-    while (cur != null) {
-      if (cur === parent) return true
-      cur = cur.parent as? android.view.View
+  private fun novaIsDescendantOf(child: android.view.View, parent: android.view.View): Boolean {
+    var p = child.parent
+    while (p != null) {
+      if (p === parent) return true
+      p = p.parent
     }
     return false
   }
 
   private fun novaFindViewByTag(root: android.view.View?, tagVal: String): android.view.View? {
     if (root == null || root.visibility != android.view.View.VISIBLE) return null
-    if (root.tag == tagVal) return root
+    if (tagVal == root.tag?.toString()) return root
     if (root is android.view.ViewGroup) {
       for (i in 0 until root.childCount) {
         val found = novaFindViewByTag(root.getChildAt(i), tagVal)
@@ -99,7 +98,7 @@ const KOTLIN_METHODS = `
 
   private fun novaFindFirstFocusable(root: android.view.View?): android.view.View? {
     if (root == null || root.visibility != android.view.View.VISIBLE) return null
-    if (root.isFocusable && root.isClickable) return root
+    if (root.isFocusable && root.isClickable && root.isEnabled) return root
     if (root is android.view.ViewGroup) {
       for (i in 0 until root.childCount) {
         val found = novaFindFirstFocusable(root.getChildAt(i))
@@ -113,9 +112,12 @@ const KOTLIN_METHODS = `
     val decor = window?.decorView as? android.view.ViewGroup ?: return false
     val modalRoot = novaFindViewByTag(decor, "nova-tv-modal-root") ?: return false
     val cur = currentFocus
-    if (cur != null && novaIsDescendantOf(cur, modalRoot)) return true
+    if (cur != null && cur.isAttachedToWindow && novaIsDescendantOf(cur, modalRoot)) return true
     val preferred = novaFindViewByTag(modalRoot, "nova-tv-preferred-focus") ?: novaFindFirstFocusable(modalRoot)
     if (preferred != null) {
+      try {
+        if (preferred.requestFocus()) return true
+      } catch (_: Throwable) {}
       preferred.post {
         try {
           preferred.requestFocus()
@@ -126,6 +128,40 @@ const KOTLIN_METHODS = `
     return false
   }
 
+  private fun novaScheduleFocusRecovery() {
+    if (novaFocusRecoveryPosted) return
+    val decor = window?.decorView as? android.view.ViewGroup ?: return
+    novaFocusRecoveryPosted = true
+    decor.postDelayed({
+      novaFocusRecoveryPosted = false
+      if (!novaDpadMode && !novaIsTvDevice()) return@postDelayed
+      if (novaEnsureModalFocus()) return@postDelayed
+      val cur = currentFocus
+      val curTag = cur?.tag?.toString() ?: ""
+      if (cur == null || cur === decor || !cur.isAttachedToWindow || curTag == "nova-tv-scan-exit") {
+        val preferred = novaFindViewByTag(decor, "nova-tv-preferred-focus") ?: novaFindFirstFocusable(decor)
+        if (preferred != null && preferred !== cur) {
+          try {
+            preferred.requestFocus()
+          } catch (_: Throwable) {}
+        }
+      }
+    }, 45L)
+  }
+
+  private fun novaEmitTvDetectedToJs() {
+    try {
+      val app = application as? com.facebook.react.ReactApplication ?: return
+      val reactContext = app.reactNativeHost.reactInstanceManager.currentReactContext ?: return
+      val params = com.facebook.react.bridge.Arguments.createMap().apply {
+        putBoolean("isTv", true)
+      }
+      reactContext
+        .getJSModule(com.facebook.react.modules.core.DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        ?.emit("novaTvDetected", params)
+    } catch (_: Throwable) {}
+  }
+
   private fun novaInstallTvFocusEngine() {
     if (novaTvEngineInstalled) return
     val decor = window?.decorView as? android.view.ViewGroup ?: return
@@ -133,21 +169,38 @@ const KOTLIN_METHODS = `
     if (novaIsTvDevice()) {
       novaDpadMode = true
       decor.isFocusableInTouchMode = false
+      decor.postDelayed({ novaEmitTvDetectedToJs() }, 350L)
+      decor.postDelayed({ novaEmitTvDetectedToJs() }, 1500L)
     }
 
-    // Modal focus is handled safely on D-pad navigation and user interaction without blocking render/layout
     decor.viewTreeObserver.addOnGlobalFocusChangeListener { oldFocus, newFocus ->
       if (oldFocus != null) {
         novaDispatchRnFocusEvent(oldFocus, false)
       }
       novaCurrentFocusedView = newFocus
-      if (newFocus != null) {
+      if (newFocus != null && newFocus !== decor) {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
           try { newFocus.defaultFocusHighlightEnabled = false } catch (_: Throwable) {}
         }
         novaDispatchRnFocusEvent(newFocus, true)
         if (novaDpadMode || novaIsTvDevice()) {
           novaScrollFocusedIntoView(newFocus)
+        }
+      } else if (novaDpadMode || novaIsTvDevice()) {
+        // When a focused loading/placeholder view unmounts, immediately recover focus
+        // onto nova-tv-preferred-focus so the cursor never disappears.
+        novaScheduleFocusRecovery()
+      }
+    }
+
+    decor.viewTreeObserver.addOnGlobalLayoutListener {
+      if (!novaDpadMode && !novaIsTvDevice()) return@addOnGlobalLayoutListener
+      val cur = currentFocus
+      val curTag = cur?.tag?.toString() ?: ""
+      if (cur == null || cur === decor || !cur.isAttachedToWindow || curTag == "nova-tv-scan-exit") {
+        val preferred = novaFindViewByTag(decor, "nova-tv-preferred-focus")
+        if (preferred != null && preferred !== cur) {
+          novaScheduleFocusRecovery()
         }
       }
     }
@@ -188,6 +241,7 @@ const KOTLIN_METHODS = `
       if (!novaDpadMode) {
         novaDpadMode = true
         window?.decorView?.isFocusableInTouchMode = false
+        novaEmitTvDetectedToJs()
       }
       if (event.action == android.view.KeyEvent.ACTION_DOWN) {
         val now = android.os.SystemClock.uptimeMillis()
@@ -196,7 +250,33 @@ const KOTLIN_METHODS = `
           novaEmitKeyEventToJs(keyCode, event.action, event.repeatCount)
         }
       }
-      novaEnsureModalFocus()
+
+      val modalHandled = novaEnsureModalFocus()
+      if (!modalHandled) {
+        val cur = currentFocus
+        val decor = window?.decorView as? android.view.ViewGroup
+        if (cur == null || cur === decor || !cur.isAttachedToWindow) {
+          if (event.action == android.view.KeyEvent.ACTION_DOWN) {
+            val preferred = novaFindViewByTag(decor, "nova-tv-preferred-focus") ?: novaFindFirstFocusable(decor)
+            if (preferred != null) {
+              try {
+                if (preferred.requestFocus()) return true
+              } catch (_: Throwable) {}
+            }
+          }
+        } else if (keyCode == android.view.KeyEvent.KEYCODE_DPAD_DOWN && event.action == android.view.KeyEvent.ACTION_DOWN) {
+          val tag = cur.tag?.toString() ?: ""
+          if (tag == "nova-tv-header-action") {
+            val preferred = novaFindViewByTag(decor, "nova-tv-preferred-focus")
+            if (preferred != null && cur !== preferred) {
+              try {
+                if (preferred.requestFocus()) return true
+              } catch (_: Throwable) {}
+            }
+          }
+        }
+      }
+
       val focused = currentFocus
       val desc = focused?.contentDescription?.toString() ?: ""
       if (
@@ -205,6 +285,7 @@ const KOTLIN_METHODS = `
       ) {
         return true
       }
+
       if (
         keyCode == android.view.KeyEvent.KEYCODE_DPAD_CENTER ||
         keyCode == android.view.KeyEvent.KEYCODE_ENTER ||
@@ -251,7 +332,6 @@ const KOTLIN_METHODS = `
   @Suppress("DEPRECATION")
   private fun novaHidePhoneSystemBars() {
     if (novaIsTvDevice()) return
-
     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
       window.insetsController?.let { controller ->
         controller.hide(android.view.WindowInsets.Type.systemBars())

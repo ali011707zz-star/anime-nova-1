@@ -1029,10 +1029,11 @@ export default function HomeScreen() {
             <View style={[styles.header, { paddingTop: topPad + 6, paddingHorizontal: scaleSize(14, 40), flexDirection: I18nManager.isRTL ? "row-reverse" : "row" }]}>
               <Pressable
                 accessibilityLabel="فتح القائمة"
+                testID="nova-tv-header-action"
                 onPress={() => setShowDrawer(true)}
                 focusable={isTvLayout && headerTvFocusable}
                 hitSlop={isTvLayout ? 10 : 6}
-                style={[
+                style={({ focused }) => [
                   styles.iconBtn,
                   {
                     width: scaleSize(42, 54),
@@ -1041,6 +1042,7 @@ export default function HomeScreen() {
                     backgroundColor: colors.surface,
                     borderColor: colors.border,
                   },
+                  isTvLayout && tvFocusStyle(focused),
                 ]}
               >
                 <Ionicons name="menu" size={scaleSize(21, 28)} color={colors.text} />
@@ -1050,9 +1052,10 @@ export default function HomeScreen() {
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel="البحث عن أنمي"
+                  testID="nova-tv-header-action"
                   onPress={() => router.push("/(tabs)/search" as any)}
                   focusable={isTvLayout && headerTvFocusable}
-                  style={[
+                  style={({ focused }) => [
                     styles.headerSearch,
                     {
                       height: scaleSize(38, 48),
@@ -1061,6 +1064,7 @@ export default function HomeScreen() {
                       backgroundColor: colors.input,
                       borderColor: colors.border,
                     },
+                    isTvLayout && tvFocusStyle(focused),
                   ]}
                 >
                   <Ionicons name="search" size={scaleSize(14, 18)} color={colors.textMuted} />

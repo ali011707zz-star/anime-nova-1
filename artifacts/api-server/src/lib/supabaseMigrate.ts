@@ -276,11 +276,12 @@ CREATE INDEX IF NOT EXISTS idx_linked_devices_user_active
 `;
 
 const REQUIRED_TABLES = [
-  "users", "pending_verifications", "watch_history", "favorites",
+  "users", "pending_verifications", "watch_history", "favorites", "comments",
   "translations_cache", "anime_meta_ar", "anime_meta_cache", "anime_poster_cache",
   // Shared L2 cache tables — verify these at startup so cache failures are visible.
   "source_cache", "subtitle_cache", "cdn_cache", "telegram_episode_cache",
   "mobile_push_tokens", "mobile_push_deliveries", "device_link_codes", "linked_devices",
+  "analytics_sessions", "analytics_episode_views",
 ];
 
 // ── PostgreSQL direct migration (للـ Replit PostgreSQL) ──────────────────────

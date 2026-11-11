@@ -23,7 +23,8 @@ import { useColors } from "@/hooks/useColors";
 import { loadRuntimeApiUrl } from "@/utils/baseUrl";
 import { installGlobalCrashHandlers } from "@/utils/crashLogger";
 import { getRuntimeIntegrity, runtimeIntegrityMessage } from "@/utils/runtimeIntegrity";
-import { isTvDevice } from "@/utils/tv";
+import { isTvDevice, useTvMetrics } from "@/utils/tv";
+import { pingMobileAppPresence } from "@/utils/analytics";
 import { registerPushNotifications, subscribeToPushTokenChanges } from "@/utils/pushNotifications";
 
 if (Platform.OS !== "web") {
@@ -229,12 +230,13 @@ function RootLayout() {
   // إجبار إخفاء الـ splash بعد 3.5 ثانية حتى لو فشل تحميل الخطوط
   const [brandSplashVisible, setBrandSplashVisible] = useState(true);
   const [telegramAnnouncementVisible, setTelegramAnnouncementVisible] = useState(false);
-  const tvMode = isTvDevice(Dimensions.get("window").width, Dimensions.get("window").height);
+  const { tv: tvMode } = useTvMetrics();
 
   // TV uses the same app bundle as phones. Only the detected TV runtime is
   // locked to landscape; phone orientation behavior remains unchanged.
   useEffect(() => {
     if (!tvMode) return;
+    setTelegramAnnouncementVisible(false);
     ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
   }, [tvMode]);
 
@@ -242,6 +244,9 @@ function RootLayout() {
   // فوقها أثناء انتظار الخطوط.
   useEffect(() => {
     SplashScreen.hideAsync().catch(() => {});
+    if (RUNTIME_INTEGRITY.trusted) {
+      pingMobileAppPresence();
+    }
   }, []);
 
   useEffect(() => {
@@ -263,11 +268,15 @@ function RootLayout() {
   }, [fontsLoaded, fontError]);
 
   useEffect(() => {
-    if (!brandSplashVisible && RUNTIME_INTEGRITY.trusted) {
+    if (!brandSplashVisible && RUNTIME_INTEGRITY.trusted && !tvMode) {
       // Let the first screen settle before presenting the announcement. The
       // native Modal already fades, but opening it on the same frame as the
       // splash disappears feels like a layout jump on slower devices.
-      const t = setTimeout(() => setTelegramAnnouncementVisible(true), 450);
+      const t = setTimeout(() => {
+        if (!isTvDevice()) {
+          setTelegramAnnouncementVisible(true);
+        }
+      }, 450);
       return () => clearTimeout(t);
     }
   }, [brandSplashVisible, tvMode]);
@@ -279,7 +288,7 @@ function RootLayout() {
           <AppProvider>
             <RootContent
               brandSplashVisible={brandSplashVisible}
-              telegramAnnouncementVisible={telegramAnnouncementVisible}
+              telegramAnnouncementVisible={telegramAnnouncementVisible && !tvMode}
               onCloseAnnouncement={() => setTelegramAnnouncementVisible(false)}
             />
           </AppProvider>
@@ -300,7 +309,7 @@ function RootContent({
 }) {
   const colors = useColors();
   const { themeHydrated } = useApp();
-  const tvMode = isTvDevice(Dimensions.get("window").width, Dimensions.get("window").height);
+  const { tv: tvMode } = useTvMetrics();
 
   if (brandSplashVisible || !themeHydrated) {
     return <BrandSplash />;
@@ -321,10 +330,12 @@ function RootContent({
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: colors.background }}>
       <PushRegistrationBridge disabled={tvMode || !RUNTIME_INTEGRITY.trusted} />
       <RootLayoutNav />
-      <TelegramAnnouncementModal
-        visible={telegramAnnouncementVisible}
-        onClose={onCloseAnnouncement}
-      />
+      {!tvMode && (
+        <TelegramAnnouncementModal
+          visible={telegramAnnouncementVisible}
+          onClose={onCloseAnnouncement}
+        />
+      )}
     </GestureHandlerRootView>
   );
 }
