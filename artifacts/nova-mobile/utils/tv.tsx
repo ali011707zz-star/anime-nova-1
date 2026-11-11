@@ -10,7 +10,6 @@ import {
 } from "react-native";
 import type {
   FlatList,
-  FlatListProps,
   PressableProps,
   PressableStateCallbackType,
   StyleProp,
@@ -25,6 +24,22 @@ let hydratedTvOverride = false;
 let hardwareDpadDetected = false;
 let cachedHardwareTv: boolean | null = null;
 const tvListeners = new Set<() => void>();
+let activeClearFocusFn: (() => void) | null = null;
+
+export function claimTvFocus(clearFn: () => void) {
+  if (activeClearFocusFn && activeClearFocusFn !== clearFn) {
+    try {
+      activeClearFocusFn();
+    } catch {}
+  }
+  activeClearFocusFn = clearFn;
+}
+
+export function releaseTvFocus(clearFn: () => void) {
+  if (activeClearFocusFn === clearFn) {
+    activeClearFocusFn = null;
+  }
+}
 
 function notifyTvListeners() {
   for (const listener of tvListeners) {
@@ -55,7 +70,6 @@ if (Platform.OS === "android") {
   try {
     DeviceEventEmitter.addListener("novaTvKeyEvent", (evt: any) => {
       const code = Number(evt?.keyCode ?? 0);
-      // Activate D-pad mode on directional/center/media remote keys
       if (
         !hardwareDpadDetected &&
         (code === 19 || code === 20 || code === 21 || code === 22 || code === 23 || code === 66 || code === 85)
@@ -69,6 +83,15 @@ if (Platform.OS === "android") {
         hardwareDpadDetected = true;
         cachedHardwareTv = true;
         notifyTvListeners();
+      }
+    });
+    DeviceEventEmitter.addListener("novaTvFocusChanged", () => {
+      if (activeClearFocusFn) {
+        const fn = activeClearFocusFn;
+        activeClearFocusFn = null;
+        try {
+          fn();
+        } catch {}
       }
     });
   } catch {}
@@ -276,6 +299,10 @@ export const TvPressable = React.forwardRef<View, TvPressableProps>(function TvP
   const [focused, setFocused] = React.useState<boolean>(false);
   const innerRef = React.useRef<View | null>(null);
 
+  const clearSelfFocus = React.useCallback(() => {
+    setFocused(false);
+  }, []);
+
   const setCombinedRef = React.useCallback(
     (node: View | null) => {
       innerRef.current = node;
@@ -297,8 +324,9 @@ export const TvPressable = React.forwardRef<View, TvPressableProps>(function TvP
     tvListeners.add(sync);
     return () => {
       tvListeners.delete(sync);
+      releaseTvFocus(clearSelfFocus);
     };
-  }, []);
+  }, [clearSelfFocus]);
 
   const isDisabled = Boolean(props.disabled);
 
@@ -308,15 +336,9 @@ export const TvPressable = React.forwardRef<View, TvPressableProps>(function TvP
       try {
         (innerRef.current as any)?.focus?.();
       } catch {}
-    }, 60);
-    const t2 = setTimeout(() => {
-      try {
-        (innerRef.current as any)?.focus?.();
-      } catch {}
-    }, 240);
+    }, 45);
     return () => {
       clearTimeout(t1);
-      clearTimeout(t2);
     };
   }, [tv, hasTVPreferredFocus, isDisabled]);
 
@@ -333,15 +355,17 @@ export const TvPressable = React.forwardRef<View, TvPressableProps>(function TvP
       android_disableSound={false}
       android_ripple={tv ? null : props.android_ripple}
       onFocus={(event: any) => {
+        claimTvFocus(clearSelfFocus);
         setFocused(true);
         onFocus?.(event);
       }}
       onBlur={(event: any) => {
+        releaseTvFocus(clearSelfFocus);
         setFocused(false);
         onBlur?.(event);
       }}
       style={(state: PressableStateCallbackType) => {
-        const isFocused = Boolean((state as any)?.focused || focused);
+        const isFocused = Boolean(focused || (state as any)?.focused);
         const baseStyle = typeof style === "function" ? style({ ...state, focused: isFocused }) : style;
         return [
           baseStyle,

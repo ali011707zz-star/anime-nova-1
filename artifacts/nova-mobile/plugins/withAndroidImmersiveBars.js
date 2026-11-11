@@ -12,6 +12,7 @@ const KOTLIN_METHODS = `
   private var novaFocusRecoveryPosted = false
   private var novaFocusedForegroundView: android.view.View? = null
   private var novaPrevForeground: android.graphics.drawable.Drawable? = null
+  private val novaHookedDecorViews = java.util.Collections.newSetFromMap(java.util.WeakHashMap<android.view.View, Boolean>())
 
   private fun novaIsTvDevice(): Boolean {
     val uiMode = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_TYPE_MASK)
@@ -50,6 +51,21 @@ const KOTLIN_METHODS = `
       device.contains("onn")
   }
 
+  private fun novaGetViewTag(view: android.view.View?): String {
+    if (view == null) return ""
+    val direct = view.tag?.toString()
+    if (!direct.isNullOrEmpty()) return direct
+    try {
+      val testId = view.getTag(com.facebook.react.R.id.react_test_id)?.toString()
+      if (!testId.isNullOrEmpty()) return testId
+    } catch (_: Throwable) {}
+    try {
+      val nativeId = view.getTag(com.facebook.react.R.id.view_tag_native_id)?.toString()
+      if (!nativeId.isNullOrEmpty()) return nativeId
+    } catch (_: Throwable) {}
+    return ""
+  }
+
   private class NovaRnFocusEvent(
     surfaceId: Int,
     viewId: Int,
@@ -81,6 +97,19 @@ const KOTLIN_METHODS = `
     } catch (_: Throwable) {}
   }
 
+  private fun novaEmitFocusChangedToJs(viewId: Int) {
+    try {
+      val app = application as? com.facebook.react.ReactApplication ?: return
+      val reactContext = app.reactNativeHost.reactInstanceManager.currentReactContext ?: return
+      val params = com.facebook.react.bridge.Arguments.createMap().apply {
+        putInt("viewTag", viewId)
+      }
+      reactContext
+        .getJSModule(com.facebook.react.modules.core.DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        ?.emit("novaTvFocusChanged", params)
+    } catch (_: Throwable) {}
+  }
+
   private fun novaApplyNativeFocusRing(newFocus: android.view.View?) {
     try {
       val prev = novaFocusedForegroundView
@@ -101,6 +130,7 @@ const KOTLIN_METHODS = `
       val clsName = newFocus.javaClass.name
       if (
         newFocus is android.widget.ScrollView ||
+        newFocus is android.widget.HorizontalScrollView ||
         clsName.contains("ScrollView") ||
         clsName.contains("ReactRootView")
       ) {
@@ -143,10 +173,12 @@ const KOTLIN_METHODS = `
       while (current != null) {
         if (current is android.widget.ScrollView) {
           val scrollView = current
+          scrollView.isFocusable = false
+          scrollView.isFocusableInTouchMode = false
           val childRect = android.graphics.Rect()
           focused.getDrawingRect(childRect)
           scrollView.offsetDescendantRectToMyCoords(focused, childRect)
-          val pad = (36 * resources.displayMetrics.density).toInt()
+          val pad = (44 * resources.displayMetrics.density).toInt()
           val visibleTop = scrollView.scrollY + pad
           val visibleBottom = scrollView.scrollY + scrollView.height - pad
           if (childRect.top < visibleTop || childRect.bottom > visibleBottom) {
@@ -169,9 +201,27 @@ const KOTLIN_METHODS = `
     return false
   }
 
+  private fun novaDisableScrollContainerFocus(root: android.view.View?) {
+    if (root == null) return
+    if (root is android.widget.ScrollView || root is android.widget.HorizontalScrollView) {
+      root.isFocusable = false
+      root.isFocusableInTouchMode = false
+    }
+    if (root is android.view.ViewGroup) {
+      for (i in 0 until root.childCount) {
+        novaDisableScrollContainerFocus(root.getChildAt(i))
+      }
+    }
+  }
+
   private fun novaFindViewByTag(root: android.view.View?, tagVal: String): android.view.View? {
     if (root == null || root.visibility != android.view.View.VISIBLE) return null
-    if (tagVal == root.tag?.toString()) return root
+    if (tagVal == novaGetViewTag(root)) {
+      if (tagVal == "nova-tv-preferred-focus" && !root.isFocusable) {
+        return novaFindFirstFocusable(root) ?: root
+      }
+      return root
+    }
     if (root is android.view.ViewGroup) {
       for (i in 0 until root.childCount) {
         val found = novaFindViewByTag(root.getChildAt(i), tagVal)
@@ -183,7 +233,15 @@ const KOTLIN_METHODS = `
 
   private fun novaFindFirstFocusable(root: android.view.View?): android.view.View? {
     if (root == null || root.visibility != android.view.View.VISIBLE) return null
-    if (root.isFocusable && root.isClickable && root.isEnabled) return root
+    if (
+      root.isFocusable &&
+      root.isEnabled &&
+      root !is android.widget.ScrollView &&
+      root !is android.widget.HorizontalScrollView &&
+      (root.isClickable || root is android.widget.EditText)
+    ) {
+      return root
+    }
     if (root is android.view.ViewGroup) {
       for (i in 0 until root.childCount) {
         val found = novaFindFirstFocusable(root.getChildAt(i))
@@ -191,6 +249,253 @@ const KOTLIN_METHODS = `
       }
     }
     return null
+  }
+
+  private fun novaCollectFocusableViews(root: android.view.View?, out: java.util.ArrayList<android.view.View>) {
+    if (root == null || root.visibility != android.view.View.VISIBLE || !root.isEnabled) return
+    if (
+      root.isFocusable &&
+      root.width > 0 &&
+      root.height > 0 &&
+      root !is android.widget.ScrollView &&
+      root !is android.widget.HorizontalScrollView &&
+      !root.javaClass.name.contains("ScrollView") &&
+      !root.javaClass.name.contains("ReactRootView")
+    ) {
+      val tag = novaGetViewTag(root)
+      if (tag != "nova-tv-scan-exit") {
+        out.add(root)
+      }
+    }
+    if (root is android.view.ViewGroup) {
+      for (i in 0 until root.childCount) {
+        novaCollectFocusableViews(root.getChildAt(i), out)
+      }
+    }
+  }
+
+  private fun novaFindScrollViewAncestor(view: android.view.View?): android.widget.ScrollView? {
+    var p = view?.parent
+    while (p != null) {
+      if (p is android.widget.ScrollView) return p
+      p = p.parent
+    }
+    return null
+  }
+
+  private fun novaFindHorizontalScrollViewAncestor(view: android.view.View?): android.widget.HorizontalScrollView? {
+    var p = view?.parent
+    while (p != null) {
+      if (p is android.widget.HorizontalScrollView) return p
+      p = p.parent
+    }
+    return null
+  }
+
+  private fun novaHandleScrollViewDirectionalNavigation(keyCode: Int): Boolean {
+    if (
+      keyCode != android.view.KeyEvent.KEYCODE_DPAD_UP &&
+      keyCode != android.view.KeyEvent.KEYCODE_DPAD_DOWN
+    ) {
+      return false
+    }
+    val decor = window?.decorView as? android.view.ViewGroup ?: return false
+    novaDisableScrollContainerFocus(decor)
+    val modalRoot = novaFindViewByTag(decor, "nova-tv-modal-root")
+    val searchScope = (modalRoot as? android.view.ViewGroup) ?: decor
+    val cur = currentFocus ?: return false
+    val isUp = keyCode == android.view.KeyEvent.KEYCODE_DPAD_UP
+    val direction = if (isUp) android.view.View.FOCUS_UP else android.view.View.FOCUS_DOWN
+
+    val scrollView = novaFindScrollViewAncestor(cur)
+    if (scrollView == null || !novaIsDescendantOf(scrollView, searchScope)) {
+      if (!isUp) {
+        val ff = try {
+          android.view.FocusFinder.getInstance().findNextFocus(searchScope, cur, direction)
+        } catch (_: Throwable) { null }
+        if (ff != null && ff !== cur && ff !is android.widget.ScrollView && ff !is android.widget.HorizontalScrollView) {
+          return false
+        }
+        val allFocusables = java.util.ArrayList<android.view.View>()
+        novaCollectFocusableViews(searchScope, allFocusables)
+        val curLoc = IntArray(2)
+        cur.getLocationOnScreen(curLoc)
+        val curBottom = curLoc[1] + cur.height
+        val curCenterX = curLoc[0] + cur.width / 2
+        var best: android.view.View? = null
+        var bestVDist = Int.MAX_VALUE
+        var bestHDist = Int.MAX_VALUE
+        val rowTol = (24 * resources.displayMetrics.density).toInt()
+        for (cand in allFocusables) {
+          if (cand === cur) continue
+          val loc = IntArray(2)
+          cand.getLocationOnScreen(loc)
+          val candTop = loc[1]
+          val candCenterY = loc[1] + cand.height / 2
+          if (candCenterY <= curBottom - 4) continue
+          val vDist = (candTop - curBottom).coerceAtLeast(0)
+          val hDist = kotlin.math.abs((loc[0] + cand.width / 2) - curCenterX)
+          if (vDist < bestVDist - rowTol || (kotlin.math.abs(vDist - bestVDist) <= rowTol && hDist < bestHDist)) {
+            best = cand
+            if (vDist < bestVDist) bestVDist = vDist
+            bestHDist = hDist
+          }
+        }
+        if (best != null) {
+          try {
+            if (best.requestFocus(direction) || best.requestFocus()) return true
+          } catch (_: Throwable) {}
+        }
+      }
+      return false
+    }
+
+    scrollView.isFocusable = false
+    scrollView.isFocusableInTouchMode = false
+
+    val curRect = android.graphics.Rect()
+    cur.getDrawingRect(curRect)
+    scrollView.offsetDescendantRectToMyCoords(cur, curRect)
+    val curHScroll = novaFindHorizontalScrollViewAncestor(cur)
+
+    var target: android.view.View? = null
+    val ff = try {
+      android.view.FocusFinder.getInstance().findNextFocus(scrollView, cur, direction)
+    } catch (_: Throwable) { null }
+
+    if (
+      ff != null &&
+      ff !== cur &&
+      ff !is android.widget.ScrollView &&
+      ff !is android.widget.HorizontalScrollView &&
+      !ff.javaClass.name.contains("ScrollView") &&
+      novaIsDescendantOf(ff, scrollView)
+    ) {
+      val ffRect = android.graphics.Rect()
+      ff.getDrawingRect(ffRect)
+      scrollView.offsetDescendantRectToMyCoords(ff, ffRect)
+      val validDir = if (isUp) ffRect.centerY() < curRect.centerY() - 4 else ffRect.centerY() > curRect.centerY() + 4
+      val sameHScroll = curHScroll != null && novaFindHorizontalScrollViewAncestor(ff) === curHScroll
+      if (validDir && !sameHScroll) {
+        target = ff
+      }
+    }
+
+    if (target == null) {
+      val candidates = java.util.ArrayList<android.view.View>()
+      novaCollectFocusableViews(scrollView, candidates)
+      val tol = (12 * resources.displayMetrics.density).toInt()
+      val rowTol = (28 * resources.displayMetrics.density).toInt()
+      var bestVDist = Int.MAX_VALUE
+      var bestHDist = Int.MAX_VALUE
+      for (cand in candidates) {
+        if (cand === cur) continue
+        if (curHScroll != null && novaFindHorizontalScrollViewAncestor(cand) === curHScroll) continue
+        val candRect = android.graphics.Rect()
+        cand.getDrawingRect(candRect)
+        scrollView.offsetDescendantRectToMyCoords(cand, candRect)
+        if (isUp) {
+          if (candRect.bottom > curRect.top + tol || candRect.centerY() >= curRect.top) continue
+          val vDist = (curRect.top - candRect.bottom).coerceAtLeast(0)
+          val hDist = kotlin.math.abs(candRect.centerX() - curRect.centerX())
+          if (vDist < bestVDist - rowTol || (kotlin.math.abs(vDist - bestVDist) <= rowTol && hDist < bestHDist)) {
+            target = cand
+            if (vDist < bestVDist) bestVDist = vDist
+            bestHDist = hDist
+          }
+        } else {
+          if (candRect.top < curRect.bottom - tol || candRect.centerY() <= curRect.bottom) continue
+          val vDist = (candRect.top - curRect.bottom).coerceAtLeast(0)
+          val hDist = kotlin.math.abs(candRect.centerX() - curRect.centerX())
+          if (vDist < bestVDist - rowTol || (kotlin.math.abs(vDist - bestVDist) <= rowTol && hDist < bestHDist)) {
+            target = cand
+            if (vDist < bestVDist) bestVDist = vDist
+            bestHDist = hDist
+          }
+        }
+      }
+    }
+
+    if (target != null) {
+      val targetRect = android.graphics.Rect()
+      target.getDrawingRect(targetRect)
+      scrollView.offsetDescendantRectToMyCoords(target, targetRect)
+      val pad = (52 * resources.displayMetrics.density).toInt()
+      val contentHeight = scrollView.getChildAt(0)?.height ?: 0
+      val maxScroll = (contentHeight - scrollView.height).coerceAtLeast(0)
+      var desiredScrollY = scrollView.scrollY
+      if (targetRect.top < desiredScrollY + pad) {
+        desiredScrollY = (targetRect.top - pad).coerceAtLeast(0)
+      } else if (targetRect.bottom > desiredScrollY + scrollView.height - pad) {
+        desiredScrollY = (targetRect.bottom - scrollView.height + pad).coerceAtMost(maxScroll).coerceAtLeast(0)
+      }
+      if (desiredScrollY != scrollView.scrollY) {
+        scrollView.scrollTo(0, desiredScrollY)
+      }
+      try {
+        if (target.requestFocus(direction) || target.requestFocus()) return true
+      } catch (_: Throwable) {}
+    }
+
+    if (isUp) {
+      if (scrollView.scrollY > 0) {
+        scrollView.scrollTo(0, 0)
+      }
+      val outsideCandidates = java.util.ArrayList<android.view.View>()
+      novaCollectFocusableViews(searchScope, outsideCandidates)
+      val scrollLoc = IntArray(2)
+      scrollView.getLocationOnScreen(scrollLoc)
+      var bestOutside: android.view.View? = null
+      var bestOutsideBottom = -1
+      for (cand in outsideCandidates) {
+        if (novaIsDescendantOf(cand, scrollView)) continue
+        val loc = IntArray(2)
+        cand.getLocationOnScreen(loc)
+        val candBottom = loc[1] + cand.height
+        if (candBottom <= scrollLoc[1] + (80 * resources.displayMetrics.density).toInt()) {
+          if (candBottom > bestOutsideBottom) {
+            bestOutsideBottom = candBottom
+            bestOutside = cand
+          }
+        }
+      }
+      if (bestOutside != null) {
+        try {
+          if (bestOutside.requestFocus(direction) || bestOutside.requestFocus()) return true
+        } catch (_: Throwable) {}
+      }
+      return true
+    } else {
+      val contentHeight = scrollView.getChildAt(0)?.height ?: 0
+      val maxScroll = (contentHeight - scrollView.height).coerceAtLeast(0)
+      if (scrollView.scrollY < maxScroll) {
+        scrollView.scrollTo(0, maxScroll)
+      }
+      val outsideCandidates = java.util.ArrayList<android.view.View>()
+      novaCollectFocusableViews(searchScope, outsideCandidates)
+      val scrollLoc = IntArray(2)
+      scrollView.getLocationOnScreen(scrollLoc)
+      val scrollBottom = scrollLoc[1] + scrollView.height
+      var bestOutside: android.view.View? = null
+      var bestOutsideTop = Int.MAX_VALUE
+      for (cand in outsideCandidates) {
+        if (novaIsDescendantOf(cand, scrollView)) continue
+        val loc = IntArray(2)
+        cand.getLocationOnScreen(loc)
+        if (loc[1] >= scrollBottom - (80 * resources.displayMetrics.density).toInt()) {
+          if (loc[1] < bestOutsideTop) {
+            bestOutsideTop = loc[1]
+            bestOutside = cand
+          }
+        }
+      }
+      if (bestOutside != null) {
+        try {
+          if (bestOutside.requestFocus(direction) || bestOutside.requestFocus()) return true
+        } catch (_: Throwable) {}
+      }
+      return true
+    }
   }
 
   private fun novaEnsureModalFocus(): Boolean {
@@ -220,10 +525,18 @@ const KOTLIN_METHODS = `
     decor.postDelayed({
       novaFocusRecoveryPosted = false
       if (!novaDpadMode && !novaIsTvDevice()) return@postDelayed
+      novaDisableScrollContainerFocus(decor)
       if (novaEnsureModalFocus()) return@postDelayed
       val cur = currentFocus
-      val curTag = cur?.tag?.toString() ?: ""
-      if (cur == null || cur === decor || !cur.isAttachedToWindow || curTag == "nova-tv-scan-exit") {
+      val curTag = novaGetViewTag(cur)
+      if (
+        cur == null ||
+        cur === decor ||
+        !cur.isAttachedToWindow ||
+        cur is android.widget.ScrollView ||
+        cur is android.widget.HorizontalScrollView ||
+        curTag == "nova-tv-scan-exit"
+      ) {
         val preferred = novaFindViewByTag(decor, "nova-tv-preferred-focus") ?: novaFindFirstFocusable(decor)
         if (preferred != null && preferred !== cur) {
           try {
@@ -247,9 +560,62 @@ const KOTLIN_METHODS = `
     } catch (_: Throwable) {}
   }
 
+  private fun novaHookDecorView(rootView: android.view.View) {
+    if (novaHookedDecorViews.contains(rootView)) return
+    novaHookedDecorViews.add(rootView)
+    rootView.viewTreeObserver.addOnGlobalFocusChangeListener { oldFocus, newFocus ->
+      val prevFocused = novaCurrentFocusedView
+      if (oldFocus != null) {
+        novaDispatchRnFocusEvent(oldFocus, false)
+      }
+      if (prevFocused != null && prevFocused !== oldFocus && prevFocused !== newFocus) {
+        novaDispatchRnFocusEvent(prevFocused, false)
+      }
+      novaCurrentFocusedView = newFocus
+      if (newFocus != null && newFocus !== rootView && newFocus !== window?.decorView) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+          try { newFocus.defaultFocusHighlightEnabled = false } catch (_: Throwable) {}
+        }
+        novaEmitFocusChangedToJs(newFocus.id)
+        novaDispatchRnFocusEvent(newFocus, true)
+        novaApplyNativeFocusRing(newFocus)
+        if (novaDpadMode || novaIsTvDevice()) {
+          novaScrollFocusedIntoView(newFocus)
+        }
+      } else {
+        novaEmitFocusChangedToJs(-1)
+        novaApplyNativeFocusRing(null)
+        if (novaDpadMode || novaIsTvDevice()) {
+          novaScheduleFocusRecovery()
+        }
+      }
+    }
+  }
+
+  private fun novaHookAllWindowDecorViews() {
+    val mainDecor = window?.decorView
+    if (mainDecor != null) {
+      novaHookDecorView(mainDecor)
+    }
+    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+      try {
+        val views = android.view.inspector.WindowInspector.getGlobalWindowViews()
+        for (v in views) {
+          if (v != null) {
+            if (novaDpadMode || novaIsTvDevice()) {
+              v.isFocusableInTouchMode = false
+            }
+            novaHookDecorView(v)
+          }
+        }
+      } catch (_: Throwable) {}
+    }
+  }
+
   private fun novaInstallTvFocusEngine() {
-    if (novaTvEngineInstalled) return
     val decor = window?.decorView as? android.view.ViewGroup ?: return
+    novaHookAllWindowDecorViews()
+    if (novaTvEngineInstalled) return
     novaTvEngineInstalled = true
     if (novaIsTvDevice()) {
       novaDpadMode = true
@@ -257,40 +623,26 @@ const KOTLIN_METHODS = `
       decor.postDelayed({
         novaEmitTvDetectedToJs()
         novaScheduleFocusRecovery()
-      }, 350L)
+      }, 80L)
       decor.postDelayed({
         novaEmitTvDetectedToJs()
         novaScheduleFocusRecovery()
-      }, 1200L)
-    }
-
-    decor.viewTreeObserver.addOnGlobalFocusChangeListener { oldFocus, newFocus ->
-      if (oldFocus != null) {
-        novaDispatchRnFocusEvent(oldFocus, false)
-      }
-      novaCurrentFocusedView = newFocus
-      if (newFocus != null && newFocus !== decor) {
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-          try { newFocus.defaultFocusHighlightEnabled = false } catch (_: Throwable) {}
-        }
-        novaDispatchRnFocusEvent(newFocus, true)
-        novaApplyNativeFocusRing(newFocus)
-        if (novaDpadMode || novaIsTvDevice()) {
-          novaScrollFocusedIntoView(newFocus)
-        }
-      } else {
-        novaApplyNativeFocusRing(null)
-        if (novaDpadMode || novaIsTvDevice()) {
-          novaScheduleFocusRecovery()
-        }
-      }
+      }, 300L)
     }
 
     decor.viewTreeObserver.addOnGlobalLayoutListener {
       if (!novaDpadMode && !novaIsTvDevice()) return@addOnGlobalLayoutListener
+      novaHookAllWindowDecorViews()
       val cur = currentFocus
-      val curTag = cur?.tag?.toString() ?: ""
-      if (cur == null || cur === decor || !cur.isAttachedToWindow || curTag == "nova-tv-scan-exit") {
+      val curTag = novaGetViewTag(cur)
+      if (
+        cur == null ||
+        cur === decor ||
+        !cur.isAttachedToWindow ||
+        cur is android.widget.ScrollView ||
+        cur is android.widget.HorizontalScrollView ||
+        curTag == "nova-tv-scan-exit"
+      ) {
         novaScheduleFocusRecovery()
       }
     }
@@ -345,7 +697,13 @@ const KOTLIN_METHODS = `
       if (!modalHandled) {
         val cur = currentFocus
         val decor = window?.decorView as? android.view.ViewGroup
-        if (cur == null || cur === decor || !cur.isAttachedToWindow) {
+        if (
+          cur == null ||
+          cur === decor ||
+          !cur.isAttachedToWindow ||
+          cur is android.widget.ScrollView ||
+          cur is android.widget.HorizontalScrollView
+        ) {
           if (event.action == android.view.KeyEvent.ACTION_DOWN) {
             val preferred = novaFindViewByTag(decor, "nova-tv-preferred-focus") ?: novaFindFirstFocusable(decor)
             if (preferred != null) {
@@ -355,7 +713,7 @@ const KOTLIN_METHODS = `
             }
           }
         } else if (keyCode == android.view.KeyEvent.KEYCODE_DPAD_DOWN && event.action == android.view.KeyEvent.ACTION_DOWN) {
-          val tag = cur.tag?.toString() ?: ""
+          val tag = novaGetViewTag(cur)
           if (tag == "nova-tv-header-action") {
             val preferred = novaFindViewByTag(decor, "nova-tv-preferred-focus")
             if (preferred != null && cur !== preferred) {
@@ -374,6 +732,15 @@ const KOTLIN_METHODS = `
         (keyCode == android.view.KeyEvent.KEYCODE_DPAD_LEFT || keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT)
       ) {
         return true
+      }
+
+      if (
+        event.action == android.view.KeyEvent.ACTION_DOWN &&
+        (keyCode == android.view.KeyEvent.KEYCODE_DPAD_UP || keyCode == android.view.KeyEvent.KEYCODE_DPAD_DOWN)
+      ) {
+        if (novaHandleScrollViewDirectionalNavigation(keyCode)) {
+          return true
+        }
       }
 
       if (

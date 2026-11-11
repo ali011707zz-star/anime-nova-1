@@ -262,10 +262,10 @@ function RootLayout() {
       const t = setTimeout(() => {
         setBrandSplashVisible(false);
         SplashScreen.hideAsync().catch(() => {});
-      }, 900);
+      }, tvMode ? 350 : 900);
       return () => clearTimeout(t);
     }
-  }, [fontsLoaded, fontError]);
+  }, [fontsLoaded, fontError, tvMode]);
 
   useEffect(() => {
     if (!brandSplashVisible && RUNTIME_INTEGRITY.trusted && !tvMode) {
@@ -311,7 +311,7 @@ function RootContent({
   const { themeHydrated } = useApp();
   const { tv: tvMode } = useTvMetrics();
 
-  if (brandSplashVisible || !themeHydrated) {
+  if (!themeHydrated) {
     return <BrandSplash />;
   }
 
@@ -330,6 +330,11 @@ function RootContent({
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: colors.background }}>
       <PushRegistrationBridge disabled={tvMode || !RUNTIME_INTEGRITY.trusted} />
       <RootLayoutNav />
+      {brandSplashVisible && (
+        <View style={[StyleSheet.absoluteFill, { zIndex: 99999, elevation: 99999 }]}>
+          <BrandSplash />
+        </View>
+      )}
       {!tvMode && (
         <TelegramAnnouncementModal
           visible={telegramAnnouncementVisible}

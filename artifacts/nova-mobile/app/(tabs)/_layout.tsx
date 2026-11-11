@@ -17,7 +17,7 @@ type TabIconProps = {
 
 function TabIcon({ name, label, color, focused, tvMode = false, iconSize, fontSize }: TabIconProps) {
   return (
-    <View style={[styles.tabItem, tvMode && focused && styles.tabActive]}>
+    <View style={styles.tabItem}>
       <Ionicons name={name} size={iconSize} color={color} />
       <Text
         style={[
@@ -158,21 +158,17 @@ const styles = StyleSheet.create({
     width: "100%",
     paddingHorizontal: 2,
   },
-  tabActive: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "rgba(6, 182, 212, 0.45)",
-    backgroundColor: "rgba(6, 182, 212, 0.10)",
-    paddingVertical: 4,
-  },
   tvTabButton: {
     borderRadius: 14,
     marginHorizontal: 4,
+    borderWidth: 0,
+    borderColor: "transparent",
+    backgroundColor: "transparent",
   },
   tvTabDpadFocused: {
     borderWidth: 2.5,
     borderColor: "#38BDF8",
-    backgroundColor: "rgba(56, 189, 248, 0.18)",
+    backgroundColor: "rgba(56, 189, 248, 0.16)",
   },
   tabLabel: {
     fontSize: 9,

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
-  View, Text, Pressable, TextInput, FlatList, Image,
+  View, Text, TextInput, FlatList, Image,
   ScrollView, ActivityIndicator, StyleSheet, Platform,
   Animated, useWindowDimensions,
 } from "react-native";
@@ -10,7 +10,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
-import { isTvDevice } from "@/utils/tv";
+import { isTvDevice, TvPressable as Pressable } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
 import type { ThemePalette } from "@/constants/colors";
 

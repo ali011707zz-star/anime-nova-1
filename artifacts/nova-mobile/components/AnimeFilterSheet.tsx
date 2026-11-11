@@ -1,7 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
-import React from "react";
+import React, { useEffect } from "react";
 import {
+  BackHandler,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,7 +12,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
-import { TvPressable as Pressable } from "@/utils/tv";
+import { TvPressable as Pressable, isTvDevice, tvFocusStyle } from "@/utils/tv";
 import type { ThemePalette } from "@/constants/colors";
 
 export type AnimeFilterOption = { label: string; value: string };
@@ -67,28 +69,50 @@ export function AnimeFilterSheet({
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { height, width } = useWindowDimensions();
+  const tvMode = isTvDevice(width, height);
   const styles = createStyles(colors);
   const numberedYears = years.filter((item) => /^\d{4}$/.test(item));
 
-  const section = (title: string, options: AnimeFilterOption[], value: string, onChange: (next: string) => void, grid = false, isFirstSection = false) => (
+  useEffect(() => {
+    if (!visible || Platform.OS !== "android") return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      onClose();
+      return true;
+    });
+    return () => sub.remove();
+  }, [visible, onClose]);
+
+  if (!visible) return null;
+
+  const section = (
+    title: string,
+    options: AnimeFilterOption[],
+    value: string,
+    onChange: (next: string) => void,
+    grid = false,
+    isFirstSection = false,
+  ) => (
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>{title}</Text>
       <View style={[styles.chips, grid && styles.sortGrid]}>
         {options.map((option, idx) => {
           const selected = value === option.value;
+          const isPreferred = isFirstSection && idx === 0;
           return (
             <Pressable
               key={`${title}-${option.value || "all"}`}
               accessibilityRole="button"
               accessibilityState={{ selected }}
-              hasTVPreferredFocus={isFirstSection && idx === 0}
-              testID={isFirstSection && idx === 0 ? "nova-tv-preferred-focus" : undefined}
+              focusable={true}
+              hasTVPreferredFocus={isPreferred}
+              testID={isPreferred ? "nova-tv-preferred-focus" : undefined}
               onPress={() => onChange(option.value)}
               style={({ focused }) => [
                 styles.chip,
                 grid && styles.sortChip,
                 selected && styles.chipSelected,
                 focused && styles.tvChipFocused,
+                tvMode && tvFocusStyle(focused),
               ]}
             >
               <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
@@ -101,6 +125,130 @@ export function AnimeFilterSheet({
     </View>
   );
 
+  const sheetContent = (
+    <View
+      testID="nova-tv-modal-root"
+      style={[
+        styles.overlay,
+        (tvMode || Platform.OS === "android") && [StyleSheet.absoluteFillObject, { zIndex: 9999, elevation: 9999 }],
+      ]}
+    >
+      <Pressable
+        accessibilityLabel="إغلاق الفلاتر"
+        focusable={false}
+        accessible={false}
+        onPress={onClose}
+        style={StyleSheet.absoluteFill}
+      />
+      <View
+        style={[
+          styles.sheet,
+          {
+            maxHeight: height * 0.86,
+            marginHorizontal: Math.min(14, width * 0.04),
+            marginBottom: Math.max(insets.bottom, 10) + 8,
+            paddingBottom: Math.max(insets.bottom, 10),
+          },
+        ]}
+      >
+        <View style={styles.header}>
+          <View style={styles.headerActions}>
+            <Pressable
+              accessibilityLabel="إغلاق"
+              focusable={true}
+              onPress={onClose}
+              style={({ focused }) => [
+                styles.closeButton,
+                focused && styles.tvChipFocused,
+                tvMode && tvFocusStyle(focused),
+              ]}
+            >
+              <Ionicons name="close" size={19} color={colors.textPrimary} />
+            </Pressable>
+            <Pressable
+              focusable={true}
+              onPress={onReset}
+              style={({ focused }) => [
+                styles.resetButton,
+                focused && styles.tvChipFocused,
+                tvMode && tvFocusStyle(focused),
+              ]}
+            >
+              <Text style={styles.resetText}>إعادة ضبط</Text>
+            </Pressable>
+          </View>
+          <Text style={styles.title}>فلترة وتصفية الأنمي</Text>
+        </View>
+
+        <ScrollView
+          focusable={false}
+          style={styles.body}
+          contentContainerStyle={styles.bodyContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {section("الترتيب حسب", sortOptions, sort, onSortChange, true, true)}
+          {section("الموسم", seasonOptions, season, onSeasonChange)}
+          {section("الحالة", statusOptions, status, onStatusChange)}
+          {section("النوع", formatOptions, format, onFormatChange)}
+          {section("التصنيفات", genreOptions, genre, onGenreChange)}
+
+          <View style={styles.section}>
+            <View style={styles.yearHeading}>
+              <Text style={styles.sectionTitle}>سنة العرض</Text>
+              <Text style={styles.yearRange}>
+                ({numberedYears[numberedYears.length - 1]} - {numberedYears[0]})
+              </Text>
+            </View>
+            <View style={styles.yearGrid}>
+              {years.map((item) => {
+                const value = item === "الكل" ? "" : item;
+                const selected = year === value;
+                return (
+                  <Pressable
+                    key={`year-${item}`}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    focusable={true}
+                    onPress={() => onYearChange(value)}
+                    style={({ focused }) => [
+                      styles.yearChip,
+                      selected && styles.chipSelected,
+                      focused && styles.tvChipFocused,
+                      tvMode && tvFocusStyle(focused),
+                    ]}
+                  >
+                    <Text style={[styles.yearText, selected && styles.chipTextSelected]}>
+                      {item}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        </ScrollView>
+
+        <View style={styles.footer}>
+          <Pressable
+            focusable={true}
+            onPress={onClose}
+            style={({ focused }) => [
+              styles.applyButton,
+              focused && styles.tvChipFocused,
+              tvMode && tvFocusStyle(focused),
+            ]}
+          >
+            <Text style={styles.applyText}>عرض النتائج ({resultCount} أنمي)</Text>
+          </Pressable>
+        </View>
+      </View>
+    </View>
+  );
+
+  if (tvMode || Platform.OS === "android") {
+    return sheetContent;
+  }
+
   return (
     <Modal
       visible={visible}
@@ -109,221 +257,139 @@ export function AnimeFilterSheet({
       presentationStyle="overFullScreen"
       onRequestClose={onClose}
     >
-      <View style={styles.overlay}>
-        <Pressable
-          accessibilityLabel="إغلاق الفلاتر"
-          focusable={false}
-          accessible={false}
-          onPress={onClose}
-          style={StyleSheet.absoluteFill}
-        />
-        <View
-          testID="nova-tv-modal-root"
-          style={[
-            styles.sheet,
-            {
-              maxHeight: height * 0.84,
-              marginHorizontal: Math.min(14, width * 0.04),
-              marginBottom: Math.max(insets.bottom, 10) + 8,
-              paddingBottom: Math.max(insets.bottom, 10),
-            },
-          ]}
-        >
-          <View style={styles.header}>
-            <View style={styles.headerActions}>
-              <Pressable
-                accessibilityLabel="إغلاق"
-                onPress={onClose}
-                style={({ focused }) => [styles.closeButton, focused && styles.tvChipFocused]}
-              >
-                <Ionicons name="close" size={19} color={colors.textPrimary} />
-              </Pressable>
-              <Pressable onPress={onReset} style={({ focused }) => [styles.resetButton, focused && styles.tvChipFocused]}>
-                <Text style={styles.resetText}>إعادة ضبط</Text>
-              </Pressable>
-            </View>
-            <Text style={styles.title}>فلترة وتصفية الأنمي</Text>
-          </View>
-
-          <ScrollView
-            style={styles.body}
-            contentContainerStyle={styles.bodyContent}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-          >
-            {section("الترتيب حسب", sortOptions, sort, onSortChange, true, true)}
-            {section("الموسم", seasonOptions, season, onSeasonChange)}
-            {section("الحالة", statusOptions, status, onStatusChange)}
-            {section("النوع", formatOptions, format, onFormatChange)}
-            {section("التصنيفات", genreOptions, genre, onGenreChange)}
-
-            <View style={styles.section}>
-              <View style={styles.yearHeading}>
-                <Text style={styles.sectionTitle}>سنة العرض</Text>
-                <Text style={styles.yearRange}>({numberedYears[numberedYears.length - 1]} - {numberedYears[0]})</Text>
-              </View>
-              <View style={styles.yearGrid}>
-                {years.map((item) => {
-                  const value = item === "الكل" ? "" : item;
-                  const selected = year === value;
-                  return (
-                    <Pressable
-                      key={`year-${item}`}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected }}
-                      onPress={() => onYearChange(value)}
-                      style={({ focused }) => [
-                        styles.yearChip,
-                        selected && styles.chipSelected,
-                        focused && styles.tvChipFocused,
-                      ]}
-                    >
-                      <Text style={[styles.yearText, selected && styles.chipTextSelected]}>
-                        {item}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </View>
-          </ScrollView>
-
-          <View style={styles.footer}>
-            <Pressable onPress={onClose} style={({ focused }) => [styles.applyButton, focused && styles.tvChipFocused]}>
-              <Text style={styles.applyText}>عرض النتائج ({resultCount} أنمي)</Text>
-            </Pressable>
-          </View>
-        </View>
-      </View>
+      {sheetContent}
     </Modal>
   );
 }
 
-const createStyles = (colors: ThemePalette) => StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.74)",
-    justifyContent: "flex-end",
-  },
-  sheet: {
-    alignSelf: "center",
-    width: "100%",
-    overflow: "hidden",
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderWidth: 1,
-    borderRadius: 26,
-  },
-  header: {
-    minHeight: 64,
-    flexDirection: "row",
-    direction: "ltr",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-  },
-  headerActions: { flexDirection: "row", alignItems: "center", gap: 8 },
-  closeButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.input,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  resetButton: {
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    backgroundColor: colors.destructiveSurface,
-    borderWidth: 1,
-    borderColor: colors.destructiveBorder,
-  },
-  resetText: { color: colors.destructive, fontSize: 12, fontFamily: "Cairo_700Bold" },
-  title: {
-    color: colors.textPrimary,
-    fontSize: 16,
-    fontFamily: "Cairo_800ExtraBold",
-    textAlign: "right",
-    writingDirection: "rtl",
-  },
-  body: { flexShrink: 1 },
-  bodyContent: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 20 },
-  section: { marginBottom: 18 },
-  sectionTitle: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontFamily: "Cairo_700Bold",
-    textAlign: "right",
-    writingDirection: "rtl",
-    marginBottom: 9,
-  },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: 7, justifyContent: "flex-start" },
-  sortGrid: { justifyContent: "space-between" },
-  chip: {
-    minHeight: 40,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 14,
-    backgroundColor: colors.input,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  sortChip: { width: "48%" },
-  chipSelected: { backgroundColor: colors.destructive, borderColor: colors.destructive },
-  tvChipFocused: { borderColor: "#38BDF8", borderWidth: 2.5 },
-  chipText: {
-    color: colors.textPrimary,
-    fontSize: 12,
-    fontFamily: "Cairo_700Bold",
-    textAlign: "center",
-    writingDirection: "rtl",
-  },
-  chipTextSelected: { color: colors.destructiveForeground },
-  yearHeading: { flexDirection: "row", justifyContent: "flex-end", alignItems: "center", gap: 5 },
-  yearRange: {
-    marginBottom: 9,
-    color: colors.textMuted,
-    fontSize: 11,
-    fontFamily: "Cairo_700Bold",
-  },
-  yearGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", gap: 6 },
-  yearChip: {
-    width: "23%",
-    minHeight: 42,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 13,
-    backgroundColor: colors.input,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  yearText: { color: colors.textPrimary, fontSize: 13, fontFamily: "Cairo_700Bold" },
-  footer: {
-    paddingHorizontal: 14,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  applyButton: {
-    minHeight: 54,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 16,
-    backgroundColor: colors.destructive,
-  },
-  applyText: {
-    color: colors.destructiveForeground,
-    fontSize: 14,
-    fontFamily: "Cairo_800ExtraBold",
-    textAlign: "center",
-    writingDirection: "rtl",
-  },
-});
+const createStyles = (colors: ThemePalette) =>
+  StyleSheet.create({
+    overlay: {
+      flex: 1,
+      backgroundColor: "rgba(0,0,0,0.74)",
+      justifyContent: "flex-end",
+    },
+    sheet: {
+      alignSelf: "center",
+      width: "100%",
+      overflow: "hidden",
+      backgroundColor: colors.surface,
+      borderColor: colors.border,
+      borderWidth: 1,
+      borderRadius: 26,
+    },
+    header: {
+      minHeight: 64,
+      flexDirection: "row",
+      direction: "ltr",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingHorizontal: 16,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.border,
+    },
+    headerActions: { flexDirection: "row", alignItems: "center", gap: 8 },
+    closeButton: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.input,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    resetButton: {
+      borderRadius: 12,
+      paddingHorizontal: 12,
+      paddingVertical: 7,
+      backgroundColor: colors.destructiveSurface,
+      borderWidth: 1,
+      borderColor: colors.destructiveBorder,
+    },
+    resetText: { color: colors.destructive, fontSize: 12, fontFamily: "Cairo_700Bold" },
+    title: {
+      color: colors.textPrimary,
+      fontSize: 16,
+      fontFamily: "Cairo_800ExtraBold",
+      textAlign: "right",
+      writingDirection: "rtl",
+    },
+    body: { flexShrink: 1 },
+    bodyContent: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 20 },
+    section: { marginBottom: 18 },
+    sectionTitle: {
+      color: colors.textMuted,
+      fontSize: 12,
+      fontFamily: "Cairo_700Bold",
+      textAlign: "right",
+      writingDirection: "rtl",
+      marginBottom: 9,
+    },
+    chips: { flexDirection: "row", flexWrap: "wrap", gap: 7, justifyContent: "flex-start" },
+    sortGrid: { justifyContent: "space-between" },
+    chip: {
+      minHeight: 40,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 12,
+      paddingVertical: 7,
+      borderRadius: 14,
+      backgroundColor: colors.input,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    sortChip: { width: "48%" },
+    chipSelected: { backgroundColor: colors.destructive, borderColor: colors.destructive },
+    tvChipFocused: { borderColor: "#00F0FF", borderWidth: 3 },
+    chipText: {
+      color: colors.textPrimary,
+      fontSize: 12,
+      fontFamily: "Cairo_700Bold",
+      textAlign: "center",
+      writingDirection: "rtl",
+    },
+    chipTextSelected: { color: colors.destructiveForeground },
+    yearHeading: { flexDirection: "row", justifyContent: "flex-end", alignItems: "center", gap: 5 },
+    yearRange: {
+      marginBottom: 9,
+      color: colors.textMuted,
+      fontSize: 11,
+      fontFamily: "Cairo_700Bold",
+    },
+    yearGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", gap: 6 },
+    yearChip: {
+      width: "23%",
+      minHeight: 42,
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: 13,
+      backgroundColor: colors.input,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    yearText: { color: colors.textPrimary, fontSize: 13, fontFamily: "Cairo_700Bold" },
+    footer: {
+      paddingHorizontal: 14,
+      paddingTop: 12,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    applyButton: {
+      minHeight: 54,
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: 16,
+      backgroundColor: colors.destructive,
+      borderWidth: 1,
+      borderColor: "transparent",
+    },
+    applyText: {
+      color: colors.destructiveForeground,
+      fontSize: 14,
+      fontFamily: "Cairo_800ExtraBold",
+      textAlign: "center",
+      writingDirection: "rtl",
+    },
+  });

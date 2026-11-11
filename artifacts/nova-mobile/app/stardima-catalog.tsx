@@ -760,8 +760,84 @@ export default function StarDimaCatalogScreen() {
         ) : hasMore ? <View style={styles.footer} /> : null}
       />
 
+      {selectedTitle && (tvMode || Platform.OS === "android") ? (
+        <View style={[styles.modalRoot, StyleSheet.absoluteFillObject, { zIndex: 9999, elevation: 9999 }]} testID="nova-tv-modal-root">
+          <Pressable style={styles.modalDismiss} focusable={false} accessible={false} onPress={() => setSelectedTitle(null)} accessibilityLabel="إغلاق التفاصيل" />
+          <View style={[styles.modalSheet, tvMode && { maxHeight: "76%", paddingHorizontal: 28 }]}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, tvMode && { fontSize: 26, lineHeight: 36 }]}>
+                {titleName(selectedTitle)}
+              </Text>
+              <Pressable
+                onPress={() => setSelectedTitle(null)}
+                focusable={true}
+                hasTVPreferredFocus={tvMode}
+                testID={tvMode ? "nova-tv-preferred-focus" : undefined}
+                accessibilityRole="button"
+                accessibilityLabel="إغلاق"
+                style={({ focused }) => [styles.modalClose, tvMode && tvFocusStyle(focused)]}
+              >
+                <Ionicons name="close" size={22} color={colors.textPrimary} />
+              </Pressable>
+            </View>
+            <ScrollView focusable={false} showsVerticalScrollIndicator={false}>
+              <Text style={[styles.modalStatus, tvMode && { fontSize: 15, lineHeight: 24 }]}>
+                {selectedTitle.media_type === "movie" ? "فيلم" : "مسلسل"}
+                {selectedTitle.release_year ? ` · ${selectedTitle.release_year}` : ""}
+                {selectedTitle.episode_count ? ` · ${selectedTitle.episode_count} حلقة مسجلة` : ""}
+                {" · "}{classificationLabel(selectedTitle.classification?.status)}
+              </Text>
+              {(selectedTitle.classification?.contentFamilies || []).length > 0 ? (
+                <View style={styles.modalSection}>
+                  <Text style={styles.modalSectionTitle}>نوع المحتوى المؤكد</Text>
+                  <View style={styles.modalValues}>
+                    {selectedTitle.classification!.contentFamilies.map((value) => (
+                      <Text key={value} style={styles.modalValue}>{familyLabel(value)}</Text>
+                    ))}
+                  </View>
+                </View>
+              ) : null}
+              <View style={styles.modalSection}>
+                <Text style={styles.modalSectionTitle}>تصنيفات المصدر</Text>
+                <View style={styles.modalValues}>
+                  {(selectedTitle.genres || []).length ? selectedTitle.genres!.map((value) => (
+                    <Text key={value} style={styles.modalValue}>{value}</Text>
+                  )) : <Text style={styles.modalStatus}>لا توجد فئة موثقة حاليًا</Text>}
+                </View>
+              </View>
+              {(selectedTitle.classification?.localizationLabels || []).length > 0 ? (
+                <View style={styles.modalSection}>
+                  <Text style={styles.modalSectionTitle}>الصوت والترجمة</Text>
+                  <View style={styles.modalValues}>
+                    {selectedTitle.classification!.localizationLabels.map((value) => (
+                      <Text key={value} style={styles.modalValue}>{value}</Text>
+                    ))}
+                  </View>
+                </View>
+              ) : null}
+              {(selectedTitle.classification?.sourceTags || []).length > 0 ? (
+                <View style={styles.modalSection}>
+                  <Text style={styles.modalSectionTitle}>وسوم المصدر</Text>
+                  <View style={styles.modalValues}>
+                    {selectedTitle.classification!.sourceTags.map((value) => (
+                      <Text key={value} style={styles.modalValue}>{value}</Text>
+                    ))}
+                  </View>
+                </View>
+              ) : null}
+              <View style={styles.modalSection}>
+                <Text style={styles.modalSectionTitle}>مصدر التصنيف</Text>
+                <Text style={styles.modalStatus}>
+                  {selectedTitle.classification?.source || "لم تُفحص بيانات التصنيف التفصيلية بعد"}
+                </Text>
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      ) : null}
+
       <Modal
-        visible={Boolean(selectedTitle)}
+        visible={Boolean(selectedTitle) && !(tvMode || Platform.OS === "android")}
         transparent
         animationType="slide"
         statusBarTranslucent

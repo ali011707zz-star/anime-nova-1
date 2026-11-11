@@ -184,21 +184,24 @@ function CharCard({ e, animeId, animeTitle, favIds, onToggle, tvMode = false, co
   const n = e.node;
   const isFav = favIds.has(n.id);
   return (
-    <View style={[d.charCard, { width: cardWidth }]}>
-      <View style={[d.charImgWrap, { width: cardWidth }, e.role === "MAIN" && d.charImgMain]}>
+    <Pressable
+      onPress={() => onToggle({ id: n.id, name: n.name?.full || "", image: n.image?.large, animeId, animeTitle })}
+      focusable={tvMode}
+      style={({ focused }) => [
+        d.charCard,
+        { width: cardWidth },
+        tvMode && { borderRadius: 12, padding: 2 },
+        tvMode && tvFocusStyle(focused),
+      ]}
+    >
+      <View style={[d.charImgWrap, { width: cardWidth - (tvMode ? 4 : 0) }, e.role === "MAIN" && d.charImgMain]}>
         {n.image?.large ? <Image source={{ uri: n.image.large }} style={d.charImg} /> : null}
-        {/* Heart button — tap to toggle favourite */}
-        <Pressable
-          onPress={() => onToggle({ id: n.id, name: n.name?.full || "", image: n.image?.large, animeId, animeTitle })}
-          focusable={tvMode}
-          style={({ focused }) => [d.charHeartBtn, isFav && d.charHeartBtnActive, tvMode && tvFocusStyle(focused)]}
-          hitSlop={6}
-        >
+        <View style={[d.charHeartBtn, isFav && d.charHeartBtnActive]}>
           <Ionicons name={isFav ? "heart" : "heart-outline"} size={12} color={isFav ? "#fff" : "rgba(255,255,255,0.90)"} />
-        </Pressable>
+        </View>
       </View>
       <Text style={[d.charName, { width: cardWidth }]} numberOfLines={2}>{n.name?.full}</Text>
-    </View>
+    </Pressable>
   );
 }
 
@@ -578,7 +581,7 @@ export default function AnimeDetailScreen() {
           </View>
         ) : <View style={d.topBarSpacer} />}
       </View>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[{ paddingBottom: 100 }, tvMode && d.tvContent]}>
+      <ScrollView focusable={false} showsVerticalScrollIndicator={false} contentContainerStyle={[{ paddingBottom: 100 }, tvMode && d.tvContent]}>
 
         {/* ── Hero Banner ── */}
         <View style={[d.hero, tvMode && d.tvHero]}>
@@ -754,26 +757,35 @@ export default function AnimeDetailScreen() {
         {desc ? (
           <View style={[d.section, tvMode && d.tvSection]}>
             <SectionHeader title="قصة الأنمي" tvMode={tvMode} />
-            <View style={[d.descBox, tvMode && d.tvDescBox]}>
+            <Pressable
+              onPress={() => setShowFull(f => !f)}
+              focusable={tvMode && desc.length <= 140}
+              onFocus={() => rememberDetailFocus("synopsis")}
+              style={({ focused }) => [
+                d.descBox,
+                tvMode && d.tvDescBox,
+                tvMode && desc.length <= 140 && tvFocusStyle(focused),
+              ]}
+            >
               <Text
                 style={[d.descText, tvMode && d.tvBodyText]}
                 numberOfLines={showFull ? undefined : 4}
               >{desc}</Text>
               {desc.length > 140 && (
-                  <Pressable onPress={() => setShowFull(f => !f)} focusable={tvMode}
-                    onFocus={() => rememberDetailFocus("read-more")}
-                    style={({ focused }) => [d.readMoreBtn, tvMode && d.tvReadMoreBtn, tvMode && tvFocusStyle(focused)]}>
+                <Pressable onPress={() => setShowFull(f => !f)} focusable={tvMode}
+                  onFocus={() => rememberDetailFocus("read-more")}
+                  style={({ focused }) => [d.readMoreBtn, tvMode && d.tvReadMoreBtn, tvMode && tvFocusStyle(focused)]}>
                   <Text style={[d.readMoreText, tvMode && d.tvReadMoreText]}>{showFull ? "عرض أقل" : "قراءة القصة كاملة"}</Text>
                   <Ionicons name={showFull ? "chevron-up" : "chevron-down"} size={tvMode ? 22 : 14} color={colors.textSecondary} />
                 </Pressable>
               )}
-            </View>
+            </Pressable>
           </View>
         ) : null}
 
         {/* ── Genres ── */}
         {(anime.genres?.length || 0) > 0 && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}
+          <ScrollView horizontal focusable={false} showsHorizontalScrollIndicator={false}
             contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }} style={{ marginTop: 14 }}>
             {anime.genres.slice(0, 10).map((g: string) => (
               <View key={g} style={[d.genreChip, tvMode && d.tvGenreChip]}>
@@ -786,7 +798,15 @@ export default function AnimeDetailScreen() {
         {/* ── Metadata ── */}
         <View style={[d.section, tvMode && d.tvSection]}>
           <SectionHeader title="معلومات الإنتاج" tvMode={tvMode} />
-          <View style={d.metaGrid}>
+          <Pressable
+            focusable={tvMode}
+            onFocus={() => rememberDetailFocus("metadata")}
+            style={({ focused }) => [
+              d.metaGrid,
+              tvMode && { borderRadius: 16, padding: 4 },
+              tvMode && tvFocusStyle(focused),
+            ]}
+          >
             {studio ? <MetaCard label="الاستوديو المنتج" value={studio} badge /> : null}
             {anime.source ? <MetaCard label="المصدر الأصلي" value={SOURCE_MAP[anime.source] || anime.source} /> : null}
             {anime.duration ? <MetaCard label="مدة الحلقة" value={fmtRuntime(anime.duration) || ""} /> : null}
@@ -795,7 +815,7 @@ export default function AnimeDetailScreen() {
             {(startD || endD) ? (
               <MetaCard label="عرض من : إلى" value={`${startD || "؟"} : ${endD || "مستمر"}`} wide />
             ) : null}
-          </View>
+          </Pressable>
         </View>
 
         {/* ── Trailer ── */}
@@ -865,7 +885,7 @@ export default function AnimeDetailScreen() {
               {suppChars.length > 0 && (
                 <>
                   <Text style={[d.tabSubTitle, { marginTop: 12 }]}>الشخصيات المساعدة</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  <ScrollView horizontal focusable={false} showsHorizontalScrollIndicator={false}>
                     <View style={[d.charGrid, d.charGridHorizontal, tvMode && d.tvCharGrid]}>
                       {suppChars.slice(0, 8).map((e: any) => <CharCard key={e.node.id} e={e} animeId={anime.id} animeTitle={anime.title?.romaji || ""} favIds={favCharIds} onToggle={toggleChar} tvMode={tvMode} columns={5} />)}
                     </View>
@@ -883,7 +903,7 @@ export default function AnimeDetailScreen() {
             related.length === 0 ? (
               <Text style={d.emptyTabText}>لا توجد أعمال ذات صلة</Text>
             ) : (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}
+              <ScrollView horizontal focusable={false} showsHorizontalScrollIndicator={false}
                 contentContainerStyle={{ gap: 10, paddingBottom: 4 }}>
                 {related.map((e: any) => {
                   const n = e.node;
@@ -959,32 +979,66 @@ export default function AnimeDetailScreen() {
       />
 
       {/* ── Rating bottom sheet ── */}
-      <Modal visible={showRating} animationType={tvMode ? "none" : "slide"} transparent onRequestClose={() => setShowRating(false)}>
-        <View style={d.ratingOverlay}>
+      {showRating && (tvMode || Platform.OS === "android") ? (
+        <View style={[d.ratingOverlay, StyleSheet.absoluteFillObject, { zIndex: 9999, elevation: 9999 }]} testID="nova-tv-modal-root">
           <Pressable style={StyleSheet.absoluteFill} focusable={false} accessible={false} onPress={() => setShowRating(false)} />
-          <View style={d.ratingSheet} testID="nova-tv-modal-root">
+          <View style={d.ratingSheet}>
             <Text style={d.ratingTitle}>أضف تقييمك</Text>
             <Text style={d.ratingSub}>اختر تقييمك من 1 إلى 10</Text>
             <View style={d.ratingBtns}>
-              {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
-                <Pressable key={n} onPress={() => submitRating(n)}
-                  focusable={tvMode}
-                  hasTVPreferredFocus={tvMode && (myRating > 0 ? n === myRating : n === 8)}
-                  style={({ focused }) => [d.ratingNum, n <= (myRating) && d.ratingNumActive, tvMode && tvFocusStyle(focused)]}>
-                  <Text style={[d.ratingNumText, n <= myRating && d.ratingNumTextActive]}>{n}</Text>
-                </Pressable>
-              ))}
+              {Array.from({ length: 10 }, (_, i) => i + 1).map(n => {
+                const isPreferred = tvMode && (myRating > 0 ? n === myRating : n === 8);
+                return (
+                  <Pressable key={n} onPress={() => submitRating(n)}
+                    focusable={tvMode}
+                    hasTVPreferredFocus={isPreferred}
+                    testID={isPreferred ? "nova-tv-preferred-focus" : undefined}
+                    style={({ focused }) => [d.ratingNum, n <= (myRating) && d.ratingNumActive, tvMode && tvFocusStyle(focused)]}>
+                    <Text style={[d.ratingNumText, n <= myRating && d.ratingNumTextActive]}>{n}</Text>
+                  </Pressable>
+                );
+              })}
             </View>
             {myRating > 0 && (
-              <Pressable onPress={() => submitRating(0)} focusable={tvMode} style={({ focused }) => [{ marginTop: 10 }, tvMode && tvFocusStyle(focused)]}>
-                <Text style={{ color: colors.destructive, fontSize: 11, fontFamily: "Cairo_700Bold", textAlign: "center" }}>
+              <Pressable onPress={() => submitRating(0)} focusable={tvMode} style={({ focused }) => [{ marginTop: 10, paddingVertical: 6, paddingHorizontal: 14, borderRadius: 10 }, tvMode && tvFocusStyle(focused)]}>
+                <Text style={{ color: colors.destructive, fontSize: 12, fontFamily: "Cairo_700Bold", textAlign: "center" }}>
                   حذف التقييم
                 </Text>
               </Pressable>
             )}
+            <Pressable onPress={() => setShowRating(false)} focusable={tvMode} style={({ focused }) => [{ marginTop: 8, paddingVertical: 8, paddingHorizontal: 18, borderRadius: 10, backgroundColor: colors.surfaceElevated }, tvMode && tvFocusStyle(focused)]}>
+              <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: "Cairo_700Bold", textAlign: "center" }}>
+                إغلاق
+              </Text>
+            </Pressable>
           </View>
         </View>
-      </Modal>
+      ) : (
+        <Modal visible={showRating} animationType="slide" transparent onRequestClose={() => setShowRating(false)}>
+          <View style={d.ratingOverlay}>
+            <Pressable style={StyleSheet.absoluteFill} focusable={false} accessible={false} onPress={() => setShowRating(false)} />
+            <View style={d.ratingSheet}>
+              <Text style={d.ratingTitle}>أضف تقييمك</Text>
+              <Text style={d.ratingSub}>اختر تقييمك من 1 إلى 10</Text>
+              <View style={d.ratingBtns}>
+                {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
+                  <Pressable key={n} onPress={() => submitRating(n)}
+                    style={[d.ratingNum, n <= (myRating) && d.ratingNumActive]}>
+                    <Text style={[d.ratingNumText, n <= myRating && d.ratingNumTextActive]}>{n}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              {myRating > 0 && (
+                <Pressable onPress={() => submitRating(0)} style={{ marginTop: 10 }}>
+                  <Text style={{ color: colors.destructive, fontSize: 11, fontFamily: "Cairo_700Bold", textAlign: "center" }}>
+                    حذف التقييم
+                  </Text>
+                </Pressable>
+              )}
+            </View>
+          </View>
+        </Modal>
+      )}
     </View>
   );
 }
@@ -1118,10 +1172,10 @@ function createDetailStyles(colors: ThemePalette) {
   emptyTabText: { textAlign: "center", color: colors.textMuted, fontSize: 12, fontFamily: "Cairo_400Regular", paddingVertical: 20 },
   tvContent: { paddingHorizontal: 40, paddingBottom: 120 },
   tvTopBar: { height: 62, paddingHorizontal: 28 },
-  tvTopBarTitle: { left: 140, right: 84, fontSize: 18, lineHeight: 27 },
-  tvTopBarStatus: { left: 28, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 11 },
+  tvTopBarTitle: { fontSize: 18, lineHeight: 27 },
+  tvTopBarStatus: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 11 },
   tvTopBarStatusText: { fontSize: 13, lineHeight: 20 },
-  tvTopBarBack: { width: 48, height: 48, right: 18, borderRadius: 14 },
+  tvTopBarBack: { width: 48, height: 48, borderRadius: 14 },
   tvCharGrid: { columnGap: 14, rowGap: 14 },
   tvSection: { marginTop: 22 },
   tvSectionHeader: { gap: 10, marginBottom: 14 },

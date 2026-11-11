@@ -1393,13 +1393,23 @@ export function RiftPlayer({
                   <Text style={styles.controlText}>10</Text>
                 </Pressable>
               </View>
-              {skipIntro && position >= skipIntro.start && position < skipIntro.end && !tvMode && (
-                <Pressable onPress={() => seek(skipIntro.end)} style={styles.skip}>
+              {skipIntro && position >= skipIntro.start && position < skipIntro.end && (
+                <Pressable
+                  onPress={() => seek(skipIntro.end)}
+                  focusable={tvMode}
+                  hasTVPreferredFocus={tvMode}
+                  style={({ focused }) => [styles.skip, tvMode && tvFocusStyle(focused)]}
+                >
                   <Text style={styles.skipText}>تخطي المقدمة</Text>
                 </Pressable>
               )}
-              {skipOutro && position >= skipOutro.start && position < skipOutro.end && !tvMode && (
-                <Pressable onPress={() => seek(skipOutro.end)} style={styles.skip}>
+              {skipOutro && position >= skipOutro.start && position < skipOutro.end && (
+                <Pressable
+                  onPress={() => seek(skipOutro.end)}
+                  focusable={tvMode}
+                  hasTVPreferredFocus={tvMode}
+                  style={({ focused }) => [styles.skip, tvMode && tvFocusStyle(focused)]}
+                >
                   <Text style={styles.skipText}>تخطي النهاية</Text>
                 </Pressable>
               )}

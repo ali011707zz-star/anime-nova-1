@@ -289,7 +289,7 @@ export default function AnimationDetailScreen() {
 
       {/* ── Genres ── */}
       {genres.length > 0 && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.genresScroll} contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}>
+        <ScrollView horizontal focusable={false} showsHorizontalScrollIndicator={false} style={s.genresScroll} contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}>
           {genres.map(g => (
             <Text key={g.id} style={s.genreChip}>
               {GENRE_AR[g.id] || g.name}
@@ -364,7 +364,7 @@ export default function AnimationDetailScreen() {
       {cast.length > 0 && (
         <View style={s.section}>
           <Text style={s.sectionTitle}>أبرز الأصوات / الشخصيات</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}>
+          <ScrollView horizontal focusable={false} showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}>
             {cast.map((c: any, i: number) => (
               <View key={c.id || i} style={s.castCard}>
                 {c.profile_path ? (
@@ -391,7 +391,7 @@ export default function AnimationDetailScreen() {
       {recs.length > 0 && (
         <View style={s.section}>
           <Text style={s.sectionTitle}>قد يعجبك أيضاً</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}>
+          <ScrollView horizontal focusable={false} showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}>
             {recs.map((r: any) => (
               <Pressable
                 key={r.id}

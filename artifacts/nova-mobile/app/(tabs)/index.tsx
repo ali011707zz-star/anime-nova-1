@@ -534,9 +534,9 @@ export default function HomeScreen() {
                   </Pressable>
                 );
               }}
-              initialNumToRender={isTvLayout ? 8 : 5}
-              maxToRenderPerBatch={isTvLayout ? 8 : 5}
-              windowSize={isTvLayout ? 11 : 3}
+              initialNumToRender={isTvLayout ? 5 : 5}
+              maxToRenderPerBatch={isTvLayout ? 4 : 5}
+              windowSize={isTvLayout ? 5 : 3}
               removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
             />
           </View>
@@ -596,9 +596,9 @@ export default function HomeScreen() {
                     </LinearGradient>
                   </Pressable>
                 )}
-                initialNumToRender={isTvLayout ? 8 : 5}
-                maxToRenderPerBatch={isTvLayout ? 8 : 5}
-                windowSize={isTvLayout ? 11 : 3}
+                initialNumToRender={isTvLayout ? 5 : 5}
+                maxToRenderPerBatch={isTvLayout ? 4 : 5}
+                windowSize={isTvLayout ? 5 : 3}
                 removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
               />
             )}
@@ -706,9 +706,9 @@ export default function HomeScreen() {
                   </Pressable>
                 );
               }}
-              initialNumToRender={isTvLayout ? 8 : 5}
-              maxToRenderPerBatch={isTvLayout ? 8 : 5}
-              windowSize={isTvLayout ? 11 : 3}
+              initialNumToRender={isTvLayout ? 5 : 5}
+              maxToRenderPerBatch={isTvLayout ? 4 : 5}
+              windowSize={isTvLayout ? 5 : 3}
               removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
             />
           </View>
@@ -801,9 +801,9 @@ export default function HomeScreen() {
                   </Pressable>
                 );
               }}
-              initialNumToRender={isTvLayout ? 8 : 5}
-              maxToRenderPerBatch={isTvLayout ? 8 : 5}
-              windowSize={isTvLayout ? 11 : 3}
+              initialNumToRender={isTvLayout ? 5 : 5}
+              maxToRenderPerBatch={isTvLayout ? 4 : 5}
+              windowSize={isTvLayout ? 5 : 3}
               removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
             />
           </View>
@@ -885,9 +885,9 @@ export default function HomeScreen() {
                   </Pressable>
                 );
               }}
-              initialNumToRender={isTvLayout ? 8 : 5}
-              maxToRenderPerBatch={isTvLayout ? 8 : 5}
-              windowSize={isTvLayout ? 11 : 3}
+              initialNumToRender={isTvLayout ? 5 : 5}
+              maxToRenderPerBatch={isTvLayout ? 4 : 5}
+              windowSize={isTvLayout ? 5 : 3}
               removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
             />
           </View>
@@ -1106,10 +1106,10 @@ export default function HomeScreen() {
         showsVerticalScrollIndicator={false}
         refreshControl={isTvLayout ? undefined : <RefreshControl refreshing={false} onRefresh={refresh} tintColor={colors.primary} />}
         removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
-        initialNumToRender={isTvLayout ? 12 : 3}
-        maxToRenderPerBatch={isTvLayout ? 12 : 2}
-        updateCellsBatchingPeriod={40}
-        windowSize={isTvLayout ? 21 : 5}
+        initialNumToRender={isTvLayout ? 3 : 3}
+        maxToRenderPerBatch={isTvLayout ? 2 : 2}
+        updateCellsBatchingPeriod={50}
+        windowSize={isTvLayout ? 7 : 5}
       />
       <DrawerMenu visible={showDrawer} onClose={() => setShowDrawer(false)} />
     </View>

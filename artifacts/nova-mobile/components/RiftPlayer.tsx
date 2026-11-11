@@ -4023,7 +4023,7 @@ function ExpoRiftPlayer({
         <View
           style={[
             s.skipBtnRowFloat,
-            tvMode && { justifyContent: "center", bottom: showControls ? 152 : 54 },
+            tvMode && { bottom: 148, left: 28, right: 28 },
           ]}
           pointerEvents="box-none"
         >

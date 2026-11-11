@@ -645,15 +645,21 @@ export default function DownloadsScreen() {
   return (
     <>
     {/* ── تشغيل محلي — Modal كاملة الشاشة حتى لا يظهر شريط التنقل السفلي ── */}
-    <Modal
-      visible={playingItem !== null}
-      animationType="slide"
-      presentationStyle="fullScreen"
-      onRequestClose={handleClosePlayer}
-      statusBarTranslucent
-    >
-      {playingItem && <LocalPlayer item={playingItem} onClose={handleClosePlayer} />}
-    </Modal>
+    {playingItem !== null && tvMode ? (
+      <View style={[StyleSheet.absoluteFillObject, { zIndex: 9999, elevation: 9999, backgroundColor: "#000" }]} testID="nova-tv-modal-root">
+        <LocalPlayer item={playingItem} onClose={handleClosePlayer} />
+      </View>
+    ) : (
+      <Modal
+        visible={playingItem !== null}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={handleClosePlayer}
+        statusBarTranslucent
+      >
+        {playingItem && <LocalPlayer item={playingItem} onClose={handleClosePlayer} />}
+      </Modal>
+    )}
 
     <View style={[s.screen, { paddingTop: topPad }]}>
       <View style={[s.header, tvMode && s.tvHeader]}>
@@ -912,13 +918,13 @@ const createDownloadStyles = (colors: ThemePalette) => StyleSheet.create({
     borderColor: colors.destructiveBorder,
   },
   clearBtnText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: colors.destructive },
-  tvHeader: { height: 74 },
-  tvHeaderRight: { top: 8, bottom: 8, left: 146, right: 24, gap: 12 },
+  tvHeader: { height: 74, paddingHorizontal: 24 },
+  tvHeaderRight: { gap: 14 },
   tvHeaderIcon: { width: 50, height: 50, borderRadius: 16 },
   tvHeaderBack: { width: 50, height: 50, borderRadius: 16 },
   tvHeaderTitle: { fontSize: 18, lineHeight: 26 },
   tvHeaderSub: { fontSize: 12, lineHeight: 18 },
-  tvClearBtn: { left: 24, top: 17, paddingHorizontal: 14, paddingVertical: 9 },
+  tvClearBtn: { paddingHorizontal: 14, paddingVertical: 9 },
 
   /* Section header */
   sectionHeader: {

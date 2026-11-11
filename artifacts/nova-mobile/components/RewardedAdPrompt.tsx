@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from "react";
 import {
+  BackHandler,
+  Linking,
   Modal,
+  Platform,
   StyleSheet,
   Text,
   View,
-  Linking,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -95,15 +97,26 @@ export function RewardedAdPrompt() {
     ? "أكملت 4 تنزيلات ناجحة. شاهد إعلانًا قصيرًا لمتابعة تنزيل الحلقات."
     : "إعلان قصير واحد يتيح لك المشاهدة لمدة 60 دقيقة بدون إعلانات.";
 
-  return (
-    <Modal
-      visible={!!pending}
-      transparent
-      animationType="fade"
-      statusBarTranslucent
-      onRequestClose={() => !busy && close(false)}
+  useEffect(() => {
+    if (!pending || Platform.OS !== "android") return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (!busy) close(false);
+      return true;
+    });
+    return () => sub.remove();
+  }, [pending, busy]);
+
+  if (!pending) return null;
+
+  const content = (
+    <View
+      testID="nova-tv-modal-root"
+      style={[
+        styles.backdrop,
+        { backgroundColor: colors.overlay },
+        (tvMode || Platform.OS === "android") && [StyleSheet.absoluteFillObject, { zIndex: 9999, elevation: 9999 }],
+      ]}
     >
-      <View style={[styles.backdrop, { backgroundColor: colors.overlay }]}>
         <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <View style={styles.topRow}>
             <View style={styles.badge}>
@@ -171,7 +184,22 @@ export function RewardedAdPrompt() {
             </Pressable>
           </View>
         </View>
-      </View>
+    </View>
+  );
+
+  if (tvMode || Platform.OS === "android") {
+    return content;
+  }
+
+  return (
+    <Modal
+      visible={!!pending}
+      transparent
+      animationType="fade"
+      statusBarTranslucent
+      onRequestClose={() => !busy && close(false)}
+    >
+      {content}
     </Modal>
   );
 }

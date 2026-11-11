@@ -305,14 +305,17 @@ export function CommentsSheet({ visible, onClose, animeId, tmdbId, episodeNumber
     );
   };
 
-  return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      transparent
-      onRequestClose={onClose}
+  if (!visible) return null;
+
+  const sheetBody = (
+    <View
+      testID="nova-tv-modal-root"
+      style={[
+        { flex: 1, justifyContent: "flex-end" },
+        (tvMode || Platform.OS === "android") && [StyleSheet.absoluteFillObject, { zIndex: 9999, elevation: 9999 }],
+      ]}
     >
-      <Pressable style={[cs.backdrop, { backgroundColor: colors.overlay }]} onPress={onClose} />
+      <Pressable style={[cs.backdrop, StyleSheet.absoluteFillObject, { backgroundColor: colors.overlay }]} focusable={false} accessible={false} onPress={onClose} />
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={[cs.sheet, { backgroundColor: colors.surface, borderColor: colors.border, paddingBottom: insets.bottom + 8 }]}
@@ -333,9 +336,24 @@ export function CommentsSheet({ visible, onClose, animeId, tmdbId, episodeNumber
               </View>
             )}
           </View>
-          <Pressable onPress={loadComments} style={cs.refreshBtn}>
-            <Ionicons name="refresh" size={16} color={colors.textSecondary} />
-          </Pressable>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <Pressable
+              onPress={loadComments}
+              focusable={tvMode}
+              style={({ focused }) => [cs.refreshBtn, tvMode && tvFocusStyle(focused)]}
+            >
+              <Ionicons name="refresh" size={16} color={colors.textSecondary} />
+            </Pressable>
+            <Pressable
+              onPress={onClose}
+              focusable={tvMode}
+              hasTVPreferredFocus={tvMode}
+              testID={tvMode ? "nova-tv-preferred-focus" : undefined}
+              style={({ focused }) => [cs.refreshBtn, tvMode && tvFocusStyle(focused)]}
+            >
+              <Ionicons name="close" size={18} color={colors.textPrimary} />
+            </Pressable>
+          </View>
         </View>
 
         {/* Comment list */}
@@ -403,7 +421,13 @@ export function CommentsSheet({ visible, onClose, animeId, tmdbId, episodeNumber
               <Pressable
                 onPress={postComment}
                 disabled={!text.trim() || posting}
-                style={[cs.sendBtn, { backgroundColor: colors.button }, (!text.trim() || posting) && cs.sendBtnDisabled]}
+                focusable={tvMode && Boolean(text.trim()) && !posting}
+                style={({ focused }) => [
+                  cs.sendBtn,
+                  { backgroundColor: colors.button },
+                  (!text.trim() || posting) && cs.sendBtnDisabled,
+                  tvMode && tvFocusStyle(focused),
+                ]}
               >
                 {posting ? (
                   <ActivityIndicator size="small" color="#fff" />
@@ -418,6 +442,21 @@ export function CommentsSheet({ visible, onClose, animeId, tmdbId, episodeNumber
           </View>
         )}
       </KeyboardAvoidingView>
+    </View>
+  );
+
+  if (tvMode || Platform.OS === "android") {
+    return sheetBody;
+  }
+
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent
+      onRequestClose={onClose}
+    >
+      {sheetBody}
     </Modal>
   );
 }

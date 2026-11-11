@@ -674,10 +674,10 @@ export default function SearchScreen() {
       />
 
       {/* ══ trace.moe modal ══ */}
-      <Modal visible={showTrace} animationType="slide" transparent presentationStyle="overFullScreen"
-        onRequestClose={() => setShowTrace(false)}>
-        <Pressable style={sm.overlay} onPress={() => setShowTrace(false)}>
-          <Pressable style={sm.sheet} onPress={e => e.stopPropagation()}>
+      {showTrace && (
+        <View style={[sm.overlay, StyleSheet.absoluteFillObject, { zIndex: 9999, elevation: 9999 }]} testID="nova-tv-modal-root">
+          <Pressable style={StyleSheet.absoluteFill} focusable={false} accessible={false} onPress={() => setShowTrace(false)} />
+          <View style={sm.sheet}>
 
             {/* header */}
             <View style={sm.header}>
@@ -695,6 +695,8 @@ export default function SearchScreen() {
 
             {/* Pick image — primary action */}
             <Pressable onPress={pickImageForTrace} disabled={traceLoading}
+              hasTVPreferredFocus={tvMode}
+              testID={tvMode ? "nova-tv-preferred-focus" : undefined}
               style={[sm.uploadBtn, traceLoading && { opacity: 0.4 }]}>
               <Ionicons name="image-outline" size={20} color={colors.accent} />
               <Text style={sm.uploadBtnText}>اختر صورة من الجهاز</Text>
@@ -754,9 +756,9 @@ export default function SearchScreen() {
                 ))}
               </ScrollView>
             )}
-          </Pressable>
-        </Pressable>
-      </Modal>
+          </View>
+        </View>
+      )}
 
     </KeyboardAvoidingView>
   );

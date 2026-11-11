@@ -17,12 +17,12 @@ const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
 export function SectionHeader({
   children,
   onSeeAll,
-  focusable = false,
+  focusable,
   seeAllLabel = "عرض الكل",
   onFocus,
 }: Props) {
   const colors = useColors();
-  const { size: scaleSize } = useTvMetrics();
+  const { tv, size: scaleSize } = useTvMetrics();
 
   return (
     <View style={[styles.header, { paddingHorizontal: scaleSize(14, 40), marginBottom: scaleSize(10, 16) }]}>
@@ -34,7 +34,7 @@ export function SectionHeader({
           hitSlop={8}
           onPress={onSeeAll}
           onFocus={onFocus}
-          focusable={focusable}
+          focusable={focusable ?? tv}
           style={({ focused, pressed }) => [
             styles.seeAll,
             {

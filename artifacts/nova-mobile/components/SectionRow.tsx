@@ -70,10 +70,10 @@ export const SectionRow = React.memo(function SectionRow({
       viewabilityConfig={focusScroll.viewabilityConfig}
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={[styles.scroll, { paddingHorizontal: sidePadding }]}
-      initialNumToRender={tvMode ? 8 : 4}
-      maxToRenderPerBatch={tvMode ? 6 : 2}
+      initialNumToRender={tvMode ? 5 : 4}
+      maxToRenderPerBatch={tvMode ? 4 : 2}
       updateCellsBatchingPeriod={50}
-      windowSize={tvMode ? 11 : 3}
+      windowSize={tvMode ? 5 : 3}
       getItemLayout={(_, index) => ({
         length: cardWidth + 14,
         offset: (cardWidth + 14) * index,
