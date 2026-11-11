@@ -10,6 +10,8 @@ const KOTLIN_METHODS = `
   private var novaCenterConsumed = false
   private var novaCurrentFocusedView: android.view.View? = null
   private var novaFocusRecoveryPosted = false
+  private var novaFocusedForegroundView: android.view.View? = null
+  private var novaPrevForeground: android.graphics.drawable.Drawable? = null
 
   private fun novaIsTvDevice(): Boolean {
     val uiMode = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_TYPE_MASK)
@@ -42,18 +44,101 @@ const KOTLIN_METHODS = `
       device.contains("skyworth") ||
       device.contains("haier") ||
       device.contains("toshiba") ||
+      device.contains("changhong") ||
+      device.contains("coocaa") ||
+      device.contains("konka") ||
       device.contains("onn")
   }
 
-  private fun novaDispatchRnFocusEvent(view: android.view.View, focused: Boolean) {
-    // React Native views dispatch focus/blur natively via OnFocusChangeListener
+  private class NovaRnFocusEvent(
+    surfaceId: Int,
+    viewId: Int,
+    private val evtName: String
+  ) : com.facebook.react.uimanager.events.Event<NovaRnFocusEvent>(surfaceId, viewId) {
+    override fun getEventName(): String = evtName
+    override fun canCoalesce(): Boolean = false
+    override fun getEventData(): com.facebook.react.bridge.WritableMap {
+      return com.facebook.react.bridge.Arguments.createMap().apply {
+        putInt("target", viewTag)
+      }
+    }
+  }
+
+  private fun novaDispatchRnFocusEvent(view: android.view.View?, isFocus: Boolean) {
+    if (view == null || view.id == android.view.View.NO_ID || view.id <= 0) return
+    try {
+      var ctx = view.context
+      while (ctx is android.content.ContextWrapper && ctx !is com.facebook.react.bridge.ReactContext) {
+        ctx = ctx.baseContext
+      }
+      val reactCtx = (ctx as? com.facebook.react.bridge.ReactContext)
+        ?: (application as? com.facebook.react.ReactApplication)?.reactNativeHost?.reactInstanceManager?.currentReactContext
+        ?: return
+      val surfaceId = com.facebook.react.uimanager.UIManagerHelper.getSurfaceId(reactCtx)
+      val dispatcher = com.facebook.react.uimanager.UIManagerHelper.getEventDispatcherForReactTag(reactCtx, view.id) ?: return
+      val evtName = if (isFocus) "topFocus" else "topBlur"
+      dispatcher.dispatchEvent(NovaRnFocusEvent(surfaceId, view.id, evtName))
+    } catch (_: Throwable) {}
+  }
+
+  private fun novaApplyNativeFocusRing(newFocus: android.view.View?) {
+    try {
+      val prev = novaFocusedForegroundView
+      if (prev != null) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+          try { prev.foreground = novaPrevForeground } catch (_: Throwable) {}
+        }
+        try {
+          prev.translationZ = 0f
+          prev.animate().scaleX(1f).scaleY(1f).setDuration(90L).start()
+        } catch (_: Throwable) {}
+        novaFocusedForegroundView = null
+        novaPrevForeground = null
+      }
+
+      if (newFocus == null || newFocus === window?.decorView) return
+      if (!novaDpadMode && !novaIsTvDevice()) return
+      val clsName = newFocus.javaClass.name
+      if (
+        newFocus is android.widget.ScrollView ||
+        clsName.contains("ScrollView") ||
+        clsName.contains("ReactRootView")
+      ) {
+        return
+      }
+
+      if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+        novaFocusedForegroundView = newFocus
+        novaPrevForeground = newFocus.foreground
+        val d = resources.displayMetrics.density
+        val radius = 14f * d
+        val outerRing = android.graphics.drawable.GradientDrawable().apply {
+          shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+          cornerRadius = radius
+          setStroke((4f * d).toInt().coerceAtLeast(4), android.graphics.Color.parseColor("#00F0FF"))
+          setColor(android.graphics.Color.argb(34, 0, 240, 255))
+        }
+        val innerRing = android.graphics.drawable.GradientDrawable().apply {
+          shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+          cornerRadius = (radius - 3f * d).coerceAtLeast(4f)
+          setStroke((2f * d).toInt().coerceAtLeast(2), android.graphics.Color.parseColor("#FFFFFF"))
+          setColor(android.graphics.Color.TRANSPARENT)
+        }
+        val layered = android.graphics.drawable.LayerDrawable(arrayOf(outerRing, innerRing)).apply {
+          val insetPx = (3f * d).toInt().coerceAtLeast(2)
+          setLayerInset(1, insetPx, insetPx, insetPx, insetPx)
+        }
+        newFocus.foreground = layered
+      }
+      try {
+        newFocus.translationZ = 16f
+        newFocus.animate().scaleX(1.03f).scaleY(1.03f).setDuration(110L).start()
+      } catch (_: Throwable) {}
+    } catch (_: Throwable) {}
   }
 
   private fun novaScrollFocusedIntoView(focused: android.view.View) {
     try {
-      // Do NOT manually scroll ReactHorizontalScrollView here: FlatList's JS scrollToIndex
-      // and Android's native requestChildFocus already handle horizontal rails. Calling
-      // requestChildRectangleOnScreen on horizontal rails caused two competing scroll animations.
       var current: android.view.ViewParent? = focused.parent
       while (current != null) {
         if (current is android.widget.ScrollView) {
@@ -146,7 +231,7 @@ const KOTLIN_METHODS = `
           } catch (_: Throwable) {}
         }
       }
-    }, 45L)
+    }, 55L)
   }
 
   private fun novaEmitTvDetectedToJs() {
@@ -169,8 +254,14 @@ const KOTLIN_METHODS = `
     if (novaIsTvDevice()) {
       novaDpadMode = true
       decor.isFocusableInTouchMode = false
-      decor.postDelayed({ novaEmitTvDetectedToJs() }, 350L)
-      decor.postDelayed({ novaEmitTvDetectedToJs() }, 1500L)
+      decor.postDelayed({
+        novaEmitTvDetectedToJs()
+        novaScheduleFocusRecovery()
+      }, 350L)
+      decor.postDelayed({
+        novaEmitTvDetectedToJs()
+        novaScheduleFocusRecovery()
+      }, 1200L)
     }
 
     decor.viewTreeObserver.addOnGlobalFocusChangeListener { oldFocus, newFocus ->
@@ -183,13 +274,15 @@ const KOTLIN_METHODS = `
           try { newFocus.defaultFocusHighlightEnabled = false } catch (_: Throwable) {}
         }
         novaDispatchRnFocusEvent(newFocus, true)
+        novaApplyNativeFocusRing(newFocus)
         if (novaDpadMode || novaIsTvDevice()) {
           novaScrollFocusedIntoView(newFocus)
         }
-      } else if (novaDpadMode || novaIsTvDevice()) {
-        // When a focused loading/placeholder view unmounts, immediately recover focus
-        // onto nova-tv-preferred-focus so the cursor never disappears.
-        novaScheduleFocusRecovery()
+      } else {
+        novaApplyNativeFocusRing(null)
+        if (novaDpadMode || novaIsTvDevice()) {
+          novaScheduleFocusRecovery()
+        }
       }
     }
 
@@ -198,10 +291,7 @@ const KOTLIN_METHODS = `
       val cur = currentFocus
       val curTag = cur?.tag?.toString() ?: ""
       if (cur == null || cur === decor || !cur.isAttachedToWindow || curTag == "nova-tv-scan-exit") {
-        val preferred = novaFindViewByTag(decor, "nova-tv-preferred-focus")
-        if (preferred != null && preferred !== cur) {
-          novaScheduleFocusRecovery()
-        }
+        novaScheduleFocusRecovery()
       }
     }
   }

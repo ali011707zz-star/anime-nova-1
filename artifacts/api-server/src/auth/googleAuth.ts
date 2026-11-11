@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { sbSelect, sbInsert, sbPatch } from "../lib/supabaseClient.js";
 import { issueUserToken } from "../lib/security.js";
+import { approveTvSessionForUser, recordPendingTvCodeFromRequest } from "../routes/deviceLink.js";
 
 async function generateUniqueUsername(base: string): Promise<string> {
   const clean = base
@@ -33,10 +34,16 @@ function userPayload(u: any) {
 }
 
 export function registerGoogleAuthRoutes(app: Express): void {
+  app.use("/tv", (req: Request, _res: Response, next) => {
+    if (req.query?.code) {
+      recordPendingTvCodeFromRequest(req, req.query.code);
+    }
+    next();
+  });
 
   app.post("/api/auth/google/token", async (req: Request, res: Response) => {
     try {
-      const { accessToken } = req.body || {};
+      const { accessToken, tvCode } = req.body || {};
       if (!accessToken)
         return res.status(400).json({ error: "accessToken مطلوب" });
 
@@ -87,7 +94,17 @@ export function registerGoogleAuthRoutes(app: Express): void {
       (req.session as any).userId = user.id;
       req.session.cookie.maxAge   = 30 * 24 * 60 * 60 * 1000;
 
-      return res.json(userPayload(user));
+      // Automatically approve any pending TV login session for this user/phone
+      let tvApproved = false;
+      try {
+        const tvResult = await approveTvSessionForUser(String(user.id), { code: tvCode, req });
+        tvApproved = tvResult.ok;
+      } catch {}
+
+      return res.json({
+        ...userPayload(user),
+        tvApproved,
+      });
     } catch (err: any) {
       console.error("[google-auth] error:", err.message);
       return res.status(500).json({ error: "حدث خطأ، حاول مرة أخرى" });

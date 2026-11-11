@@ -74,10 +74,10 @@ export default function TvLinkScreen() {
   const tvMode = isTvDevice();
   const goBack = () => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any);
 
-  const [mode, setMode] = useState<"qr" | "manual">(tvMode ? "qr" : "manual");
+  const [mode, setMode] = useState<"qr" | "manual">("qr");
   const [code, setCode] = useState("");
   const [deviceId, setDeviceId] = useState<string | null>(null);
-  const [checking, setChecking] = useState(true);
+  const [checking, setChecking] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -100,7 +100,11 @@ export default function TvLinkScreen() {
     await setUserAuthToken(data.authToken);
     await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(user));
     setCurrentUser(user);
-    router.replace("/(tabs)" as any);
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace("/(tabs)" as any);
+    }
   }, [router, setCurrentUser]);
 
   const startTvGoogleSession = useCallback(async () => {
@@ -142,33 +146,34 @@ export default function TvLinkScreen() {
     let active = true;
     void getDeviceId().then(id => { if (active) setDeviceId(id); });
     secureFetch(`${getBaseUrl()}/api/auth/me`)
-      .then(response => {
-        if (active) {
-          if (response.ok) router.replace("/(tabs)" as any);
-          else setChecking(false);
+      .then(async response => {
+        if (!active || !response.ok) return;
+        const me = await response.json().catch(() => null);
+        if (active && me?.id) {
+          if (router.canGoBack()) router.back();
+          else router.replace("/(tabs)" as any);
         }
       })
-      .catch(() => { if (active) setChecking(false); });
+      .catch(() => {});
     return () => { active = false; };
   }, [router]);
 
   useEffect(() => {
-    if (checking) return;
-    if (tvMode && mode === "qr" && !tvSession && !sessionLoading && !sessionError) {
+    if (mode === "qr" && !tvSession && !sessionLoading && !sessionError) {
       void startTvGoogleSession();
     }
-  }, [checking, tvMode, mode, tvSession, sessionLoading, sessionError, startTvGoogleSession]);
+  }, [mode, tvSession, sessionLoading, sessionError, startTvGoogleSession]);
 
-  // Poll every 2.5 seconds while TV Google session is active
+  // Poll every 2 seconds while TV Google session is active
   useEffect(() => {
     if (pollTimerRef.current) {
       clearInterval(pollTimerRef.current);
       pollTimerRef.current = null;
     }
-    if (checking || mode !== "qr" || !tvSession) return;
+    if (mode !== "qr" || !tvSession) return;
 
     let cancelled = false;
-    pollTimerRef.current = setInterval(async () => {
+    const checkStatus = async () => {
       if (cancelled) return;
       try {
         const id = deviceId || await getDeviceId();
@@ -189,13 +194,16 @@ export default function TvLinkScreen() {
           return;
         }
         if (res.ok && data.status === "approved" && data.authToken) {
+          cancelled = true;
           if (pollTimerRef.current) clearInterval(pollTimerRef.current);
           await completeLogin(data);
         }
       } catch {
         // Ignore transient network hiccups during polling
       }
-    }, 2500);
+    };
+
+    pollTimerRef.current = setInterval(checkStatus, 2000);
 
     return () => {
       cancelled = true;
@@ -204,7 +212,7 @@ export default function TvLinkScreen() {
         pollTimerRef.current = null;
       }
     };
-  }, [checking, mode, tvSession, deviceId, completeLogin]);
+  }, [mode, tvSession, deviceId, completeLogin]);
 
   const handleClaim = async (overrideCode?: string) => {
     const normalized = normalizeLinkCode(overrideCode ?? code);

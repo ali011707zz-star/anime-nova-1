@@ -63,7 +63,12 @@ export default function AuthCallback() {
             return;
           }
           await refreshUser();
-          navigate("/");
+          const pendingTvCode = sessionStorage.getItem("nova-tv-pending-code");
+          if (pendingTvCode) {
+            navigate(`/tv?code=${encodeURIComponent(pendingTvCode)}&auto=1`);
+          } else {
+            navigate("/");
+          }
         })
         .catch(() => {
           setErrorMsg("خطأ في الاتصال بالخادم");
@@ -79,6 +84,14 @@ export default function AuthCallback() {
     const hash        = window.location.hash.slice(1);
     const hashParams  = new URLSearchParams(hash);
     const accessToken = hashParams.get("access_token");
+    const hashState   = hashParams.get("state") || qParams.get("state") || "";
+    const stateTvCode = hashState.startsWith("tv:") ? hashState.slice(3).replace(/\D/g, "").slice(0, 6) : "";
+    const storedTvCode = (
+      stateTvCode ||
+      sessionStorage.getItem("nova-tv-pending-code") ||
+      localStorage.getItem("nova-tv-pending-code") ||
+      ""
+    ).replace(/\D/g, "").slice(0, 6);
     const hashError   = hashParams.get("error");
     const hashErrDesc = hashParams.get("error_description");
 
@@ -100,7 +113,7 @@ export default function AuthCallback() {
       method : "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
-      body   : JSON.stringify({ accessToken }),
+      body   : JSON.stringify({ accessToken, tvCode: storedTvCode || undefined }),
     })
       .then(async r => {
         const data = await r.json();
@@ -111,7 +124,35 @@ export default function AuthCallback() {
           return;
         }
         await refreshUser();
-        navigate("/");
+        const pendingTvCode = storedTvCode || (
+          sessionStorage.getItem("nova-tv-pending-code") ||
+          localStorage.getItem("nova-tv-pending-code") ||
+          ""
+        ).replace(/\D/g, "").slice(0, 6);
+
+        if (pendingTvCode.length === 6) {
+          let approvedOk = Boolean(data.tvApproved);
+          if (!approvedOk) {
+            try {
+              const appRes = await fetch(API_BASE + "/api/device-link/tv-session/approve", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
+                body: JSON.stringify({ code: pendingTvCode }),
+              });
+              approvedOk = appRes.ok;
+            } catch {}
+          }
+          try {
+            sessionStorage.removeItem("nova-tv-pending-code");
+            localStorage.removeItem("nova-tv-pending-code");
+          } catch {}
+          navigate(`/tv?code=${encodeURIComponent(pendingTvCode)}&auto=1${approvedOk ? "&approved=1" : ""}`);
+        } else if (data.tvApproved) {
+          navigate("/tv?approved=1");
+        } else {
+          navigate("/");
+        }
       })
       .catch(() => {
         setErrorMsg("خطأ في الاتصال بالخادم");

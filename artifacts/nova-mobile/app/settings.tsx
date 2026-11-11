@@ -1880,6 +1880,7 @@ export default function SettingsScreen() {
     clearHistory,
     clearFavorites,
     refreshConfig,
+    currentUser: globalUser,
     setCurrentUser: setGlobalUser,
   } = useApp();
   const colors = useColors();
@@ -1901,7 +1902,13 @@ export default function SettingsScreen() {
   const [selectedDonationTier, setSelectedDonationTier] = useState<"1" | "3" | "5">("1");
   const [showCrashLog, setShowCrashLog] = useState(false);
   const [crashEntries, setCrashEntries] = useState<CrashEntry[]>([]);
-  const [currentUser, setCurrentUser] = useState<MobileUser | null>(null);
+  const [currentUser, setCurrentUser] = useState<MobileUser | null>(globalUser || null);
+
+  useEffect(() => {
+    if (globalUser) {
+      setCurrentUser(globalUser);
+    }
+  }, [globalUser]);
 
   const refreshCurrentUser = useCallback(async () => {
     let storedUser: MobileUser | null = null;
@@ -1927,6 +1934,7 @@ export default function SettingsScreen() {
             : storedUser.profileImageUrl,
       };
       setCurrentUser(mergedLocal);
+      setGlobalUser(mergedLocal);
     }
 
     try {
@@ -1960,8 +1968,9 @@ export default function SettingsScreen() {
       };
       await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(nextUser));
       setCurrentUser(nextUser);
+      setGlobalUser(nextUser);
     } catch {}
-  }, []);
+  }, [setGlobalUser]);
 
   const refreshPushStatus = useCallback(async () => {
     try {
@@ -2196,7 +2205,7 @@ export default function SettingsScreen() {
             </Pressable>
           ) : (
             <View style={{ gap: 10 }}>
-              <Pressable onPress={() => setShowAuth(true)} style={[ts.profileCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Pressable onPress={() => tvMode ? router.push("/tv-link" as any) : setShowAuth(true)} style={[ts.profileCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 <View style={ts.profileAvatar}>
                   <Ionicons name="person" size={24} color={colors.textMuted} />
                 </View>

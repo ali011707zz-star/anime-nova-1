@@ -19,12 +19,137 @@ type TvLoginSession = {
   deviceId: string;
   deviceName: string;
   platform: string;
+  ip: string;
   createdAt: number;
   expiresAt: number;
   approvedPayload: Record<string, any> | null;
 };
 
 const tvLoginSessions = new Map<string, TvLoginSession>();
+const recentPhoneTvCodeByIp = new Map<string, { code: string; ts: number }>();
+
+export function recordPendingTvCodeFromRequest(req: Request, rawCode: unknown): void {
+  const code = normalizeCode(rawCode);
+  if (!/^\d{6}$/.test(code)) return;
+  try {
+    if (req.session) {
+      (req.session as any).pendingTvCode = code;
+    }
+  } catch {}
+  const ip = requestIp(req);
+  if (ip && ip !== "unknown") {
+    recentPhoneTvCodeByIp.set(ip, { code, ts: Date.now() });
+  }
+}
+
+export async function approveTvSessionForUser(
+  userId: string,
+  options: { code?: unknown; req?: Request } = {},
+): Promise<{ ok: boolean; status: number; deviceName?: string; user?: { displayName: string; email: string }; error?: string }> {
+  cleanupExpiredTvSessions();
+  const explicitCode = normalizeCode(options.code);
+  const sessionCode = options.req ? normalizeCode((options.req.session as any)?.pendingTvCode) : "";
+  const reqIp = options.req ? requestIp(options.req) : "";
+  const ipRecorded = reqIp ? recentPhoneTvCodeByIp.get(reqIp) : undefined;
+  const ipCode = ipRecorded && Date.now() - ipRecorded.ts < 10 * 60_000 ? ipRecorded.code : "";
+
+  let targetCode = explicitCode || sessionCode || ipCode;
+  if (!targetCode || !tvLoginSessions.has(targetCode)) {
+    // Fallback: match active unapproved TV session from the same IP, or the single active unapproved TV session within 5 minutes
+    const now = Date.now();
+    const unapproved = Array.from(tvLoginSessions.values()).filter(
+      s => !s.approvedPayload && s.expiresAt > now,
+    );
+    const sameIp = reqIp ? unapproved.filter(s => s.ip === reqIp) : [];
+    if (sameIp.length === 1) {
+      targetCode = sameIp[0].code;
+    } else if (!explicitCode && unapproved.length === 1 && now - unapproved[0].createdAt < 5 * 60_000) {
+      targetCode = unapproved[0].code;
+    }
+  }
+
+  if (!/^\d{6}$/.test(targetCode)) {
+    return { ok: false, status: 400, error: "أدخل رمز التلفاز المكوّن من 6 أرقام" };
+  }
+
+  const session = tvLoginSessions.get(targetCode);
+  if (!session || session.expiresAt <= Date.now()) {
+    tvLoginSessions.delete(targetCode);
+    return { ok: false, status: 410, error: "رمز التلفاز غير صحيح أو انتهت صلاحيته. اعرض رمزاً جديداً على التلفاز." };
+  }
+
+  try {
+    const userRows = await sbSelect("users", { id: `eq.${userId}` }, { limit: 1 });
+    const user = userRows[0];
+    if (!user) {
+      return { ok: false, status: 410, error: "الحساب غير موجود" };
+    }
+
+    const existing = await sbSelect("linked_devices", {
+      user_id: `eq.${userId}`,
+      revoked_at: "is.null",
+    }, { limit: MAX_ACTIVE_DEVICES });
+    const linkedForDevice = existing.find(row => row.device_id === session.deviceId);
+    if (!linkedForDevice && existing.length >= MAX_ACTIVE_DEVICES) {
+      return { ok: false, status: 409, error: "وصلت إلى الحد الأقصى وهو 8 أجهزة. ألغِ ربط جهاز أولاً." };
+    }
+
+    const now = new Date().toISOString();
+    const insertedLinked = linkedForDevice
+      ? await sbPatch("linked_devices", { id: `eq.${linkedForDevice.id}`, user_id: `eq.${userId}` }, {
+          device_name: session.deviceName,
+          platform: session.platform,
+          linked_at: now,
+          last_seen_at: now,
+          revoked_at: null,
+        })
+      : await sbInsert("linked_devices", {
+          user_id: userId,
+          device_id: session.deviceId,
+          device_name: session.deviceName,
+          platform: session.platform,
+          linked_at: now,
+          last_seen_at: now,
+        });
+
+    const linked = insertedLinked || (await sbSelect("linked_devices", {
+      user_id: `eq.${userId}`,
+      device_id: `eq.${session.deviceId}`,
+      revoked_at: "is.null",
+    }, { limit: 1 }))[0];
+
+    if (!linked) {
+      return { ok: false, status: 503, error: "تعذّر حفظ جهاز التلفاز. حاول مرة أخرى." };
+    }
+
+    session.approvedPayload = {
+      ...userPayload(user, session.deviceId),
+      device: deviceSummary(linked),
+    };
+    session.expiresAt = Math.min(session.expiresAt, Date.now() + 90_000);
+
+    if (options.req?.session) {
+      delete (options.req.session as any).pendingTvCode;
+    }
+    if (reqIp) {
+      recentPhoneTvCodeByIp.delete(reqIp);
+    }
+
+    console.log(`[device-link] TV session code=${targetCode} approved for user=${user.email || userId}`);
+    return {
+      ok: true,
+      status: 200,
+      deviceName: session.deviceName,
+      user: {
+        displayName: user.display_name || user.username || user.email,
+        email: user.email,
+      },
+    };
+  } catch (err) {
+    console.error("[device-link] tv-session approve:", err);
+    return { ok: false, status: 503, error: "تعذّر الاتصال بالخادم" };
+  }
+}
 
 function cleanupExpiredTvSessions(): void {
   const now = Date.now();
@@ -180,7 +305,17 @@ router.post("/device-link/claim", async (req: Request, res: Response) => {
       claimed_at: "is.null",
     }, { limit: 1 });
     const pending = rows[0];
-    if (!pending) return res.status(400).json({ error: "الرمز غير صحيح أو مستخدم من قبل" });
+    if (!pending) {
+      // Also support claiming a TV session code if the user typed the TV's own 6-digit code!
+      const tvSess = tvLoginSessions.get(code);
+      if (tvSess && tvSess.approvedPayload && tvSess.expiresAt > Date.now()) {
+        return res.json({
+          ok: true,
+          ...tvSess.approvedPayload,
+        });
+      }
+      return res.status(400).json({ error: "الرمز غير صحيح أو مستخدم من قبل" });
+    }
 
     const expiresAt = new Date(pending.expires_at).getTime();
     if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
@@ -321,7 +456,7 @@ router.post("/device-link/tv-session/start", async (req: Request, res: Response)
   if (!/^[A-Za-z0-9._:-]{6,160}$/.test(deviceId)) {
     return res.status(400).json({ error: "معرّف الجهاز غير صالح" });
   }
-  if (!checkRateLimit(`tv-session-start:${ip}`, 15, 5 * 60_000)) {
+  if (!checkRateLimit(`tv-session-start:${ip}`, 25, 5 * 60_000)) {
     return res.status(429).json({ error: "محاولات كثيرة. انتظر قليلاً ثم حاول مجدداً." });
   }
 
@@ -356,6 +491,7 @@ router.post("/device-link/tv-session/start", async (req: Request, res: Response)
     deviceId,
     deviceName,
     platform,
+    ip,
     createdAt: now,
     expiresAt,
     approvedPayload: null,
@@ -408,12 +544,23 @@ router.post("/device-link/tv-session/poll", async (req: Request, res: Response) 
   }
 
   const payload = session.approvedPayload;
-  tvLoginSessions.delete(code);
+  // Keep approved session alive briefly in case the TV retries the poll due to network latency
+  session.expiresAt = Math.min(session.expiresAt, Date.now() + 60_000);
   return res.json({
     ok: true,
     status: "approved",
     ...payload,
   });
+});
+
+/**
+ * POST /api/device-link/tv-session/prepare
+ * Called by the phone page (/tv?code=XXXXXX) before redirecting to Google OAuth
+ * so the server remembers which TV code this phone is activating.
+ */
+router.post("/device-link/tv-session/prepare", (req: Request, res: Response) => {
+  recordPendingTvCodeFromRequest(req, req.body?.code);
+  return res.json({ ok: true });
 });
 
 /**
@@ -424,19 +571,8 @@ router.post("/device-link/tv-session/poll", async (req: Request, res: Response) 
 router.post("/device-link/tv-session/approve", async (req: Request, res: Response) => {
   cleanupExpiredTvSessions();
   const ip = requestIp(req);
-  if (!checkRateLimit(`tv-session-approve:${ip}`, 15, 60_000)) {
+  if (!checkRateLimit(`tv-session-approve:${ip}`, 25, 60_000)) {
     return res.status(429).json({ error: "محاولات كثيرة. انتظر دقيقة ثم حاول مجدداً." });
-  }
-
-  const code = normalizeCode(req.body?.code);
-  if (!/^\d{6}$/.test(code)) {
-    return res.status(400).json({ error: "أدخل رمز التلفاز المكوّن من 6 أرقام" });
-  }
-
-  const session = tvLoginSessions.get(code);
-  if (!session || session.expiresAt <= Date.now()) {
-    tvLoginSessions.delete(code);
-    return res.status(410).json({ error: "رمز التلفاز غير صحيح أو انتهت صلاحيته. اعرض رمزاً جديداً على التلفاز." });
   }
 
   const userId = signedInUserId(req);
@@ -444,67 +580,15 @@ router.post("/device-link/tv-session/approve", async (req: Request, res: Respons
     return res.status(401).json({ error: "يرجى تسجيل الدخول بحساب Google أولاً لإتمام ربط التلفاز" });
   }
 
-  try {
-    const userRows = await sbSelect("users", { id: `eq.${userId}` }, { limit: 1 });
-    const user = userRows[0];
-    if (!user) {
-      return res.status(410).json({ error: "الحساب غير موجود" });
-    }
-
-    const existing = await sbSelect("linked_devices", {
-      user_id: `eq.${userId}`,
-      revoked_at: "is.null",
-    }, { limit: MAX_ACTIVE_DEVICES });
-    const linkedForDevice = existing.find(row => row.device_id === session.deviceId);
-    if (!linkedForDevice && existing.length >= MAX_ACTIVE_DEVICES) {
-      return res.status(409).json({ error: "وصلت إلى الحد الأقصى وهو 8 أجهزة. ألغِ ربط جهاز أولاً." });
-    }
-
-    const now = new Date().toISOString();
-    const insertedLinked = linkedForDevice
-      ? await sbPatch("linked_devices", { id: `eq.${linkedForDevice.id}`, user_id: `eq.${userId}` }, {
-          device_name: session.deviceName,
-          platform: session.platform,
-          linked_at: now,
-          last_seen_at: now,
-          revoked_at: null,
-        })
-      : await sbInsert("linked_devices", {
-          user_id: userId,
-          device_id: session.deviceId,
-          device_name: session.deviceName,
-          platform: session.platform,
-          linked_at: now,
-          last_seen_at: now,
-        });
-
-    const linked = insertedLinked || (await sbSelect("linked_devices", {
-      user_id: `eq.${userId}`,
-      device_id: `eq.${session.deviceId}`,
-      revoked_at: "is.null",
-    }, { limit: 1 }))[0];
-
-    if (!linked) {
-      return res.status(503).json({ error: "تعذّر حفظ جهاز التلفاز. حاول مرة أخرى." });
-    }
-
-    session.approvedPayload = {
-      ...userPayload(user, session.deviceId),
-      device: deviceSummary(linked),
-    };
-
-    return res.json({
-      ok: true,
-      deviceName: session.deviceName,
-      user: {
-        displayName: user.display_name || user.username || user.email,
-        email: user.email,
-      },
-    });
-  } catch (err) {
-    console.error("[device-link] tv-session approve:", err);
-    return res.status(503).json({ error: "تعذّر الاتصال بالخادم" });
+  const result = await approveTvSessionForUser(userId, { code: req.body?.code, req });
+  if (!result.ok) {
+    return res.status(result.status).json({ error: result.error });
   }
+  return res.json({
+    ok: true,
+    deviceName: result.deviceName,
+    user: result.user,
+  });
 });
 
 export default router;

@@ -186,14 +186,16 @@ export function tvFocusStyle(focused: boolean, isWhite?: boolean): ViewStyle {
   if (white) {
     return {
       borderColor: "#0284C7",
-      borderWidth: 2.5,
-      zIndex: 25,
+      borderWidth: 3.5,
+      transform: [{ scale: 1.03 }],
+      zIndex: 50,
     };
   }
   return {
-    borderColor: "#38BDF8",
-    borderWidth: 2.5,
-    zIndex: 25,
+    borderColor: "#00F0FF",
+    borderWidth: 3.5,
+    transform: [{ scale: 1.03 }],
+    zIndex: 50,
   };
 }
 
@@ -272,6 +274,19 @@ export const TvPressable = React.forwardRef<View, TvPressableProps>(function TvP
 ) {
   const [tv, setTv] = React.useState<boolean>(() => isTvDevice());
   const [focused, setFocused] = React.useState<boolean>(false);
+  const innerRef = React.useRef<View | null>(null);
+
+  const setCombinedRef = React.useCallback(
+    (node: View | null) => {
+      innerRef.current = node;
+      if (typeof ref === "function") {
+        ref(node);
+      } else if (ref) {
+        (ref as React.MutableRefObject<View | null>).current = node;
+      }
+    },
+    [ref],
+  );
 
   React.useEffect(() => {
     const sync = () => {
@@ -287,10 +302,29 @@ export const TvPressable = React.forwardRef<View, TvPressableProps>(function TvP
 
   const isDisabled = Boolean(props.disabled);
 
+  React.useEffect(() => {
+    if (!tv || !hasTVPreferredFocus || isDisabled) return;
+    const t1 = setTimeout(() => {
+      try {
+        (innerRef.current as any)?.focus?.();
+      } catch {}
+    }, 60);
+    const t2 = setTimeout(() => {
+      try {
+        (innerRef.current as any)?.focus?.();
+      } catch {}
+    }, 240);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [tv, hasTVPreferredFocus, isDisabled]);
+
   return (
     <Pressable
-      ref={ref}
+      ref={setCombinedRef}
       {...props}
+      testID={tv && hasTVPreferredFocus && !isDisabled && !props.testID ? "nova-tv-preferred-focus" : props.testID}
       unstable_pressDelay={0}
       focusable={tv ? (isDisabled ? false : focusable !== false) : focusable}
       hasTVPreferredFocus={tv && !isDisabled && hasTVPreferredFocus}

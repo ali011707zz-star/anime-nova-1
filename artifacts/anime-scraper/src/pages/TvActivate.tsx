@@ -27,11 +27,34 @@ export default function TvActivate() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    if (params.get("approved") === "1") {
+      try {
+        sessionStorage.removeItem(PENDING_TV_CODE_KEY);
+        localStorage.removeItem(PENDING_TV_CODE_KEY);
+      } catch {}
+      setApprovedDeviceName("جهاز التلفاز");
+    }
     const urlCode = normalizeTvCode(params.get("code") || "");
-    const storedCode = normalizeTvCode(sessionStorage.getItem(PENDING_TV_CODE_KEY) || "");
+    const storedCode = normalizeTvCode(
+      sessionStorage.getItem(PENDING_TV_CODE_KEY) ||
+      localStorage.getItem(PENDING_TV_CODE_KEY) ||
+      "",
+    );
     const initial = urlCode || storedCode;
     if (initial) {
       setCode(initial);
+      try {
+        sessionStorage.setItem(PENDING_TV_CODE_KEY, initial);
+        localStorage.setItem(PENDING_TV_CODE_KEY, initial);
+      } catch {}
+      if (initial.length === 6) {
+        fetch(`${API_BASE}/api/device-link/tv-session/prepare`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ code: initial }),
+        }).catch(() => {});
+      }
     }
   }, []);
 
@@ -55,7 +78,10 @@ export default function TvActivate() {
         setError(data.error || "تعذّر ربط التلفاز. تأكد من الرمز وحاول مرة أخرى.");
         return;
       }
-      sessionStorage.removeItem(PENDING_TV_CODE_KEY);
+      try {
+        sessionStorage.removeItem(PENDING_TV_CODE_KEY);
+        localStorage.removeItem(PENDING_TV_CODE_KEY);
+      } catch {}
       setApprovedDeviceName(data.deviceName || "جهاز التلفاز");
     } catch {
       setError("تعذّر الاتصال بالخادم. تحقق من الإنترنت وحاول مجدداً.");
@@ -65,15 +91,16 @@ export default function TvActivate() {
   };
 
   useEffect(() => {
-    if (authLoading || !user || autoApprovedRef.current) return;
+    if (authLoading || !user || autoApprovedRef.current || approvedDeviceName) return;
     const params = new URLSearchParams(window.location.search);
-    const shouldAuto = params.get("auto") === "1";
-    const normalized = normalizeTvCode(code || params.get("code") || "");
+    const urlCode = normalizeTvCode(params.get("code") || "");
+    const shouldAuto = params.get("auto") === "1" || urlCode.length === 6;
+    const normalized = normalizeTvCode(code || urlCode);
     if (shouldAuto && normalized.length === 6) {
       autoApprovedRef.current = true;
       void approveTvCode(normalized);
     }
-  }, [authLoading, user, code]);
+  }, [authLoading, user, code, approvedDeviceName]);
 
   const handleGoogleSignInForTv = () => {
     const normalized = normalizeTvCode(code);
@@ -81,7 +108,16 @@ export default function TvActivate() {
       setError("أدخل رمز التلفاز المكوّن من 6 أرقام أولاً");
       return;
     }
-    sessionStorage.setItem(PENDING_TV_CODE_KEY, normalized);
+    try {
+      sessionStorage.setItem(PENDING_TV_CODE_KEY, normalized);
+      localStorage.setItem(PENDING_TV_CODE_KEY, normalized);
+    } catch {}
+    fetch(`${API_BASE}/api/device-link/tv-session/prepare`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ code: normalized }),
+    }).catch(() => {});
     const clientId = typeof __GOOGLE_CLIENT_ID__ !== "undefined" ? __GOOGLE_CLIENT_ID__ : "";
     if (!clientId) {
       navigate("/auth");
@@ -94,6 +130,7 @@ export default function TvActivate() {
       response_type: "token",
       scope: "openid email profile",
       prompt: "select_account",
+      state: `tv:${normalized}`,
     });
     window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
   };
