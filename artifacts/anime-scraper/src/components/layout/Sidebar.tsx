@@ -35,7 +35,7 @@ interface NavItem {
 
 const MAIN_ITEMS: NavItem[] = [
   { icon: Home,      label: "الرئيسية",              route: "/",                        color: "#8B5CF6" },
-  { icon: Download,  label: "تحميل التطبيق والتلفاز", route: "/download",                color: "#FF6B00" },
+  { icon: Download,  label: "تحميل التطبيق والتلفاز", route: "/app",                color: "#FF6B00" },
   { icon: Flame,     label: "أحدث الحلقات",          route: "/latest",                  color: "#f97316" },
   { icon: Search,    label: "البحث",                 route: "/search",                  color: "#6366f1" },
   { icon: Compass,   label: "تصفح الأنمي",           route: "/browse",                  color: "#3b82f6" },
