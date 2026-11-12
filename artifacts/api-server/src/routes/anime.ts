@@ -17830,7 +17830,9 @@ function isClientRoutedFlixMedia(absUrl: string, ref = ""): boolean {
       host.endsWith(".plasmacdn.top") ||
       host.includes("plasmacdn") ||
       host.endsWith(".chronoscdn.top") ||
-      host.includes("chronoscdn")
+      host.includes("chronoscdn") ||
+      host.endsWith(".sirencdn.top") ||
+      host.includes("sirencdn")
     );
   } catch {
     return false;
@@ -17859,7 +17861,9 @@ function hlsRefererForTarget(absUrl: string, fallbackRef: string): string {
       host.endsWith(".chronoscdn.top") ||
       host.includes("chronoscdn") ||
       host.endsWith(".stronghole.site") ||
-      host.endsWith(".rundowncdn.top")
+      host.endsWith(".rundowncdn.top") ||
+      host.endsWith(".sirencdn.top") ||
+      host.includes("sirencdn")
     ) return "https://flixcloud.cc/";
   } catch {}
   return fallbackRef;
@@ -19207,6 +19211,9 @@ function findTsPayload(buf: Buffer): Buffer | null {
   const max = Math.min(buf.length - 376, 1024 * 1024);
   for (let i = 0; i <= max; i++) {
     if (buf[i] === 0x47 && buf[i + 188] === 0x47 && buf[i + 376] === 0x47) {
+      if (i + 752 < buf.length && (buf[i + 564] !== 0x47 || buf[i + 752] !== 0x47)) {
+        continue;
+      }
       return buf.slice(i);
     }
   }
@@ -19216,6 +19223,12 @@ function findTsPayload(buf: Buffer): Buffer | null {
 function stripImageMediaWrapper(raw: ArrayBuffer | Buffer): Buffer | null {
   const buf = Buffer.from(raw);
   if (buf.length < 377) return null;
+  const hasPng = buf.length >= 8 && buf.readUInt32BE(0) === 0x89504e47;
+  const hasWebp =
+    buf.length >= 12 &&
+    buf.toString("ascii", 0, 4) === "RIFF" &&
+    buf.toString("ascii", 8, 12) === "WEBP";
+  if (!hasPng && !hasWebp) return null;
   return findTsPayload(buf);
 }
 
@@ -19319,7 +19332,7 @@ router.get("/anime/seg-proxy", async (req, res) => {
       return true;
     }
 
-    if (ct.startsWith("image/") || (isGenericBinary && hasImageWrapper)) {
+    if (hasImageWrapper) {
       let raw: Buffer;
       try {
         raw = await collectInspectedBody(inspected, maxWrappedSegmentBytes);
@@ -19335,7 +19348,6 @@ router.get("/anime/seg-proxy", async (req, res) => {
         res.status(200).end(stripped);
         return true;
       }
-      // FlixCloud segments masquerading as .webp with AES-128 encryption
       if ((reanimeFlixReferer || isFlix) && raw.length > 4096) {
         res.setHeader("Content-Type", "video/MP2T");
         res.setHeader("Content-Length", String(raw.length));
@@ -19344,10 +19356,24 @@ router.get("/anime/seg-proxy", async (req, res) => {
         res.status(200).end(raw);
         return true;
       }
-      // Reanime CDNs can return an image placeholder with HTTP 200 when
-      // fetched from the VPS IP. Never pass it to hls.js as a segment;
-      // that creates the endless spinner/retry loop.
       return false;
+    }
+
+    if (ct.startsWith("image/")) {
+      const hasJpegSignature =
+        prefix.length >= 3 && prefix[0] === 0xff && prefix[1] === 0xd8 && prefix[2] === 0xff;
+      const hasGifSignature =
+        prefix.length >= 6 &&
+        (prefix.toString("ascii", 0, 6) === "GIF87a" || prefix.toString("ascii", 0, 6) === "GIF89a");
+      if (
+        hasJpegSignature ||
+        hasGifSignature ||
+        isHtmlOrJsonBody(prefix) ||
+        (prefix.length < 4096 && !reanimeFlixReferer && !isFlix)
+      ) {
+        await cancelInspectedBody(inspected);
+        return false;
+      }
     }
 
     const magic = mediaMagic(prefix);
@@ -19370,7 +19396,9 @@ router.get("/anime/seg-proxy", async (req, res) => {
       ? "video/MP2T"
       : magic === "mp4" || (mp4UrlHint && (isGenericBinary || mislabeledText))
         ? "video/mp4"
-        : r.headers.get("content-type") || "video/MP2T";
+        : ct.startsWith("image/")
+          ? "video/MP2T"
+          : r.headers.get("content-type") || "video/MP2T";
     res.setHeader("Content-Type", correctedCt);
     for (const [sourceName, outputName] of [
       ["content-length", "Content-Length"],
@@ -19409,9 +19437,15 @@ router.get("/anime/seg-proxy", async (req, res) => {
     // image placeholder, so use the dedicated binary proxy first.
     const isFlix = isClientRoutedFlixMedia(url, ref);
     const flixResponse = isFlix
-      ? await cfProxyStreamFetch(url, ref || "https://flixcloud.cc/", req.headers.range ? String(req.headers.range) : undefined)
+      ? await cfProxyStreamFetch(
+          url,
+          ref || "https://flixcloud.cc/",
+          req.headers.range ? String(req.headers.range) : undefined,
+          upstreamAbort.signal,
+        )
       : null;
     if (flixResponse?.ok) {
+      clearTimeout(connectTimeout);
       tracePlayback(trace, "hls-segment", "upstream_headers", safeHost(url), Date.now() - startedAt, `status=${flixResponse.status}`);
       const servedViaCf = await serveSegResponse(flixResponse);
       if (servedViaCf) return;
