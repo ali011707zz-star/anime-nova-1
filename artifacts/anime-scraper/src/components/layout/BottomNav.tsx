@@ -9,7 +9,7 @@ const navItems = [
   { icon: Bookmark, label: "قائمتي",    href: "/library" },
 ];
 
-const HIDE_ON = ["/watch", "/comments", "/dubbed/watch", "/aw-dubbed/watch", "/stardima/watch"];
+const HIDE_ON = ["/watch", "/comments", "/dubbed/watch", "/aw-dubbed/watch", "/stardima/watch", "/app", "/download"];
 
 export function BottomNav() {
   const [location] = useLocation();
