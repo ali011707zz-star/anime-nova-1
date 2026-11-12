@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Download,
   Tv,
@@ -205,6 +205,21 @@ export default function DownloadApp({ onBack }: { onBack?: () => void }) {
   const [heroPreviewIndex, setHeroPreviewIndex] = useState(0);
   const [screenFilter, setScreenFilter] = useState<ScreenCategory>("all");
   const [lightboxShot, setLightboxShot] = useState<AppScreenItem | null>(null);
+
+  useEffect(() => {
+    const prevTitle = document.title;
+    document.title =
+      "تطبيق أنمي نوفا الرسمي | تحميل تطبيق انمي نوفا للأندرويد والتلفاز الذكي Anime NOVA APK";
+    const canonical = document.querySelector('link[rel="canonical"]') as HTMLLinkElement | null;
+    const prevCanonical = canonical?.href;
+    if (canonical) {
+      canonical.href = `${window.location.origin}/app`;
+    }
+    return () => {
+      document.title = prevTitle;
+      if (canonical && prevCanonical) canonical.href = prevCanonical;
+    };
+  }, []);
 
   const heroScreens = [
     REAL_SCREENSHOTS[0], // Home

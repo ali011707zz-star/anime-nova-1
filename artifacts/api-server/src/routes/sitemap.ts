@@ -74,13 +74,15 @@ async function buildSitemap(): Promise<string> {
   // ── الصفحات الثابتة ──
   const staticUrls = [
     url(`${BASE}/`,           "1.0", "daily",   today),
+    url(`${BASE}/app`,        "1.0", "daily",   today),
     url(`${BASE}/browse`,     "0.9", "daily",   today),
-    url(`${BASE}/animations`, "0.9", "daily",   today),
-    url(`${BASE}/dubbed`,     "0.9", "daily",   today),
-    url(`${BASE}/updates`,    "0.8", "hourly",  today),
-    url(`${BASE}/schedule`,   "0.7", "daily",   today),
-    url(`${BASE}/search`,     "0.6", "weekly",  today),
-    url(`${BASE}/auth`,       "0.3", "monthly", today),
+    url(`${BASE}/manga`,      "0.9", "daily",   today),
+    url(`${BASE}/spacetoon`,  "0.9", "daily",   today),
+    url(`${BASE}/cartoon`,    "0.8", "daily",   today),
+    url(`${BASE}/animation`,  "0.8", "daily",   today),
+    url(`${BASE}/updates`,    "0.9", "hourly",  today),
+    url(`${BASE}/schedule`,   "0.8", "daily",   today),
+    url(`${BASE}/search`,     "0.7", "weekly",  today),
   ];
 
   // ── أنيمي رائج (صفحتان من AniList = 100 عنوان) ──

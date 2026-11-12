@@ -1,3 +1,4 @@
+import fs from "fs";
 import express, { type Express, type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
 import path from "path";
@@ -385,10 +386,81 @@ export async function createApp(): Promise<Express> {
     immutable: true,
     etag: false,
   }));
-  // index.html + other root files → no cache (always fresh)
-  app.use(express.static(frontendDist, { maxAge: 0, etag: true }));
-  app.get("/{*path}", (_req, res) => {
+  // Dynamic sitemap.xml & robots.txt (must precede static files so /app + 100 anime URLs are always served)
+  app.use(sitemapRouter);
+
+  // Dynamic SSR SEO injection for /, /app, /browse, /manga, /spacetoon, /cartoon, /animation
+  const renderSeoHtml = (reqPath: string): string | null => {
+    try {
+      const rawHtml = fs.readFileSync(path.join(frontendDist, "index.html"), "utf8");
+      const cleanPath = reqPath === "/" ? "/" : reqPath.replace(/\/+$/, "");
+      const canonicalUrl = `https://animenovaa.duckdns.org${cleanPath === "/" ? "/" : cleanPath}`;
+
+      let title = "أنمي نوفا | تطبيق وموقع Anime NOVA لمشاهدة وتحميل الأنمي المترجم والمدبلج والمانجا";
+      let desc = "موقع وتطبيق أنمي نوفا (Anime NOVA) الرسمي لمشاهدة وتحميل الأنمي المترجم والمدبلج، قراءة المانجا والمانهوا، ومسلسلات سبيستون والكرتون مجاناً بجودة عالية FHD بدون إعلانات. حمل تطبيق انمي نوفا للأندرويد والتلفاز الذكي الآن.";
+      let rootSeoHtml = "";
+
+      if (cleanPath === "/app") {
+        title = "تطبيق أنمي نوفا الرسمي | تحميل تطبيق انمي نوفا للأندرويد والتلفاز الذكي Anime NOVA APK";
+        desc = "حمل تطبيق أنمي نوفا (Anime NOVA APK) الأصلي مجاناً للهواتف وشاشات التلفاز الذكية Android TV (كود Downloader: 2576388). مشاهدة وتحميل الأنمي المترجم والمدبلج، قراءة المانجا والمانهوا، ومسلسلات سبيستون والكرتون بدون إعلانات.";
+        rootSeoHtml = `<main dir="rtl" style="max-width:960px;margin:0 auto;padding:24px;color:#f4f4f5;font-family:Cairo,sans-serif;">
+          <h1>تطبيق أنمي نوفا الرسمي | تحميل تطبيق انمي نوفا للأندرويد والتلفاز الذكي (Anime NOVA APK v1.0.6)</h1>
+          <p>حمل <strong>تطبيق أنمي نوفا (Anime NOVA)</strong> الأصلي مجاناً لهواتف الأندرويد وشاشات التلفاز الذكية Android TV و Google TV و Fire TV عبر <strong>كود تطبيق Downloader: 2576388</strong> أو الرابط المباشر <a href="https://aftv.news/2576388">aftv.news/2576388</a>.</p>
+          <h2>مميزات تطبيق أنمي نوفا للهاتف والتلفاز الذكي</h2>
+          <ul>
+            <li>مشاهدة وتحميل الأنمي المترجم والمدبلج بجودة 1080p FHD مع تخطي المقدمة والنهاية تلقائياً.</li>
+            <li>مكتبة المانجا اليابانية والمانهوا الكورية الملونة المترجمة بالكامل مع قارئ عمودي ذكي وتحميل الفصول بدون إنترنت.</li>
+            <li>قسم خاص لمسلسلات وأفلام سبيستون، الكرتون المدبلج، والأنيميشن العائلي.</li>
+            <li>نسخة مخصصة لشاشات التلفاز الذكية Android TV تدعم التحكم الكامل بالريموت والمؤشر الذكي.</li>
+          </ul>
+          <p><a href="https://animenovaa.duckdns.org/Anime-Nova.apk">تحميل تطبيق أنمي نوفا للهاتف (APK)</a> | <a href="https://animenovaa.duckdns.org/nova.apk">تحميل نسخة التلفاز الذكي (Android TV APK)</a> | <a href="https://animenovaa.duckdns.org/">تصفح موقع أنمي نوفا</a></p>
+        </main>`;
+      } else if (cleanPath === "/browse") {
+        title = "تصفح مكتبة الأنمي المترجم | أنمي نوفا Anime NOVA";
+        desc = "تصفح آلاف مسلسلات وأفلام الأنمي المترجمة بالعربية في موقع وتطبيق أنمي نوفا (Anime NOVA) مع فلترة متقدمة حسب التصنيف، السنة، والتقييم العالمي.";
+      } else if (cleanPath === "/manga") {
+        title = "مكتبة المانجا والمانهوا المترجمة | تطبيق أنمي نوفا Anime NOVA";
+        desc = "اقرأ وحمل أشهر أعمال المانجا اليابانية والمانهوا الكورية الملونة المترجمة للعربية حصرياً عبر تطبيق أنمي نوفا (Anime NOVA).";
+      } else if (cleanPath === "/spacetoon") {
+        title = "مسلسلات وأفلام سبيستون المدبلجة | تطبيق أنمي نوفا Anime NOVA";
+        desc = "شاهد وحمل أجمل مسلسلات وأفلام سبيستون الكلاسيكية والحديثة المدبلجة للعربية بجودة عالية عبر تطبيق أنمي نوفا (Anime NOVA).";
+      } else if (cleanPath === "/cartoon") {
+        title = "كرتون مدبلج ومترجم | تطبيق وموقع أنمي نوفا Anime NOVA";
+        desc = "مشاهدة وتحميل مسلسلات وأفلام الكرتون المدبلجة والمترجمة بالعربية بجودة عالية عبر تطبيق أنمي نوفا (Anime NOVA).";
+      } else if (cleanPath === "/animation") {
+        title = "أفلام ومسلسلات الأنيميشن | تطبيق وموقع أنمي نوفا Anime NOVA";
+        desc = "مشاهدة وتحميل أحدث أفلام ومسلسلات الأنيميشن العالمية مترجمة ومدبلجة بجودة 1080p FHD عبر تطبيق أنمي نوفا (Anime NOVA).";
+      }
+
+      let html = rawHtml
+        .replace(/<title>[\s\S]*?<\/title>/i, `<title>${title}</title>`)
+        .replace(/<meta name="description" content="[^"]*" \/>/i, `<meta name="description" content="${desc}" />`)
+        .replace(/<link rel="canonical" href="[^"]*" \/>/i, `<link rel="canonical" href="${canonicalUrl}" />`)
+        .replace(/<meta property="og:title" content="[^"]*" \/>/i, `<meta property="og:title" content="${title}" />`)
+        .replace(/<meta property="og:description" content="[^"]*" \/>/i, `<meta property="og:description" content="${desc}" />`)
+        .replace(/<meta property="og:url" content="[^"]*" \/>/i, `<meta property="og:url" content="${canonicalUrl}" />`)
+        .replace(/<meta name="twitter:title" content="[^"]*" \/>/i, `<meta name="twitter:title" content="${title}" />`)
+        .replace(/<meta name="twitter:description" content="[^"]*" \/>/i, `<meta name="twitter:description" content="${desc}" />`);
+
+      if (rootSeoHtml) {
+        html = html.replace(/<div id="root">[\s\S]*?<\/main>\s*<\/div>/i, `<div id="root">${rootSeoHtml}</div>`);
+      }
+      return html;
+    } catch {
+      return null;
+    }
+  };
+
+  // Serve static files except index.html so "/" also goes through renderSeoHtml with no-cache
+  app.use(express.static(frontendDist, { maxAge: 0, etag: true, index: false }));
+  app.get("/{*path}", (req, res) => {
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    const html = renderSeoHtml(req.path || "/");
+    if (html) {
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.status(200).send(html);
+      return;
+    }
     res.sendFile(path.join(frontendDist, "index.html"));
   });
 
