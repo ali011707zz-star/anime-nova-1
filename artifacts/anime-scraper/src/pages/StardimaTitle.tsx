@@ -81,6 +81,7 @@ export default function StardimaTitlePage() {
   const [title, setTitle] = useState<StardimaCatalogTitle | null>(null);
   const [episodes, setEpisodes] = useState<CatalogEpisode[]>([]);
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
+  const [epOrder, setEpOrder] = useState<"desc" | "asc">("desc");
   const [progress, setProgress] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -88,8 +89,10 @@ export default function StardimaTitlePage() {
 
   const orderedEpisodes = useMemo(() => [...episodes].sort((a, b) =>
     safeNumber(a.season_number) - safeNumber(b.season_number) ||
-    safeNumber(a.episode_number) - safeNumber(b.episode_number)
-  ), [episodes]);
+    (epOrder === "desc"
+      ? safeNumber(b.episode_number) - safeNumber(a.episode_number)
+      : safeNumber(a.episode_number) - safeNumber(b.episode_number))
+  ), [episodes, epOrder]);
   const seasons = useMemo(() => [...new Set(orderedEpisodes.map((episode) =>
     safeNumber(episode.season_number)
   ))].sort((a, b) => a - b), [orderedEpisodes]);

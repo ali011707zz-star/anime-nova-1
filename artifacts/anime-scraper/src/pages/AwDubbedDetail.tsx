@@ -28,6 +28,7 @@ export default function AwDubbedDetail() {
   const [episodes,   setEpisodes]   = useState<Episode[]>([]);
   const [epLoading,  setEpLoading]  = useState(false);
   const [epProgress, setEpProgress] = useState<Record<number, number>>({});
+  const [epOrder, setEpOrder] = useState<"desc" | "asc">("desc");
   const [exclusiveEpisode, setExclusiveEpisode] = useState<number | null>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
 
@@ -163,6 +164,20 @@ export default function AwDubbedDetail() {
 
       {/* Episodes */}
       <div className="px-4 mt-4 space-y-2">
+        <div className="flex items-center justify-between pb-2 mb-2 border-b border-white/5">
+          <div className="flex items-center gap-2">
+            <div className="w-1 h-5 rounded-full bg-emerald-500" />
+            <h3 className="text-[13px] font-black font-['Cairo'] text-white">الحلقات ({episodes.length})</h3>
+          </div>
+          <button
+            onClick={() => setEpOrder(o => o === "desc" ? "asc" : "desc")}
+            className="px-2.5 py-1 rounded-xl text-[11px] font-bold font-['Cairo'] bg-white/5 hover:bg-white/10 border border-white/10 text-emerald-300 flex items-center gap-1.5 transition active:scale-95"
+            title="تبديل ترتيب الحلقات"
+          >
+            <span>⇅</span>
+            <span>{epOrder === "desc" ? "الأحدث أولاً" : "الأقدم أولاً"}</span>
+          </button>
+        </div>
         {epLoading ? (
           <div className="flex flex-col items-center justify-center py-16 gap-3">
             <AnimeMascot mood="loading" />
@@ -176,7 +191,7 @@ export default function AwDubbedDetail() {
             <p className="text-white/25 text-sm font-['Cairo']">لا توجد حلقات لهذا الموسم</p>
           </div>
         ) : (
-          episodes.map((ep, i) => {
+          [...episodes].sort((a, b) => epOrder === "desc" ? b.number - a.number : a.number - b.number).map((ep, i) => {
             const pct     = progressPct(ep);
             const watched = pct >= 90;
             const progSec = epProgress[ep.number] || 0;

@@ -214,14 +214,28 @@ function StardimaCard({ title, onClick }: { title: StardimaCatalogTitle; onClick
   );
 }
 
+
+function getRowYear(row: { kind: string; item: any }): number {
+  if (row.kind === "catalog") {
+    const raw = (row.item as StardimaCatalogTitle).release_year;
+    const y = Number(raw);
+    return Number.isFinite(y) && y > 0 ? y : 2020;
+  }
+  const raw = (row.item as any).year;
+  const y = Number(raw);
+  return Number.isFinite(y) && y > 0 ? y : 2015;
+}
+
 // ── Animation tab content ─────────────────────────────────────────────────
 
 function AnimationList({
   searchQ,
+  sortOrder = "newest",
   onNavigate,
   onCatalogNavigate,
 }: {
   searchQ: string;
+  sortOrder?: "newest" | "oldest";
   onNavigate: (s: AwSeries) => void;
   onCatalogNavigate: (title: StardimaCatalogTitle) => void;
 }) {
@@ -278,10 +292,15 @@ function AnimationList({
   }, [searchQ]);
 
   const displayList = searchQ.trim().length >= 2 ? searchResults : series;
-  const rows = mergeCatalogRows(
+  const rawRows = mergeCatalogRows(
     displayList.map((item) => ({ kind: "legacy", item })),
     catalog.items.map((item) => ({ kind: "catalog", item })),
   );
+  const rows = [...rawRows].sort((a, b) => {
+    const yA = getRowYear(a);
+    const yB = getRowYear(b);
+    return sortOrder === "newest" ? yB - yA : yA - yB;
+  });
 
   if (loading && series.length === 0 && catalog.loading && catalog.items.length === 0) return (
     <div className="flex items-center justify-center py-20">
@@ -338,10 +357,12 @@ function AnimationList({
 
 function CartoonList({
   searchQ,
+  sortOrder = "newest",
   onNavigate,
   onCatalogNavigate,
 }: {
   searchQ: string;
+  sortOrder?: "newest" | "oldest";
   onNavigate: (s: AtSeries) => void;
   onCatalogNavigate: (title: StardimaCatalogTitle) => void;
 }) {
@@ -399,10 +420,15 @@ function CartoonList({
   }, [searchQ]);
 
   const displayList = searchQ.trim().length >= 2 ? searchResults : series;
-  const rows = mergeCatalogRows(
+  const rawRows = mergeCatalogRows(
     displayList.map((item) => ({ kind: "legacy", item })),
     catalog.items.map((item) => ({ kind: "catalog", item })),
   );
+  const rows = [...rawRows].sort((a, b) => {
+    const yA = getRowYear(a);
+    const yB = getRowYear(b);
+    return sortOrder === "newest" ? yB - yA : yA - yB;
+  });
 
   if (loading && series.length === 0 && catalog.loading && catalog.items.length === 0) return (
     <div className="flex items-center justify-center py-20">
@@ -458,9 +484,11 @@ function CartoonList({
 
 function CarateenList({
   searchQ,
+  sortOrder = "newest",
   onNavigate,
 }: {
   searchQ: string;
+  sortOrder?: "newest" | "oldest";
   onNavigate: (series: CarateenSeries) => void;
 }) {
   const [series, setSeries] = useState<CarateenSeries[]>([]);
@@ -556,7 +584,11 @@ function CarateenList({
         <>
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3">
             <AnimatePresence mode="popLayout">
-              {series.map(item => (
+              {[...series].sort((a, b) => {
+    const yA = Number(a.year) || 2000;
+    const yB = Number(b.year) || 2000;
+    return sortOrder === "newest" ? yB - yA : yA - yB;
+  }).map(item => (
                 <CarateenCard
                   key={`${item.provider}:${item.id}`}
                   s={item}
@@ -604,6 +636,7 @@ export default function DubbedCombinedLibrary() {
   );
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQ,    setSearchQ]    = useState("");
+  const [sortOrder,  setSortOrder]  = useState<"newest" | "oldest">("newest");
 
   useEffect(() => {
     const nextTab = new URLSearchParams(pageSearch).get("tab");
@@ -696,6 +729,35 @@ export default function DubbedCombinedLibrary() {
           ))}
         </div>
 
+
+        {/* ── Sort Filter Buttons ── */}
+        <div className="flex items-center justify-between px-4 py-2 border-t border-white/5 bg-white/[0.02]">
+          <span className="text-[11px] text-white/50 font-['Cairo']">
+            ترتيب الأعمال:
+          </span>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setSortOrder("newest")}
+              className={`px-3 py-1 rounded-xl text-xs font-bold font-['Cairo'] border transition-all active:scale-95 ${
+                sortOrder === "newest"
+                  ? `${accentCls} bg-white/10 shadow-sm`
+                  : "border-white/5 text-white/40 hover:text-white/70"
+              }`}
+            >
+              الأحدث (حسب السنة) ✨
+            </button>
+            <button
+              onClick={() => setSortOrder("oldest")}
+              className={`px-3 py-1 rounded-xl text-xs font-bold font-['Cairo'] border transition-all active:scale-95 ${
+                sortOrder === "oldest"
+                  ? `${accentCls} bg-white/10 shadow-sm`
+                  : "border-white/5 text-white/40 hover:text-white/70"
+              }`}
+            >
+              القديم (الكلاسيكي) ⏳
+            </button>
+          </div>
+        </div>
         {/* ── Search bar ── */}
         <AnimatePresence>
           {searchOpen && (
@@ -750,10 +812,10 @@ export default function DubbedCombinedLibrary() {
           <motion.div key={tab} initial={{ opacity: 0 }} animate={{ opacity: 1 }}
             exit={{ opacity: 0 }} transition={{ duration: 0.1 }}>
             {tab === "animation"
-              ? <AnimationList searchQ={searchQ} onNavigate={openAwDetail} onCatalogNavigate={openCatalogDetail} />
+              ? <AnimationList searchQ={searchQ} sortOrder={sortOrder} onNavigate={openAwDetail} onCatalogNavigate={openCatalogDetail} />
               : tab === "spacetoon"
-                ? <CarateenList searchQ={searchQ} onNavigate={openCarateenDetail} />
-                : <CartoonList searchQ={searchQ} onNavigate={openAtDetail} onCatalogNavigate={openCatalogDetail} />
+                ? <CarateenList searchQ={searchQ} sortOrder={sortOrder} onNavigate={openCarateenDetail} />
+                : <CartoonList searchQ={searchQ} sortOrder={sortOrder} onNavigate={openAtDetail} onCatalogNavigate={openCatalogDetail} />
             }
           </motion.div>
         </AnimatePresence>
