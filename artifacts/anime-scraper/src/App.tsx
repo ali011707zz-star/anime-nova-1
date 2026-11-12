@@ -84,6 +84,7 @@ const Updates            = lazy(() => import("@/pages/Updates"));
 const AuthPage           = lazy(() => import("@/pages/Auth"));
 const AuthCallback       = lazy(() => import("@/pages/AuthCallback"));
 const TvActivate         = lazy(() => import("@/pages/TvActivate"));
+const DownloadApp        = lazy(() => import("@/pages/DownloadApp"));
 const CommentsPage       = lazy(() => import("@/pages/Comments"));
 const Subscription       = lazy(() => import("@/pages/Subscription"));
 const EpisodeList        = lazy(() => import("@/pages/EpisodeList"));
@@ -105,6 +106,8 @@ function PageLoader() {
 }
 
 const NO_GLOBAL_HEADER = [
+  "/download",
+  "/app",
   "/watch",
   "/episodes/",
   "/anime/",
@@ -268,6 +271,8 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
                 <Route path="/auth/callback"           component={AuthCallback} />
                 <Route path="/auth"                    component={AuthPage} />
                 <Route path="/tv"                      component={TvActivate} />
+                <Route path="/download"                component={DownloadApp} />
+                <Route path="/app"                     component={DownloadApp} />
                 {/* Animation section hidden — disabled 2026-07-30 */}
                 <Route path="/dubbed"                          component={DubbedCombinedLibrary} />
                 <Route path="/dubbed/watch"                    component={DubbedWatch} />

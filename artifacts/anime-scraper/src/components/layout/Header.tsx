@@ -1,5 +1,5 @@
 import { useLocation } from "wouter";
-import { Menu, Search } from "lucide-react";
+import { Menu, Search, Download } from "lucide-react";
 
 interface HeaderProps {
   onMenuClick: () => void;
@@ -43,6 +43,15 @@ export function Header({ onMenuClick }: HeaderProps) {
           }}
         >
           <Menu className="w-[21px] h-[21px]" />
+        </button>
+
+        {/* App Download Page Quick Button */}
+        <button
+          onClick={() => navigate("/download")}
+          className="h-[38px] px-3 rounded-[13px] bg-[#FF6B00] text-white text-[11px] font-black font-[Cairo] flex items-center gap-1.5 shrink-0 shadow-sm active:scale-95 transition-transform"
+        >
+          <Download className="w-3.5 h-3.5" />
+          <span>التطبيق</span>
         </button>
 
         {/* Right Group: Compact Search Trigger + Brand Logo */}

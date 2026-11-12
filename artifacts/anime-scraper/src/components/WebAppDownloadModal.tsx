@@ -9,7 +9,7 @@ const DOWNLOADER_CODE = "2576388";
 const DOWNLOADER_SHORT_URL = "aftv.news/2576388";
 
 export function WebAppDownloadModal() {
-  const [location] = useLocation();
+  const [location, navigate] = useLocation();
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -78,6 +78,14 @@ export function WebAppDownloadModal() {
             </a>
           </p>
         </div>
+
+        <button
+          type="button"
+          onClick={() => { setOpen(false); navigate("/download"); }}
+          className="relative mt-2.5 flex h-10 w-full items-center justify-center rounded-xl border border-orange-500/30 bg-orange-500/10 font-[Cairo] text-[12px] font-black text-orange-300 transition-colors hover:bg-orange-500/20"
+        >
+          ✨ استعراض صفحة ومميزات تطبيق الهاتف والتلفاز
+        </button>
 
         <button
           type="button"
