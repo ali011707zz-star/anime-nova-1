@@ -47,38 +47,38 @@ const REAL_SCREENSHOTS: AppScreenItem[] = [
   {
     id: "home",
     title: "الصفحة الرئيسية الذكية",
-    subtitle: "بانر مختارات الموسم، قسم متابعة المشاهدة مع نسبة التقدم، وأحدث الحلقات المضافة فور صدورها",
+    subtitle: "بانر مختارات الموسم (ون بنش مان)، قسم متابعة المشاهدة مع نسبة التقدم، وأحدث الحلقات المضافة فور صدورها",
     category: "anime",
     tag: "واجهة الأنمي",
     tagColor: "#06b6d4",
-    image: "/app-screens/screen-home.png",
+    image: "/app-screens/screen-home.png?v=2",
   },
   {
     id: "detail",
     title: "صفحة تفاصيل الأنمي الشاملة",
-    subtitle: "القصة مترجمة بالعربية، التقييم والترتيب العالمي (MAL)، الحلقات، التعليقات، وقسم الشخصيات",
+    subtitle: "هجوم العمالقة الموسم 4، القصة مترجمة بالعربية، التقييم والترتيب العالمي (MAL #37)، الحلقات والتعليقات",
     category: "anime",
     tag: "تفاصيل العمل",
     tagColor: "#0284c7",
-    image: "/app-screens/screen-detail.png",
+    image: "/app-screens/screen-detail.png?v=2",
   },
   {
     id: "browse",
     title: "المكتبة والتصفح والفلترة",
-    subtitle: "تصفح حسب التصنيفات المصورة (مغامرة، أكشن، كوميديا، فانتازيا) والفلترة حسب السنة والشعبية",
+    subtitle: "تصفح حسب التصنيفات المصورة (مغامرة، أكشن، كوميديا، فانتازيا) والفلترة حسب الأكثر شعبية والسنة",
     category: "anime",
     tag: "تصفح متقدم",
     tagColor: "#7c3aed",
-    image: "/app-screens/screen-browse.png",
+    image: "/app-screens/screen-browse.png?v=2",
   },
   {
     id: "manga",
     title: "مكتبة المانجا المترجمة",
-    subtitle: "أشهر أعمال المانجا اليابانية (ون بيس، هنتر إكس هنتر، بيرسيرك، البرسيم الأسود) بفصول كاملة",
+    subtitle: "أشهر أعمال المانجا اليابانية (ون بيس، الارتقاء المنفرد، هنتر إكس هنتر، بيرسيرك، البرسيم الأسود) بفصول كاملة",
     category: "manga",
     tag: "المانجا اليابانية",
     tagColor: "#10b981",
-    image: "/app-screens/screen-manga.png",
+    image: "/app-screens/screen-manga.png?v=2",
   },
   {
     id: "manhwa",
@@ -87,16 +87,16 @@ const REAL_SCREENSHOTS: AppScreenItem[] = [
     category: "manga",
     tag: "مانهوا ملونة",
     tagColor: "#059669",
-    image: "/app-screens/screen-manhwa.png",
+    image: "/app-screens/screen-manhwa.png?v=2",
   },
   {
     id: "spacetoon",
     title: "مسلسلات وأفلام سبيستون",
-    subtitle: "جميع أفلام المحقق كونان المدبلجة وروائع سبيستون الكلاسيكية والحديثة حصرياً داخل التطبيق",
+    subtitle: "جميع أفلام المحقق كونان المدبلجة (24، 25، 26، 27) ولوبين الثالث وباكوغان حصرياً داخل التطبيق",
     category: "dubbed",
     tag: "سبيستون حصرياً",
     tagColor: "#0891b2",
-    image: "/app-screens/screen-spacetoon.png",
+    image: "/app-screens/screen-spacetoon.png?v=2",
   },
   {
     id: "cartoon",
@@ -105,16 +105,16 @@ const REAL_SCREENSHOTS: AppScreenItem[] = [
     category: "dubbed",
     tag: "كرتون عربي",
     tagColor: "#8b5cf6",
-    image: "/app-screens/screen-cartoon.png",
+    image: "/app-screens/screen-cartoon.png?v=2",
   },
   {
     id: "animation",
     title: "أفلام ومسلسلات الأنيميشن",
-    subtitle: "أحدث إنتاجات الأنيميشن العالمية المدبلجة والمترجمة للعربية بمواسمها الكاملة",
+    subtitle: "أحدث إنتاجات الأنيميشن العالمية المدبلجة والمترجمة للعربية (200% Wolf، 10 Lives، وقت المغامرة)",
     category: "dubbed",
     tag: "أنيميشن عالمي",
     tagColor: "#ec4899",
-    image: "/app-screens/screen-animation.png",
+    image: "/app-screens/screen-animation.png?v=2",
   },
 ];
 
@@ -483,19 +483,19 @@ export default function DownloadApp({ onBack }: { onBack?: () => void }) {
               {/* Decorative Glow Behind Phone */}
               <div className="absolute -inset-4 rounded-[48px] bg-gradient-to-tr from-[#06b6d4]/25 via-[#7c3aed]/20 to-transparent blur-2xl pointer-events-none" />
 
-              {/* Realistic Smartphone Frame holding ACTUAL user screenshot */}
-              <div className="relative w-[275px] sm:w-[300px] rounded-[42px] p-2.5 bg-[#161922] border-[4px] border-[#2D3343] shadow-[0_30px_70px_rgba(0,0,0,0.38)]">
+              {/* Realistic Device Frame holding ACTUAL user screenshot without cropping any side */}
+              <div className="relative w-[300px] sm:w-[340px] rounded-[34px] p-2.5 bg-[#161922] border-[4px] border-[#2D3343] shadow-[0_30px_70px_rgba(0,0,0,0.38)]">
                 {/* Speaker / Camera Notch */}
-                <div className="w-16 h-1.5 rounded-full bg-white/10 mx-auto mb-2" />
+                <div className="w-16 h-1.5 rounded-full bg-white/15 mx-auto mb-2" />
 
                 <div
                   onClick={() => setLightboxShot(activeHeroShot)}
-                  className="relative rounded-[32px] overflow-hidden bg-[#090A0C] aspect-[9/19.2] cursor-pointer group border border-white/10"
+                  className="relative rounded-[24px] overflow-hidden bg-[#F4F6FA] cursor-pointer group border border-white/10"
                 >
                   <img
                     src={activeHeroShot.image}
                     alt={activeHeroShot.title}
-                    className="w-full h-full object-cover object-top transition-transform duration-300 group-hover:scale-[1.02]"
+                    className="w-full h-auto block transition-transform duration-300 group-hover:scale-[1.01]"
                   />
                   <div className="absolute inset-x-0 bottom-0 p-3 bg-gradient-to-t from-black/85 via-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-between text-white text-xs font-bold">
                     <span>{activeHeroShot.title}</span>
@@ -612,7 +612,7 @@ export default function DownloadApp({ onBack }: { onBack?: () => void }) {
           </div>
         </div>
 
-        {/* Grid of Real Original Screenshots inside Sleek Phone Mockups */}
+        {/* Grid of Real Original Screenshots inside Uncropped Device Mockups */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
           {filteredScreenshots.map((shot) => (
             <div
@@ -624,20 +624,20 @@ export default function DownloadApp({ onBack }: { onBack?: () => void }) {
                   : "bg-[#111622] border-white/[0.08] hover:border-cyan-500/40 shadow-xl"
               }`}
             >
-              {/* Phone Bezel */}
-              <div className="w-full max-w-[230px] rounded-[30px] p-2 bg-[#161922] border-[3px] border-[#2D3343] shadow-lg">
-                <div className="w-10 h-1 rounded-full bg-white/15 mx-auto mb-1.5" />
-                <div className="relative rounded-[22px] overflow-hidden aspect-[9/19.2] bg-[#090A0C]">
+              {/* Full-Ratio Device Bezel (No Cropping on Any Edge) */}
+              <div className="w-full max-w-[290px] rounded-[26px] p-2 bg-[#161922] border-[3px] border-[#2D3343] shadow-lg">
+                <div className="w-12 h-1 rounded-full bg-white/15 mx-auto mb-1.5" />
+                <div className="relative rounded-[18px] overflow-hidden bg-[#F4F6FA]">
                   <img
                     src={shot.image}
                     alt={shot.title}
                     loading="lazy"
-                    className="w-full h-full object-cover object-top transition-transform duration-300 group-hover:scale-[1.03]"
+                    className="w-full h-auto block transition-transform duration-300 group-hover:scale-[1.02]"
                   />
                   <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
                     <span className="opacity-0 group-hover:opacity-100 transition-opacity px-3 py-1.5 rounded-xl bg-black/80 text-white text-[11px] font-bold flex items-center gap-1.5 shadow-lg">
                       <ZoomIn className="w-3.5 h-3.5 text-cyan-400" />
-                      <span>تكبير الصورة</span>
+                      <span>تكبير الصورة كاملة</span>
                     </span>
                   </div>
                 </div>
@@ -729,32 +729,36 @@ export default function DownloadApp({ onBack }: { onBack?: () => void }) {
             </div>
           </div>
 
-          {/* Dual Phone Preview: Manga + Manhwa Original Screenshots */}
-          <div className="lg:col-span-6 flex items-center justify-center gap-4 sm:gap-6">
+          {/* Dual Phone Preview: Manga + Manhwa Original Screenshots (Uncropped) */}
+          <div className="lg:col-span-6 grid grid-cols-2 gap-3 sm:gap-5 items-start">
             <div
               onClick={() => setLightboxShot(REAL_SCREENSHOTS[3])}
-              className="w-[165px] sm:w-[220px] rounded-[32px] p-2 bg-[#161922] border-[3px] border-[#2D3343] shadow-2xl cursor-pointer transition-transform hover:-translate-y-1.5"
+              className="w-full rounded-[26px] p-2 bg-[#161922] border-[3px] border-[#2D3343] shadow-2xl cursor-pointer transition-transform hover:-translate-y-1.5"
             >
-              <div className="rounded-[24px] overflow-hidden aspect-[9/19.2]">
+              <div className="w-10 h-1 rounded-full bg-white/15 mx-auto mb-1.5" />
+              <div className="rounded-[18px] overflow-hidden bg-[#F4F6FA]">
                 <img
-                  src="/app-screens/screen-manga.png"
+                  src="/app-screens/screen-manga.png?v=2"
                   alt="المانجا المترجمة"
-                  className="w-full h-full object-cover object-top"
+                  className="w-full h-auto block"
                 />
               </div>
+              <p className="text-center text-white text-xs font-extrabold mt-2">مكتبة المانجا المترجمة</p>
             </div>
 
             <div
               onClick={() => setLightboxShot(REAL_SCREENSHOTS[4])}
-              className="w-[165px] sm:w-[220px] rounded-[32px] p-2 bg-[#161922] border-[3px] border-[#2D3343] shadow-2xl cursor-pointer transition-transform hover:-translate-y-1.5 mt-8"
+              className="w-full rounded-[26px] p-2 bg-[#161922] border-[3px] border-[#2D3343] shadow-2xl cursor-pointer transition-transform hover:-translate-y-1.5 mt-4 sm:mt-6"
             >
-              <div className="rounded-[24px] overflow-hidden aspect-[9/19.2]">
+              <div className="w-10 h-1 rounded-full bg-white/15 mx-auto mb-1.5" />
+              <div className="rounded-[18px] overflow-hidden bg-[#F4F6FA]">
                 <img
-                  src="/app-screens/screen-manhwa.png"
+                  src="/app-screens/screen-manhwa.png?v=2"
                   alt="المانهوا الملونة"
-                  className="w-full h-full object-cover object-top"
+                  className="w-full h-auto block"
                 />
               </div>
+              <p className="text-center text-white text-xs font-extrabold mt-2">المانهوا الكورية الملونة</p>
             </div>
           </div>
         </div>
