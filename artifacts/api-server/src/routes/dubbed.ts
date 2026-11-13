@@ -554,9 +554,20 @@ router.get("/dubbed/carateen/catalog", async (req, res) => {
 
   try {
     const all = await getCarateenCatalog(req.query.refresh === "1");
+    const order = req.query.order === "oldest" ? "oldest" : "newest";
+    const orderedAll = [...all].sort((a, b) => {
+      const ya = parseInt(a.year || "0", 10) || 0;
+      const yb = parseInt(b.year || "0", 10) || 0;
+      if (order === "oldest") {
+        if (ya && yb && ya !== yb) return ya - yb;
+        return a.id - b.id;
+      }
+      if (ya && yb && ya !== yb) return yb - ya;
+      return b.id - a.id;
+    });
     const providerRows = provider
-      ? all.filter((entry) => entry.provider === provider)
-      : all;
+      ? orderedAll.filter((entry) => entry.provider === provider)
+      : orderedAll;
     const filtered = query
       ? providerRows.filter((entry) =>
           normalizeCarateenText(
@@ -785,6 +796,12 @@ router.get("/dubbed/search", async (req, res) => {
 // ── GET /api/dubbed/episodes?series= ──
 router.get("/dubbed/episodes", async (req, res) => {
   const series = (req.query.series as string || "").trim();
+  const order = req.query.order === "asc" ? "asc" : "desc";
+  const sortEps = (list: any[]) => [...list].sort((a, b) => {
+    const an = Number(a?.number) || 0;
+    const bn = Number(b?.number) || 0;
+    return order === "asc" ? an - bn : bn - an;
+  });
   if (!series) { res.json({ episodes: [] }); return; }
 
   const cacheKey = `/api/dubbed/episodes?series=${series}`;
@@ -798,7 +815,7 @@ router.get("/dubbed/episodes", async (req, res) => {
     Date.now() - hit.ts < CATALOG_TTL
   ) {
     res.setHeader("Cache-Control", "public, max-age=1800");
-    res.json({ episodes: hit.data });
+    res.json({ episodes: sortEps(hit.data) });
     return;
   }
 
@@ -810,7 +827,7 @@ router.get("/dubbed/episodes", async (req, res) => {
     if (arabicToonsEpisodes.length) {
       _catalogCache.set(cacheKey, { data: arabicToonsEpisodes, ts: Date.now() });
       res.setHeader("Cache-Control", "public, max-age=1800");
-      res.json({ episodes: arabicToonsEpisodes });
+      res.json({ episodes: sortEps(arabicToonsEpisodes) });
       return;
     }
   }
@@ -852,7 +869,7 @@ router.get("/dubbed/episodes", async (req, res) => {
 
     _catalogCache.set(cacheKey, { data: episodes, ts: Date.now() });
     res.setHeader("Cache-Control", "public, max-age=1800");
-    res.json({ episodes });
+    res.json({ episodes: sortEps(episodes) });
   } catch { res.json({ episodes: [] }); }
 });
 
@@ -1217,6 +1234,7 @@ interface AwCatalogItem {
   poster: string | null;
   seasons: { label: string; animeId: string }[];
   dubbedConfirmed: boolean;
+  year?: number;
 }
 
 interface AwSourceTitle {
@@ -1437,6 +1455,62 @@ async function fetchDalCatalog(
   return result;
 }
 
+
+function extractAwYear(title: string, anilistId: number | null): number {
+  const titleYear = title.match(/\b(19\d{2}|20\d{2})\b/)?.[1];
+  if (titleYear) {
+    const y = parseInt(titleYear, 10);
+    if (y >= 1950 && y <= 2030) return y;
+  }
+  const KNOWN_YEARS: Record<string, number> = {
+    "invincible": 2024,
+    "arcane": 2024,
+    "10 lives": 2024,
+    "200% wolf": 2024,
+    "7 bears": 2024,
+    "castlevania: nocturne": 2023,
+    "fionna & cake": 2023,
+    "spider-man: across the spider-verse": 2023,
+    "spider-man: into the spider-verse": 2018,
+    "puss in boots: the last wish": 2022,
+    "bad guys": 2022,
+    "super mario bros": 2023,
+    "wish": 2023,
+    "elemental": 2023,
+    "inside out 2": 2024,
+    "moana 2": 2024,
+    "despicable me 4": 2024,
+    "kung fu panda 4": 2024,
+    "the wild robot": 2024,
+    "transformers one": 2024,
+    "lion king": 1994,
+    "aladdin": 1992,
+    "beauty and the beast": 1991,
+    "mulan": 1998,
+    "tarzan": 1999,
+    "hercules": 1997,
+    "adventure time": 2010,
+    "regular show": 2010,
+    "gravity falls": 2012,
+    "ben 10": 2005,
+    "avatar": 2005,
+    "samurai jack": 2001,
+  };
+  const lower = title.toLowerCase();
+  for (const [key, yr] of Object.entries(KNOWN_YEARS)) {
+    if (lower.includes(key)) return yr;
+  }
+  if (anilistId && anilistId > 0) {
+    if (anilistId >= 160000) return 2024;
+    if (anilistId >= 140000) return 2022;
+    if (anilistId >= 110000) return 2020;
+    if (anilistId >= 90000) return 2017;
+    if (anilistId >= 20000) return 2014;
+    return 2010;
+  }
+  return 2020;
+}
+
 async function buildAwCatalog(): Promise<AwCatalogItem[]> {
   const SB_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
   const SB_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
@@ -1578,6 +1652,7 @@ async function buildAwCatalog(): Promise<AwCatalogItem[]> {
       poster: awPoster(group.anilistIds[0]),
       seasons: group.seasons,
       dubbedConfirmed: group.seasons.some(season => season.dubbedConfirmed),
+      year: extractAwYear(group.title, group.anilistIds[0] ?? null),
     };
   });
 
@@ -1588,7 +1663,7 @@ async function buildAwCatalog(): Promise<AwCatalogItem[]> {
   for (const item of items) {
     if (!item.poster) item.poster = awFallbackPoster(item.title);
   }
-  items.sort((a, b) => a.title.localeCompare(b.title, "en-US"));
+  items.sort((a, b) => (b.year || 2020) - (a.year || 2020) || a.title.localeCompare(b.title, "en-US"));
 
   writeAwDiskCatalog(items);
   hydrateAwPostersInBackground(items, needPosters);
@@ -1667,8 +1742,16 @@ function awSearchResults(catalog: AwCatalogItem[], query: string): AwCatalogItem
 router.get("/aw-dubbed/catalog", async (req, res) => {
   const page = Math.max(1, parseInt(req.query.page as string || "1", 10) || 1);
   const q = (req.query.q as string || "").trim();
+  const order = req.query.order === "oldest" ? "oldest" : req.query.order === "alpha" ? "alpha" : "newest";
   try {
     let catalog = await getAwCatalog();
+    if (order === "oldest") {
+      catalog = [...catalog].sort((a, b) => (a.year || 2020) - (b.year || 2020) || a.title.localeCompare(b.title, "en-US"));
+    } else if (order === "alpha") {
+      catalog = [...catalog].sort((a, b) => a.title.localeCompare(b.title, "en-US"));
+    } else {
+      catalog = [...catalog].sort((a, b) => (b.year || 2020) - (a.year || 2020) || a.title.localeCompare(b.title, "en-US"));
+    }
     if (q.length >= 2) {
       catalog = awSearchResults(catalog, q);
       // A cold process may return the persistent catalog before its background
@@ -1741,7 +1824,8 @@ router.get("/aw-dubbed/episodes", async (req, res) => {
         }
       }
     }
-    episodes.sort((a, b) => a.number - b.number);
+    const order = req.query.order === "asc" ? "asc" : "desc";
+    episodes.sort((a, b) => order === "asc" ? a.number - b.number : b.number - a.number);
     res.setHeader("Cache-Control", "public, max-age=1800");
     res.json({ episodes });
   } catch { res.json({ episodes: [] }); }
