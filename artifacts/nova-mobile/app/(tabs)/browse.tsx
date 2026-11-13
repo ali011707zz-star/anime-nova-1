@@ -136,18 +136,24 @@ function GenreCard({
       style={({ focused }) => [
         g.genreCard,
         horizontal ? g.horizontalGenreCard : { flex: 1 / columns },
+        tvMode && { borderRadius: horizontal ? 10 : 12, padding: 1.5 },
         tvMode && tvFocusStyle(focused),
       ]}
     >
       <View
         style={[
           g.genrePillWrap,
-          horizontal && g.horizontalGenrePillWrap,
-          tvMode && g.tvGenreImgWrap,
+          horizontal ? g.horizontalGenrePillWrap : (tvMode && g.tvGenreImgWrap),
           { backgroundColor: item.color },
         ]}
       >
-        <Text numberOfLines={1} style={[g.genreLabel, tvMode && g.tvGenreLabel]}>
+        <Text
+          numberOfLines={1}
+          style={[
+            g.genreLabel,
+            horizontal ? g.horizontalGenreLabel : (tvMode && g.tvGenreLabel),
+          ]}
+        >
           {item.ar}
         </Text>
         <View style={[g.genreFloatingPosterWrap, horizontal && g.horizontalGenreFloatingPosterWrap]}>
@@ -156,12 +162,13 @@ function GenreCard({
               source={{ uri: item.cover }}
               style={g.genreFloatingPoster}
               resizeMode="cover"
+              fadeDuration={0}
               onError={() => setImgErr(true)}
             />
           ) : (
             <Ionicons
               name={item.icon as any}
-              size={horizontal ? 19 : 22}
+              size={horizontal ? 13 : 16}
               color="#FFFFFF"
             />
           )}
@@ -596,7 +603,7 @@ export default function BrowseScreen() {
           key={`genres-${genreColumns}`}
           keyExtractor={item => item.genre}
           numColumns={genreColumns}
-          contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 12, paddingBottom: 100 }}
+          contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 6, paddingBottom: 88 }}
           columnWrapperStyle={{ gap: 10, marginBottom: 10 }}
           showsVerticalScrollIndicator={false}
           initialNumToRender={6}
@@ -630,7 +637,7 @@ export default function BrowseScreen() {
               key={`anime-grid-${gridColumns}`}
               keyExtractor={(item, i) => `${item.id}-${i}`}
               numColumns={gridColumns}
-              contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 12, paddingBottom: 100 }}
+              contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 6, paddingBottom: 88 }}
               columnWrapperStyle={{ gap: 10, marginBottom: 10 }}
               showsVerticalScrollIndicator={false}
               initialNumToRender={6}
@@ -714,26 +721,26 @@ export default function BrowseScreen() {
 
 const createBrowseStyles = (colors: ThemePalette, s = 1, tvMode = false) => StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  header: { backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border, paddingHorizontal: Math.round(11 * s), paddingTop: 8, paddingBottom: 5 },
-  tvHeader: { paddingHorizontal: 32, paddingTop: 16, paddingBottom: 14 },
-  mobileHeaderRow: { flexDirection: ROW_RTL, alignItems: "center", justifyContent: "space-between", minHeight: Math.round(40 * s), gap: 6 },
-  mobileActions: { flexDirection: ROW_RTL, alignItems: "center", gap: 5, flexShrink: 0 },
-  mobileFilterButton: { width: Math.round(36 * s), height: Math.round(36 * s), borderRadius: Math.round(11 * s), alignItems: "center", justifyContent: "center", backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
+  header: { backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border, paddingHorizontal: Math.round(10 * s), paddingTop: 4, paddingBottom: 4 },
+  tvHeader: { paddingHorizontal: 18, paddingTop: 6, paddingBottom: 5 },
+  mobileHeaderRow: { flexDirection: ROW_RTL, alignItems: "center", justifyContent: "space-between", minHeight: Math.round(31 * s), gap: 5 },
+  mobileActions: { flexDirection: ROW_RTL, alignItems: "center", gap: 4, flexShrink: 0 },
+  mobileFilterButton: { width: Math.round(30 * s), height: Math.round(30 * s), borderRadius: Math.round(9 * s), alignItems: "center", justifyContent: "center", backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
   mobileFilterButtonActive: { backgroundColor: colors.destructive, borderColor: colors.destructive },
-  modeSwitch: { flexDirection: ROW_RTL, alignItems: "center", padding: 2.5, borderRadius: Math.round(12 * s), backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
-  modeButton: { minHeight: Math.round(30 * s), flexDirection: ROW_RTL, alignItems: "center", justifyContent: "center", gap: 4, paddingHorizontal: Math.round(8 * s), borderRadius: Math.round(9 * s) },
+  modeSwitch: { flexDirection: ROW_RTL, alignItems: "center", padding: 2, borderRadius: Math.round(9 * s), backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
+  modeButton: { minHeight: Math.round(25 * s), flexDirection: ROW_RTL, alignItems: "center", justifyContent: "center", gap: 3, paddingHorizontal: Math.round(7 * s), borderRadius: Math.round(7 * s) },
   modeButtonActive: { backgroundColor: "#0ea5e9" },
-  modeButtonText: { color: colors.textSecondary, fontFamily: "Cairo_700Bold", fontSize: Math.round(9.8 * s) },
+  modeButtonText: { color: colors.textSecondary, fontFamily: "Cairo_700Bold", fontSize: Math.round(9 * s) },
   modeButtonTextActive: { color: "#ffffff" },
-  mobileTitleGroup: { flex: 1, flexDirection: ROW_RTL, alignItems: "center", gap: 7, minWidth: 0 },
-  mobileTitle: { color: colors.textPrimary, fontSize: Math.round(15 * s), fontFamily: "Cairo_800ExtraBold", textAlign: "right", writingDirection: "rtl" },
-  mobileBackButton: { width: Math.round(36 * s), height: Math.round(36 * s), borderRadius: Math.round(11 * s), alignItems: "center", justifyContent: "center", backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, flexShrink: 0 },
-  mobileSortButton: { minHeight: Math.round(40 * s), flexDirection: ROW_RTL, alignItems: "center", gap: 8, marginTop: 8, paddingHorizontal: 12, borderRadius: Math.round(13 * s), backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
-  mobileSortText: { flex: 1, color: colors.textPrimary, fontSize: Math.round(12.2 * s), fontFamily: "Cairo_700Bold", textAlign: "right", writingDirection: "rtl" },
-  mobileGenreRail: { marginTop: 10, marginHorizontal: -Math.round(11 * s) },
-  mobileGenreRailContent: { flexDirection: ROW_RTL, gap: 9, paddingHorizontal: Math.round(11 * s), paddingTop: 10, paddingBottom: 6 },
-  resultsHeading: { paddingTop: 2, paddingBottom: 10, alignItems: "flex-end" },
-  resultsHeadingText: { color: colors.textSecondary, fontSize: Math.round(11 * s), fontFamily: "Cairo_700Bold", textAlign: "right", writingDirection: "rtl" },
+  mobileTitleGroup: { flex: 1, flexDirection: ROW_RTL, alignItems: "center", gap: 6, minWidth: 0 },
+  mobileTitle: { color: colors.textPrimary, fontSize: Math.round(13.5 * s), fontFamily: "Cairo_800ExtraBold", textAlign: "right", writingDirection: "rtl" },
+  mobileBackButton: { width: Math.round(30 * s), height: Math.round(30 * s), borderRadius: Math.round(9 * s), alignItems: "center", justifyContent: "center", backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border, flexShrink: 0 },
+  mobileSortButton: { minHeight: Math.round(28 * s), flexDirection: ROW_RTL, alignItems: "center", gap: 6, marginTop: 4, paddingHorizontal: 10, borderRadius: Math.round(9 * s), backgroundColor: colors.input, borderWidth: 1, borderColor: colors.border },
+  mobileSortText: { flex: 1, color: colors.textPrimary, fontSize: Math.round(10.5 * s), fontFamily: "Cairo_700Bold", textAlign: "right", writingDirection: "rtl" },
+  mobileGenreRail: { marginTop: 4, marginHorizontal: -Math.round(10 * s) },
+  mobileGenreRailContent: { flexDirection: ROW_RTL, gap: 6, paddingHorizontal: Math.round(10 * s), paddingTop: 2, paddingBottom: 2 },
+  resultsHeading: { paddingTop: 0, paddingBottom: 6, alignItems: "flex-end" },
+  resultsHeadingText: { color: colors.textSecondary, fontSize: Math.round(10.5 * s), fontFamily: "Cairo_700Bold", textAlign: "right", writingDirection: "rtl" },
   headerRow: { flexDirection: "row", alignItems: "center", marginBottom: 6 },
   headerTitle: { fontSize: 17, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary },
   tvHeaderTitle: { fontSize: 26, lineHeight: 36 },
@@ -762,63 +769,60 @@ const createBrowseStyles = (colors: ThemePalette, s = 1, tvMode = false) => Styl
   searchInput: { flex: 1, color: colors.textPrimary, fontSize: 10, fontFamily: "Cairo_400Regular", textAlign: "right" },
   tvSearchInput: { fontSize: 14, lineHeight: 21 },
   genreCard: { flex: 1 },
-  horizontalGenreCard: { width: Math.round(142 * s), flexGrow: 0 },
-  genreCardWrap: { paddingTop: 16, position: "relative" },
-  horizontalGenreCardWrap: { paddingTop: 14, position: "relative" },
+  horizontalGenreCard: { width: tvMode ? 98 : Math.round(98 * s), flexGrow: 0 },
+  genreCardWrap: { paddingTop: 8, position: "relative" },
+  horizontalGenreCardWrap: { paddingTop: 6, position: "relative" },
   genrePillWrap: {
-    height: tvMode ? Math.round(44 * s) : Math.round(58 * s),
-    borderRadius: Math.round(15 * s),
+    height: tvMode ? 40 : Math.round(42 * s),
+    borderRadius: Math.round(11 * s),
     flexDirection: ROW_RTL,
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: Math.round(10 * s),
+    paddingHorizontal: Math.round(7 * s),
     position: "relative",
-    overflow: "visible",
+    overflow: "hidden",
   },
   horizontalGenrePillWrap: {
-    height: Math.round(48 * s),
-    borderRadius: Math.round(14 * s),
+    height: tvMode ? 30 : Math.round(30 * s),
+    borderRadius: Math.round(9 * s),
+    paddingHorizontal: Math.round(6 * s),
   },
   genreFloatingPosterWrap: {
-    width: tvMode ? Math.round(28 * s) : Math.round(38 * s),
-    height: tvMode ? Math.round(28 * s) : Math.round(38 * s),
-    borderRadius: Math.round(11 * s),
+    width: tvMode ? 24 : Math.round(25 * s),
+    height: tvMode ? 24 : Math.round(25 * s),
+    borderRadius: Math.round(7 * s),
     overflow: "hidden",
-    borderWidth: 1.5,
-    borderColor: "rgba(255,255,255,0.45)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.4)",
     backgroundColor: "rgba(0, 0, 0, 0.25)",
     alignItems: "center",
     justifyContent: "center",
-    elevation: 3,
-    shadowColor: "#000",
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
   },
   horizontalGenreFloatingPosterWrap: {
-    width: Math.round(32 * s),
-    height: Math.round(32 * s),
-    borderRadius: Math.round(10 * s),
+    width: tvMode ? 19 : Math.round(20 * s),
+    height: tvMode ? 19 : Math.round(20 * s),
+    borderRadius: Math.round(6 * s),
   },
   genreFloatingPoster: { width: "100%", height: "100%" },
   genrePillLabel: {
     flex: 1,
-    fontSize: Math.round(13 * s),
+    fontSize: Math.round(11 * s),
     fontFamily: "Cairo_800ExtraBold",
     color: "#ffffff",
     textAlign: "right",
-    paddingHorizontal: 6,
+    paddingHorizontal: 4,
     textShadowColor: "rgba(0,0,0,0.28)",
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
   },
-  genreImgWrap: { height: 90, borderRadius: 16, overflow: "hidden", position: "relative", borderWidth: 1, borderColor: colors.border, justifyContent: "flex-end" },
-  horizontalGenreImgWrap: { height: 58, borderRadius: 13 },
-  tvGenreImgWrap: { height: 95, borderRadius: 14, borderWidth: 1 },
+  genreImgWrap: { height: 52, borderRadius: 12, overflow: "hidden", position: "relative", borderWidth: 1, borderColor: colors.border, justifyContent: "flex-end" },
+  horizontalGenreImgWrap: { height: 30, borderRadius: 9 },
+  tvGenreImgWrap: { height: 42, borderRadius: 11, borderWidth: 1 },
   genreImg: { ...StyleSheet.absoluteFillObject, width: "100%", height: "100%" },
-  genreColorBar: { position: "absolute", bottom: 0, left: 0, right: 0, height: 3 },
-  genreLabel: { fontSize: Math.round(13 * s), fontFamily: "Cairo_800ExtraBold", color: "#fff", paddingHorizontal: Math.round(8 * s), paddingVertical: Math.round(6 * s), textShadowColor: "rgba(0,0,0,0.8)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4 },
-  tvGenreLabel: { fontSize: 15, lineHeight: 22, padding: 8 },
+  genreColorBar: { position: "absolute", bottom: 0, left: 0, right: 0, height: 2.5 },
+  genreLabel: { flex: 1, fontSize: Math.round(11.5 * s), fontFamily: "Cairo_800ExtraBold", color: "#fff", paddingHorizontal: Math.round(5 * s), paddingVertical: Math.round(2 * s), textAlign: "right", textShadowColor: "rgba(0,0,0,0.8)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3 },
+  horizontalGenreLabel: { fontSize: tvMode ? 10.5 : Math.round(10 * s), paddingHorizontal: 4, paddingVertical: 0 },
+  tvGenreLabel: { fontSize: 12, lineHeight: 17, paddingHorizontal: 6, paddingVertical: 2 },
   card: { flex: 1 },
   cardWrap: { borderRadius: Math.round(13 * s), overflow: "hidden", aspectRatio: 2 / 3, backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: colors.border, position: "relative" },
   tvCardWrap: { borderRadius: 16, borderWidth: 1 },

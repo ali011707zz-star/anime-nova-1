@@ -82,10 +82,10 @@ export function DrawerMenu({ visible, onClose }: Props) {
   const { width: winW, height: winH } = useWindowDimensions();
   const tvMode = isTvDevice(winW, winH);
   const drawerWidth = tvMode && winW >= 700
-    ? Math.min(winW * 0.40, 420)
+    ? Math.min(winW * 0.30, 290)
     : winW >= 600
-      ? Math.min(winW * 0.46, 360)
-      : Math.min(winW * 0.80, 315);
+      ? Math.min(winW * 0.36, 280)
+      : Math.min(winW * 0.72, 265);
   const topPad = Platform.OS === "web" ? 0 : insets.top;
   const { watchHistory, favorites, theme, currentUser } = useApp();
   const colors = useColors();
@@ -236,7 +236,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
                 { backgroundColor: colors.surfaceElevated, borderWidth: 2, borderColor: focused ? "#38BDF8" : "transparent" },
                 tvMode && tvFocusStyle(focused),
               ]}>
-              <Ionicons name="close" size={tvMode ? 28 : 20} color={colors.textMuted} />
+              <Ionicons name="close" size={tvMode ? 17 : 15} color={colors.textMuted} />
             </Pressable>
           </View>
 
@@ -247,7 +247,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
             style={({ focused }) => [
               s.userCard,
               tvMode && s.tvUserCard,
-              focused && { borderColor: "#38BDF8", borderWidth: 2.5 },
+              focused && { borderColor: "#38BDF8" },
               tvMode && tvFocusStyle(focused),
             ]}
           >
@@ -298,7 +298,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
 
               {/* Left side: Action pill / chevron */}
               <View style={s.userChevronCircle}>
-                <Ionicons name="chevron-back" size={16} color="#38bdf8" />
+                <Ionicons name="chevron-back" size={13} color="#38bdf8" />
               </View>
             </LinearGradient>
           </Pressable>
@@ -399,22 +399,22 @@ function DrawerItem({ item, onPress, tvMode, hasTVPreferredFocus = false, colors
       style={({ pressed, focused }) => [
         s.navItem,
         tvMode && s.tvNavItem,
-        { backgroundColor: colors.card, borderColor: colors.border, borderWidth: tvMode ? 2.5 : 1 },
+        { backgroundColor: colors.card, borderColor: colors.border, borderWidth: tvMode ? 1.5 : 1 },
         (pressed || (tvMode && focused)) && { backgroundColor: colors.surfaceElevated },
         tvMode && tvFocusStyle(focused),
       ]}
     >
       <View style={[s.navIcon, tvMode && s.tvNavIcon, { backgroundColor: (item.color || "#8B5CF6") + "18" }]}>
-        <Ionicons name={item.icon} size={tvMode ? 24 : 18} color={item.color || "#8B5CF6"} />
+        <Ionicons name={item.icon} size={tvMode ? 16 : 15} color={item.color || "#8B5CF6"} />
       </View>
-      <Text style={[s.navLabel, tvMode && s.tvNavLabel, { color: colors.textPrimary }]}>{item.label}</Text>
+      <Text style={[s.navLabel, tvMode && s.tvNavLabel, { color: colors.textPrimary }]} numberOfLines={1}>{item.label}</Text>
       {badgeLabel && (
         <View style={[s.badge, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
           <Text style={[s.badgeText, { color: colors.textSecondary }]}>{badgeLabel}</Text>
         </View>
       )}
       {item.showChevron !== false && (
-        <Ionicons name="chevron-back" size={15} color={colors.textMuted} />
+        <Ionicons name="chevron-back" size={13} color={colors.textMuted} />
       )}
     </Pressable>
   );
@@ -438,114 +438,114 @@ const s = StyleSheet.create({
     shadowRadius: 16,
     elevation: 20,
   },
-  tvDrawer: { borderLeftWidth: 2 },
+  tvDrawer: { borderLeftWidth: 1.5 },
   logoRow: {
-    flexDirection: "row", alignItems: "center", gap: 10,
-    paddingHorizontal: 20, paddingVertical: 20,
+    flexDirection: "row", alignItems: "center", gap: 8,
+    paddingHorizontal: 13, paddingVertical: 11,
     borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)",
   },
-  tvLogoRow: { paddingHorizontal: 28, paddingVertical: 28, gap: 16 },
+  tvLogoRow: { paddingHorizontal: 15, paddingVertical: 12, gap: 10 },
   logoBadge: {
-    width: 34, height: 34, borderRadius: 10,
+    width: 28, height: 28, borderRadius: 8,
     alignItems: "center", justifyContent: "center",
   },
   logoAccent: {
-    width: 3.5, height: 28, borderRadius: 2,
+    width: 3, height: 22, borderRadius: 2,
   },
-  logoText: { fontSize: 17, letterSpacing: 0.7, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
-  tvLogoText: { fontSize: 25 },
-  logoSub: { fontSize: 9, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.3)", marginTop: -2, textAlign: "right" },
-  tvLogoSub: { fontSize: 14, marginTop: 1 },
+  logoText: { fontSize: 14.5, letterSpacing: 0.5, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+  tvLogoText: { fontSize: 16 },
+  logoSub: { fontSize: 8.5, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.3)", marginTop: -2, textAlign: "right" },
+  tvLogoSub: { fontSize: 9.5, marginTop: -1 },
   closeBtn: {
-    width: 32, height: 32, borderRadius: 16,
+    width: 28, height: 28, borderRadius: 14,
     alignItems: "center", justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.05)",
   },
-  tvCloseBtn: { width: 48, height: 48, borderRadius: 16 },
+  tvCloseBtn: { width: 32, height: 32, borderRadius: 10 },
   userCard: {
-    marginHorizontal: 14,
-    marginTop: 16,
-    marginBottom: 8,
-    borderRadius: 20,
+    marginHorizontal: 10,
+    marginTop: 10,
+    marginBottom: 4,
+    borderRadius: 14,
     overflow: "hidden",
     borderWidth: 1.5,
     borderColor: "rgba(56,189,248,0.28)",
     backgroundColor: "#141624",
   },
-  tvUserCard: { marginHorizontal: 22, marginTop: 24, marginBottom: 14, borderRadius: 22 },
+  tvUserCard: { marginHorizontal: 12, marginTop: 10, marginBottom: 6, borderRadius: 14 },
   userCardInner: {
     flexDirection: ROW_RTL,
     alignItems: "center",
-    gap: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
+    gap: 9,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
   },
   userAvatarWrap: {
     position: "relative",
-    width: 50,
-    height: 50,
-    borderRadius: 16,
-    borderWidth: 2,
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    borderWidth: 1.5,
     borderColor: "#0ea5e9",
-    padding: 1.5,
+    padding: 1,
     backgroundColor: "#0f172a",
     flexShrink: 0,
   },
   userAvatar: {
     width: "100%",
     height: "100%",
-    borderRadius: 12,
+    borderRadius: 9,
     alignItems: "center",
     justifyContent: "center",
   },
   userAvatarImg: {
     width: "100%",
     height: "100%",
-    borderRadius: 12,
+    borderRadius: 9,
   },
   userOnlineBadge: {
     position: "absolute",
     bottom: -2,
     left: -2,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
     backgroundColor: "#10b981",
-    borderWidth: 2,
+    borderWidth: 1.5,
     borderColor: "#141624",
   },
-  userAvatarText: { fontSize: 18, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+  userAvatarText: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
   userInfoCol: {
     flex: 1,
     alignItems: "flex-end",
     justifyContent: "center",
-    gap: 3,
+    gap: 2,
   },
   userNameRow: {
     flexDirection: ROW_RTL,
     alignItems: "center",
-    gap: 7,
+    gap: 5,
     flexWrap: "wrap",
   },
-  userName: { fontSize: 14.5, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "right" },
+  userName: { fontSize: 12.5, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "right" },
   userHandlePill: {
-    paddingHorizontal: 8,
-    paddingVertical: 1.5,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
     borderRadius: 999,
     backgroundColor: "rgba(14,165,233,0.16)",
     borderWidth: 1,
     borderColor: "rgba(56,189,248,0.4)",
   },
   userHandlePillText: {
-    fontSize: 10,
+    fontSize: 8.5,
     fontFamily: "Cairo_700Bold",
     color: "#38bdf8",
   },
-  userSub: { fontSize: 10.5, fontFamily: "Cairo_600SemiBold", color: "rgba(255,255,255,0.48)", textAlign: "right" },
+  userSub: { fontSize: 9, fontFamily: "Cairo_600SemiBold", color: "rgba(255,255,255,0.48)", textAlign: "right" },
   userChevronCircle: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     backgroundColor: "rgba(14,165,233,0.14)",
     borderWidth: 1,
     borderColor: "rgba(56,189,248,0.3)",
@@ -554,43 +554,43 @@ const s = StyleSheet.create({
     flexShrink: 0,
   },
   sectionHeading: {
-    flexDirection: "row", alignItems: "center", gap: 10,
-    paddingHorizontal: 18, paddingTop: 14, paddingBottom: 8,
+    flexDirection: "row", alignItems: "center", gap: 8,
+    paddingHorizontal: 12, paddingTop: 9, paddingBottom: 4,
   },
   sectionLabel: {
-    fontSize: 9, fontFamily: "Cairo_700Bold",
+    fontSize: 8.5, fontFamily: "Cairo_700Bold",
     textTransform: "uppercase",
-    letterSpacing: 1.2,
+    letterSpacing: 1,
   },
   sectionRule: {
     flex: 1, height: StyleSheet.hairlineWidth,
   },
   navItem: {
-    flexDirection: "row", alignItems: "center", gap: 12,
-    paddingHorizontal: 12, paddingVertical: 10,
-    marginHorizontal: 14, marginBottom: 6,
-    borderRadius: 16, borderWidth: 1,
+    flexDirection: "row", alignItems: "center", gap: 9,
+    paddingHorizontal: 9, paddingVertical: 7,
+    marginHorizontal: 10, marginBottom: 4,
+    borderRadius: 11, borderWidth: 1,
   },
-  tvNavItem: { paddingHorizontal: 22, paddingVertical: 18, marginHorizontal: 22, marginBottom: 10, borderRadius: 18, gap: 18 },
+  tvNavItem: { paddingHorizontal: 11, paddingVertical: 8, marginHorizontal: 12, marginBottom: 5, borderRadius: 12, gap: 10 },
   navIcon: {
-    width: 38, height: 38, borderRadius: 11,
+    width: 30, height: 30, borderRadius: 8,
     alignItems: "center", justifyContent: "center",
   },
-  tvNavIcon: { width: 52, height: 52, borderRadius: 15 },
-  navLabel: { flex: 1, fontSize: 13, fontFamily: "Cairo_700Bold" },
-  tvNavLabel: { fontSize: 19 },
+  tvNavIcon: { width: 32, height: 32, borderRadius: 9 },
+  navLabel: { flex: 1, fontSize: 11.5, fontFamily: "Cairo_700Bold" },
+  tvNavLabel: { fontSize: 12.5 },
   badge: {
-    width: 28, height: 28, borderRadius: 14,
+    minWidth: 22, height: 20, paddingHorizontal: 5, borderRadius: 10,
     alignItems: "center", justifyContent: "center",
     borderWidth: 1,
   },
-  badgeText: { fontSize: 10, fontFamily: "Cairo_700Bold" },
+  badgeText: { fontSize: 9, fontFamily: "Cairo_700Bold" },
   footer: {
-    marginTop: 24, paddingHorizontal: 20,
+    marginTop: 14, paddingHorizontal: 14,
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
   },
-  footerText: { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.2)" },
+  footerText: { fontSize: 9.5, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.2)" },
   footerDot: { flexDirection: "row", alignItems: "center", gap: 5 },
-  onlineDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#22c55e" },
-  footerStatus: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(34,197,94,0.7)" },
+  onlineDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: "#22c55e" },
+  footerStatus: { fontSize: 9.5, fontFamily: "Cairo_700Bold", color: "rgba(34,197,94,0.7)" },
 });

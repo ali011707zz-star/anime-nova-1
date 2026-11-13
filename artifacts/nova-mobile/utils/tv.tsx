@@ -183,6 +183,30 @@ export function isTvDevice(_width?: number, _height?: number): boolean {
   return detectAndroidTvHardware();
 }
 
+let activeFullScreenOverlay = false;
+const overlayListeners = new Set<() => void>();
+
+export function setTvFullScreenOverlayActive(active: boolean) {
+  if (activeFullScreenOverlay === active) return;
+  activeFullScreenOverlay = active;
+  for (const fn of overlayListeners) {
+    try { fn(); } catch {}
+  }
+}
+
+export function useTvFullScreenOverlay(): boolean {
+  const [active, setActive] = React.useState<boolean>(() => activeFullScreenOverlay);
+  React.useEffect(() => {
+    const sync = () => setActive(activeFullScreenOverlay);
+    sync();
+    overlayListeners.add(sync);
+    return () => {
+      overlayListeners.delete(sync);
+    };
+  }, []);
+  return active;
+}
+
 let activeThemeIsWhite = false;
 
 export function setActiveThemeIsWhite(isWhite: boolean) {
@@ -209,14 +233,10 @@ export function tvFocusStyle(focused: boolean, isWhite?: boolean): ViewStyle {
   if (white) {
     return {
       borderColor: "#0284C7",
-      borderWidth: 2.5,
-      zIndex: 50,
     };
   }
   return {
-    borderColor: "#00F0FF",
-    borderWidth: 2.5,
-    zIndex: 50,
+    borderColor: "#38BDF8",
   };
 }
 
@@ -366,6 +386,7 @@ export const TvPressable = React.forwardRef<View, TvPressableProps>(function TvP
         const isFocused = Boolean(focused || (state as any)?.focused);
         const baseStyle = typeof style === "function" ? style({ ...state, focused: isFocused }) : style;
         return [
+          tv && { borderWidth: 1.5, borderColor: "transparent" },
           baseStyle,
           tv && isFocused && tvFocusStyle(true),
           state.pressed && { opacity: 0.85 },

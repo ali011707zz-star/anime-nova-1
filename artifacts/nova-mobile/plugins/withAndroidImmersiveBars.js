@@ -110,10 +110,42 @@ const KOTLIN_METHODS = `
     } catch (_: Throwable) {}
   }
 
+  private fun novaExtractDrawableRadius(dr: android.graphics.drawable.Drawable?): Float {
+    if (dr == null) return -1f
+    try {
+      val m = dr.javaClass.getMethod("getFullBorderRadius")
+      val v = (m.invoke(dr) as? Number)?.toFloat() ?: -1f
+      if (!v.isNaN() && v > 0f) return v
+    } catch (_: Throwable) {}
+    if (dr is android.graphics.drawable.LayerDrawable) {
+      for (i in 0 until dr.numberOfLayers) {
+        val r = novaExtractDrawableRadius(dr.getDrawable(i))
+        if (r > 0f) return r
+      }
+    }
+    return -1f
+  }
+
+  private fun novaResolveCornerRadius(view: android.view.View, d: Float): Float {
+    val minDim = kotlin.math.min(view.width, view.height).toFloat()
+    val maxAllowed = if (minDim > 0f) minDim / 2f else 14f * d
+    val own = novaExtractDrawableRadius(view.background)
+    if (own > 0f) return kotlin.math.min(own, maxAllowed)
+    if (view is android.view.ViewGroup && view.childCount > 0) {
+      val childRadius = novaExtractDrawableRadius(view.getChildAt(0)?.background)
+      if (childRadius > 0f) return kotlin.math.min(childRadius, maxAllowed)
+    }
+    if (minDim > 0f && view.height <= (44f * d).toInt() && view.width >= (view.height * 1.35f).toInt()) {
+      return kotlin.math.min(12f * d, maxAllowed)
+    }
+    return if (minDim > 0f) kotlin.math.min(11f * d, maxAllowed) else 11f * d
+  }
+
   private fun novaApplyNativeFocusRing(newFocus: android.view.View?) {
     try {
       val prev = novaFocusedForegroundView
       if (prev != null) {
+        try { prev.animate().cancel() } catch (_: Throwable) {}
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
           try { prev.foreground = novaPrevForeground } catch (_: Throwable) {}
         }
@@ -138,45 +170,73 @@ const KOTLIN_METHODS = `
         return
       }
 
+      val d = resources.displayMetrics.density
       if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
         novaFocusedForegroundView = newFocus
         novaPrevForeground = newFocus.foreground
-        val d = resources.displayMetrics.density
-        val minDim = kotlin.math.min(newFocus.width, newFocus.height).toFloat()
-        val radius = if (minDim > 0f) kotlin.math.min(12f * d, minDim / 2.2f) else 12f * d
+        val radius = novaResolveCornerRadius(newFocus, d)
+        val isCompactControl = newFocus.height in 1..(54f * d).toInt()
         val ring = android.graphics.drawable.GradientDrawable().apply {
           shape = android.graphics.drawable.GradientDrawable.RECTANGLE
           cornerRadius = radius
-          setStroke((2.5f * d).toInt().coerceAtLeast(3), android.graphics.Color.parseColor("#00F0FF"))
-          setColor(android.graphics.Color.argb(26, 0, 240, 255))
+          setStroke((1.8f * d).toInt().coerceAtLeast(2), android.graphics.Color.parseColor("#38BDF8"))
+          setColor(
+            if (isCompactControl) android.graphics.Color.argb(18, 56, 189, 248)
+            else android.graphics.Color.TRANSPARENT
+          )
         }
         newFocus.foreground = ring
+        try {
+          android.animation.ObjectAnimator.ofInt(ring, "alpha", 95, 255).apply {
+            duration = 115L
+            interpolator = android.view.animation.DecelerateInterpolator()
+            start()
+          }
+        } catch (_: Throwable) {}
       }
       try {
-        newFocus.translationZ = 10f
+        newFocus.translationZ = 6f
       } catch (_: Throwable) {}
     } catch (_: Throwable) {}
   }
 
   private fun novaScrollFocusedIntoView(focused: android.view.View) {
     try {
+      val d = resources.displayMetrics.density
       var current: android.view.ViewParent? = focused.parent
-      while (current != null) {
-        if (current is android.widget.ScrollView) {
+      var handledH = false
+      var handledV = false
+      while (current != null && (!handledH || !handledV)) {
+        if (!handledH && current is android.widget.HorizontalScrollView) {
+          handledH = true
+          val hScroll = current
+          hScroll.isFocusable = false
+          hScroll.isFocusableInTouchMode = false
+          val childRect = android.graphics.Rect()
+          focused.getDrawingRect(childRect)
+          hScroll.offsetDescendantRectToMyCoords(focused, childRect)
+          val padX = (28 * d).toInt()
+          val visibleLeft = hScroll.scrollX + padX
+          val visibleRight = hScroll.scrollX + hScroll.width - padX
+          if (childRect.left < visibleLeft || childRect.right > visibleRight) {
+            childRect.inset(-padX, 0)
+            hScroll.requestChildRectangleOnScreen(focused, childRect, false)
+          }
+        } else if (!handledV && current is android.widget.ScrollView) {
+          handledV = true
           val scrollView = current
           scrollView.isFocusable = false
           scrollView.isFocusableInTouchMode = false
           val childRect = android.graphics.Rect()
           focused.getDrawingRect(childRect)
           scrollView.offsetDescendantRectToMyCoords(focused, childRect)
-          val pad = (44 * resources.displayMetrics.density).toInt()
-          val visibleTop = scrollView.scrollY + pad
-          val visibleBottom = scrollView.scrollY + scrollView.height - pad
+          val padY = (40 * d).toInt()
+          val visibleTop = scrollView.scrollY + padY
+          val visibleBottom = scrollView.scrollY + scrollView.height - padY
           if (childRect.top < visibleTop || childRect.bottom > visibleBottom) {
-            childRect.inset(0, -pad)
+            childRect.inset(0, -padY)
             scrollView.requestChildRectangleOnScreen(focused, childRect, false)
           }
-          break
         }
         current = current.parent
       }

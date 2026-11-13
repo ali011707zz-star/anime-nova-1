@@ -16,7 +16,7 @@ import {
 } from "@/utils/downloadManager";
 import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
 import * as FileSystem from "expo-file-system";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
+import { isTvDevice, setTvFullScreenOverlayActive, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
 import type { ThemePalette } from "@/constants/colors";
 
@@ -36,6 +36,56 @@ interface DownloadGroup {
   items: DownloadItem[];
   totalSize: number;
   lastDownloadedAt: number;
+}
+
+function DownloadCoverImage({
+  uri,
+  animeId,
+  style,
+  fallbackStyle,
+  iconSize = 22,
+  iconColor,
+}: {
+  uri?: string;
+  animeId?: number;
+  style: any;
+  fallbackStyle?: any;
+  iconSize?: number;
+  iconColor: string;
+}) {
+  const candidates = useMemo(() => {
+    const vals = [
+      uri ? String(uri).trim() : "",
+      animeId && animeId > 0 ? `https://img.anili.st/media/${animeId}` : "",
+    ];
+    return [...new Set(vals.filter(Boolean))];
+  }, [uri, animeId]);
+  const [idx, setIdx] = useState(0);
+  useEffect(() => {
+    setIdx(0);
+  }, [candidates.join("|")]);
+
+  const activeUri = candidates[idx];
+  if (!activeUri) {
+    return (
+      <View style={[style, fallbackStyle]}>
+        <Ionicons name="film" size={iconSize} color={iconColor} />
+      </View>
+    );
+  }
+  return (
+    <Image
+      source={{ uri: activeUri }}
+      style={style}
+      resizeMode="cover"
+      fadeDuration={0}
+      resizeMethod="resize"
+      onError={() => {
+        if (idx < candidates.length - 1) setIdx(idx + 1);
+        else setIdx(candidates.length);
+      }}
+    />
+  );
 }
 
 function downloadedDateLabel(timestamp: number): string {
@@ -136,13 +186,14 @@ function ActiveDownloadCard({
                   : "تنزيل نظامي — يستمر حتى بعد إغلاق التطبيق"}
         </Text>
       </View>
-      {item.cover ? (
-        <Image source={{ uri: item.cover }} style={s.activePoster} resizeMode="cover" />
-      ) : (
-        <View style={[s.activePoster, s.posterFallback]}>
-          <Ionicons name="film-outline" size={20} color={colors.accent} />
-        </View>
-      )}
+      <DownloadCoverImage
+        uri={item.cover}
+        animeId={item.animeId}
+        style={s.activePoster}
+        fallbackStyle={s.posterFallback}
+        iconSize={20}
+        iconColor={colors.accent}
+      />
     </View>
   );
 }
@@ -173,19 +224,26 @@ function DownloadCard({
       <Pressable
         onPress={() => onPlay(item)}
         hitSlop={4}
-         focusable={tvMode}
-          style={({ pressed, focused }) => [s.posterWrap, tvMode && s.tvEpisodePosterWrap, pressed && { opacity: 0.78 }, tvMode && tvFocusStyle(focused)]}
+        focusable={tvMode}
+        style={({ pressed, focused }) => [
+          s.posterWrap,
+          tvMode && s.tvEpisodePosterWrap,
+          pressed && { opacity: 0.82 },
+          tvMode && tvFocusStyle(focused),
+        ]}
         accessibilityRole="button"
         accessibilityLabel={`تشغيل ${item.title} الحلقة ${item.ep}`}
         testID={`download-play-poster-${item.id}`}
       >
-          {item.cover ? (
-            <Image source={{ uri: item.cover }} style={s.poster} resizeMode="cover" />
-          ) : (
-            <View style={[s.poster, s.posterFallback]}>
-              <Ionicons name="film" size={22} color={colors.accent} />
-            </View>
-          )}
+        <View style={s.posterClip}>
+          <DownloadCoverImage
+            uri={item.cover}
+            animeId={item.animeId}
+            style={s.poster}
+            fallbackStyle={s.posterFallback}
+            iconSize={22}
+            iconColor={colors.accent}
+          />
           <LinearGradient
             colors={["transparent", "rgba(0,0,0,0.5)"]}
             style={StyleSheet.absoluteFill}
@@ -193,6 +251,7 @@ function DownloadCard({
           <View style={s.episodeNumberBadge}>
             <Text style={s.episodeNumberText}>EP {item.ep}</Text>
           </View>
+        </View>
       </Pressable>
 
       {/* Info */}
@@ -287,27 +346,29 @@ function DownloadWorkCard({
   const tvMode = isTvDevice();
 
   return (
-    <View style={[s.workCard, tvMode && s.tvWorkCard, { width }]}>
-      <Pressable
-        onPress={onOpen}
-        focusable={tvMode}
-        style={({ pressed, focused }) => [
-          s.workPoster,
-          tvMode && s.tvWorkPoster,
-          pressed && { opacity: 0.86 },
-          tvMode && tvFocusStyle(focused),
-        ]}
-        accessibilityRole="button"
-        accessibilityLabel={`عرض الحلقات المحملة من ${group.title}`}
-        testID={`download-work-${group.animeId}`}
-      >
-        {group.cover ? (
-          <Image source={{ uri: group.cover }} style={s.workPosterImage} resizeMode="cover" />
-        ) : (
-          <View style={[s.workPosterImage, s.posterFallback]}>
-            <Ionicons name="film" size={28} color={colors.accent} />
-          </View>
-        )}
+    <Pressable
+      onPress={onOpen}
+      focusable={tvMode}
+      style={({ pressed, focused }) => [
+        s.workCard,
+        tvMode && s.tvWorkCard,
+        { width },
+        pressed && { opacity: 0.88 },
+        tvMode && tvFocusStyle(focused),
+      ]}
+      accessibilityRole="button"
+      accessibilityLabel={`عرض الحلقات المحملة من ${group.title}`}
+      testID={`download-work-${group.animeId}`}
+    >
+      <View style={[s.workPoster, tvMode && s.tvWorkPoster]}>
+        <DownloadCoverImage
+          uri={group.cover}
+          animeId={group.animeId}
+          style={s.workPosterImage}
+          fallbackStyle={s.posterFallback}
+          iconSize={28}
+          iconColor={colors.accent}
+        />
         <LinearGradient
           colors={["rgba(0,0,0,0.18)", "rgba(0,0,0,0.08)", "rgba(0,0,0,0.86)"]}
           locations={[0, 0.46, 1]}
@@ -325,25 +386,19 @@ function DownloadWorkCard({
         <View style={s.workPosterBottom}>
           <Text style={s.workTitle} numberOfLines={2}>{group.title}</Text>
           <View style={s.workPosterMeta}>
-          <Text style={s.workMetaText}>تم حفظ {group.items.length} حلقات</Text>
+            <Text style={s.workMetaText}>تم حفظ {group.items.length} حلقات</Text>
             <Text style={s.workOpenText}>فتح  ←</Text>
           </View>
         </View>
-      </Pressable>
+      </View>
 
-      <Pressable
-        onPress={onOpen}
-        focusable={tvMode}
-        style={({ focused }) => [s.workFooter, tvMode && tvFocusStyle(focused)]}
-        accessibilityRole="button"
-        accessibilityLabel={`دخول إلى حلقات ${group.title}`}
-      >
+      <View style={s.workFooter}>
         <Text style={s.workFooterLabel}>عرض الحلقات ({group.items.length})</Text>
         <View style={s.workEnterButton}>
           <Text style={s.workEnterText}>دخول</Text>
         </View>
-      </Pressable>
-    </View>
+      </View>
+    </Pressable>
   );
 }
 
@@ -617,6 +672,22 @@ export default function DownloadsScreen() {
   }, [gallerySavingId, loadDownloads]);
 
   /* تشغيل محلي — Modal كاملة الشاشة حتى لا يظهر شريط التنقل السفلي */
+  useEffect(() => {
+    setTvFullScreenOverlayActive(playingItem !== null);
+    return () => {
+      setTvFullScreenOverlayActive(false);
+    };
+  }, [playingItem]);
+
+  useEffect(() => {
+    if (!playingItem) return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      setPlayingItem(null);
+      return true;
+    });
+    return () => sub.remove();
+  }, [playingItem]);
+
   const handleClosePlayer = useCallback(() => setPlayingItem(null), []);
 
   const handleHeaderBack = useCallback(() => {
@@ -752,13 +823,14 @@ export default function DownloadsScreen() {
                 </View>
               </View>
               <View style={[s.detailPosterWrap, tvMode && s.tvDetailPosterWrap]}>
-                {selectedGroup.cover ? (
-                  <Image source={{ uri: selectedGroup.cover }} style={s.detailPoster} resizeMode="cover" />
-                ) : (
-                  <View style={[s.detailPoster, s.posterFallback]}>
-                    <Ionicons name="film" size={25} color={colors.accent} />
-                  </View>
-                )}
+                <DownloadCoverImage
+                  uri={selectedGroup.cover}
+                  animeId={selectedGroup.animeId}
+                  style={s.detailPoster}
+                  fallbackStyle={s.posterFallback}
+                  iconSize={25}
+                  iconColor={colors.accent}
+                />
                 <View style={s.detailPosterCount}>
                   <Text style={s.detailPosterCountText}>{selectedGroup.items.length} حلقات</Text>
                 </View>
@@ -991,7 +1063,8 @@ const createDownloadStyles = (colors: ThemePalette) => StyleSheet.create({
     borderWidth: 1, borderColor: colors.border, padding: 9,
   },
 
-  posterWrap: { width: 70, height: 82, borderRadius: 10, overflow: "hidden", flexShrink: 0, position: "relative" },
+  posterWrap: { width: 70, height: 82, borderRadius: 10, padding: 1.5, borderWidth: 1.5, borderColor: "transparent", flexShrink: 0, position: "relative" },
+  posterClip: { width: "100%", height: "100%", borderRadius: 8, overflow: "hidden", position: "relative", backgroundColor: colors.surfaceElevated },
   poster:     { width: "100%", height: "100%" },
   posterFallback: { backgroundColor: colors.surfaceElevated, alignItems: "center", justifyContent: "center" },
 
@@ -1065,12 +1138,12 @@ const createDownloadStyles = (colors: ThemePalette) => StyleSheet.create({
   workGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", alignItems: "flex-start", direction: "rtl" },
   tvWorkGrid: { justifyContent: "flex-start" },
   workCard: {
-    marginBottom: 1, overflow: "hidden", borderRadius: 18,
-    backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border,
+    marginBottom: 1, overflow: "hidden", borderRadius: 16,
+    backgroundColor: colors.card, borderWidth: 1.5, borderColor: colors.border,
   },
-  workPoster: { height: 203, overflow: "hidden", position: "relative", backgroundColor: colors.surfaceElevated },
-  workPosterImage: { ...StyleSheet.absoluteFillObject as any, width: "100%", height: "100%" },
-  tvWorkPoster: { height: 290 },
+  workPoster: { width: "100%", height: 196, overflow: "hidden", position: "relative", backgroundColor: colors.surfaceElevated },
+  workPosterImage: { width: "100%", height: "100%" },
+  tvWorkPoster: { height: 225 },
   workPosterTop: {
     position: "absolute", top: 9, left: 9, right: 9,
     flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 5, direction: "ltr",
