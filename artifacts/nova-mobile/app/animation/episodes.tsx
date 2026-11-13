@@ -316,11 +316,11 @@ return StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  tvEpCard: { minHeight: 198, gap: 16, padding: 16, borderRadius: 18, borderWidth: 1 },
+  tvEpCard: { minHeight: 88, gap: 12, padding: 10, borderRadius: 14, borderWidth: 1 },
   epCardWatched: { opacity: 0.7 },
 
   epThumb: { width: 96, height: 58, borderRadius: 10, overflow: "hidden", backgroundColor: colors.surfaceElevated, flexShrink: 0, position: "relative" },
-  tvEpThumb: { width: 270, height: 152, borderRadius: 14 },
+  tvEpThumb: { width: 126, height: 74, borderRadius: 10 },
   epThumbPlaceholder: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
   epThumbOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.25)", alignItems: "center", justifyContent: "center" },
   epPlayCircle: { width: 28, height: 28, borderRadius: 14, backgroundColor: "rgba(16,185,129,0.92)", alignItems: "center", justifyContent: "center" },
@@ -330,11 +330,11 @@ return StyleSheet.create({
   progressFill: { height: "100%", backgroundColor: "#10B981" },
 
   epInfo: { flex: 1, alignItems: "flex-end" },
-  tvEpInfo: { minHeight: 110, justifyContent: "center" },
+  tvEpInfo: { minHeight: 62, justifyContent: "center" },
   epTitle: { fontSize: 14, fontFamily: "Cairo_700Bold", color: colors.textPrimary, textAlign: "right" },
-  tvEpTitle: { fontSize: 21, lineHeight: 30 },
+  tvEpTitle: { fontSize: 15, lineHeight: 22 },
   epSubTitle: { fontSize: 11, color: colors.textSecondary, fontFamily: "Cairo_400Regular", textAlign: "right", marginTop: 2 },
-  tvEpOverview: { fontSize: 14, lineHeight: 22, marginTop: 7 },
+  tvEpOverview: { fontSize: 12, lineHeight: 18, marginTop: 4 },
 
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
   tvBackBtn: { width: 48, height: 48, borderRadius: 15 },

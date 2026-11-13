@@ -744,7 +744,7 @@ export default function StarDimaCatalogScreen() {
         onEndReached={loadMore}
         onEndReachedThreshold={0.55}
         keyboardShouldPersistTaps="handled"
-        removeClippedSubviews={!tvMode}
+        removeClippedSubviews={false}
         ListEmptyComponent={loading ? (
           <View style={styles.centerState}>
             <ActivityIndicator size="large" color={colors.accent} />

@@ -242,7 +242,7 @@ export default function DubbedDetailScreen() {
           renderItem={renderEp}
           onViewableItemsChanged={episodeFocusScroll.onViewableItemsChanged}
           viewabilityConfig={episodeFocusScroll.viewabilityConfig}
-          removeClippedSubviews={Platform.OS === "android" && !tvMode}
+          removeClippedSubviews={false}
           initialNumToRender={tvMode ? 12 : 8}
           maxToRenderPerBatch={tvMode ? 10 : 6}
           windowSize={tvMode ? 7 : Platform.OS === "android" ? 4 : 5}

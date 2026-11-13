@@ -212,6 +212,7 @@ export default function DubbedScreen() {
       ) : (
         <FlatList
           data={displayList}
+          removeClippedSubviews={false}
           style={{ width: gridWidth, alignSelf: "center" }}
           key={`dubbed-grid-${numColumns}`}
           keyExtractor={item => item.key || item.title}

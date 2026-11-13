@@ -497,7 +497,7 @@ export function MediaCatalogGrid({
       initialNumToRender={12}
       maxToRenderPerBatch={12}
       windowSize={5}
-      removeClippedSubviews={!tvMode}
+      removeClippedSubviews={false}
     />
   );
 }

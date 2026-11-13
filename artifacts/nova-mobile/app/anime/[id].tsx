@@ -567,7 +567,7 @@ export default function AnimeDetailScreen() {
           testID="nova-tv-header-action"
           onFocus={() => rememberDetailFocus("back")}
           style={({ focused }) => [d.topBarBack, tvMode && d.tvTopBarBack, tvMode && tvFocusStyle(focused)]}>
-          <Ionicons name="chevron-forward" size={tvMode ? 26 : 20} color={colors.textPrimary} />
+          <Ionicons name="chevron-forward" size={tvMode ? 20 : 20} color={colors.textPrimary} />
         </Pressable>
         <Text style={[d.topBarTitle, tvMode && d.tvTopBarTitle]} numberOfLines={1}>
           {arabicTitle || anime.title?.english || anime.title?.romaji || "تفاصيل الأنمي"}
@@ -676,7 +676,7 @@ export default function AnimeDetailScreen() {
           >
             <View style={d.watchBtnRight}>
               <View style={[d.watchBtnIcon, tvMode && d.tvWatchBtnIcon]}>
-                <Ionicons name="play" size={tvMode ? 24 : 18} color="#fff" style={{ marginLeft: 2 }} />
+                <Ionicons name="play" size={tvMode ? 18 : 18} color="#fff" style={{ marginLeft: 2 }} />
               </View>
               <View style={d.watchBtnTextWrap}>
                 <Text style={[d.watchBtnText, tvMode && d.tvButtonText]}>مشاهدة الآن</Text>
@@ -714,7 +714,7 @@ export default function AnimeDetailScreen() {
              <Pressable key={label} onPress={onPress} focusable={tvMode}
                onFocus={() => rememberDetailFocus(label)}
                style={({ focused }) => [d.actionBtn, tvMode && d.tvActionBtn, active && { backgroundColor: activeColor + "18", borderColor: activeColor + "45" }, tvMode && tvFocusStyle(focused)]}>
-              <Ionicons name={(active ? activeIcon : icon) as any} size={tvMode ? 28 : 16} color={active ? activeColor : colors.textPrimary} />
+              <Ionicons name={(active ? activeIcon : icon) as any} size={tvMode ? 18 : 16} color={active ? activeColor : colors.textPrimary} />
               <Text style={[d.actionBtnLabel, tvMode && d.tvActionBtnLabel, active && { color: activeColor }]}>
                 {label === "تقييمي" && myRating > 0 ? `تقييمي (${myRating}/10)` : label}
               </Text>
@@ -759,12 +759,12 @@ export default function AnimeDetailScreen() {
             <SectionHeader title="قصة الأنمي" tvMode={tvMode} />
             <Pressable
               onPress={() => setShowFull(f => !f)}
-              focusable={tvMode && desc.length <= 140}
+              focusable={tvMode}
               onFocus={() => rememberDetailFocus("synopsis")}
               style={({ focused }) => [
                 d.descBox,
                 tvMode && d.tvDescBox,
-                tvMode && desc.length <= 140 && tvFocusStyle(focused),
+                tvMode && tvFocusStyle(focused),
               ]}
             >
               <Text
@@ -772,12 +772,10 @@ export default function AnimeDetailScreen() {
                 numberOfLines={showFull ? undefined : 4}
               >{desc}</Text>
               {desc.length > 140 && (
-                <Pressable onPress={() => setShowFull(f => !f)} focusable={tvMode}
-                  onFocus={() => rememberDetailFocus("read-more")}
-                  style={({ focused }) => [d.readMoreBtn, tvMode && d.tvReadMoreBtn, tvMode && tvFocusStyle(focused)]}>
+                <View style={[d.readMoreBtn, tvMode && d.tvReadMoreBtn]}>
                   <Text style={[d.readMoreText, tvMode && d.tvReadMoreText]}>{showFull ? "عرض أقل" : "قراءة القصة كاملة"}</Text>
-                  <Ionicons name={showFull ? "chevron-up" : "chevron-down"} size={tvMode ? 22 : 14} color={colors.textSecondary} />
-                </Pressable>
+                  <Ionicons name={showFull ? "chevron-up" : "chevron-down"} size={tvMode ? 16 : 14} color={colors.textSecondary} />
+                </View>
               )}
             </Pressable>
           </View>
@@ -1063,7 +1061,7 @@ function createDetailStyles(colors: ThemePalette) {
   titleMain: { fontSize: 20, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, lineHeight: 28, textAlign: "right", writingDirection: "rtl" },
   titleArabicMain: { writingDirection: "rtl", textAlign: "right" },
   titleArabic: { fontSize: 13, color: colors.textSecondary, fontFamily: "Cairo_700Bold", lineHeight: 19, textAlign: "left", writingDirection: "ltr" },
-  tvTitleArabic: { fontSize: 19, lineHeight: 28 },
+  tvTitleArabic: { fontSize: 14, lineHeight: 21 },
   titleNative: { fontSize: 11, color: colors.textSecondary, fontFamily: "Cairo_400Regular" },
   badgeRow: { flexDirection: ROW_RTL, gap: 6, flexWrap: "wrap", marginTop: 4 },
   badge: { borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, flexDirection: ROW_RTL, alignItems: "center", gap: 4 },
@@ -1170,38 +1168,38 @@ function createDetailStyles(colors: ThemePalette) {
   charHeartBtnActive: { backgroundColor: "rgba(244,63,94,0.85)", borderColor: "#f43f5e" },
   charName: { fontSize: 10, color: colors.textSecondary, fontFamily: "Cairo_400Regular", textAlign: "center", lineHeight: 15 },
   emptyTabText: { textAlign: "center", color: colors.textMuted, fontSize: 12, fontFamily: "Cairo_400Regular", paddingVertical: 20 },
-  tvContent: { paddingHorizontal: 40, paddingBottom: 120 },
-  tvTopBar: { height: 62, paddingHorizontal: 28 },
-  tvTopBarTitle: { fontSize: 18, lineHeight: 27 },
-  tvTopBarStatus: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 11 },
-  tvTopBarStatusText: { fontSize: 13, lineHeight: 20 },
-  tvTopBarBack: { width: 48, height: 48, borderRadius: 14 },
-  tvCharGrid: { columnGap: 14, rowGap: 14 },
-  tvSection: { marginTop: 22 },
-  tvSectionHeader: { gap: 10, marginBottom: 14 },
-  tvSectionBar: { width: 4, height: 24, borderRadius: 2 },
-  tvSectionTitle: { fontSize: 22, lineHeight: 32 },
-  tvActionGrid: { paddingHorizontal: 40, gap: 14, marginTop: 18 },
-  tvBackBtn: { width: 52, height: 52, borderRadius: 16 },
-  tvHero: { height: 350 },
-  tvInfoRow: { paddingHorizontal: 40, gap: 24, marginTop: -84 },
-  tvCover: { width: 175, height: 254, borderRadius: 20 },
-  tvTitleMain: { fontSize: 30, lineHeight: 40 },
-  tvTitleNative: { fontSize: 17, lineHeight: 25 },
-  tvBodyText: { fontSize: 20, lineHeight: 32 },
-  tvButtonText: { fontSize: 20, lineHeight: 30 },
-  tvWatchBtn: { minHeight: 76, borderRadius: 22, gap: 14 },
-  tvWatchBtnIcon: { width: 48, height: 48, borderRadius: 15 },
-  tvActionBtn: { minHeight: 88, paddingVertical: 18, borderRadius: 20, gap: 10 },
-  tvActionBtnLabel: { fontSize: 19, lineHeight: 29 },
-  tvDescBox: { padding: 22, borderRadius: 20 },
-  tvReadMoreBtn: { minHeight: 60, paddingHorizontal: 24, borderRadius: 14, backgroundColor: colors.accentSurface },
-  tvReadMoreText: { fontSize: 19, lineHeight: 29 },
-  tvGenreChip: { paddingHorizontal: 16, paddingVertical: 9, borderRadius: 18 },
-  tvGenreChipText: { fontSize: 16, lineHeight: 24 },
-  tvTabNav: { marginBottom: 16 },
-  tvTabBtn: { paddingBottom: 12, minHeight: 50 },
-  tvTabBtnText: { fontSize: 19, lineHeight: 29 },
+  tvContent: { paddingHorizontal: 28, paddingBottom: 100 },
+  tvTopBar: { height: 52, paddingHorizontal: 22 },
+  tvTopBarTitle: { fontSize: 15, lineHeight: 22 },
+  tvTopBarStatus: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 9 },
+  tvTopBarStatusText: { fontSize: 11, lineHeight: 17 },
+  tvTopBarBack: { width: 38, height: 38, borderRadius: 11 },
+  tvCharGrid: { columnGap: 12, rowGap: 12 },
+  tvSection: { marginTop: 16 },
+  tvSectionHeader: { gap: 8, marginBottom: 10 },
+  tvSectionBar: { width: 3.5, height: 18, borderRadius: 2 },
+  tvSectionTitle: { fontSize: 16, lineHeight: 24 },
+  tvActionGrid: { paddingHorizontal: 16, gap: 10, marginTop: 12 },
+  tvBackBtn: { width: 40, height: 40, borderRadius: 12 },
+  tvHero: { height: 220 },
+  tvInfoRow: { paddingHorizontal: 24, gap: 16, marginTop: -68 },
+  tvCover: { width: 124, height: 180, borderRadius: 14 },
+  tvTitleMain: { fontSize: 21, lineHeight: 29 },
+  tvTitleNative: { fontSize: 13, lineHeight: 19 },
+  tvBodyText: { fontSize: 14, lineHeight: 23 },
+  tvButtonText: { fontSize: 15, lineHeight: 22 },
+  tvWatchBtn: { minHeight: 54, borderRadius: 15, gap: 10 },
+  tvWatchBtnIcon: { width: 36, height: 36, borderRadius: 11 },
+  tvActionBtn: { minHeight: 52, paddingVertical: 10, borderRadius: 14, gap: 7 },
+  tvActionBtnLabel: { fontSize: 13, lineHeight: 20 },
+  tvDescBox: { padding: 16, borderRadius: 15 },
+  tvReadMoreBtn: { minHeight: 40, paddingHorizontal: 16, borderRadius: 11, backgroundColor: colors.accentSurface },
+  tvReadMoreText: { fontSize: 13, lineHeight: 20 },
+  tvGenreChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14 },
+  tvGenreChipText: { fontSize: 12, lineHeight: 18 },
+  tvTabNav: { marginBottom: 12 },
+  tvTabBtn: { paddingBottom: 8, minHeight: 40 },
+  tvTabBtnText: { fontSize: 14, lineHeight: 21 },
   relCard: { width: 100, gap: 6 },
   relImgWrap: { width: 100, height: 140, borderRadius: 12, overflow: "hidden", position: "relative", backgroundColor: colors.surfaceElevated },
   relImg: { width: "100%", height: "100%" },

@@ -240,7 +240,7 @@ export default function LibraryScreen() {
     <View style={[s.container, { backgroundColor: colors.background }]}>
 
       {/* ── Header ── */}
-      <View style={[s.header, { paddingTop: topPad + 14 }]}>
+      <View style={[s.header, { paddingTop: topPad + (tvMode ? 8 : 14) }]}>
         <Text style={[s.title, { color: colors.text }]}>قائمتي</Text>
         {counts[activeTab] > 0 && (
           <View style={[s.countBadge, { backgroundColor: colors.primary + "20" }]}>
@@ -273,7 +273,7 @@ export default function LibraryScreen() {
             >
               <Ionicons
                 name={active ? tab.activeIcon : tab.icon}
-                size={tvMode ? 22 : 14}
+                size={tvMode ? 15 : 14}
                 color={active ? "#fff" : colors.mutedForeground}
               />
               <Text style={[s.tabText, tvMode && s.tvTabText, { color: active ? "#fff" : colors.mutedForeground }]}>
@@ -348,6 +348,7 @@ export default function LibraryScreen() {
         ) : (
           <FlatList
             data={continueItems}
+            removeClippedSubviews={false}
             keyExtractor={i => i.key}
             renderItem={renderHistoryItem}
             contentContainerStyle={[s.list, { paddingBottom: insets.bottom + 100 }]}
@@ -363,6 +364,7 @@ export default function LibraryScreen() {
         ) : (
           <FlatList
             data={historyItems}
+            removeClippedSubviews={false}
             keyExtractor={i => i.key}
             renderItem={renderHistoryItem}
             contentContainerStyle={[s.list, { paddingBottom: insets.bottom + 100 }]}
@@ -378,6 +380,7 @@ export default function LibraryScreen() {
         ) : (
           <FlatList
             data={filteredFavs}
+            removeClippedSubviews={false}
             style={{ width: gridWidth, alignSelf: "center" }}
             keyExtractor={f => f.id.toString()}
             key={`favorites-grid-${gridColumns}`}
@@ -412,7 +415,7 @@ export default function LibraryScreen() {
                   focusable={tvMode}
                   style={({ focused }) => [s.favHeart, tvMode && s.tvFavHeart, tvMode && tvFocusStyle(focused)]}
                 >
-                  <Ionicons name="heart" size={tvMode ? 23 : 13} color="#f43f5e" />
+                  <Ionicons name="heart" size={tvMode ? 14 : 13} color="#f43f5e" />
                 </Pressable>
                 <View style={[s.favInfo, tvMode && s.tvFavInfo]}>
                   <Text style={[s.favTitle, tvMode && s.tvFavTitle, { color: colors.text }]} numberOfLines={2}>
@@ -420,7 +423,7 @@ export default function LibraryScreen() {
                   </Text>
                   {item.score && (
                     <View style={[s.favScore, tvMode && s.tvFavScore]}>
-                      <Ionicons name="star" size={tvMode ? 16 : 9} color="#FBBF24" />
+                      <Ionicons name="star" size={tvMode ? 11 : 9} color="#FBBF24" />
                       <Text style={[s.favScoreText, tvMode && s.tvFavScoreText, { color: colors.mutedForeground }]}>
                         {(item.score / 10).toFixed(1)}
                       </Text>
@@ -440,6 +443,7 @@ export default function LibraryScreen() {
         ) : (
           <FlatList
             data={filteredChars}
+            removeClippedSubviews={false}
             style={{ width: gridWidth, alignSelf: "center" }}
             keyExtractor={c => c.id.toString()}
             key={`characters-grid-${gridColumns}`}
@@ -504,12 +508,12 @@ const s = StyleSheet.create({
     paddingHorizontal: 13, paddingVertical: 8,
     borderRadius: 20, borderWidth: 1,
   },
-  tvTabBtn: { paddingHorizontal: 20, paddingVertical: 13, borderRadius: 12 },
+  tvTabBtn: { paddingHorizontal: 13, paddingVertical: 7, borderRadius: 11 },
   tabText: { fontSize: 12, fontFamily: "Cairo_600SemiBold" },
-  tvTabText: { fontSize: 19 },
+  tvTabText: { fontSize: 13 },
   tabBadge: { paddingHorizontal: 5, paddingVertical: 1, borderRadius: 8 },
   tabBadgeText: { fontSize: 9, fontFamily: "Cairo_700Bold" },
-  tvBadgeText: { fontSize: 14 },
+  tvBadgeText: { fontSize: 11 },
 
   searchWrap: {
     flexDirection: "row", alignItems: "center", gap: 8,
@@ -543,18 +547,18 @@ const s = StyleSheet.create({
   favGrid: { paddingHorizontal: 16, paddingTop: 4, gap: 12 },
   favCard: { flex: 1, gap: 6, position: "relative" },
   favImg: { width: "100%", aspectRatio: 0.68, borderRadius: 10 },
-  tvFavCard: { gap: 10 },
-  tvFavImg: { aspectRatio: 1 / 1.4, borderRadius: 16, borderWidth: 2, borderColor: "rgba(255,255,255,0.08)" },
+  tvFavCard: { gap: 6 },
+  tvFavImg: { aspectRatio: 0.69, borderRadius: 12, borderWidth: 1.5, borderColor: "rgba(255,255,255,0.08)" },
   favHeart: { position: "absolute", top: 6, right: 6, backgroundColor: "rgba(0,0,0,0.6)", borderRadius: 10, padding: 4 },
-  tvFavHeart: { top: 12, right: 12, borderRadius: 16, padding: 10 },
+  tvFavHeart: { top: 7, right: 7, borderRadius: 11, padding: 5 },
   favInfo: { gap: 2 },
   favTitle: { fontSize: 10, fontFamily: "Cairo_600SemiBold", lineHeight: 14 },
-  tvFavInfo: { gap: 4 },
-  tvFavTitle: { fontSize: 18, lineHeight: 27 },
+  tvFavInfo: { gap: 2 },
+  tvFavTitle: { fontSize: 12.5, lineHeight: 18 },
   favScore: { flexDirection: "row", alignItems: "center", gap: 2 },
   favScoreText: { fontSize: 9, fontFamily: "Cairo_400Regular" },
-  tvFavScore: { gap: 5 },
-  tvFavScoreText: { fontSize: 16 },
+  tvFavScore: { gap: 3 },
+  tvFavScoreText: { fontSize: 11 },
 
   charGrid: { paddingHorizontal: 16, paddingTop: 4, gap: 14 },
   charCard: { flex: 1, alignItems: "center", gap: 4, position: "relative" },
@@ -568,15 +572,15 @@ const s = StyleSheet.create({
   emptyTitle: { fontSize: 17, fontFamily: "Cairo_700Bold", textAlign: "center" },
   emptyDesc: { fontSize: 12, fontFamily: "Cairo_400Regular", textAlign: "center", lineHeight: 20 },
   browseBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 22, paddingVertical: 11, borderRadius: 12, marginTop: 4 },
-  tvSearchWrap: { minHeight: 68, paddingHorizontal: 20, paddingVertical: 14, borderRadius: 16 },
-  tvSearchInput: { fontSize: 21, lineHeight: 32 },
+  tvSearchWrap: { minHeight: 42, paddingHorizontal: 14, paddingVertical: 6, borderRadius: 11, marginBottom: 6 },
+  tvSearchInput: { fontSize: 13.5, lineHeight: 20 },
   browseBtnText: { color: "#fff", fontFamily: "Cairo_700Bold", fontSize: 13 },
-  libraryFilters: { gap: 6, marginBottom: 8 },
-  filterChips: { paddingHorizontal: 16, gap: 8 },
+  libraryFilters: { gap: 5, marginBottom: 6 },
+  filterChips: { paddingHorizontal: 16, gap: 7 },
   filterChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 12, backgroundColor: "#18181B", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)" },
   filterChipActive: { backgroundColor: "rgba(139,92,246,0.22)", borderColor: "rgba(139,92,246,0.5)" },
   filterChipText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.5)" },
   filterChipTextActive: { color: "#c4b5fd" },
-  tvFilterChip: { paddingHorizontal: 20, paddingVertical: 12, borderRadius: 10 },
-  tvFilterChipText: { fontSize: 16 },
+  tvFilterChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 9 },
+  tvFilterChipText: { fontSize: 12 },
 });

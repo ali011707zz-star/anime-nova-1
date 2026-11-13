@@ -370,6 +370,7 @@ export function CommentsSheet({ visible, onClose, animeId, tmdbId, episodeNumber
         ) : (
           <FlatList
             ref={listRef}
+            removeClippedSubviews={false}
             data={topLevel}
             keyExtractor={c => c.id}
             renderItem={({ item }) => renderComment(item)}

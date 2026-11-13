@@ -84,6 +84,7 @@ export default function SeasonsScreen() {
       {activeTab === "all" && !selectedSeason ? (
         <FlatList
           data={seasonRows}
+          removeClippedSubviews={false}
           keyExtractor={(item) => `${item.season}-${item.year}`}
           contentContainerStyle={styles.seasonList}
           showsVerticalScrollIndicator={false}

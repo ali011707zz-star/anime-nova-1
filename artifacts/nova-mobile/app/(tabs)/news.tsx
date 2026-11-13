@@ -544,6 +544,7 @@ export default function NewsScreen() {
         ) : (
           <FlatList
             data={news}
+            removeClippedSubviews={false}
             keyExtractor={item => item.id}
             renderItem={renderNewsItem}
             contentContainerStyle={s.list}
@@ -570,8 +571,10 @@ export default function NewsScreen() {
           <AniListError />
         ) : (
           <FlatList
+            key={`ani-${tab}`}
             data={tab === "airing" ? airing : tab === "upcoming" ? upcoming : trending}
-            keyExtractor={(_, i) => String(i)}
+            keyExtractor={(item, i) => `${tab}-${item?.media?.id || item?.id || i}-${i}`}
+            removeClippedSubviews={false}
             renderItem={
               tab === "airing" ? renderAiring :
               tab === "upcoming" ? renderUpcoming :

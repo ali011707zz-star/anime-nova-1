@@ -209,15 +209,13 @@ export function tvFocusStyle(focused: boolean, isWhite?: boolean): ViewStyle {
   if (white) {
     return {
       borderColor: "#0284C7",
-      borderWidth: 3.5,
-      transform: [{ scale: 1.03 }],
+      borderWidth: 2.5,
       zIndex: 50,
     };
   }
   return {
     borderColor: "#00F0FF",
-    borderWidth: 3.5,
-    transform: [{ scale: 1.03 }],
+    borderWidth: 2.5,
     zIndex: 50,
   };
 }

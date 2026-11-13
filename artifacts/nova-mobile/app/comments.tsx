@@ -376,6 +376,7 @@ export default function CommentsPage() {
       ) : (
         <FlatList
           ref={listRef}
+          removeClippedSubviews={false}
           data={topLevel}
           keyExtractor={c => c.id}
           renderItem={({ item }) => renderComment(item)}

@@ -1561,6 +1561,7 @@ export default function MangaDetailScreen() {
           ) : (
             <FlatList
               ref={chaptersFlatListRef}
+              removeClippedSubviews={false}
               data={pagedChapters}
               keyExtractor={(ch, idx) => `${ch.id || ch.slug}-${idx}`}
               contentContainerStyle={{
@@ -1813,6 +1814,7 @@ export default function MangaDetailScreen() {
 
             <FlatList
               data={pagedPickerChapters}
+              removeClippedSubviews={false}
               keyExtractor={(item, index) => `${item.id || item.slug}-${index}`}
               contentContainerStyle={{ padding: 14, gap: 8 }}
               showsVerticalScrollIndicator={false}

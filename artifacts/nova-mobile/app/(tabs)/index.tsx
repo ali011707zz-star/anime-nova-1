@@ -537,7 +537,7 @@ export default function HomeScreen() {
               initialNumToRender={isTvLayout ? 5 : 5}
               maxToRenderPerBatch={isTvLayout ? 4 : 5}
               windowSize={isTvLayout ? 5 : 3}
-              removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
+              removeClippedSubviews={false}
             />
           </View>
         )}
@@ -561,7 +561,7 @@ export default function HomeScreen() {
               <FlatList
                 data={todayEps}
                 horizontal
-                keyExtractor={(ep, idx) => `${ep.source}-${ep.anslayerId || ep.awAnimeId || ep.animeId || ep.name || idx}-${ep.episode}`}
+                keyExtractor={(ep, idx) => `${ep.source}-${ep.anslayerId || ep.awAnimeId || ep.animeId || ep.name || "ep"}-${ep.episode}-${idx}`}
                 showsHorizontalScrollIndicator={false}
                  contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
                 renderItem={({ item: ep }) => (
@@ -599,7 +599,7 @@ export default function HomeScreen() {
                 initialNumToRender={isTvLayout ? 5 : 5}
                 maxToRenderPerBatch={isTvLayout ? 4 : 5}
                 windowSize={isTvLayout ? 5 : 3}
-                removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
+                removeClippedSubviews={false}
               />
             )}
           </View>
@@ -709,7 +709,7 @@ export default function HomeScreen() {
               initialNumToRender={isTvLayout ? 5 : 5}
               maxToRenderPerBatch={isTvLayout ? 4 : 5}
               windowSize={isTvLayout ? 5 : 3}
-              removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
+              removeClippedSubviews={false}
             />
           </View>
         )}
@@ -804,7 +804,7 @@ export default function HomeScreen() {
               initialNumToRender={isTvLayout ? 5 : 5}
               maxToRenderPerBatch={isTvLayout ? 4 : 5}
               windowSize={isTvLayout ? 5 : 3}
-              removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
+              removeClippedSubviews={false}
             />
           </View>
         )}
@@ -888,7 +888,7 @@ export default function HomeScreen() {
               initialNumToRender={isTvLayout ? 5 : 5}
               maxToRenderPerBatch={isTvLayout ? 4 : 5}
               windowSize={isTvLayout ? 5 : 3}
-              removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
+              removeClippedSubviews={false}
             />
           </View>
         )}
@@ -908,7 +908,7 @@ export default function HomeScreen() {
             <FlatList
               data={manhwaItems}
               horizontal
-              keyExtractor={(item) => `manhwa-${item.id}`}
+              keyExtractor={(item, idx) => `manhwa-${item.id}-${idx}`}
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
               renderItem={({ item }) => (
@@ -955,7 +955,7 @@ export default function HomeScreen() {
               initialNumToRender={5}
               maxToRenderPerBatch={5}
               windowSize={3}
-              removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
+              removeClippedSubviews={false}
             />
           </View>
         )}
@@ -975,7 +975,7 @@ export default function HomeScreen() {
             <FlatList
               data={mangaItems}
               horizontal
-              keyExtractor={(item) => `manga-${item.id}`}
+              keyExtractor={(item, idx) => `manga-${item.id}-${idx}`}
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
               renderItem={({ item }) => (
@@ -1006,7 +1006,7 @@ export default function HomeScreen() {
               initialNumToRender={5}
               maxToRenderPerBatch={5}
               windowSize={3}
-              removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
+              removeClippedSubviews={false}
             />
           </View>
         )}
@@ -1105,7 +1105,7 @@ export default function HomeScreen() {
         ListFooterComponent={<View style={{ height: 90 }} />}
         showsVerticalScrollIndicator={false}
         refreshControl={isTvLayout ? undefined : <RefreshControl refreshing={false} onRefresh={refresh} tintColor={colors.primary} />}
-        removeClippedSubviews={Platform.OS === "android" && !isTvLayout}
+        removeClippedSubviews={false}
         initialNumToRender={isTvLayout ? 3 : 3}
         maxToRenderPerBatch={isTvLayout ? 2 : 2}
         updateCellsBatchingPeriod={50}

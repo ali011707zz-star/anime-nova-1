@@ -604,7 +604,7 @@ export default function SearchScreen() {
             maxToRenderPerBatch={3}
             updateCellsBatchingPeriod={50}
             windowSize={5}
-             removeClippedSubviews={Platform.OS !== "web" && !tvMode}
+             removeClippedSubviews={false}
             ListHeaderComponent={
               <View style={s.resultsHeader}>
                 <Text style={s.resultsCount}>

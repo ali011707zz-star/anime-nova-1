@@ -79,7 +79,7 @@ export const SectionRow = React.memo(function SectionRow({
         offset: (cardWidth + 14) * index,
         index,
       })}
-      removeClippedSubviews={Platform.OS === "android" && !tvMode}
+      removeClippedSubviews={false}
     />
   );
 
@@ -97,11 +97,9 @@ export const SectionRow = React.memo(function SectionRow({
           <View style={[styles.accentBar, { backgroundColor: colors.homeAccent || "#06b6d4" }]} />
         </View>
       </SectionHeader>
-      {tvMode ? (
-        <TvFocusGuideView autoFocus={false} style={styles.focusGuide}>
-          {rail}
-        </TvFocusGuideView>
-      ) : rail}
+      <TvFocusGuideView autoFocus={false} style={tvMode ? styles.focusGuide : undefined}>
+        {rail}
+      </TvFocusGuideView>
     </View>
   );
 });

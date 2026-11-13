@@ -367,7 +367,7 @@ function EpisodeRow({
           accessibilityRole="button"
           accessibilityLabel={`تعليقات الحلقة ${n}`}
         >
-          <Ionicons name="chatbubble-outline" size={tvMode ? 24 : 15} color={colors.textSecondary} />
+          <Ionicons name="chatbubble-outline" size={tvMode ? 17 : 15} color={colors.textSecondary} />
           {commentCount > 0 && (
             <View style={ep_s.commentCountBadge}>
               <Text style={[ep_s.commentCount, tvMode && ep_s.tvCommentCount]}>{commentCount}</Text>
@@ -384,7 +384,7 @@ function EpisodeRow({
           accessibilityRole="button"
           accessibilityLabel={watched ? `إلغاء مشاهدة الحلقة ${n}` : `تحديد الحلقة ${n} كمشاهدة`}
         >
-          <Ionicons name={watched ? "eye-outline" : "eye-off-outline"} size={tvMode ? 24 : 16} color={watched ? "#10B981" : colors.textMuted} />
+          <Ionicons name={watched ? "eye-outline" : "eye-off-outline"} size={tvMode ? 17 : 16} color={watched ? "#10B981" : colors.textMuted} />
         </Pressable>
       </View>
     </View>
@@ -1161,7 +1161,7 @@ export default function EpisodeListScreen() {
               numColumns={1}
               keyExtractor={n => n.toString()}
               showsVerticalScrollIndicator={false}
-              removeClippedSubviews={Platform.OS === "android" && !tvMode}
+              removeClippedSubviews={false}
               initialNumToRender={tvMode ? 12 : 12}
               maxToRenderPerBatch={tvMode ? 10 : 12}
               updateCellsBatchingPeriod={40}

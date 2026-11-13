@@ -272,6 +272,7 @@ export default function LatestEpisodesScreen() {
       ) : (
         <FlatList
           key={tvMode ? "latest-tv" : "latest-phone"}
+          removeClippedSubviews={false}
           data={visibleItems}
           numColumns={3}
           keyExtractor={(item, index) => `${item.source}-${item.animeId || item.anslayerId || item.awAnimeId}-${item.episode}-${index}`}

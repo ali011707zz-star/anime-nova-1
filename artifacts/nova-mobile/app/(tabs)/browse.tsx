@@ -603,7 +603,7 @@ export default function BrowseScreen() {
           maxToRenderPerBatch={3}
           updateCellsBatchingPeriod={50}
           windowSize={5}
-           removeClippedSubviews={Platform.OS !== "web" && !tvMode}
+           removeClippedSubviews={false}
           renderItem={({ item }) => (
             <GenreCard
               item={item}
@@ -637,7 +637,7 @@ export default function BrowseScreen() {
               maxToRenderPerBatch={3}
               updateCellsBatchingPeriod={50}
               windowSize={5}
-               removeClippedSubviews={Platform.OS !== "web" && !tvMode}
+               removeClippedSubviews={false}
                onEndReached={() => { if (!search.trim() && hasMore && !loading) loadItems(page + 1, false); }}
               onEndReachedThreshold={0.4}
               ListEmptyComponent={

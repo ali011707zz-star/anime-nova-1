@@ -412,7 +412,7 @@ export default function AnimationsScreen() {
           maxToRenderPerBatch={3}
           updateCellsBatchingPeriod={50}
           windowSize={5}
-          removeClippedSubviews={Platform.OS !== "web"}
+          removeClippedSubviews={false}
           renderItem={renderItem}
           onEndReached={() => {
             if (hasMore && !loading) {
