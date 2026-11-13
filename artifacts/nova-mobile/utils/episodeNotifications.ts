@@ -181,7 +181,7 @@ async function notifyOneEpisode(item: LatestEpisode): Promise<void> {
 }
 
 export async function syncLatestEpisodeNotifications(force = false): Promise<void> {
-  if (Platform.OS === "web" || syncInFlight) return syncInFlight ?? Promise.resolve();
+  if (Platform.OS === "web" || AppState.currentState === "background" || syncInFlight) return syncInFlight ?? Promise.resolve();
   syncInFlight = (async () => {
     if (!(await arePushNotificationsEnabled())) return;
     if (!(await configure())) return;
@@ -264,8 +264,8 @@ export function startEpisodeNotificationSync(): () => void {
     void syncLatestEpisodeNotifications(false);
   }, SYNC_MIN_INTERVAL_MS);
   const subscription = AppState.addEventListener("change", (state) => {
-    if (state === "active" || state === "background") {
-      void syncLatestEpisodeNotifications(state === "active");
+    if (state === "active") {
+      void syncLatestEpisodeNotifications(true);
     }
   });
   return () => {

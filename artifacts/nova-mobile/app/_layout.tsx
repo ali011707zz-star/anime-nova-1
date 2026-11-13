@@ -61,11 +61,12 @@ if (SENTRY_DSN && RUNTIME_INTEGRITY.trusted) {
     debug: false,
     beforeSend(event) {
       const firstEx = event?.exception?.values?.[0];
-      if (
-        firstEx?.type === "ApplicationNotResponding" &&
-        typeof firstEx?.value === "string" &&
-        firstEx.value.includes("Background ANR")
-      ) {
+      const isAnr = firstEx?.type === "ApplicationNotResponding";
+      const isBgAnr =
+        isAnr &&
+        ((typeof firstEx?.value === "string" && firstEx.value.includes("Background ANR")) ||
+          event?.contexts?.app?.in_foreground === false);
+      if (isBgAnr) {
         return null;
       }
       return event;
@@ -83,10 +84,7 @@ if (RUNTIME_INTEGRITY.trusted) {
   installGlobalCrashHandlers();
 }
 
-// استعادة التنزيلات التي انقطعت بسبب إغلاق التطبيق — تُعرض بحالة خطأ للمستخدم
-if (RUNTIME_INTEGRITY.trusted) {
-  import("@/utils/downloadManager").then(m => m.restoreInterruptedDownloads()).catch(() => {});
-}
+// restoreInterruptedDownloads is deferred to RootLayout after initial frame & active state.
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -244,9 +242,16 @@ function RootLayout() {
   // فوقها أثناء انتظار الخطوط.
   useEffect(() => {
     SplashScreen.hideAsync().catch(() => {});
-    if (RUNTIME_INTEGRITY.trusted) {
-      pingMobileAppPresence();
-    }
+    if (!RUNTIME_INTEGRITY.trusted) return;
+    const t = setTimeout(() => {
+      if (AppState.currentState !== "background") {
+        pingMobileAppPresence();
+        import("@/utils/downloadManager")
+          .then((m) => m.restoreInterruptedDownloads())
+          .catch(() => {});
+      }
+    }, 1000);
+    return () => clearTimeout(t);
   }, []);
 
   useEffect(() => {
@@ -347,34 +352,34 @@ function RootContent({
 
 function PushRegistrationBridge({ disabled }: { disabled: boolean }) {
   const { authReady, currentUser } = useApp();
-
   useEffect(() => {
     if (disabled || Platform.OS === "web" || !authReady) return;
     let disposed = false;
     let stopEpisodeSync: (() => void) | undefined;
     const stopTokenListener = subscribeToPushTokenChanges();
-
-    void registerPushNotifications()
-      .catch((error) => {
-        console.warn("[push] startup registration failed:", error instanceof Error ? error.message : String(error));
-        return false;
-      })
-      .then(async () => {
-        if (disposed) return;
-        const { startEpisodeNotificationSync } = await import("@/utils/episodeNotifications");
-        if (!disposed) stopEpisodeSync = startEpisodeNotificationSync();
-      })
-      .catch((error) => {
-        console.warn("[push] local notification fallback startup failed:", error instanceof Error ? error.message : String(error));
-      });
-
+    const timer = setTimeout(() => {
+      if (disposed || AppState.currentState === "background") return;
+      void registerPushNotifications()
+        .catch((error) => {
+          console.warn("[push] startup registration failed:", error instanceof Error ? error.message : String(error));
+          return false;
+        })
+        .then(async () => {
+          if (disposed || AppState.currentState === "background") return;
+          const { startEpisodeNotificationSync } = await import("@/utils/episodeNotifications");
+          if (!disposed) stopEpisodeSync = startEpisodeNotificationSync();
+        })
+        .catch((error) => {
+          console.warn("[push] local notification fallback startup failed:", error instanceof Error ? error.message : String(error));
+        });
+    }, 1500);
     return () => {
       disposed = true;
+      clearTimeout(timer);
       stopTokenListener();
       stopEpisodeSync?.();
     };
   }, [authReady, currentUser?.id, disabled]);
-
   return null;
 }
 
