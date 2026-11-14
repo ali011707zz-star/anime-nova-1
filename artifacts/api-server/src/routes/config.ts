@@ -15,8 +15,8 @@ const PERMANENTLY_DISABLED_SOURCES = [
   "consumet_gogo",
 ] as const;
 
-const LATEST_APP_VERSION = "1.0.8";
-const LATEST_VERSION_CODE = 9;
+const LATEST_APP_VERSION = "1.0.9";
+const LATEST_VERSION_CODE = 10;
 
 function compareSemver(a: string, b: string): number {
   const pa = String(a || "0.0.0").replace(/[^0-9.]/g, "").split(".").map((x) => parseInt(x, 10) || 0);
@@ -40,10 +40,10 @@ const DEFAULT_CONFIG = {
   updateTitle: "التحديث مطلوب",
   updateMessage: "يجب تحديث التطبيق إلى الإصدار " + LATEST_APP_VERSION + " للمتابعة — هذا الإصدار لم يعد مدعوماً.",
   updateChangelog: [
-    "تشغيل أسرع: بدء أسرع وتقديم شبه فوري في جميع سيرفرات الأنمي والمدبلج",
+    "دعم الأسماء العربية الأنيقة فوق الإنجليزية لجميع الأنميات في البحث والبطاقات والتفاصيل والجدول",
+    "ترجمة عربية احترافية غير حرفية لأكثر من 3,000 أنمي مع بحث عربي فوري",
     "تحديث وتثبيت مباشر داخل التطبيق مع متابعة حجم التقدم بالميجابايت",
-    "إطار تركيز مزدوج عالي التباين وتنقل فوري سلس بالريموت في جميع الصفحات",
-    "تحسينات كبيرة في الأداء والثبات وإصلاحات عامة",
+    "تحسينات في الأداء والثبات ومنع تعليق الخلفية على الأجهزة الضعيفة",
   ],
   maintenanceMode: false,
   maintenanceMessage: "",
