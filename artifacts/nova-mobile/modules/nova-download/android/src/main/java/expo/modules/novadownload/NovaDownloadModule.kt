@@ -3,7 +3,12 @@ package expo.modules.novadownload
 import android.app.DownloadManager
 import android.content.Context
 import android.database.Cursor
+import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.provider.Settings
+import androidx.core.content.FileProvider
+import java.io.File
 import android.os.Environment
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -63,7 +68,7 @@ class NovaDownloadModule : Module() {
       val request = DownloadManager.Request(Uri.parse(url))
         .setTitle(title.take(120))
         .setDescription(description.take(240))
-        .setMimeType("video/mp4")
+        .setMimeType(if (safeFileName.endsWith(".apk", ignoreCase = true)) "application/vnd.android.package-archive" else "video/mp4")
         .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
         .setAllowedOverMetered(true)
         .setAllowedOverRoaming(true)
@@ -119,6 +124,62 @@ class NovaDownloadModule : Module() {
 
     AsyncFunction("forget") { appId: String ->
       removeStoredJob(appId.trim().take(180), cancel = false)
+    }
+
+    AsyncFunction("canInstallPackages") {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        appContext().packageManager.canRequestPackageInstalls()
+      } else {
+        true
+      }
+    }
+
+    AsyncFunction("openInstallPermissionSettings") {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val intent = Intent(
+          Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+          Uri.parse("package:${appContext().packageName}")
+        ).apply {
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        appContext().startActivity(intent)
+      }
+      true
+    }
+
+    AsyncFunction("installApk") { localPathOrUri: String ->
+      val ctx = appContext()
+      val cleanPath = if (localPathOrUri.startsWith("file://")) {
+        Uri.parse(localPathOrUri).path ?: localPathOrUri.removePrefix("file://")
+      } else {
+        localPathOrUri
+      }
+      val apkFile = File(cleanPath)
+      if (!apkFile.exists() || apkFile.length() < 1024L) {
+        throw IllegalStateException("ملف التحديث غير موجود أو غير مكتمل")
+      }
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !ctx.packageManager.canRequestPackageInstalls()) {
+        val permIntent = Intent(
+          Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+          Uri.parse("package:${ctx.packageName}")
+        ).apply {
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        ctx.startActivity(permIntent)
+        return@AsyncFunction "permission_required"
+      }
+      val contentUri = FileProvider.getUriForFile(
+        ctx,
+        "${ctx.packageName}.novadownload.fileprovider",
+        apkFile
+      )
+      val installIntent = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(contentUri, "application/vnd.android.package-archive")
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      }
+      ctx.startActivity(installIntent)
+      "launched"
     }
   }
 

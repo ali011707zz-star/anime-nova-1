@@ -1081,7 +1081,7 @@ export default function HomeScreen() {
               </View>
             </View>
 
-            {!isTvLayout && <AnnouncementBanner />}
+            <AnnouncementBanner />
 
             {isLoading ? (
               <View style={{ height: 420, backgroundColor: colors.card }} />

@@ -18,6 +18,7 @@ import * as ScreenOrientation from "expo-screen-orientation";
 import * as Sentry from "@sentry/react-native";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { TelegramAnnouncementModal } from "@/components/TelegramAnnouncementModal";
+import { AppUpdateModal } from "@/components/AppUpdateModal";
 import { AppProvider, useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { loadRuntimeApiUrl } from "@/utils/baseUrl";
@@ -346,6 +347,7 @@ function RootContent({
           onClose={onCloseAnnouncement}
         />
       )}
+      {!brandSplashVisible && <AppUpdateModal />}
     </GestureHandlerRootView>
   );
 }

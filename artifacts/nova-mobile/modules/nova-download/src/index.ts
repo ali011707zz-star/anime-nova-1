@@ -33,6 +33,9 @@ type NovaDownloadModule = {
   list(): Promise<NativeDownloadRecord[]>;
   remove(appId: string): Promise<boolean>;
   forget(appId: string): Promise<boolean>;
+  canInstallPackages(): Promise<boolean>;
+  openInstallPermissionSettings(): Promise<boolean>;
+  installApk(localPathOrUri: string): Promise<"launched" | "permission_required">;
 };
 
 const nativeModule = requireOptionalNativeModule<NovaDownloadModule>("NovaDownload");
@@ -77,4 +80,20 @@ export async function removeNativeDownload(appId: string): Promise<boolean> {
 export async function forgetNativeDownload(appId: string): Promise<boolean> {
   if (!nativeModule) return false;
   return nativeModule.forget(appId);
+}
+export async function canInstallPackagesNative(): Promise<boolean> {
+  if (!nativeModule?.canInstallPackages) return true;
+  return nativeModule.canInstallPackages();
+}
+
+export async function openInstallPermissionSettingsNative(): Promise<boolean> {
+  if (!nativeModule?.openInstallPermissionSettings) return false;
+  return nativeModule.openInstallPermissionSettings();
+}
+
+export async function installApkNative(localPathOrUri: string): Promise<"launched" | "permission_required"> {
+  if (!nativeModule?.installApk) {
+    throw new Error("Native APK installer is unavailable");
+  }
+  return nativeModule.installApk(localPathOrUri);
 }

@@ -1,3 +1,4 @@
+import { CURRENT_APP_VERSION, openAppUpdateModal } from "@/components/AppUpdateModal";
 import { Ionicons } from "@expo/vector-icons";
 import * as Google from "expo-auth-session/providers/google";
 import { makeRedirectUri } from "expo-auth-session";
@@ -2443,17 +2444,13 @@ export default function SettingsScreen() {
         <SectionHeader title="عن التطبيق" icon="حول" />
         <View style={{ paddingHorizontal: 16 }}>
           <Card>
-            {/* Version */}
-            <View style={[ts.navRow, { borderBottomColor: colors.border }]}>
-              <View style={[ts.navIcon, { backgroundColor: "rgba(139,92,246,0.10)" }]}>
-                <Ionicons name="phone-portrait" size={16} color={colors.accent} />
-              </View>
-              <View style={[ts.navText, { alignItems: "flex-end" }]}>
-                <Text style={[ts.navLabel, { color: colors.textPrimary }]}>إصدار التطبيق</Text>
-                <Text style={[ts.navSub, { color: colors.textSecondary }]}>ANIME NOVA · تطبيق بث الأنمي العربي</Text>
-              </View>
-              <Text style={{ fontSize: 12, fontFamily: "Cairo_700Bold", color: colors.accent }}>v2.4.0</Text>
-            </View>
+            {/* Version & In-App Update */}
+            <NavRow
+              icon="cloud-download" iconColor="#0EA5E9" iconBg="rgba(14,165,233,0.12)"
+              label={`تحديث التطبيق (الإصدار v${CURRENT_APP_VERSION})`}
+              sub="اضغط للتحقق من التحديثات وتثبيتها مباشرة داخل التطبيق"
+              onPress={() => openAppUpdateModal()}
+            />
             {/* Report issue */}
             <NavRow
               icon="alert-circle" iconColor="#38bdf8" iconBg="rgba(56,189,248,0.10)"
@@ -2540,7 +2537,7 @@ export default function SettingsScreen() {
             />
             <NavRow
               icon="information-circle" iconColor="#a78bfa" iconBg="rgba(139,92,246,0.10)"
-              label="عن التطبيق" sub="ANIME NOVA · إصدار 2.4.0"
+              label="عن التطبيق" sub={`ANIME NOVA · إصدار v${CURRENT_APP_VERSION}`}
               onPress={() => Alert.alert(
                 "عن Anime NOVA",
                 "تطبيق لمتابعة الأنمي واكتشاف الحلقات الجديدة والمحتوى المترجم والمدبلج.",
@@ -2555,7 +2552,7 @@ export default function SettingsScreen() {
             <Text style={[ts.footerLogoText, { color: colors.textPrimary }]}>ANIME </Text>
             <Text style={[ts.footerLogoText, { color: colors.accent }]}>NOVA</Text>
           </View>
-          <Text style={[ts.footerSub, { color: colors.textMuted }]}>v2.4.0 · مجاني للجميع · 2025</Text>
+          <Text style={[ts.footerSub, { color: colors.textMuted }]}>v{CURRENT_APP_VERSION} · مجاني للجميع · 2025</Text>
         </View>
       </ScrollView>
 

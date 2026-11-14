@@ -15,8 +15,29 @@ const PERMANENTLY_DISABLED_SOURCES = [
   "consumet_gogo",
 ] as const;
 
+const LATEST_APP_VERSION = "1.0.9";
+const LATEST_VERSION_CODE = 10;
+
+function compareSemver(a: string, b: string): number {
+  const pa = String(a || "0.0.0").replace(/[^0-9.]/g, "").split(".").map((x) => parseInt(x, 10) || 0);
+  const pb = String(b || "0.0.0").replace(/[^0-9.]/g, "").split(".").map((x) => parseInt(x, 10) || 0);
+  for (let i = 0; i < 3; i++) {
+    const da = pa[i] || 0;
+    const db = pb[i] || 0;
+    if (da < db) return -1;
+    if (da > db) return 1;
+  }
+  return 0;
+}
+
 const DEFAULT_CONFIG = {
-  version: "1.0.0",
+  version: LATEST_APP_VERSION,
+  latestVersion: LATEST_APP_VERSION,
+  latestVersionCode: LATEST_VERSION_CODE,
+  apkUrl: "https://animenovaa.duckdns.org/nova.apk?v=" + LATEST_APP_VERSION,
+  tvDownloaderCode: "2576388",
+  updateTitle: "تحديث جديد متوفر (v" + LATEST_APP_VERSION + ")",
+  updateMessage: "يتوفر إصدار جديد من تطبيق Anime NOVA يتضمن تحسينات شاملة في سلاسة التنقل ووضوح المؤشر والتحديث المباشر داخل التطبيق.",
   maintenanceMode: false,
   maintenanceMessage: "",
   sources: {
@@ -100,22 +121,50 @@ async function isAdmin(req: any): Promise<boolean> {
 }
 
 /* ── GET /api/config ── public remote configuration ── */
-router.get("/config", async (_req, res) => {
+router.get("/config", async (req, res) => {
+  const clientVersionHeader = String(req.headers["x-nova-version"] || "").trim();
+  const uaMatch = String(req.headers["user-agent"] || "").match(/NovaAnime\/([0-9.]+)/i);
+  const clientVersion = clientVersionHeader || (uaMatch ? uaMatch[1] : "");
+  const isOutdatedClient = Boolean(clientVersion && compareSemver(clientVersion, LATEST_APP_VERSION) < 0);
+  const outdatedBanner = {
+    id: "auto-update-v" + LATEST_APP_VERSION,
+    type: "warning" as const,
+    message: "🚀 يتوفر تحديث جديد للتطبيق (v" + LATEST_APP_VERSION + ")! للتحديث على الهاتف حمّله من animenovaa.duckdns.org/nova.apk أو على التلفاز عبر كود Downloader: 2576388",
+    link: "https://animenovaa.duckdns.org/nova.apk",
+  };
+
   try {
     const remoteRaw = await getDbConfig(REMOTE_CONFIG_KEY);
     const remote = remoteRaw ? JSON.parse(remoteRaw) : {};
     const rows = await sbSelect("app_config", { key: "eq.announcements" }, { limit: 1 });
-    const announcements = rows.length > 0 && rows[0].value
+    const dbAnnouncements = rows.length > 0 && rows[0].value
       ? JSON.parse(rows[0].value)
       : [];
+    const baseList = Array.isArray(dbAnnouncements) ? dbAnnouncements : [];
+    const mergedCfg = mergeConfig(remote);
+    const latestVer = mergedCfg.latestVersion || LATEST_APP_VERSION;
+    const clientNeedsUpdate = Boolean(clientVersion && compareSemver(clientVersion, latestVer) < 0);
+    const announcements = clientNeedsUpdate
+      ? [outdatedBanner, ...baseList.filter((a: any) => a?.id !== outdatedBanner.id)]
+      : baseList;
     return res.json({
-      ...mergeConfig(remote),
-      announcements: Array.isArray(announcements) ? announcements : [],
+      ...mergedCfg,
+      version: latestVer,
+      latestVersion: latestVer,
+      latestVersionCode: mergedCfg.latestVersionCode || LATEST_VERSION_CODE,
+      apkUrl: mergedCfg.apkUrl || DEFAULT_CONFIG.apkUrl,
+      tvDownloaderCode: mergedCfg.tvDownloaderCode || DEFAULT_CONFIG.tvDownloaderCode,
+      updateTitle: mergedCfg.updateTitle || DEFAULT_CONFIG.updateTitle,
+      updateMessage: mergedCfg.updateMessage || DEFAULT_CONFIG.updateMessage,
+      announcements,
     });
   } catch {
     /* fall through to default */
   }
-  return res.json(DEFAULT_CONFIG);
+  return res.json({
+    ...DEFAULT_CONFIG,
+    announcements: isOutdatedClient ? [outdatedBanner] : [],
+  });
 });
 
 /* ── GET/PATCH /api/admin/remote-config ── protected remote control ── */

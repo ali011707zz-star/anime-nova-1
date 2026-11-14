@@ -42,6 +42,13 @@ export type RemoteConfig = {
   maintenanceMode?: boolean;
   maintenanceMessage?: string;
   version?: string;
+  latestVersion?: string;
+  latestVersionCode?: number;
+  apkUrl?: string;
+  tvDownloaderCode?: string;
+  updateTitle?: string;
+  updateMessage?: string;
+  forceUpdate?: boolean;
   limits?: { downloadLimit: number; watchAccessMinutes: number };
 };
 

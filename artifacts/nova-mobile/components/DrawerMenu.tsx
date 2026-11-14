@@ -1,3 +1,4 @@
+import { CURRENT_APP_VERSION, openAppUpdateModal } from "@/components/AppUpdateModal";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -337,6 +338,22 @@ export function DrawerMenu({ visible, onClose }: Props) {
             colors={colors}
             onPress={() => {
               toggleTvMode();
+            }}
+          />
+          <DrawerItem
+            item={{
+              icon: "cloud-download-outline",
+              label: "تحديث التطبيق",
+              route: "",
+              badge: `v${CURRENT_APP_VERSION}`,
+              showChevron: false,
+              color: "#0EA5E9",
+            }}
+            tvMode={tvMode}
+            colors={colors}
+            onPress={() => {
+              onClose();
+              setTimeout(() => openAppUpdateModal(), 180);
             }}
           />
           {NAV_OTHER.map((item) => (
