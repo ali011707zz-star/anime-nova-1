@@ -232,11 +232,11 @@ export function tvFocusStyle(focused: boolean, isWhite?: boolean): ViewStyle {
   const white = typeof isWhite === "boolean" ? isWhite : activeThemeIsWhite;
   if (white) {
     return {
-      borderColor: "#0284C7",
+      borderColor: "#EA580C",
     };
   }
   return {
-    borderColor: "#38BDF8",
+    borderColor: "#FACC15",
   };
 }
 

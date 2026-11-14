@@ -168,8 +168,8 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
   },
   tvTabDpadFocused: {
-    borderColor: "#38BDF8",
-    backgroundColor: "rgba(56, 189, 248, 0.14)",
+    borderColor: "#FACC15",
+    backgroundColor: "rgba(250, 204, 21, 0.16)",
   },
   tabLabel: {
     fontSize: 8.5,

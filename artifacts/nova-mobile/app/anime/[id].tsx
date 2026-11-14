@@ -180,7 +180,7 @@ function CharCard({ e, animeId, animeTitle, favIds, onToggle, tvMode = false, co
   const { d } = useDetailStyles();
   const { width } = useWindowDimensions();
   const gap = tvMode ? 14 : 12;
-  const cardWidth = (width - (tvMode ? 80 : 32) - gap * (columns - 1)) / columns;
+  const cardWidth = Math.floor((width - (tvMode ? 88 : 32) - gap * (columns - 1)) / columns);
   const n = e.node;
   const isFav = favIds.has(n.id);
   return (
@@ -724,7 +724,11 @@ export default function AnimeDetailScreen() {
 
         {/* ── MAL Stats ── */}
         {(score || allTimeRank || anime.idMal) && (
-          <View style={[d.malBox, { marginHorizontal: 16 }]}>
+          <Pressable
+            focusable={tvMode}
+            onFocus={() => rememberDetailFocus("malStats")}
+            style={({ focused }) => [d.malBox, { marginHorizontal: 16 }, tvMode && tvFocusStyle(focused)]}
+          >
             <View style={d.malHeader}>
               <Text style={d.malTitle}>الإحصائيات والتقييم العالمي</Text>
               <Text style={d.malId}>{anime.idMal ? `MAL #${anime.idMal}` : "MyAnimeList"}</Text>
@@ -750,7 +754,7 @@ export default function AnimeDetailScreen() {
                 <Text style={d.malStatSub}>في قائمة المتابعة</Text>
               </View>
             </View>
-          </View>
+          </Pressable>
         )}
 
         {/* ── Synopsis ── */}
@@ -883,11 +887,17 @@ export default function AnimeDetailScreen() {
               {suppChars.length > 0 && (
                 <>
                   <Text style={[d.tabSubTitle, { marginTop: 12 }]}>الشخصيات المساعدة</Text>
-                  <ScrollView horizontal focusable={false} showsHorizontalScrollIndicator={false}>
-                    <View style={[d.charGrid, d.charGridHorizontal, tvMode && d.tvCharGrid]}>
-                      {suppChars.slice(0, 8).map((e: any) => <CharCard key={e.node.id} e={e} animeId={anime.id} animeTitle={anime.title?.romaji || ""} favIds={favCharIds} onToggle={toggleChar} tvMode={tvMode} columns={5} />)}
+                  {tvMode ? (
+                    <View style={[d.charGrid, d.tvCharGrid]}>
+                      {suppChars.slice(0, 10).map((e: any) => <CharCard key={e.node.id} e={e} animeId={anime.id} animeTitle={anime.title?.romaji || ""} favIds={favCharIds} onToggle={toggleChar} tvMode={tvMode} columns={5} />)}
                     </View>
-                  </ScrollView>
+                  ) : (
+                    <ScrollView horizontal focusable={false} showsHorizontalScrollIndicator={false}>
+                      <View style={[d.charGrid, d.charGridHorizontal]}>
+                        {suppChars.slice(0, 8).map((e: any) => <CharCard key={e.node.id} e={e} animeId={anime.id} animeTitle={anime.title?.romaji || ""} favIds={favCharIds} onToggle={toggleChar} tvMode={false} columns={5} />)}
+                      </View>
+                    </ScrollView>
+                  )}
                 </>
               )}
               {mainChars.length === 0 && suppChars.length === 0 && (
@@ -943,7 +953,7 @@ export default function AnimeDetailScreen() {
                   if (!rec) return null;
                   return (
                      <Pressable key={rec.id} onPress={() => router.push(`/anime/${rec.id}`)} focusable={tvMode}
-                       style={({ focused }) => [d.simCard, tvMode && tvFocusStyle(focused)]}>
+                       style={({ focused }) => [d.simCard, tvMode && { width: Math.floor((width - 88 - 48) / 5), borderRadius: 12, padding: 2 }, tvMode && tvFocusStyle(focused)]}>
                       <View style={d.simImgWrap}>
                         {rec.coverImage?.large ? (
                           <Image source={{ uri: rec.coverImage.large }} style={d.simImg} />

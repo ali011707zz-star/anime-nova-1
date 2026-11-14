@@ -189,7 +189,7 @@ export function HeroSection({
                     borderRadius: Math.round(11 * s),
                     gap: Math.round(5 * s),
                     borderWidth: 2,
-                    borderColor: focused ? "#ffffff" : "transparent",
+                    borderColor: focused ? "#FACC15" : "transparent",
                   },
                 ]}
               >
@@ -211,7 +211,7 @@ export function HeroSection({
                     borderRadius: Math.round(11 * s),
                     gap: Math.round(5 * s),
                     borderWidth: 2,
-                    borderColor: focused ? "#38BDF8" : "rgba(255, 255, 255, 0.22)",
+                    borderColor: focused ? "#FACC15" : "rgba(255, 255, 255, 0.22)",
                   },
                 ]}
               >
@@ -227,7 +227,7 @@ export function HeroSection({
                     accessibilityLabel="الأنمي السابق"
                     style={({ focused }) => [
                       styles.tvSlideBtn,
-                      focused && { borderColor: "#38BDF8", backgroundColor: "rgba(56,189,248,0.22)" },
+                      focused && { borderColor: "#FACC15", backgroundColor: "rgba(250,204,21,0.22)" },
                     ]}
                   >
                     <Ionicons name="chevron-forward" size={18} color="#fff" />
@@ -238,7 +238,7 @@ export function HeroSection({
                     accessibilityLabel="الأنمي التالي"
                     style={({ focused }) => [
                       styles.tvSlideBtn,
-                      focused && { borderColor: "#38BDF8", backgroundColor: "rgba(56,189,248,0.22)" },
+                      focused && { borderColor: "#FACC15", backgroundColor: "rgba(250,204,21,0.22)" },
                     ]}
                   >
                     <Ionicons name="chevron-back" size={18} color="#fff" />

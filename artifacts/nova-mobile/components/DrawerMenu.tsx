@@ -233,7 +233,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
               style={({ focused }) => [
                 s.closeBtn,
                 tvMode && s.tvCloseBtn,
-                { backgroundColor: colors.surfaceElevated, borderWidth: 2, borderColor: focused ? "#38BDF8" : "transparent" },
+                { backgroundColor: colors.surfaceElevated, borderWidth: 2, borderColor: focused ? "#FACC15" : "transparent" },
                 tvMode && tvFocusStyle(focused),
               ]}>
               <Ionicons name="close" size={tvMode ? 17 : 15} color={colors.textMuted} />
@@ -247,7 +247,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
             style={({ focused }) => [
               s.userCard,
               tvMode && s.tvUserCard,
-              focused && { borderColor: "#38BDF8" },
+              focused && { borderColor: "#FACC15" },
               tvMode && tvFocusStyle(focused),
             ]}
           >
