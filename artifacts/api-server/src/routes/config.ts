@@ -15,8 +15,8 @@ const PERMANENTLY_DISABLED_SOURCES = [
   "consumet_gogo",
 ] as const;
 
-const LATEST_APP_VERSION = "1.0.9";
-const LATEST_VERSION_CODE = 10;
+const LATEST_APP_VERSION = "1.1.0";
+const LATEST_VERSION_CODE = 11;
 
 function compareSemver(a: string, b: string): number {
   const pa = String(a || "0.0.0").replace(/[^0-9.]/g, "").split(".").map((x) => parseInt(x, 10) || 0);
@@ -36,8 +36,15 @@ const DEFAULT_CONFIG = {
   latestVersionCode: LATEST_VERSION_CODE,
   apkUrl: "https://animenovaa.duckdns.org/nova.apk?v=" + LATEST_APP_VERSION,
   tvDownloaderCode: "2576388",
-  updateTitle: "تحديث جديد متوفر (v" + LATEST_APP_VERSION + ")",
-  updateMessage: "يتوفر إصدار جديد من تطبيق Anime NOVA يتضمن تحسينات شاملة في سلاسة التنقل ووضوح المؤشر والتحديث المباشر داخل التطبيق.",
+  forceUpdate: true,
+  updateTitle: "التحديث مطلوب",
+  updateMessage: "يجب تحديث التطبيق إلى الإصدار " + LATEST_APP_VERSION + " للمتابعة — هذا الإصدار لم يعد مدعوماً.",
+  updateChangelog: [
+    "تشغيل أسرع: بدء أسرع وتقديم شبه فوري في جميع سيرفرات الأنمي والمدبلج",
+    "تحديث وتثبيت مباشر داخل التطبيق مع متابعة حجم التقدم بالميجابايت",
+    "إطار تركيز مزدوج عالي التباين وتنقل فوري سلس بالريموت في جميع الصفحات",
+    "تحسينات كبيرة في الأداء والثبات وإصلاحات عامة",
+  ],
   maintenanceMode: false,
   maintenanceMessage: "",
   sources: {
@@ -154,8 +161,10 @@ router.get("/config", async (req, res) => {
       latestVersionCode: mergedCfg.latestVersionCode || LATEST_VERSION_CODE,
       apkUrl: mergedCfg.apkUrl || DEFAULT_CONFIG.apkUrl,
       tvDownloaderCode: mergedCfg.tvDownloaderCode || DEFAULT_CONFIG.tvDownloaderCode,
+      forceUpdate: typeof mergedCfg.forceUpdate === "boolean" ? mergedCfg.forceUpdate : DEFAULT_CONFIG.forceUpdate,
       updateTitle: mergedCfg.updateTitle || DEFAULT_CONFIG.updateTitle,
       updateMessage: mergedCfg.updateMessage || DEFAULT_CONFIG.updateMessage,
+      updateChangelog: Array.isArray(mergedCfg.updateChangelog) && mergedCfg.updateChangelog.length > 0 ? mergedCfg.updateChangelog : DEFAULT_CONFIG.updateChangelog,
       announcements,
     });
   } catch {

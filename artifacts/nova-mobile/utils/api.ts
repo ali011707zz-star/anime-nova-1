@@ -49,6 +49,7 @@ export type RemoteConfig = {
   updateTitle?: string;
   updateMessage?: string;
   forceUpdate?: boolean;
+  updateChangelog?: string[];
   limits?: { downloadLimit: number; watchAccessMinutes: number };
 };
 

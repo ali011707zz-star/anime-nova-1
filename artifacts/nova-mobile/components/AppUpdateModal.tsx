@@ -4,7 +4,8 @@ import Constants from "expo-constants";
 import * as FileSystem from "expo-file-system";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
+  AppState,
+  BackHandler,
   Linking,
   Modal,
   Platform,
@@ -14,20 +15,21 @@ import {
   useWindowDimensions,
 } from "react-native";
 import {
+  canInstallPackagesNative,
   enqueueNativeDownload,
   installApkNative,
   isNativeDownloadAvailable,
   listNativeDownloads,
+  openInstallPermissionSettingsNative,
 } from "expo-nova-download";
 import { useApp } from "@/context/AppContext";
-import { useColors } from "@/hooks/useColors";
 import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 
 const DISMISSED_VERSION_KEY = "nova-dismissed-update-version";
 const UPDATE_JOB_ID = "nova-self-update-apk";
 
-export const CURRENT_APP_VERSION: string = Constants.expoConfig?.version || "1.0.9";
-export const CURRENT_VERSION_CODE: number = Number(Constants.expoConfig?.android?.versionCode || 10);
+export const CURRENT_APP_VERSION: string = Constants.expoConfig?.version || "1.1.0";
+export const CURRENT_VERSION_CODE: number = Number(Constants.expoConfig?.android?.versionCode || 11);
 
 export function compareAppVersions(a: string, b: string): number {
   const pa = String(a || "0.0.0")
@@ -47,6 +49,11 @@ export function compareAppVersions(a: string, b: string): number {
   return 0;
 }
 
+function formatMb(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0.0";
+  return (bytes / (1024 * 1024)).toFixed(1);
+}
+
 type ManualOpenListener = () => void;
 const manualOpenListeners = new Set<ManualOpenListener>();
 
@@ -58,35 +65,52 @@ export function openAppUpdateModal(): void {
   }
 }
 
+type UpdateStep = "prompt" | "permission" | "downloading" | "ready_to_install";
+
+const DEFAULT_CHANGELOG = [
+  "تشغيل أسرع: بدء أسرع وتقديم شبه فوري في جميع سيرفرات الأنمي والمدبلج",
+  "تحديث وتثبيت مباشر داخل التطبيق مع متابعة حجم التقدم بالميجابايت",
+  "إطار تركيز مزدوج عالي التباين وتنقل فوري سلس بالريموت في جميع الصفحات",
+  "تحسينات كبيرة في الأداء والثبات وإصلاحات عامة",
+];
+
 export function AppUpdateModal() {
-  const colors = useColors();
-  const { remoteConfig, refreshConfig, theme } = useApp();
+  const { remoteConfig, refreshConfig } = useApp();
   const { width, height } = useWindowDimensions();
   const tvMode = isTvDevice(width, height);
-  const isWhite = theme === "white";
 
   const [visible, setVisible] = useState(false);
   const [manualCheckMode, setManualCheckMode] = useState(false);
-  const [downloading, setDownloading] = useState(false);
+  const [step, setStep] = useState<UpdateStep>("prompt");
   const [progressPct, setProgressPct] = useState(0);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [bytesWritten, setBytesWritten] = useState(0);
+  const [totalBytes, setTotalBytes] = useState(78.3 * 1024 * 1024);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [downloadedPath, setDownloadedPath] = useState<string | null>(null);
+
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const waitingPermissionRef = useRef(false);
+  const startDownloadRef = useRef<() => Promise<void>>(async () => {});
 
   const latestVersion = remoteConfig.latestVersion || remoteConfig.version || CURRENT_APP_VERSION;
   const latestVersionCode = Number(remoteConfig.latestVersionCode || CURRENT_VERSION_CODE);
   const apkUrl = remoteConfig.apkUrl || `https://animenovaa.duckdns.org/nova.apk?v=${latestVersion}`;
-  const tvCode = remoteConfig.tvDownloaderCode || "2576388";
+  const changelog =
+    Array.isArray(remoteConfig.updateChangelog) && remoteConfig.updateChangelog.length > 0
+      ? remoteConfig.updateChangelog
+      : DEFAULT_CHANGELOG;
+
   const hasNewerVersion =
     compareAppVersions(CURRENT_APP_VERSION, latestVersion) < 0 ||
     (latestVersionCode > CURRENT_VERSION_CODE && compareAppVersions(CURRENT_APP_VERSION, latestVersion) <= 0);
 
+  const isMandatory = Boolean(hasNewerVersion && (remoteConfig.forceUpdate !== false));
+
   useEffect(() => {
     const handleManualOpen = () => {
       setErrorMessage(null);
-      setStatusMessage(null);
       setManualCheckMode(true);
+      setStep("prompt");
       setVisible(true);
       void refreshConfig();
     };
@@ -99,11 +123,18 @@ export function AppUpdateModal() {
   useEffect(() => {
     if (!hasNewerVersion) return;
     let cancelled = false;
+    if (isMandatory) {
+      setManualCheckMode(false);
+      setStep("prompt");
+      setVisible(true);
+      return;
+    }
     AsyncStorage.getItem(DISMISSED_VERSION_KEY)
       .then((dismissedVer) => {
         if (cancelled) return;
-        if (dismissedVer === latestVersion && !remoteConfig.forceUpdate) return;
+        if (dismissedVer === latestVersion) return;
         setManualCheckMode(false);
+        setStep("prompt");
         setVisible(true);
       })
       .catch(() => {
@@ -112,7 +143,14 @@ export function AppUpdateModal() {
     return () => {
       cancelled = true;
     };
-  }, [hasNewerVersion, latestVersion, remoteConfig.forceUpdate]);
+  }, [hasNewerVersion, isMandatory, latestVersion]);
+
+  // Block hardware back button when update is mandatory
+  useEffect(() => {
+    if (!visible || !isMandatory) return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => true);
+    return () => sub.remove();
+  }, [visible, isMandatory]);
 
   useEffect(() => {
     return () => {
@@ -122,19 +160,19 @@ export function AppUpdateModal() {
 
   const triggerInstall = useCallback(async (localUri: string) => {
     try {
-      setStatusMessage("جارٍ فتح مثبت الحزم لتثبيت التحديث…");
       const res = await installApkNative(localUri);
       if (res === "permission_required") {
-        setStatusMessage("يرجى تفعيل سماحية «تثبيت التطبيقات غير المعروفة» لـ Anime NOVA ثم اضغط «تثبيت التحديث الآن».");
+        waitingPermissionRef.current = true;
+        setStep("permission");
       } else {
-        setStatusMessage("تم فتح نافذة التثبيت بنجاح ✓");
+        setStep("ready_to_install");
       }
     } catch {
       Linking.openURL(apkUrl).catch(() => {});
     }
   }, [apkUrl]);
 
-  const startInAppUpdate = useCallback(async () => {
+  const beginDownload = useCallback(async () => {
     if (Platform.OS !== "android") {
       Linking.openURL(apkUrl).catch(() => {});
       return;
@@ -145,10 +183,10 @@ export function AppUpdateModal() {
       return;
     }
 
-    setDownloading(true);
+    setStep("downloading");
     setProgressPct(1);
+    setBytesWritten(0);
     setErrorMessage(null);
-    setStatusMessage("جارٍ تنزيل التحديث داخل التطبيق…");
 
     const fileName = `Anime-Nova-v${latestVersion}.apk`;
 
@@ -170,26 +208,30 @@ export function AppUpdateModal() {
             const list = await listNativeDownloads();
             const record = list.find((r) => r.appId === UPDATE_JOB_ID);
             if (!record) return;
+            if (record.bytesWritten > 0) {
+              setBytesWritten(record.bytesWritten);
+            }
             if (record.totalBytes > 0) {
+              setTotalBytes(record.totalBytes);
               const pct = Math.min(99, Math.max(1, Math.round((record.bytesWritten / record.totalBytes) * 100)));
               setProgressPct(pct);
             }
             if (record.status === "successful") {
               if (pollTimerRef.current) clearInterval(pollTimerRef.current);
               pollTimerRef.current = null;
-              setDownloading(false);
               setProgressPct(100);
               const finalPath = record.localPath || job.localPath;
               setDownloadedPath(finalPath);
+              setStep("ready_to_install");
               await triggerInstall(finalPath);
             } else if (record.status === "failed") {
               if (pollTimerRef.current) clearInterval(pollTimerRef.current);
               pollTimerRef.current = null;
-              setDownloading(false);
-              setErrorMessage(record.reasonMessage || "تعذر إكمال التنزيل، جرب التحميل المباشر");
+              setStep("prompt");
+              setErrorMessage(record.reasonMessage || "تعذر إكمال التنزيل الداخلي — جرب التنزيل من المتصفح");
             }
           } catch {}
-        }, 700);
+        }, 500);
         return;
       }
 
@@ -199,7 +241,11 @@ export function AppUpdateModal() {
         targetUri,
         {},
         (prog) => {
+          if (prog.totalBytesWritten > 0) {
+            setBytesWritten(prog.totalBytesWritten);
+          }
           if (prog.totalBytesExpectedToWrite > 0) {
+            setTotalBytes(prog.totalBytesExpectedToWrite);
             const pct = Math.min(
               99,
               Math.max(1, Math.round((prog.totalBytesWritten / prog.totalBytesExpectedToWrite) * 100)),
@@ -209,28 +255,84 @@ export function AppUpdateModal() {
         },
       );
       const res = await resumable.downloadAsync();
-      setDownloading(false);
       if (res?.uri) {
         setProgressPct(100);
         setDownloadedPath(res.uri);
+        setStep("ready_to_install");
         await triggerInstall(res.uri);
       } else {
-        setErrorMessage("تعذر حفظ ملف التحديث، سيتم فتح الرابط المباشر");
-        Linking.openURL(apkUrl).catch(() => {});
+        setStep("prompt");
+        setErrorMessage("تعذر حفظ ملف التحديث — جرب التنزيل من المتصفح");
       }
     } catch {
-      setDownloading(false);
-      setErrorMessage("حدث خطأ أثناء التنزيل الداخلي، سيتم فتح التحميل المباشر");
-      Linking.openURL(apkUrl).catch(() => {});
+      setStep("prompt");
+      setErrorMessage("حدث خطأ أثناء التنزيل الداخلي — جرب التنزيل من المتصفح");
     }
   }, [apkUrl, downloadedPath, latestVersion, triggerInstall]);
 
-  const handleDismiss = useCallback(() => {
+  useEffect(() => {
+    startDownloadRef.current = beginDownload;
+  }, [beginDownload]);
+
+  // When user returns from Android "Install unknown apps" settings screen, automatically resume download/install
+  useEffect(() => {
+    if (!visible || Platform.OS !== "android") return;
+    const sub = AppState.addEventListener("change", async (nextState) => {
+      if (nextState === "active" && (waitingPermissionRef.current || step === "permission")) {
+        try {
+          const allowed = await canInstallPackagesNative();
+          if (allowed) {
+            waitingPermissionRef.current = false;
+            if (downloadedPath) {
+              await triggerInstall(downloadedPath);
+            } else {
+              await startDownloadRef.current();
+            }
+          }
+        } catch {}
+      }
+    });
+    return () => sub.remove();
+  }, [visible, step, downloadedPath, triggerInstall]);
+
+  const handlePrimaryPress = useCallback(async () => {
+    if (Platform.OS !== "android") {
+      Linking.openURL(apkUrl).catch(() => {});
+      return;
+    }
+
+    if (step === "permission") {
+      waitingPermissionRef.current = true;
+      await openInstallPermissionSettingsNative();
+      return;
+    }
+
+    if (step === "downloading") return;
+
+    // Check unknown sources permission first (just like HDO FLIX)
+    try {
+      const allowed = await canInstallPackagesNative();
+      if (!allowed) {
+        waitingPermissionRef.current = true;
+        setStep("permission");
+        return;
+      }
+    } catch {}
+
+    await beginDownload();
+  }, [apkUrl, beginDownload, step]);
+
+  const handleBrowserDownload = useCallback(() => {
+    Linking.openURL(apkUrl).catch(() => {});
+  }, [apkUrl]);
+
+  const handleClose = useCallback(() => {
+    if (isMandatory) return;
     if (hasNewerVersion && !manualCheckMode) {
       AsyncStorage.setItem(DISMISSED_VERSION_KEY, latestVersion).catch(() => {});
     }
     setVisible(false);
-  }, [hasNewerVersion, latestVersion, manualCheckMode]);
+  }, [hasNewerVersion, isMandatory, latestVersion, manualCheckMode]);
 
   if (!visible) return null;
 
@@ -239,7 +341,7 @@ export function AppUpdateModal() {
       visible={visible}
       transparent
       animationType={tvMode ? "none" : "fade"}
-      onRequestClose={handleDismiss}
+      onRequestClose={handleClose}
       statusBarTranslucent
     >
       <View
@@ -247,148 +349,122 @@ export function AppUpdateModal() {
         testID="nova-tv-modal-root"
         style={[styles.backdrop, tvMode && styles.tvBackdrop]}
       >
-        <View
-          style={[
-            styles.card,
-            {
-              backgroundColor: isWhite ? "#FFFFFF" : "#12131C",
-              borderColor: isWhite ? "#CBD5E1" : "rgba(56, 189, 248, 0.35)",
-            },
-            tvMode && styles.tvCard,
-          ]}
-        >
-          <View style={styles.headerBadgeRow}>
-            <View style={[styles.iconCircle, { backgroundColor: hasNewerVersion ? "rgba(14,165,233,0.16)" : "rgba(34,197,94,0.16)" }]}>
-              <Ionicons
-                name={hasNewerVersion ? "rocket" : "checkmark-circle"}
-                size={tvMode ? 28 : 26}
-                color={hasNewerVersion ? "#0EA5E9" : "#22C55E"}
-              />
-            </View>
-            <View style={styles.versionPillsRow}>
-              <View style={[styles.versionPill, { backgroundColor: isWhite ? "#F1F5F9" : "rgba(255,255,255,0.07)" }]}>
-                <Text style={[styles.versionPillText, { color: colors.textSecondary }]}>
-                  إصدارك الحالي: v{CURRENT_APP_VERSION}
-                </Text>
-              </View>
-              {hasNewerVersion && (
-                <View style={[styles.versionPill, { backgroundColor: "rgba(14,165,233,0.18)" }]}>
-                  <Text style={[styles.versionPillText, { color: "#38BDF8" }]}>
-                    الإصدار الجديد: v{latestVersion}
-                  </Text>
-                </View>
-              )}
-            </View>
+        <View style={[styles.card, tvMode && styles.tvCard]}>
+          {/* Top circular red/amber warning icon */}
+          <View style={styles.warningIconOuter}>
+            <Ionicons name="warning-outline" size={tvMode ? 32 : 30} color="#EF4444" />
           </View>
 
-          <Text style={[styles.title, { color: colors.textPrimary }, tvMode && styles.tvTitle]}>
-            {hasNewerVersion
-              ? remoteConfig.updateTitle || `تحديث جديد متوفر (v${latestVersion})`
-              : "أنت تستخدم أحدث إصدار من التطبيق ✓"}
+          {/* Main title */}
+          <Text style={[styles.title, tvMode && styles.tvTitle]}>
+            {hasNewerVersion ? "التحديث مطلوب" : "تحديث التطبيق"}
           </Text>
 
-          <Text style={[styles.desc, { color: colors.textSecondary }, tvMode && styles.tvDesc]}>
-            {hasNewerVersion
-              ? remoteConfig.updateMessage ||
-                "يتوفر إصدار جديد من تطبيق Anime NOVA يتضمن تحسينات شاملة في سلاسة التنقل ووضوح المؤشر والأداء."
-              : `لا توجد تحديثات جديدة حالياً. إصدارك المثبت (v${CURRENT_APP_VERSION}) هو الأحدث.`}
-          </Text>
-
-          {tvMode && hasNewerVersion && (
-            <View style={[styles.tvCodeBox, { backgroundColor: isWhite ? "#F8FAFC" : "rgba(14,165,233,0.09)", borderColor: "rgba(14,165,233,0.3)" }]}>
-              <Ionicons name="tv-outline" size={18} color="#0EA5E9" />
-              <Text style={[styles.tvCodeText, { color: colors.textPrimary }]}>
-                يمكنك التحديث مباشرة بالزر أدناه، أو عبر تطبيق Downloader بالكود: <Text style={{ color: "#0EA5E9", fontFamily: "Cairo_800ExtraBold" }}>{tvCode}</Text>
+          {/* Dynamic subtitle depending on state (Prompt vs Permission vs Downloading) */}
+          {step === "permission" ? (
+            <Text style={[styles.subtitle, tvMode && styles.tvSubtitle]}>
+              لتثبيت التحديث من داخل التطبيق، اسمح لـ ANIME NOVA بتثبيت التحديثات. فعّل «السماح من هذا المصدر» ثم ارجع.
+            </Text>
+          ) : step === "downloading" ? (
+            <View style={styles.downloadingSubWrap}>
+              <Text style={[styles.subtitle, tvMode && styles.tvSubtitle]}>جارٍ تنزيل التحديث...</Text>
+              <Text style={styles.mbCounterText}>
+                {formatMb(bytesWritten)} / {formatMb(totalBytes)} MB
               </Text>
             </View>
+          ) : hasNewerVersion ? (
+            <Text style={[styles.subtitle, tvMode && styles.tvSubtitle]}>
+              {`يجب تحديث التطبيق إلى الإصدار ${latestVersion} للمتابعة — هذا الإصدار لم يعد مدعوماً.`}
+            </Text>
+          ) : (
+            <Text style={[styles.subtitle, tvMode && styles.tvSubtitle]}>
+              {`أنت تستخدم أحدث إصدار من التطبيق (${CURRENT_APP_VERSION}). يمكنك إعادة تنزيل وتثبيت النسخة الحالية من الزر أدناه.`}
+            </Text>
           )}
 
-          {downloading && (
-            <View style={styles.progressSection}>
-              <View style={styles.progressHeader}>
-                <Text style={[styles.progressLabel, { color: colors.textPrimary }]}>
-                  جارٍ تنزيل التحديث…
-                </Text>
-                <Text style={styles.progressPercent}>{progressPct}%</Text>
+          {/* What's New inner card */}
+          <View style={styles.whatsNewBox}>
+            <Text style={styles.whatsNewTitle}>ما الجديد</Text>
+            {changelog.map((item, idx) => (
+              <View key={idx} style={styles.bulletRow}>
+                <View style={styles.redDot} />
+                <Text style={[styles.bulletText, tvMode && styles.tvBulletText]}>{item}</Text>
               </View>
-              <View style={[styles.progressTrack, { backgroundColor: isWhite ? "#E2E8F0" : "rgba(255,255,255,0.12)" }]}>
-                <View style={[styles.progressFill, { width: `${progressPct}%` }]} />
-              </View>
-            </View>
-          )}
+            ))}
+          </View>
 
-          {statusMessage ? (
-            <Text style={[styles.statusText, { color: "#0EA5E9" }]}>{statusMessage}</Text>
-          ) : null}
+          {/* Version Tag */}
+          <View style={styles.versionTagRow}>
+            <Text style={styles.versionTagText}>الإصدار {latestVersion}</Text>
+            <Ionicons name="pricetag-outline" size={13} color="#9CA3AF" style={{ transform: [{ scaleX: -1 }] }} />
+          </View>
 
           {errorMessage ? (
-            <Text style={[styles.statusText, { color: "#EF4444" }]}>{errorMessage}</Text>
+            <Text style={styles.errorText}>{errorMessage}</Text>
           ) : null}
 
-          <View style={[styles.actionsRow, tvMode && styles.tvActionsRow]}>
-            {hasNewerVersion ? (
-              <Pressable
-                onPress={startInAppUpdate}
-                disabled={downloading}
-                focusable={tvMode}
-                hasTVPreferredFocus={tvMode}
-                testID="nova-tv-preferred-focus"
-                style={({ focused }) => [
-                  styles.primaryBtn,
-                  downloading && { opacity: 0.7 },
-                  tvMode && tvFocusStyle(focused),
-                ]}
-              >
-                {downloading ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Ionicons name={downloadedPath ? "checkmark-done" : "download"} size={19} color="#FFFFFF" />
-                )}
-                <Text style={styles.primaryBtnText}>
-                  {downloading
-                    ? `جارٍ التنزيل (${progressPct}%)`
-                    : downloadedPath
-                      ? "تثبيت التحديث الآن"
-                      : "تحديث وتثبيت داخل التطبيق"}
-                </Text>
-              </Pressable>
+          {/* Primary Pill Action Button */}
+          <Pressable
+            onPress={handlePrimaryPress}
+            disabled={step === "downloading"}
+            focusable={tvMode}
+            hasTVPreferredFocus={tvMode}
+            testID="nova-tv-preferred-focus"
+            style={({ focused }) => [
+              styles.primaryPillBtn,
+              tvMode && tvFocusStyle(focused),
+            ]}
+          >
+            {step === "permission" ? (
+              <>
+                <Text style={styles.primaryPillBtnText}>فتح الإعدادات</Text>
+                <Ionicons name="settings-outline" size={18} color="#FFFFFF" />
+              </>
+            ) : step === "downloading" ? (
+              <>
+                <Text style={styles.primaryPillBtnText}>{progressPct}%</Text>
+                <Ionicons name="download-outline" size={18} color="#FFFFFF" />
+              </>
+            ) : downloadedPath ? (
+              <>
+                <Text style={styles.primaryPillBtnText}>تثبيت التحديث الآن</Text>
+                <Ionicons name="checkmark-circle-outline" size={18} color="#FFFFFF" />
+              </>
             ) : (
-              <Pressable
-                onPress={startInAppUpdate}
-                disabled={downloading}
-                focusable={tvMode}
-                style={({ focused }) => [
-                  styles.secondaryActionBtn,
-                  { borderColor: colors.border, backgroundColor: colors.surfaceElevated },
-                  tvMode && tvFocusStyle(focused),
-                ]}
-              >
-                <Ionicons name="cloud-download-outline" size={17} color={colors.textPrimary} />
-                <Text style={[styles.secondaryActionText, { color: colors.textPrimary }]}>
-                  إعادة تنزيل وتثبيت النسخة الحالية (v{latestVersion})
-                </Text>
-              </Pressable>
+              <>
+                <Text style={styles.primaryPillBtnText}>حدّث الآن</Text>
+                <Ionicons name="download-outline" size={18} color="#FFFFFF" />
+              </>
             )}
+          </Pressable>
 
+          {/* Secondary Browser Download Link (shown in permission & downloading states or on TV) */}
+          {(step === "permission" || step === "downloading" || errorMessage || tvMode) && (
             <Pressable
-              onPress={handleDismiss}
+              onPress={handleBrowserDownload}
               focusable={tvMode}
-              hasTVPreferredFocus={tvMode && !hasNewerVersion}
-              testID={!hasNewerVersion ? "nova-tv-preferred-focus" : undefined}
               style={({ focused }) => [
-                styles.closeBtn,
-                {
-                  backgroundColor: isWhite ? "#F1F5F9" : "rgba(255,255,255,0.08)",
-                  borderColor: isWhite ? "#CBD5E1" : "rgba(255,255,255,0.16)",
-                },
+                styles.browserLinkBtn,
                 tvMode && tvFocusStyle(focused),
               ]}
             >
-              <Text style={[styles.closeBtnText, { color: colors.textSecondary }]}>
-                {hasNewerVersion ? "لاحقاً" : "إغلاق"}
-              </Text>
+              <Text style={styles.browserLinkText}>التنزيل من المتصفّح</Text>
             </Pressable>
-          </View>
+          )}
+
+          {/* Close button only when opened manually and already up to date */}
+          {!isMandatory && (
+            <Pressable
+              onPress={handleClose}
+              focusable={tvMode}
+              style={({ focused }) => [
+                styles.browserLinkBtn,
+                tvMode && tvFocusStyle(focused),
+              ]}
+            >
+              <Text style={styles.browserLinkText}>إغلاق</Text>
+            </Pressable>
+          )}
         </View>
       </View>
     </Modal>
@@ -398,174 +474,168 @@ export function AppUpdateModal() {
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.78)",
+    backgroundColor: "rgba(0, 0, 0, 0.82)",
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 20,
+    paddingHorizontal: 22,
   },
   tvBackdrop: {
     paddingHorizontal: 48,
-    backgroundColor: "rgba(2, 6, 18, 0.88)",
+    backgroundColor: "rgba(0, 0, 0, 0.86)",
   },
   card: {
     width: "100%",
-    maxWidth: 430,
+    maxWidth: 390,
+    backgroundColor: "#14151B",
     borderRadius: 24,
-    borderWidth: 1.5,
-    padding: 22,
-    gap: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.09)",
+    paddingHorizontal: 22,
+    paddingTop: 26,
+    paddingBottom: 22,
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.65,
+    shadowRadius: 28,
+    elevation: 18,
   },
   tvCard: {
-    maxWidth: 560,
-    padding: 26,
-    gap: 14,
+    maxWidth: 460,
+    paddingHorizontal: 26,
+    paddingTop: 24,
+    paddingBottom: 20,
   },
-  headerBadgeRow: {
-    flexDirection: "row-reverse",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 10,
-  },
-  iconCircle: {
-    width: 50,
-    height: 50,
-    borderRadius: 16,
+  warningIconOuter: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: "rgba(239, 68, 68, 0.12)",
+    borderWidth: 1.5,
+    borderColor: "rgba(239, 68, 68, 0.35)",
     alignItems: "center",
     justifyContent: "center",
-  },
-  versionPillsRow: {
-    flexDirection: "row-reverse",
-    flexWrap: "wrap",
-    gap: 6,
-    flex: 1,
-  },
-  versionPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 10,
-  },
-  versionPillText: {
-    fontSize: 11,
-    fontFamily: "Cairo_700Bold",
+    marginBottom: 14,
   },
   title: {
-    fontSize: 18,
+    color: "#FFFFFF",
+    fontSize: 21,
     fontFamily: "Cairo_800ExtraBold",
-    textAlign: "right",
+    textAlign: "center",
+    marginBottom: 6,
   },
   tvTitle: {
-    fontSize: 20,
+    fontSize: 22,
   },
-  desc: {
-    fontSize: 13,
+  subtitle: {
+    color: "#9CA3AF",
+    fontSize: 13.5,
     lineHeight: 21,
-    fontFamily: "Cairo_400Regular",
-    textAlign: "right",
-  },
-  tvDesc: {
-    fontSize: 14,
-    lineHeight: 23,
-  },
-  tvCodeBox: {
-    flexDirection: "row-reverse",
-    alignItems: "center",
-    gap: 8,
-    padding: 11,
-    borderRadius: 12,
-    borderWidth: 1,
-  },
-  tvCodeText: {
-    flex: 1,
-    fontSize: 12.5,
     fontFamily: "Cairo_600SemiBold",
-    textAlign: "right",
-    lineHeight: 19,
+    textAlign: "center",
+    paddingHorizontal: 6,
   },
-  progressSection: {
-    gap: 6,
-    marginTop: 2,
+  tvSubtitle: {
+    fontSize: 14,
+    lineHeight: 22,
   },
-  progressHeader: {
-    flexDirection: "row-reverse",
-    justifyContent: "space-between",
+  downloadingSubWrap: {
     alignItems: "center",
+    gap: 2,
   },
-  progressLabel: {
-    fontSize: 12,
+  mbCounterText: {
+    color: "#9CA3AF",
+    fontSize: 13.5,
     fontFamily: "Cairo_700Bold",
+    textAlign: "center",
+    writingDirection: "ltr",
   },
-  progressPercent: {
-    fontSize: 12,
-    fontFamily: "Cairo_800ExtraBold",
-    color: "#0EA5E9",
-  },
-  progressTrack: {
+  whatsNewBox: {
     width: "100%",
-    height: 8,
-    borderRadius: 4,
-    overflow: "hidden",
-  },
-  progressFill: {
-    height: "100%",
-    backgroundColor: "#0EA5E9",
-    borderRadius: 4,
-  },
-  statusText: {
-    fontSize: 12,
-    fontFamily: "Cairo_700Bold",
-    textAlign: "right",
-    lineHeight: 18,
-  },
-  actionsRow: {
-    flexDirection: "column",
-    gap: 9,
-    marginTop: 6,
-  },
-  tvActionsRow: {
-    flexDirection: "row-reverse",
-    gap: 12,
-  },
-  primaryBtn: {
-    flex: 1,
-    minHeight: 48,
-    borderRadius: 14,
-    backgroundColor: "#0EA5E9",
-    flexDirection: "row-reverse",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
+    backgroundColor: "#0E0F14",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
     paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginTop: 16,
+    gap: 10,
   },
-  primaryBtnText: {
+  whatsNewTitle: {
     color: "#FFFFFF",
     fontSize: 14,
     fontFamily: "Cairo_800ExtraBold",
+    textAlign: "right",
+    marginBottom: 2,
   },
-  secondaryActionBtn: {
+  bulletRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  redDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#EF4444",
+    marginTop: 2,
+  },
+  bulletText: {
     flex: 1,
-    minHeight: 46,
-    borderRadius: 14,
-    borderWidth: 1,
-    flexDirection: "row-reverse",
+    color: "#D1D5DB",
+    fontSize: 12.5,
+    lineHeight: 19,
+    fontFamily: "Cairo_600SemiBold",
+    textAlign: "right",
+  },
+  tvBulletText: {
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  versionTagRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    marginTop: 14,
+    marginBottom: 12,
+  },
+  versionTagText: {
+    color: "#9CA3AF",
+    fontSize: 12.5,
+    fontFamily: "Cairo_600SemiBold",
+  },
+  errorText: {
+    color: "#EF4444",
+    fontSize: 12,
+    fontFamily: "Cairo_700Bold",
+    textAlign: "center",
+    marginBottom: 8,
+  },
+  primaryPillBtn: {
+    width: "100%",
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: "#F04438",
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    paddingHorizontal: 14,
   },
-  secondaryActionText: {
+  primaryPillBtnText: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontFamily: "Cairo_800ExtraBold",
+  },
+  browserLinkBtn: {
+    marginTop: 12,
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+  },
+  browserLinkText: {
+    color: "#9CA3AF",
     fontSize: 13,
     fontFamily: "Cairo_700Bold",
-  },
-  closeBtn: {
-    minHeight: 44,
-    paddingHorizontal: 20,
-    borderRadius: 13,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  closeBtnText: {
-    fontSize: 13,
-    fontFamily: "Cairo_700Bold",
+    textAlign: "center",
   },
 });

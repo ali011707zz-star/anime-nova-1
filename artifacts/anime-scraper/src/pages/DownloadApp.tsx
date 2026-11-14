@@ -25,7 +25,7 @@ import {
   Globe,
 } from "lucide-react";
 
-const APP_VERSION = "1.0.7";
+const APP_VERSION = "1.1.0";
 const MOBILE_APK_URL = `/Anime-Nova.apk?v=${APP_VERSION}`;
 const TV_APK_URL = `/nova.apk?v=${APP_VERSION}`;
 const DOWNLOADER_CODE = "2576388";
