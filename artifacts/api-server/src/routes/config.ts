@@ -15,8 +15,8 @@ const PERMANENTLY_DISABLED_SOURCES = [
   "consumet_gogo",
 ] as const;
 
-const LATEST_APP_VERSION = "1.1.0";
-const LATEST_VERSION_CODE = 11;
+const LATEST_APP_VERSION = "1.0.8";
+const LATEST_VERSION_CODE = 9;
 
 function compareSemver(a: string, b: string): number {
   const pa = String(a || "0.0.0").replace(/[^0-9.]/g, "").split(".").map((x) => parseInt(x, 10) || 0);

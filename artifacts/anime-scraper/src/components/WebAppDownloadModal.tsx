@@ -2,7 +2,7 @@ import { Download, Smartphone, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.0.8";
 const APK_URL = `/Anime-Nova.apk?v=${APP_VERSION}`;
 const TV_APK_URL = `/nova.apk?v=${APP_VERSION}`;
 const DOWNLOADER_CODE = "2576388";
@@ -56,7 +56,7 @@ export function WebAppDownloadModal() {
             </span>
             <a
               href={TV_APK_URL}
-              download="Anime-Nova-TV-v1.1.0.apk"
+              download="Anime-Nova-TV-v1.0.8.apk"
               className="rounded-lg bg-cyan-500/20 px-2 py-0.5 text-[10px] font-black text-cyan-200 hover:bg-cyan-500/30"
             >
               تحميل مباشر (nova.apk)
@@ -116,7 +116,7 @@ export function WebAppDownloadModal() {
 
         <a
           href={APK_URL}
-          download="Anime-Nova-v1.1.0.apk"
+          download="Anime-Nova-v1.0.8.apk"
           className="relative mt-5 flex h-12 items-center justify-center gap-2 rounded-2xl bg-gradient-to-l from-violet-700 to-violet-500 font-['Cairo'] text-[13px] font-black text-white shadow-lg shadow-violet-900/30 transition-transform hover:brightness-110 active:scale-[0.98]"
         >
           <Download className="h-4 w-4" />
