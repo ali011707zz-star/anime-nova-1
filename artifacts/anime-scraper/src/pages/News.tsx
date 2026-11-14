@@ -136,7 +136,14 @@ export default function News() {
                         </span>
                       )}
                     </div>
-                    <p className="text-sm font-black text-white/90 line-clamp-2 font-['Cairo'] leading-tight">{sched.media.title.romaji}</p>
+                    <p dir={sched.media.title_ar ? "rtl" : "ltr"} className={`text-sm font-black text-white/95 line-clamp-2 font-['Cairo'] leading-tight ${sched.media.title_ar ? "text-right" : ""}`}>
+                      {sched.media.title_ar || sched.media.title.english || sched.media.title.romaji}
+                    </p>
+                    {sched.media.title_ar && (sched.media.title.english || sched.media.title.romaji) && (
+                      <p dir="ltr" className="text-[10px] text-white/50 font-['Cairo'] mt-0.5 truncate text-right">
+                        {sched.media.title.english || sched.media.title.romaji}
+                      </p>
+                    )}
                     <div className="flex items-center gap-3 mt-1.5">
                       <div className="flex items-center gap-1 text-primary">
                         <Clock className="w-3 h-3" />
@@ -164,8 +171,14 @@ export default function News() {
                     <div className="flex items-center gap-1.5 mb-1">
                       <span className="text-[8px] bg-amber-500/20 text-amber-400 border border-amber-500/20 px-1.5 py-0.5 rounded-full font-black">قريباً</span>
                     </div>
-                    <p className="text-sm font-black text-white/90 line-clamp-2 font-['Cairo'] leading-tight">{a.title.romaji}</p>
-                    {a.title.english && <p className="text-[9px] text-white/30 font-['Cairo'] mt-0.5 truncate">{a.title.english}</p>}
+                    <p dir={a.title_ar ? "rtl" : "ltr"} className={`text-sm font-black text-white/95 line-clamp-2 font-['Cairo'] leading-tight ${a.title_ar ? "text-right" : ""}`}>
+                      {a.title_ar || a.title.english || a.title.romaji}
+                    </p>
+                    {(a.title_ar ? (a.title.english || a.title.romaji) : a.title.english) && (
+                      <p dir="ltr" className="text-[10px] text-white/50 font-['Cairo'] mt-0.5 truncate text-right">
+                        {a.title_ar ? (a.title.english || a.title.romaji) : a.title.english}
+                      </p>
+                    )}
                     <div className="flex items-center gap-3 mt-1.5">
                       {a.startDate?.year && (
                         <div className="flex items-center gap-1 text-amber-400">
@@ -209,7 +222,14 @@ export default function News() {
                           <span className="text-[8px] bg-red-500/20 text-red-400 border border-red-500/20 px-1.5 py-0.5 rounded-full font-black">#{i + 1} تريندنج</span>
                         </div>
                       )}
-                      <p className="text-sm font-black text-white/90 line-clamp-1 font-['Cairo']">{a.title.romaji}</p>
+                      <p dir={a.title_ar ? "rtl" : "ltr"} className={`text-sm font-black text-white/95 line-clamp-1 font-['Cairo'] ${a.title_ar ? "text-right" : ""}`}>
+                        {a.title_ar || a.title.english || a.title.romaji}
+                      </p>
+                      {a.title_ar && (a.title.english || a.title.romaji) && (
+                        <p dir="ltr" className="text-[10px] text-white/50 font-['Cairo'] mt-0.5 truncate text-right">
+                          {a.title.english || a.title.romaji}
+                        </p>
+                      )}
                       {a.description && (
                         <p className="text-[10px] text-white/35 font-['Cairo'] mt-0.5 line-clamp-2 leading-relaxed">
                           {a.description.replace(/<[^>]*>/g, "").slice(0, 100)}...

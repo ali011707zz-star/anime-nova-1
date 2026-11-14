@@ -577,13 +577,21 @@ export default function AnimeDetail() {
           )}
         </div>
         <div className="flex-1 pb-3 min-w-0 space-y-1.5">
-          <h1 dir="ltr" lang="en" className="text-[17px] font-black text-white leading-snug font-['Cairo'] line-clamp-2 text-right">
-            {displayTitle}
-          </h1>
-          {titleAr && (
-            <p dir="rtl" lang="ar" className="text-[12px] text-white/65 leading-snug font-['Cairo'] line-clamp-2">
-              {titleAr}
-            </p>
+          {titleAr ? (
+            <>
+              <h1 dir="rtl" lang="ar" className="text-[18px] font-black text-white leading-snug font-['Cairo'] line-clamp-2 text-right">
+                {titleAr}
+              </h1>
+              {displayTitle && titleAr !== displayTitle && (
+                <p dir="ltr" lang="en" className="text-[12px] text-white/70 leading-snug font-['Cairo'] line-clamp-1 text-right">
+                  {displayTitle}
+                </p>
+              )}
+            </>
+          ) : (
+            <h1 dir="ltr" lang="en" className="text-[17px] font-black text-white leading-snug font-['Cairo'] line-clamp-2 text-right">
+              {displayTitle}
+            </h1>
           )}
           {anime.title?.romaji && anime.title.romaji !== displayTitle && (
             <p dir="ltr" lang="ja-Latn" className="text-[10px] text-white/35 line-clamp-1">{anime.title.romaji}</p>

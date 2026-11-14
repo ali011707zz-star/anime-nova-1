@@ -671,8 +671,16 @@ export default function Library() {
                           {/* Title below */}
                           <div className="mt-1.5 flex items-start justify-between gap-1">
                             <div className="flex-1 min-w-0">
-                              <p className="text-[11px] text-white/75 font-black font-['Cairo'] line-clamp-1">{anime.title?.english || anime.title?.romaji}</p>
-                              {anime.title_ar && <p dir="rtl" lang="ar" className="text-[9px] text-white/50 font-['Cairo'] line-clamp-1 mt-0.5">{anime.title_ar}</p>}
+                              {anime.title_ar ? (
+                                <>
+                                  <p dir="rtl" lang="ar" className="text-[11.5px] text-white/95 font-black font-['Cairo'] line-clamp-1">{anime.title_ar}</p>
+                                  {(anime.title?.english || anime.title?.romaji) && (
+                                    <p dir="ltr" lang="en" className="text-[9px] text-white/55 font-['Cairo'] line-clamp-1 mt-0.5 text-right">{anime.title?.english || anime.title?.romaji}</p>
+                                  )}
+                                </>
+                              ) : (
+                                <p className="text-[11px] text-white/75 font-black font-['Cairo'] line-clamp-1">{anime.title?.english || anime.title?.romaji}</p>
+                              )}
                             </div>
                             <ChevronRight className="w-3.5 h-3.5 text-white/20 mt-0.5 shrink-0" />
                           </div>

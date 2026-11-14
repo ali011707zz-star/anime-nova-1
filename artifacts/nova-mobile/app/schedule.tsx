@@ -10,6 +10,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { anilistQuery, SCHEDULE_QUERY } from "@/utils/anilist";
+import { getKnownArabicAnimeTitle } from "@/utils/arabicAnimeTitles";
 import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 
 const DAYS_AR = ["الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
@@ -187,7 +188,9 @@ export default function ScheduleScreen() {
           contentContainerStyle={styles.scheduleList}
         >
           {schedules.map((item) => {
-            const animeTitle = item.media.title_ar || item.media.title.english || item.media.title.romaji;
+            const enTitle = item.media.title.english || item.media.title.romaji;
+            const arTitle = item.media.title_ar || getKnownArabicAnimeTitle(item.media.id, item.media.title.english, item.media.title.romaji);
+            const animeTitle = arTitle || enTitle;
             return (
               <Pressable
                 key={item.id}
@@ -213,9 +216,17 @@ export default function ScheduleScreen() {
 
                 {/* Middle Text Info */}
                 <View style={styles.scheduleInfo}>
-                  <Text style={styles.scheduleTitle} numberOfLines={1}>
+                  <Text style={styles.scheduleTitle} numberOfLines={2}>
                     {animeTitle}
                   </Text>
+                  {arTitle && enTitle && arTitle.trim() !== enTitle.trim() ? (
+                    <Text
+                      style={{ fontSize: 10.5, fontFamily: "Cairo_600SemiBold", color: "#a1a1aa", textAlign: "right", writingDirection: "ltr" }}
+                      numberOfLines={1}
+                    >
+                      {enTitle}
+                    </Text>
+                  ) : null}
                   <Text style={styles.scheduleEp}>الحلقة {item.episode}</Text>
                   <Text style={styles.scheduleTime}>
                     {formatAiringTime12h(item.airingAt)}

@@ -160,14 +160,22 @@ function AnimeCard({ anime }: { anime: any }) {
             <div className="absolute bottom-1.5 right-1.5 bg-emerald-500/80 text-white text-[7px] px-1.5 py-0.5 rounded-md font-black">يُبث</div>
           )}
         </div>
-        <p className="mt-1.5 text-[10px] text-white/80 truncate font-bold group-hover:text-primary transition-colors">{primaryTitle}</p>
-        {anime.title_ar && (
-          <p dir="rtl" lang="ar" className="text-[9px] text-white/55 truncate font-['Cairo'] mt-0.5">
-            {anime.title_ar}
-          </p>
-        )}
-        {secondaryTitle && (
-          <p dir="ltr" lang="ja-Latn" className="text-[8px] text-white/30 truncate font-['Cairo']">{secondaryTitle}</p>
+        {anime.title_ar ? (
+          <>
+            <p dir="rtl" lang="ar" className="mt-1.5 text-[10.5px] text-white/95 truncate font-bold font-['Cairo'] group-hover:text-primary transition-colors">
+              {anime.title_ar}
+            </p>
+            <p dir="ltr" lang="en" className="text-[9px] text-white/55 truncate text-right font-['Cairo'] mt-0.5">
+              {primaryTitle}
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="mt-1.5 text-[10px] text-white/80 truncate font-bold group-hover:text-primary transition-colors">{primaryTitle}</p>
+            {secondaryTitle && (
+              <p dir="ltr" lang="ja-Latn" className="text-[8px] text-white/30 truncate font-['Cairo']">{secondaryTitle}</p>
+            )}
+          </>
         )}
       </motion.div>
     </Link>

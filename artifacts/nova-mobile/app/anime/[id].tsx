@@ -13,6 +13,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useApp } from "@/context/AppContext";
+import { getKnownArabicAnimeTitle } from "@/utils/arabicAnimeTitles";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch } from "@/utils/secureApi";
 import { getYoutubeEmbedUrl, getYoutubeReferer } from "@/utils/youtube";
@@ -454,10 +455,12 @@ export default function AnimeDetailScreen() {
   const handleFavorite = useCallback(async () => {
     if (!anime) return;
     
+    const favAr = anime.title_ar || anime.synonyms?.find((value: string) => /[\u0600-\u06FF]/.test(value)) || getKnownArabicAnimeTitle(anime.id, anime.title?.english, anime.title?.romaji);
     await toggleFavorite({
       id: anime.id,
       title: anime.title.romaji,
       english: anime.title.english || "",
+      titleAr: favAr || "",
       thumbnail: anime.coverImage.extraLarge || anime.coverImage.large,
       episodes: anime.episodes,
       score: anime.averageScore,
@@ -479,7 +482,7 @@ export default function AnimeDetailScreen() {
     await AsyncStorage.setItem(`my-rating-${id}`, String(n));
   }
 
-  const arabicTitle = anime?.title_ar || anime?.synonyms?.find((value: string) => /[\u0600-\u06FF]/.test(value));
+  const arabicTitle = anime?.title_ar || anime?.synonyms?.find((value: string) => /[\u0600-\u06FF]/.test(value)) || getKnownArabicAnimeTitle(anime?.id, anime?.title?.english, anime?.title?.romaji);
   if (loading) return (
     <View style={[d.container, { paddingTop: topPad }]}>
       <View style={[d.topBar, tvMode && d.tvTopBar]}>
@@ -934,7 +937,18 @@ export default function AnimeDetailScreen() {
                           </View>
                         ) : null}
                       </View>
-                      <Text style={d.relTitle} numberOfLines={2}>{n.title?.english || n.title?.romaji || "عنوان غير متاح"}</Text>
+                      {(() => {
+                        const relEn = n.title?.english || n.title?.romaji || "";
+                        const relAr = n.title_ar || getKnownArabicAnimeTitle(n.id, n.title?.english, n.title?.romaji);
+                        return (
+                          <>
+                            <Text style={d.relTitle} numberOfLines={2}>{relAr || relEn || "عنوان غير متاح"}</Text>
+                            {relAr && relEn && relAr.trim() !== relEn.trim() ? (
+                              <Text style={d.relSubtitle} numberOfLines={1}>{relEn}</Text>
+                            ) : null}
+                          </>
+                        );
+                      })()}
                     </Pressable>
                   );
                 })}
@@ -967,7 +981,18 @@ export default function AnimeDetailScreen() {
                           </View>
                         ) : null}
                       </View>
-                      <Text style={d.simTitle} numberOfLines={2}>{rec.title?.english || rec.title?.romaji || "عنوان غير متاح"}</Text>
+                      {(() => {
+                        const simEn = rec.title?.english || rec.title?.romaji || "";
+                        const simAr = rec.title_ar || getKnownArabicAnimeTitle(rec.id, rec.title?.english, rec.title?.romaji);
+                        return (
+                          <>
+                            <Text style={d.simTitle} numberOfLines={2}>{simAr || simEn || "عنوان غير متاح"}</Text>
+                            {simAr && simEn && simAr.trim() !== simEn.trim() ? (
+                              <Text style={d.simSubtitle} numberOfLines={1}>{simEn}</Text>
+                            ) : null}
+                          </>
+                        );
+                      })()}
                     </Pressable>
                   );
                 })}
@@ -1216,13 +1241,15 @@ function createDetailStyles(colors: ThemePalette) {
   relTypeBadge: { position: "absolute", top: 5, right: 5, backgroundColor: "rgba(0,0,0,0.75)", borderRadius: 6, paddingHorizontal: 5, paddingVertical: 2 },
   relTypeBadgeText: { fontSize: 7, color: "#fff", fontFamily: "Cairo_700Bold" },
   relScoreBadge: { position: "absolute", bottom: 5, left: 5, flexDirection: "row", alignItems: "center", gap: 2, backgroundColor: "rgba(0,0,0,0.7)", borderRadius: 6, paddingHorizontal: 4, paddingVertical: 2 },
-  relTitle: { fontSize: 10, color: colors.textSecondary, fontFamily: "Cairo_400Regular", textAlign: "center" },
+  relTitle: { fontSize: 10, color: colors.textPrimary, fontFamily: "Cairo_700Bold", textAlign: "center" },
+  relSubtitle: { fontSize: 8.5, color: colors.textMuted, fontFamily: "Cairo_400Regular", textAlign: "center", writingDirection: "ltr" },
   simGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   simCard: { width: (W - 32 - 16) / 3, gap: 4 },
   simImgWrap: { width: "100%", aspectRatio: 0.7, borderRadius: 12, overflow: "hidden", position: "relative", backgroundColor: colors.surfaceElevated },
   simImg: { width: "100%", height: "100%" },
   simScore: { position: "absolute", bottom: 5, left: 5, flexDirection: "row", alignItems: "center", gap: 2, backgroundColor: "rgba(0,0,0,0.7)", borderRadius: 6, paddingHorizontal: 4, paddingVertical: 2 },
-  simTitle: { fontSize: 10, color: colors.textSecondary, fontFamily: "Cairo_400Regular", textAlign: "center" },
+  simTitle: { fontSize: 10, color: colors.textPrimary, fontFamily: "Cairo_700Bold", textAlign: "center" },
+  simSubtitle: { fontSize: 8.5, color: colors.textMuted, fontFamily: "Cairo_400Regular", textAlign: "center", writingDirection: "ltr" },
   ratingOverlay: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end" },
   ratingSheet: { backgroundColor: colors.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, gap: 16, borderTopWidth: 1, borderTopColor: colors.border },
   ratingTitle: { fontSize: 18, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, textAlign: "center" },

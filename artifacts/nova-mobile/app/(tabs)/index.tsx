@@ -33,6 +33,7 @@ import { getBaseUrl } from "@/utils/api";
 import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { useTvFocusMemory } from "@/utils/tvFocus";
 import { getPosterUri, getTvPosterUri } from "@/utils/media";
+import { getKnownArabicAnimeTitle } from "@/utils/arabicAnimeTitles";
 import {
   catalogBadge,
   isLegacyCartoonEntry,
@@ -509,7 +510,7 @@ export default function HomeScreen() {
                         ]}
                         numberOfLines={1}
                       >
-                        {h.titleAr || h.english || h.title}
+                        {h.titleAr || getKnownArabicAnimeTitle(h.animeId, h.english, h.title) || h.english || h.title}
                       </Text>
                       <View style={styles.historyResumeRow}>
                         <Text style={[styles.historyPercent, { fontSize: Math.max(7.5, Math.round(8.5 * hScale)) }]}>
@@ -591,9 +592,32 @@ export default function HomeScreen() {
                     <View style={[styles.historyBadge, styles.historyEpisodeBadge]}>
                       <Text style={styles.historyBadgeText}>الحلقة {ep.episode}</Text>
                     </View>
-                    <LinearGradient colors={["transparent", "rgba(0,0,0,0.95)"]} style={todayEpStyles.grad}>
-                      <Text style={todayEpStyles.title} numberOfLines={2}>{ep.titleAr || ep.name}</Text>
-                    </LinearGradient>
+                    {(() => {
+                      const epArRaw = ep.titleAr || ep.title_ar || getKnownArabicAnimeTitle(ep.animeId || ep.anilistId, ep.english || ep.name, ep.romaji || ep.name);
+                      const epAr = typeof epArRaw === "string" ? epArRaw : "";
+                      const epEn = String(ep.english || ep.romaji || ep.name || "");
+                      return (
+                        <LinearGradient colors={["transparent", "rgba(0,0,0,0.95)"]} style={todayEpStyles.grad}>
+                          <Text style={todayEpStyles.title} numberOfLines={2}>{epAr || ep.name}</Text>
+                          {epAr && epEn && epAr.trim() !== epEn.trim() ? (
+                            <Text
+                              style={{
+                                color: "rgba(255,255,255,0.72)",
+                                fontSize: isTvLayout ? 11 : 8.5,
+                                lineHeight: isTvLayout ? 15 : 12,
+                                fontFamily: "Cairo_600SemiBold",
+                                textAlign: "right",
+                                writingDirection: "ltr",
+                                marginTop: 1,
+                              }}
+                              numberOfLines={1}
+                            >
+                              {epEn}
+                            </Text>
+                          ) : null}
+                        </LinearGradient>
+                      );
+                    })()}
                   </Pressable>
                 )}
                 initialNumToRender={isTvLayout ? 5 : 5}

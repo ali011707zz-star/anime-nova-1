@@ -73,7 +73,7 @@ import {
   probeHlsVariants,
 } from "../lib/consumet.js";
 import { sbSelect, sbUpsert, sbPatch } from "../lib/supabaseClient.js";
-import { attachArabicTitles, findArabicAnimeTitles, getArabicAnimeTitleById } from "../lib/arabicAnimeTitles.js";
+import { attachArabicTitles, findArabicAnimeTitles, getArabicAnimeTitleById, resolveArabicAnimeTitle } from "../lib/arabicAnimeTitles.js";
 import {
   catalogQualityRank,
   getSourceCatalogHint,
@@ -15833,7 +15833,13 @@ async function fetchLiveFallbackLatestEpisodes(): Promise<any[]> {
       }
     }
     const meta = animeId ? getCachedAniListSourceMeta(animeId) : undefined;
-    const titleAr = item.titleAr || (/[\u0600-\u06FF]/.test(item.name) ? item.name : "");
+    const existingAr = item.titleAr || (/[\u0600-\u06FF]/.test(item.name) ? item.name : "");
+    const titleAr = existingAr || await getArabicAnimeTitleById(animeId || 0, {
+      english: meta?.english || item.english || item.name,
+      romaji: meta?.romaji || item.name,
+      native: meta?.native || "",
+      synonyms: item.synonyms || [],
+    });
     return {
       anslayerId: item.sourceId,
       sourceId: item.sourceId,
@@ -15881,8 +15887,19 @@ router.get("/anime/anslayer-latest", async (req, res) => {
       if (_anslayerLatestCache) _anslayerLatestTs = 0;
     }
     if (_anslayerLatestCache && Date.now() - _anslayerLatestTs < ANSLAYER_LATEST_TTL) {
+      const enrichedCache = await Promise.all(_anslayerLatestCache.map(async (row: any) => {
+        if (row.titleAr && /[\u0600-\u06FF]/.test(row.titleAr)) return { ...row, title_ar: row.title_ar || row.titleAr };
+        const resolved = await getArabicAnimeTitleById(row.animeId || row.anilistId || 0, {
+          english: row.english || row.name,
+          romaji: row.romaji || row.name,
+          native: row.native || "",
+          synonyms: Array.isArray(row.titleVariants) ? row.titleVariants : [],
+        });
+        return { ...row, titleAr: resolved, title_ar: resolved };
+      }));
+      _anslayerLatestCache = enrichedCache;
       res.setHeader("Cache-Control", "no-store");
-      res.json({ items: _anslayerLatestCache });
+      res.json({ items: enrichedCache });
       return;
     }
     const data = await anslayerGet("animes/get-published-animes", { list_type: "latest_updated_episode_new", page: 1 });
@@ -15937,8 +15954,13 @@ router.get("/anime/anslayer-latest", async (req, res) => {
       };
     }).filter((it: any) => it.anslayerId && it.episode);
 
-    const items = rawItems.map((item: any) => {
-      const titleAr = /[\u0600-\u06FF]/.test(item.name) ? item.name : "";
+    const items = (await Promise.all(rawItems.map(async (item: any) => {
+      const directAr = /[\u0600-\u06FF]/.test(item.name) ? item.name : "";
+      const titleAr = directAr || await getArabicAnimeTitleById(item.anilistId || 0, {
+        english: item.name,
+        romaji: item.name,
+        synonyms: [],
+      });
       return {
         ...item,
         animeId: item.anilistId || null,
@@ -15950,7 +15972,7 @@ router.get("/anime/anslayer-latest", async (req, res) => {
         english: "",
         native: "",
       };
-    }).filter((item: any) => (item.animeId || item.anslayerId) && item.episode);
+    }))).filter((item: any) => (item.animeId || item.anslayerId) && item.episode);
 
     if (items.length === 0) {
       if (_anslayerLatestCache?.length) {
@@ -16032,7 +16054,7 @@ router.get("/anime/aw-latest", async (req, res) => {
       let anilistId = r.anilist_id || undefined;
       if (!anilistId) anilistId = await resolveAniListIdForSource(r.anime_name || r.anime_id, null, [], null);
       const meta = anilistId ? getCachedAniListSourceMeta(anilistId) : undefined;
-      const titleAr = anilistId ? await getArabicAnimeTitleById(anilistId) : null;
+      const titleAr = await getArabicAnimeTitleById(anilistId || 0, { english: meta?.english || r.anime_name || r.anime_id, romaji: meta?.romaji || r.anime_name || r.anime_id });
       return {
         animeId: anilistId || null,
         anilistId: anilistId || null,
@@ -16041,6 +16063,7 @@ router.get("/anime/aw-latest", async (req, res) => {
         episode: Number(r.ep_number) || null,
         cover: anilistId ? `https://img.anili.st/media/${anilistId}` : "",
         updatedAt: r.imported_at || null,
+        title_ar: titleAr,
         titleAr,
         titleVariants: meta?.titles || [r.anime_name || r.anime_id].filter(Boolean),
         romaji: meta?.romaji || r.anime_name || r.anime_id,
@@ -20317,9 +20340,7 @@ async function handleAnilistRequest(req: Request, res: Response) {
       }
       res.setHeader("Cache-Control", "public, max-age=300");
       res.setHeader("X-Meta-Source", cached.stale ? "cache-stale" : "cache");
-      return res.json(cached.source === "anilist"
-        ? await attachArabicTitles(cached.data)
-        : cached.data);
+      return res.json(await attachArabicTitles(cached.data));
     }
   }
 
@@ -20349,7 +20370,7 @@ async function handleAnilistRequest(req: Request, res: Response) {
     }
     res.setHeader("Cache-Control", "public, max-age=60");
     res.setHeader("X-Meta-Source", "jikan");
-    return res.json(jikanData);
+    return res.json(await attachArabicTitles(jikanData));
   }
 
   // 4️⃣ Kitsu fallback — بديل ثالث لـ Page queries
@@ -20360,7 +20381,7 @@ async function handleAnilistRequest(req: Request, res: Response) {
     }
     res.setHeader("Cache-Control", "public, max-age=60");
     res.setHeader("X-Meta-Source", "kitsu");
-    return res.json(kitsuData);
+    return res.json(await attachArabicTitles(kitsuData));
   }
 
   // 5️⃣ كل المصادر فشلت — هيكل فارغ بدل خطأ
@@ -20579,7 +20600,7 @@ router.get("/anime/new-episodes", async (req, res) => {
       poster: awMap.get(item.anilistId) || item.poster,
     }));
     const confirmed = await Promise.all(confirmedWithPosters.map(async (item: any) => {
-      const titleAr = await getArabicAnimeTitleById(Number(item.anilistId));
+      const titleAr = await getArabicAnimeTitleById(Number(item.anilistId), { english: item.english || item.title || item.romaji, romaji: item.romaji || item.title });
       return {
         ...item,
         title_ar: titleAr,

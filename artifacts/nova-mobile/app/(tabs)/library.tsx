@@ -13,6 +13,7 @@ import { useColors } from "@/hooks/useColors";
 import { historyRoute, useApp } from "@/context/AppContext";
 import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvModeOverride } from "@/utils/tv";
 import { getGridColumnCount, getRailCardWidth } from "@/components/AnimeCard";
+import { getKnownArabicAnimeTitle } from "@/utils/arabicAnimeTitles";
 
 interface FavChar {
   id: number;
@@ -102,10 +103,15 @@ export default function LibraryScreen() {
     const sq = search.toLowerCase();
     const animeItems = watchHistory
       .filter(h => (h.position ?? 0) > 30)
-      .map(h => ({
+      .map(h => {
+        const isAnimeKind = h.contentKind === "anime" || !h.contentKind;
+        const en = h.english || h.title;
+        const ar = h.titleAr || (isAnimeKind ? getKnownArabicAnimeTitle(h.animeId, h.english, h.title) : null);
+        return {
         key: `${h.contentKind || "anime"}-${h.contentKey || h.animeId}-${h.season || 1}-${h.ep}`,
-        kind: h.contentKind === "anime" || !h.contentKind ? "anime" : "dubbed",
-        title: h.english || h.title,
+        kind: isAnimeKind ? "anime" : "dubbed",
+        title: ar || en,
+        englishTitle: ar && en && ar !== en ? en : "",
         subtitle: `حلقة ${h.ep}`,
         thumbnail: h.thumbnail,
         date: h.updatedAt,
@@ -113,28 +119,35 @@ export default function LibraryScreen() {
         duration: h.duration,
         onPress: () => router.push(historyRoute(h) as any),
         onDelete: () => removeFromHistory(h.animeId),
-      }));
+      };
+      });
     const all = animeItems.sort((a, b) => (b.date as number) - (a.date as number));
-    return sq ? all.filter(i => i.title.toLowerCase().includes(sq)) : all;
+    return sq ? all.filter(i => (i.title + " " + (i.englishTitle || "")).toLowerCase().includes(sq)) : all;
   }, [watchHistory, search, router, removeFromHistory]);
 
   /* ── All history (السجل) ── */
   const historyItems = useMemo(() => {
     const sq = search.toLowerCase();
-    const animeItems = watchHistory.map(h => ({
-      key: `${h.contentKind || "anime"}-${h.contentKey || h.animeId}-${h.season || 1}-${h.ep}`,
-      kind: h.contentKind === "anime" || !h.contentKind ? "anime" : "dubbed",
-      title: h.english || h.title,
-      subtitle: `حلقة ${h.ep}`,
-      thumbnail: h.thumbnail,
-      date: h.updatedAt,
-      position: h.position,
-      duration: h.duration,
-      onPress: () => router.push(historyRoute(h) as any),
-      onDelete: () => removeFromHistory(h.animeId),
-    }));
+    const animeItems = watchHistory.map(h => {
+      const isAnimeKind = h.contentKind === "anime" || !h.contentKind;
+      const en = h.english || h.title;
+      const ar = h.titleAr || (isAnimeKind ? getKnownArabicAnimeTitle(h.animeId, h.english, h.title) : null);
+      return {
+        key: `${h.contentKind || "anime"}-${h.contentKey || h.animeId}-${h.season || 1}-${h.ep}`,
+        kind: isAnimeKind ? "anime" : "dubbed",
+        title: ar || en,
+        englishTitle: ar && en && ar !== en ? en : "",
+        subtitle: `حلقة ${h.ep}`,
+        thumbnail: h.thumbnail,
+        date: h.updatedAt,
+        position: h.position,
+        duration: h.duration,
+        onPress: () => router.push(historyRoute(h) as any),
+        onDelete: () => removeFromHistory(h.animeId),
+      };
+    });
     const all = animeItems.sort((a, b) => (b.date as number) - (a.date as number));
-    return sq ? all.filter(i => i.title.toLowerCase().includes(sq)) : all;
+    return sq ? all.filter(i => (i.title + " " + (i.englishTitle || "")).toLowerCase().includes(sq)) : all;
   }, [watchHistory, search, router, removeFromHistory]);
 
   /* ── Filtered favorites (المحفوظة — بدون المانجا في وضع التلفاز) ── */
@@ -142,7 +155,8 @@ export default function LibraryScreen() {
     const sq = search.toLowerCase();
     return favorites.filter(f => {
       if (tvMode && f.mangaId) return false;
-      const matchesSearch = !sq || (f.english || f.title).toLowerCase().includes(sq);
+      const ar = f.titleAr || (!f.mangaId ? getKnownArabicAnimeTitle(f.id, f.english, f.title) : null);
+      const matchesSearch = !sq || [ar, f.english, f.title].some(v => (v || "").toLowerCase().includes(sq));
       const matchesYear = !year || String(f.startYear || new Date(f.addedAt).getFullYear()) === year;
       const matchesGenre = !genre || (f.genres || []).includes(genre);
       return matchesSearch && matchesYear && matchesGenre;
@@ -213,6 +227,11 @@ export default function LibraryScreen() {
       </View>
       <View style={s.historyInfo}>
         <Text style={[s.historyTitle, { color: colors.text }]} numberOfLines={2}>{item.title}</Text>
+        {item.englishTitle ? (
+          <Text style={{ fontSize: 10, fontFamily: "Cairo_400Regular", color: colors.mutedForeground, textAlign: "right", writingDirection: "ltr" }} numberOfLines={1}>
+            {item.englishTitle}
+          </Text>
+        ) : null}
         <Text style={[s.historyEp, { color: colors.primary }]}>{item.subtitle}</Text>
         <Text style={[s.historyDate, { color: colors.mutedForeground }]}>
           {new Date(item.date).toLocaleDateString("ar-SA")}
@@ -418,9 +437,25 @@ export default function LibraryScreen() {
                   <Ionicons name="heart" size={tvMode ? 14 : 13} color="#f43f5e" />
                 </Pressable>
                 <View style={[s.favInfo, tvMode && s.tvFavInfo]}>
-                  <Text style={[s.favTitle, tvMode && s.tvFavTitle, { color: colors.text }]} numberOfLines={2}>
-                    {item.english || item.title}
-                  </Text>
+                  {(() => {
+                    const favEn = item.english || item.title;
+                    const favAr = item.titleAr || (!item.mangaId ? getKnownArabicAnimeTitle(item.id, item.english, item.title) : null);
+                    return (
+                      <>
+                        <Text style={[s.favTitle, tvMode && s.tvFavTitle, { color: colors.text }]} numberOfLines={2}>
+                          {favAr || favEn}
+                        </Text>
+                        {favAr && favEn && favAr.trim() !== favEn.trim() ? (
+                          <Text
+                            style={{ fontSize: tvMode ? 10.5 : 8.5, fontFamily: "Cairo_400Regular", color: colors.mutedForeground, textAlign: "right", writingDirection: "ltr" }}
+                            numberOfLines={1}
+                          >
+                            {favEn}
+                          </Text>
+                        ) : null}
+                      </>
+                    );
+                  })()}
                   {item.score && (
                     <View style={[s.favScore, tvMode && s.tvFavScore]}>
                       <Ionicons name="star" size={tvMode ? 11 : 9} color="#FBBF24" />

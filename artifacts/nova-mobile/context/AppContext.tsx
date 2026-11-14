@@ -36,6 +36,7 @@ export type FavoriteAnime = {
   source?: "manga" | "manhwa";
   title: string;
   english: string;
+  titleAr?: string;
   thumbnail: string;
   episodes: number | null;
   score: number | null;

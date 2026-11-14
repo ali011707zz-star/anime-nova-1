@@ -12,6 +12,7 @@ import { useTvFocusMemory } from "@/utils/tvFocus";
 import { getGridColumnCount } from "@/components/AnimeCard";
 import { AnimeFilterSheet, type AnimeFilterOption } from "@/components/AnimeFilterSheet";
 import { useColors } from "@/hooks/useColors";
+import { getKnownArabicAnimeTitle } from "@/utils/arabicAnimeTitles";
 import type { ThemePalette } from "@/constants/colors";
 
 function useBrowseTheme() {
@@ -235,19 +236,28 @@ function AnimeCard({
             <Text style={[g.fmtText, tvMode && g.tvFmtText]}>{fmt}</Text>
           </View>
         ) : null}
-        <View style={g.cardBottom}>
-          <Text style={[g.cardTitle, { writingDirection: "ltr" }]} numberOfLines={1}>
-            {anime.title?.english || anime.title?.romaji}
-          </Text>
-          {anime.title_ar ? (
-            <Text
-              numberOfLines={1}
-              style={g.cardTitleAr}
-            >
-              {anime.title_ar}
-            </Text>
-          ) : null}
-        </View>
+        {(() => {
+          const enTitle = anime.title?.english || anime.title?.romaji || "";
+          const arTitle = anime.title_ar || getKnownArabicAnimeTitle(anime.id, anime.title?.english, anime.title?.romaji);
+          return (
+            <View style={g.cardBottom}>
+              <Text
+                style={arTitle ? g.cardTitleAr : [g.cardTitle, { writingDirection: "ltr", color: "#fff" }]}
+                numberOfLines={2}
+              >
+                {arTitle || enTitle}
+              </Text>
+              {arTitle && enTitle && arTitle.trim() !== enTitle.trim() ? (
+                <Text
+                  numberOfLines={1}
+                  style={[g.cardTitle, { writingDirection: "ltr", textAlign: "right", color: "rgba(255,255,255,0.72)", fontSize: tvMode ? 11 : 8.5, lineHeight: tvMode ? 15 : 12 }]}
+                >
+                  {enTitle}
+                </Text>
+              ) : null}
+            </View>
+          );
+        })()}
       </View>
     </Pressable>
   );
@@ -837,8 +847,8 @@ const createBrowseStyles = (colors: ThemePalette, s = 1, tvMode = false) => Styl
   fmtText: { fontSize: Math.max(7, Math.round(7.5 * s)), color: "#fff", fontFamily: "Cairo_700Bold" },
   tvFmtText: { fontSize: 12 },
   cardBottom: { position: "absolute", bottom: 0, left: 0, right: 0, paddingHorizontal: Math.round(7 * s), paddingVertical: Math.round(6 * s), backgroundColor: "rgba(0,0,0,0.72)", gap: 2 },
-  cardTitle: { fontSize: Math.max(9.5, Math.round(10.5 * s)), color: "#fff", fontFamily: "Cairo_700Bold", lineHeight: Math.round(14 * s), textAlign: "left" },
-  cardTitleAr: { fontSize: Math.max(8.5, Math.round(9.5 * s)), color: "rgba(255,255,255,0.82)", fontFamily: "Cairo_700Bold", lineHeight: Math.round(13.5 * s), textAlign: "right", writingDirection: "rtl" },
+  cardTitle: { fontSize: Math.max(9.5, Math.round(10.5 * s)), color: "#fff", fontFamily: "Cairo_600SemiBold", lineHeight: Math.round(14 * s), textAlign: "left" },
+  cardTitleAr: { fontSize: Math.max(10, Math.round(11 * s)), color: "#fff", fontFamily: "Cairo_700Bold", lineHeight: Math.round(14.5 * s), textAlign: "right", writingDirection: "rtl" },
   tvCardTitle: { fontSize: 13, lineHeight: 18 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, minHeight: 200 },
   emptyText: { fontSize: 14, fontFamily: "Cairo_700Bold", color: colors.textMuted, textAlign: "center" },

@@ -219,7 +219,9 @@ function SectionHeader({
 
 /* ── Unified AnimeCard matching /artifacts/nova-mobile/components/AnimeCard.tsx ── */
 function MobileAnimeCard({ anime }: { anime: any }) {
-  const title = anime.title_ar || anime.title?.english || anime.title?.romaji || "أنمي";
+  const enTitle = anime.title?.english || anime.title?.romaji || "";
+  const arTitle = typeof anime.title_ar === "string" && /[\u0600-\u06FF]/.test(anime.title_ar) ? anime.title_ar.trim() : "";
+  const title = arTitle || enTitle || "أنمي";
   return (
     <Link href={animeHref(anime)}>
       <motion.div
@@ -270,11 +272,20 @@ function MobileAnimeCard({ anime }: { anime: any }) {
             }}
           >
             <p
-              dir="rtl"
-              className="text-[11px] font-semibold text-white leading-[15px] line-clamp-2 text-right font-['Cairo']"
+              dir={arTitle ? "rtl" : "ltr"}
+              className={`text-[11px] font-bold text-white leading-[15px] line-clamp-2 font-['Cairo'] ${arTitle ? "text-right" : "text-left"}`}
             >
               {title}
             </p>
+            {arTitle && enTitle && arTitle !== enTitle && (
+              <p
+                dir="ltr"
+                lang="en"
+                className="text-[9px] font-semibold text-white/70 leading-[12px] line-clamp-1 text-right mt-0.5 font-['Cairo']"
+              >
+                {enTitle}
+              </p>
+            )}
           </div>
         </div>
       </motion.div>

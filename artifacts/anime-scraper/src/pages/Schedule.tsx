@@ -117,18 +117,28 @@ function AnimeCard({ item, isToday, isPastItem }: { item: any; isToday: boolean;
         </div>
 
         <div className="flex-1 min-w-0 text-right">
-          <h3 className="text-[13px] font-black text-white leading-snug line-clamp-1 font-['Cairo']">
-            {media?.title?.english || media?.title?.romaji}
-          </h3>
-          {media?.title_ar && (
-            <p dir="rtl" lang="ar" className="text-[10px] text-white/65 font-['Cairo'] line-clamp-1 mt-0.5">
-              {media.title_ar}
-            </p>
-          )}
-          {media?.title?.romaji && media.title.romaji !== media.title.english && (
-            <p dir="ltr" lang="ja-Latn" className="text-[8px] text-white/30 font-['Cairo'] line-clamp-1 mt-0.5">
-              {media.title.romaji}
-            </p>
+          {media?.title_ar ? (
+            <>
+              <h3 dir="rtl" lang="ar" className="text-[13.5px] font-black text-white leading-snug line-clamp-1 font-['Cairo']">
+                {media.title_ar}
+              </h3>
+              {(media?.title?.english || media?.title?.romaji) && (
+                <p dir="ltr" lang="en" className="text-[10px] text-white/60 font-['Cairo'] line-clamp-1 mt-0.5 text-right">
+                  {media?.title?.english || media?.title?.romaji}
+                </p>
+              )}
+            </>
+          ) : (
+            <>
+              <h3 className="text-[13px] font-black text-white leading-snug line-clamp-1 font-['Cairo']">
+                {media?.title?.english || media?.title?.romaji}
+              </h3>
+              {media?.title?.romaji && media.title.romaji !== media.title.english && (
+                <p dir="ltr" lang="ja-Latn" className="text-[8px] text-white/30 font-['Cairo'] line-clamp-1 mt-0.5">
+                  {media.title.romaji}
+                </p>
+              )}
+            </>
           )}
 
           <div className="flex items-center gap-1.5 mt-1.5 flex-wrap justify-end">

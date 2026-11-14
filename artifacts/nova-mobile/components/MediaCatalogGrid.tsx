@@ -43,12 +43,16 @@ export type CatalogMedia = {
   genres?: string[];
 };
 
-function getArabicTitleForItem(item: CatalogMedia): string | null {
+function getArabicTitleForItem(item: CatalogMedia, mediaType: "ANIME" | "MANGA"): string | null {
   if (item.arTitle && /[\u0600-\u06FF]/.test(item.arTitle)) return item.arTitle;
   if (item.title_ar && /[\u0600-\u06FF]/.test(item.title_ar)) return item.title_ar;
   if (item.title?.native && /[\u0600-\u06FF]/.test(item.title.native)) return item.title.native;
   const arSyn = (item.synonyms || []).find((s) => /[\u0600-\u06FF]/.test(s));
   if (arSyn) return arSyn;
+  if (mediaType !== "MANGA") {
+    const numId = typeof item.id === "number" ? item.id : (Number(item.id) || null);
+    return getKnownArabicAnimeTitle(numId, item.title?.english, item.title?.romaji);
+  }
   return null;
 }
 
@@ -338,7 +342,7 @@ export function MediaCatalogGrid({
 
   const openMedia = (item: CatalogMedia) => {
     if (mediaType === "MANGA") {
-      const arTitle = getArabicTitleForItem(item) || "";
+      const arTitle = getArabicTitleForItem(item, mediaType) || "";
       const enTitle = item.title?.english || item.title?.romaji || "";
       const cover = item.coverImage?.extraLarge || item.coverImage?.large || "";
       router.push({
@@ -360,15 +364,16 @@ export function MediaCatalogGrid({
   };
 
   const renderItem = ({ item, index }: { item: CatalogMedia; index: number }) => {
-    const arTitle = getArabicTitleForItem(item);
+    const arTitle = getArabicTitleForItem(item, mediaType);
     const enTitle = item.title?.english || item.title?.romaji || item.title?.native || "";
     const title = arTitle || enTitle || mangaOriginLabel(item.countryOfOrigin, item.source);
     const hasArabicTitle = /[\u0600-\u06FF]/.test(title);
+    const hasDualEnglish = Boolean(arTitle && enTitle && arTitle.trim() !== enTitle.trim());
     const year = item.startDate?.year || null;
     const cover = item.coverImage?.extraLarge || item.coverImage?.large;
-    const cardSubtitle = variant === "manga"
-      ? (arTitle && enTitle && arTitle !== enTitle ? enTitle : mangaOriginLabel(item.countryOfOrigin, item.source))
-      : formatLabel(item.format);
+    const cardSubtitle = hasDualEnglish
+      ? enTitle
+      : (variant === "manga" ? mangaOriginLabel(item.countryOfOrigin, item.source) : formatLabel(item.format));
     const mangaGenres = mediaType === "MANGA"
       ? (item.genres || []).slice(0, 2).map(translateMangaGenre)
       : [];
@@ -438,7 +443,17 @@ export function MediaCatalogGrid({
         >
           {title || "عنوان غير متوفر"}
         </Text>
-        <Text style={[styles.cardSubtitle, { color: colors.textMuted }]} numberOfLines={1}>
+        <Text
+          style={[
+            styles.cardSubtitle,
+            {
+              color: colors.textMuted,
+              textAlign: "right",
+              writingDirection: hasDualEnglish ? "ltr" : "rtl",
+            },
+          ]}
+          numberOfLines={1}
+        >
           {cardSubtitle}
         </Text>
         {mangaGenres.length > 0 && (

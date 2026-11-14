@@ -127,7 +127,17 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
         {mainTitle}
       </Text>
       {secondaryTitle ? (
-        <Text style={styles.titleArabic} numberOfLines={1}>
+        <Text
+          style={[
+            styles.titleArabic,
+            {
+              color: colors.mutedForeground,
+              fontSize: scaleSize(9.5, 11.5),
+              lineHeight: scaleSize(13, 16),
+            },
+          ]}
+          numberOfLines={1}
+        >
           {secondaryTitle}
         </Text>
       ) : null}
@@ -163,6 +173,6 @@ const styles = StyleSheet.create({
   },
   progressFill: { height: 3 },
   title: { fontSize: 12, fontWeight: "600", lineHeight: 16, writingDirection: "ltr" },
-  titleArabic: { fontSize: 10, fontFamily: "Cairo_700Bold", lineHeight: 14, textAlign: "right", writingDirection: "rtl", opacity: 0.78 },
+  titleArabic: { fontSize: 10, fontFamily: "Cairo_600SemiBold", lineHeight: 14, textAlign: "right", writingDirection: "ltr", opacity: 0.85 },
   epCount: { fontSize: 10 },
 });

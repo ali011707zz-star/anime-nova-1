@@ -28,8 +28,8 @@ import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 const DISMISSED_VERSION_KEY = "nova-dismissed-update-version";
 const UPDATE_JOB_ID = "nova-self-update-apk";
 
-export const CURRENT_APP_VERSION: string = Constants.expoConfig?.version || "1.0.8";
-export const CURRENT_VERSION_CODE: number = Number(Constants.expoConfig?.android?.versionCode || 9);
+export const CURRENT_APP_VERSION: string = Constants.expoConfig?.version || "1.0.9";
+export const CURRENT_VERSION_CODE: number = Number(Constants.expoConfig?.android?.versionCode || 10);
 
 export function compareAppVersions(a: string, b: string): number {
   const pa = String(a || "0.0.0")

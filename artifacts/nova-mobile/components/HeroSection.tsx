@@ -9,6 +9,7 @@ import {
 } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { isTvDevice, TvPressable as Pressable } from "@/utils/tv";
+import { getKnownArabicAnimeTitle } from "@/utils/arabicAnimeTitles";
 
 type Props = {
   items: AnilistMedia[];
@@ -62,6 +63,7 @@ export function HeroSection({
 
   const renderSlideContent = (anime: AnilistMedia, index: number) => {
     const title = anime.title.english || anime.title.romaji;
+    const heroArabic = anime.title_ar || (anime as any).synonyms?.find((v: string) => /[\u0600-\u06FF]/.test(v)) || getKnownArabicAnimeTitle(anime.id, anime.title.english, anime.title.romaji);
     return (
       <>
         <Image
@@ -148,21 +150,25 @@ export function HeroSection({
               ]}
               numberOfLines={1}
             >
-              {anime.title_ar || anime.title.romaji || title}
+              {heroArabic || title}
             </Text>
-            <Text
-              style={[
-                styles.heroTitleEnglish,
-                {
-                  fontSize: Math.round(11 * s),
-                  lineHeight: Math.round(15 * s),
-                  marginBottom: Math.round(3 * s),
-                },
-              ]}
-              numberOfLines={1}
-            >
-              {title}
-            </Text>
+            {heroArabic && title && heroArabic.trim() !== title.trim() ? (
+              <Text
+                style={[
+                  styles.heroTitleEnglish,
+                  {
+                    fontSize: Math.round(11 * s),
+                    lineHeight: Math.round(15 * s),
+                    marginBottom: Math.round(3 * s),
+                    writingDirection: "ltr",
+                    textAlign: "right",
+                  },
+                ]}
+                numberOfLines={1}
+              >
+                {title}
+              </Text>
+            ) : null}
 
             {/* Metadata Row */}
             <View style={[styles.infoRow, { marginBottom: Math.round(6 * s) }]}>

@@ -253,12 +253,20 @@ function AnimeCardSmall({ anime }: { anime: AnimeResult }) {
             </div>
           )}
           <div className="absolute bottom-0 left-0 right-0 px-2 pb-2">
-            <p className="text-[9.5px] text-white/90 font-bold line-clamp-2 leading-tight font-['Cairo']">
-              {anime.title?.english || anime.title?.romaji}
-            </p>
-            {anime.title_ar && (
-              <p dir="rtl" lang="ar" className="text-[8px] text-white/65 line-clamp-1 leading-tight font-['Cairo'] mt-0.5">
-                {anime.title_ar}
+            {anime.title_ar ? (
+              <>
+                <p dir="rtl" lang="ar" className="text-[10.5px] text-white font-bold line-clamp-2 leading-tight font-['Cairo']">
+                  {anime.title_ar}
+                </p>
+                {(anime.title?.english || anime.title?.romaji) && (
+                  <p dir="ltr" lang="en" className="text-[8.5px] text-white/70 line-clamp-1 leading-tight text-right font-['Cairo'] mt-0.5">
+                    {anime.title?.english || anime.title?.romaji}
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="text-[9.5px] text-white/90 font-bold line-clamp-2 leading-tight font-['Cairo']">
+                {anime.title?.english || anime.title?.romaji}
               </p>
             )}
             {anime.startDate?.year && (

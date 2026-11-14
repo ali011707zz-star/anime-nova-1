@@ -13,6 +13,7 @@ import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from
 import { getGridColumnCount } from "@/components/AnimeCard";
 import { AnimeFilterSheet, type AnimeFilterOption } from "@/components/AnimeFilterSheet";
 import { useColors } from "@/hooks/useColors";
+import { getKnownArabicAnimeTitle } from "@/utils/arabicAnimeTitles";
 import type { ThemePalette } from "@/constants/colors";
 
 const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
@@ -271,19 +272,28 @@ function AnimeCard({ anime, onPress, columns }: { anime: AnimeResult; onPress: (
             <Text style={s.fmtText}>{fmt}</Text>
           </View>
         ) : null}
-        <View style={s.cardBottom}>
-          <Text style={[s.cardTitle, { writingDirection: "ltr" }]} numberOfLines={1}>
-            {anime.title?.english || anime.title?.romaji}
-          </Text>
-          {anime.title_ar ? (
-            <Text
-              numberOfLines={1}
-              style={s.cardTitleAr}
-            >
-              {anime.title_ar}
-            </Text>
-          ) : null}
-        </View>
+        {(() => {
+          const enTitle = anime.title?.english || anime.title?.romaji || "";
+          const arTitle = anime.title_ar || getKnownArabicAnimeTitle(anime.id, anime.title?.english, anime.title?.romaji);
+          return (
+            <View style={s.cardBottom}>
+              <Text
+                style={arTitle ? s.cardTitleAr : [s.cardTitle, { writingDirection: "ltr", color: "#fff" }]}
+                numberOfLines={2}
+              >
+                {arTitle || enTitle}
+              </Text>
+              {arTitle && enTitle && arTitle.trim() !== enTitle.trim() ? (
+                <Text
+                  numberOfLines={1}
+                  style={[s.cardTitle, { writingDirection: "ltr", textAlign: "right", color: "rgba(255,255,255,0.72)", fontSize: tvMode ? 11 : 8.5, lineHeight: tvMode ? 15 : 12 }]}
+                >
+                  {enTitle}
+                </Text>
+              ) : null}
+            </View>
+          );
+        })()}
       </View>
     </Pressable>
   );
@@ -860,8 +870,8 @@ const createSearchStyles = (colors: ThemePalette, s = 1) => StyleSheet.create({
   fmtBadge: { position: "absolute", top: 6, left: 6, paddingHorizontal: 5, paddingVertical: 2, borderRadius: 6 },
   fmtText: { fontSize: 7, fontFamily: "Cairo_700Bold", color: "#fff" },
   cardBottom: { position: "absolute", bottom: 0, left: 0, right: 0, paddingHorizontal: 7, paddingVertical: 6, backgroundColor: "rgba(0,0,0,0.72)", gap: 2 },
-  cardTitle: { fontSize: Math.max(9.5, Math.round(10.5 * s)), color: "#fff", fontFamily: "Cairo_700Bold", lineHeight: Math.round(14 * s), textAlign: "left" },
-  cardTitleAr: { fontSize: Math.max(8.5, Math.round(9.5 * s)), color: "rgba(255,255,255,0.82)", fontFamily: "Cairo_700Bold", lineHeight: Math.round(13.5 * s), textAlign: "right", writingDirection: "rtl" },
+  cardTitle: { fontSize: Math.max(9.5, Math.round(10.5 * s)), color: "#fff", fontFamily: "Cairo_600SemiBold", lineHeight: Math.round(14 * s), textAlign: "left" },
+  cardTitleAr: { fontSize: Math.max(10, Math.round(11 * s)), color: "#fff", fontFamily: "Cairo_700Bold", lineHeight: Math.round(14.5 * s), textAlign: "right", writingDirection: "rtl" },
   idleWrap: { alignItems: "center", paddingTop: 20 },
   idleIcon: { width: 72, height: 72, borderRadius: 24, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder, alignItems: "center", justifyContent: "center", marginBottom: 16 },
   idleText: { fontSize: 16, fontFamily: "Cairo_700Bold", color: colors.textSecondary, marginBottom: 6 },
