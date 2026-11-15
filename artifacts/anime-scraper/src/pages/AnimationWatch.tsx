@@ -580,6 +580,17 @@ export default function AnimationWatch() {
      letting it run causes unwanted cascade when FHD source fails */
 
   /* ── Time update (progress + subtitle sync) ── */
+  useEffect(() => {
+    if (step !== "playing" || !selSrc?.isEmbed) return;
+    let syntheticPos = 0;
+    analyticsTrackerRef.current?.markProgress(0);
+    const id = window.setInterval(() => {
+      syntheticPos += 5;
+      analyticsTrackerRef.current?.markProgress(syntheticPos);
+    }, 5_000);
+    return () => window.clearInterval(id);
+  }, [step, selSrc]);
+
   const handleTimeUpdate = useCallback((t: number) => {
     analyticsTrackerRef.current?.markProgress(t);
     setHlsTime(t);

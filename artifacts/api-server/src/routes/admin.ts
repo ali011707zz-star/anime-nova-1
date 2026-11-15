@@ -631,8 +631,22 @@ router.get("/admin/stats", async (req: Request, res: Response) => {
     }
 
     const totalConfirmedViews = Math.max(exactEpisodeViewsCount, episodeViews.length);
+    const activeGuestSessions = activeSessions.filter((s) => !s.user_id && !loggedInVisitorKeys.has(`${s.platform || "mobile"}:${s.visitor_id}`));
+    const activeRegisteredSessions = activeSessions.filter((s) => Boolean(s.user_id) || loggedInVisitorKeys.has(`${s.platform || "mobile"}:${s.visitor_id}`));
+    const watchingSessions = activeSessions.filter((s) => s.anime_id && s.episode_number !== null);
+    const watchingGuestsCount = watchingSessions.filter((s) => !s.user_id && !loggedInVisitorKeys.has(`${s.platform || "mobile"}:${s.visitor_id}`)).length;
+    const watchingRegisteredCount = watchingSessions.length - watchingGuestsCount;
+    const viewsByGuestsCount = episodeViews.filter((v) => !v.user_id && !loggedInVisitorKeys.has(`${v.platform || "mobile"}:${v.visitor_id}`)).length;
+    const viewsByRegisteredCount = episodeViews.length - viewsByGuestsCount;
+    const watchingNowList = watchingSessions.slice(0, 15).map((s) => ({
+      animeId: String(s.anime_id || ""),
+      title: String(s.anime_title || s.anime_id || "أنمي"),
+      episode: Number(s.episode_number) || 1,
+      platform: s.platform === "web" ? "web" : "mobile",
+      isGuest: !s.user_id && !loggedInVisitorKeys.has(`${s.platform || "mobile"}:${s.visitor_id}`),
+      lastSeenAt: s.last_seen_at,
+    }));
     const premiumCount = [...entitlements.values()].filter((v) => v.plan === "premium").length;
-
     return res.json({
       totalUsers:       registeredCount,
       guestUsers:       guestUsersCount,
@@ -647,12 +661,19 @@ router.get("/admin/stats", async (req: Request, res: Response) => {
       cacheEntries:     cacheRows.length,
       analytics: {
         activeUsers:        uniqueActiveUsers(activeSessions),
+        activeGuests:       uniqueActiveUsers(activeGuestSessions),
+        activeRegistered:   uniqueActiveUsers(activeRegisteredSessions),
         activeWeb:          uniqueActiveUsers(byPlatform("web")),
         activeMobile:       uniqueActiveUsers(byPlatform("mobile")),
-        watchingNow:        activeSessions.filter((s) => s.anime_id && s.episode_number !== null).length,
+        watchingNow:        watchingSessions.length,
+        watchingGuests:     watchingGuestsCount,
+        watchingRegistered: watchingRegisteredCount,
         watchingWeb:        byPlatform("web").filter((s) => s.anime_id && s.episode_number !== null).length,
         watchingMobile:     byPlatform("mobile").filter((s) => s.anime_id && s.episode_number !== null).length,
+        watchingNowList,
         episodeViews:       totalConfirmedViews,
+        episodeViewsGuests: viewsByGuestsCount,
+        episodeViewsRegistered: viewsByRegisteredCount,
         episodeViewsToday:  viewsTodayRiyadh.length,
         episodeViews24h:    viewsLast24h.length,
         episodeViewsWeb:    viewsByPlatform("web").length,

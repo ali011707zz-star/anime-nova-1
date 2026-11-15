@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useSearch } from "wouter";
 import { ArrowLeft, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
 import RiftPlayer from "@/components/player/RiftPlayer";
+import { startWebWatchAnalytics } from "@/lib/analytics";
 import { API_BASE } from "@/lib/apiBase";
 import { useAuth } from "@/lib/auth-context";
 
@@ -282,7 +283,25 @@ export default function StardimaWatchPage() {
     try { localStorage.setItem(progressKey, String(Math.floor(position))); } catch { /* storage can be unavailable */ }
   }, [episodeId, progressKey, providerTitleId]);
 
+  const analyticsRef = useRef<ReturnType<typeof startWebWatchAnalytics> | null>(null);
+  useEffect(() => {
+    const key = providerTitleId || episodeId || title;
+    if (!key) return;
+    const tracker = startWebWatchAnalytics({
+      animeId: `stardima:${key}`,
+      episode: Number(episodeNumber) || 1,
+      title,
+      source: "stardima",
+    });
+    analyticsRef.current = tracker;
+    return () => {
+      tracker.stop();
+      if (analyticsRef.current === tracker) analyticsRef.current = null;
+    };
+  }, [providerTitleId, episodeId, title, episodeNumber]);
+
   const onTimeUpdate = useCallback((position: number) => {
+    analyticsRef.current?.markProgress(position);
     lastTimeRef.current = position;
     if (position - lastSavedTimeRef.current >= 15) saveProgress(position);
   }, [saveProgress]);

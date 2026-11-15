@@ -3694,6 +3694,17 @@ function EpisodePlayer({
      RiftPlayer's fireOnFail reads onFailRef.current (stable ref), so loadSource
      never re-fires from identity changes here. */
 
+  useEffect(() => {
+    if (!currentUrl || !isIframeUrl(currentUrl)) return;
+    let syntheticPos = 0;
+    onPlaybackProgress?.(0);
+    const id = window.setInterval(() => {
+      syntheticPos += 5;
+      onPlaybackProgress?.(syntheticPos);
+    }, 5_000);
+    return () => window.clearInterval(id);
+  }, [currentUrl, onPlaybackProgress]);
+
   /* ── Embed-type URL → sandboxed iframe player ── */
   /* AnimatePresence mode="wait" أُزيل هنا — كان يُبقي MegaEmbedPlayer حياً أثناء exit animation
      بعد أن يُنهار الـ parent (EpisodePlayer) عند العودة للـ picker، مما يُطلق error boundary. */

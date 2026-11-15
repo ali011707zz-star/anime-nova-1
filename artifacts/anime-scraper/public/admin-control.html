@@ -95,7 +95,7 @@
     <section class="analytics">
       <div class="row toolbar"><div><h2>إحصائيات الاستخدام والمشاهدات</h2><span class="muted">تُسجل المشاهدة بعد تقدم الفيديو 10 ثوانٍ على الأقل، وتُحتسب جميع المشاهدات بدون سقف 1000.</span></div></div>
       <div class="analytics-grid">
-        <div class="analytics-card"><span>المستخدمون النشطون الآن</span><strong id="activeUsers">—</strong><small>آخر 5 دقائق</small></div>
+        <div class="analytics-card"><span>النشطون الآن (زوار + مسجلون)</span><strong id="activeUsers">—</strong><small id="activeUsersSplit">آخر 5 دقائق</small></div>
         <div class="analytics-card"><span>يشاهدون حلقة الآن</span><strong id="watchingNow">—</strong><small id="watchingSplit">ويب — · موبايل —</small></div>
         <div class="analytics-card"><span>مشاهدات الحلقات المؤكدة</span><strong id="episodeViews">—</strong><small id="episodeViewsToday">اليوم (الرياض): —</small></div>
         <div class="analytics-card"><span>آخر تسجيل مشاهدة</span><strong id="lastEventAt" style="font-size:16px">—</strong><small>من بيانات التطبيق</small></div>
@@ -185,12 +185,14 @@ async function loadStats(){
     $("freeUsers").textContent=d.freeUsers??"—";
     $("updatedAt").textContent=new Date().toLocaleTimeString("ar-SA");
     $("activeUsers").textContent=typeof a.activeUsers==="number"?a.activeUsers:"—";
+    if($("activeUsersSplit"))$("activeUsersSplit").textContent=`زوار: ${a.activeGuests??0} · مسجلون: ${a.activeRegistered??0} (آخر 5 د)`;
     $("watchingNow").textContent=typeof a.watchingNow==="number"?a.watchingNow:"—";
-    $("watchingSplit").textContent=`ويب ${a.watchingWeb??"—"} · موبايل ${a.watchingMobile??"—"}`;
+    $("watchingSplit").textContent=`زوار ${a.watchingGuests??0} · مسجلون ${a.watchingRegistered??0} (موبايل ${a.watchingMobile??0} · ويب ${a.watchingWeb??0})`;
     $("episodeViews").textContent=typeof a.episodeViews==="number"?a.episodeViews.toLocaleString("en-US"):"—";
     const todayCount=a.episodeViewsToday??"—";
     const last24hCount=a.episodeViews24h!==undefined?` · آخر 24س: ${a.episodeViews24h}`:"";
-    $("episodeViewsToday").textContent=`اليوم (الرياض): ${todayCount}${last24hCount}`;
+    const guestViewsNote=typeof a.episodeViewsGuests==="number"?` · زوار: ${a.episodeViewsGuests.toLocaleString("en-US")} · مسجلون: ${(a.episodeViewsRegistered||0).toLocaleString("en-US")}`:"";
+    $("episodeViewsToday").textContent=`اليوم: ${todayCount}${last24hCount}${guestViewsNote}`;
     $("activeWeb").textContent=a.activeWeb??"—";
     $("activeMobile").textContent=a.activeMobile??"—";
     $("viewsWeb").textContent=typeof a.episodeViewsWeb==="number"?a.episodeViewsWeb.toLocaleString("en-US"):"—";

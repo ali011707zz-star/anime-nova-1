@@ -4,6 +4,7 @@ import { useLocation, useSearch } from "wouter";
 import { ChevronRight, RefreshCw, AlertCircle } from "lucide-react";
 import { motion } from "framer-motion";
 import RiftPlayer from "@/components/player/RiftPlayer";
+import { startWebWatchAnalytics } from "@/lib/analytics";
 import { AnimeMascot } from "@/components/AnimeMascot";
 
 export default function DubbedWatch() {
@@ -113,7 +114,25 @@ export default function DubbedWatch() {
     return () => { mountedRef.current = false; };
   }, [loadSource]);
 
+  const analyticsRef = useRef<ReturnType<typeof startWebWatchAnalytics> | null>(null);
+  useEffect(() => {
+    const key = showId || atIds[0] || keyParam || title;
+    if (!key) return;
+    const tracker = startWebWatchAnalytics({
+      animeId: `dubbed:${key}`,
+      episode: Number(ep) || 1,
+      title,
+      source: provider || "dubbed",
+    });
+    analyticsRef.current = tracker;
+    return () => {
+      tracker.stop();
+      if (analyticsRef.current === tracker) analyticsRef.current = null;
+    };
+  }, [showId, at, keyParam, title, ep, provider]);
+
   const handleTimeUpdate = useCallback((currentTime: number) => {
+    analyticsRef.current?.markProgress(currentTime);
     if (!at || !ep) return;
     const firstId = atIds[0];
     if (!firstId) return;

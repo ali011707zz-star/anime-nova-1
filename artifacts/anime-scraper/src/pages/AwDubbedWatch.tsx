@@ -4,6 +4,7 @@ import { useLocation, useSearch } from "wouter";
 import { ChevronRight, RefreshCw, AlertCircle, Play, CheckCircle2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import RiftPlayer from "@/components/player/RiftPlayer";
+import { startWebWatchAnalytics } from "@/lib/analytics";
 import { AnimeMascot } from "@/components/AnimeMascot";
 
 interface SourceItem {
@@ -121,7 +122,25 @@ export default function AwDubbedWatch() {
     setPhase("player");
   };
 
+  const analyticsRef = useRef<ReturnType<typeof startWebWatchAnalytics> | null>(null);
+  useEffect(() => {
+    const key = series || keyParam || displayTitle;
+    if (!key) return;
+    const tracker = startWebWatchAnalytics({
+      animeId: `aw:${key}`,
+      episode: Number(ep) || 1,
+      title: displayTitle,
+      source: "aw-dubbed",
+    });
+    analyticsRef.current = tracker;
+    return () => {
+      tracker.stop();
+      if (analyticsRef.current === tracker) analyticsRef.current = null;
+    };
+  }, [series, keyParam, displayTitle, ep]);
+
   const handleTimeUpdate = useCallback((currentTime: number) => {
+    analyticsRef.current?.markProgress(currentTime);
     if (!series || !ep) return;
     localStorage.setItem(`aw-dubbed-wp-${series}-${ep}`, String(Math.floor(currentTime)));
   }, [series, ep]);

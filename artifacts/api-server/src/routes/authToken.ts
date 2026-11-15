@@ -37,7 +37,7 @@ router.post("/api/auth/anon-token", (req, res) => {
     req.socket.remoteAddress ||
     "unknown";
 
-  if (!checkRateLimit(`tok:${ip}`, 20, 60_000)) {
+  if (!checkRateLimit(`tok:${ip}`, 120, 60_000)) {
     res.status(429).json({ error: "Too many requests. Try again later." });
     return;
   }
@@ -52,7 +52,7 @@ router.get("/api/auth/anon-token", (req, res) => {
     req.socket.remoteAddress ||
     "unknown";
 
-  if (!checkRateLimit(`tok:${ip}`, 20, 60_000)) {
+  if (!checkRateLimit(`tok:${ip}`, 120, 60_000)) {
     res.status(429).json({ error: "Too many requests. Try again later." });
     return;
   }

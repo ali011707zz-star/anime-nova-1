@@ -11,6 +11,7 @@ import { getBaseUrl } from "@/utils/api";
 import { getAuthToken, getDownloadToken } from "@/utils/secureApi";
 import { getWatchContentId, useApp } from "@/context/AppContext";
 import { ensureWatchAccess } from "@/utils/adPolicy";
+import { startMobileWatchAnalytics } from "@/utils/analytics";
 import { RewardedAdPrompt } from "@/components/RewardedAdPrompt";
 import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
@@ -737,9 +738,27 @@ export default function DubbedWatchScreen() {
     else router.replace("/(tabs)" as any);
   }, [router, saveProgress, screen]);
 
+  const analyticsRef = useRef<ReturnType<typeof startMobileWatchAnalytics> | null>(null);
+  useEffect(() => {
+    const key = showId || series || title;
+    if (!key) return;
+    const tracker = startMobileWatchAnalytics({
+      animeId: String(key),
+      episode: episodeNumber,
+      title: title || "كرتون مدبلج",
+      source: provider || "dubbed",
+    });
+    analyticsRef.current = tracker;
+    return () => {
+      analyticsRef.current = null;
+      tracker.stop();
+    };
+  }, [showId, series, title, episodeNumber, provider]);
+
   const onProgress = useCallback((position: number, duration: number) => {
     lastTimeRef.current = position;
     if (duration > 0) lastDurationRef.current = duration;
+    analyticsRef.current?.markProgress(position);
   }, []);
 
   useEffect(() => () => {

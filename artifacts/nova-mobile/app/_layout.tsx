@@ -252,7 +252,19 @@ function RootLayout() {
           .catch(() => {});
       }
     }, 1000);
-    return () => clearTimeout(t);
+    const interval = setInterval(() => {
+      if (AppState.currentState === "active") {
+        pingMobileAppPresence();
+      }
+    }, 120_000);
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") pingMobileAppPresence();
+    });
+    return () => {
+      clearTimeout(t);
+      clearInterval(interval);
+      sub.remove();
+    };
   }, []);
 
   useEffect(() => {

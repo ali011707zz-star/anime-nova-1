@@ -7,6 +7,7 @@ import { BottomNav } from "@/components/layout/BottomNav";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { AuthProvider } from "@/lib/auth-context";
 import { WebAppDownloadModal } from "@/components/WebAppDownloadModal";
+import { pingWebAppPresence } from "@/lib/analytics";
 
 class ErrorBoundary extends Component<{ children: ReactNode; resetKey?: string }, { hasError: boolean; lastKey?: string }> {
   constructor(props: { children: ReactNode; resetKey?: string }) {
@@ -165,6 +166,20 @@ function applyTheme(t: string) {
 
 function StartPageRedirect() {
   const [location, navigate] = useLocation();
+  useEffect(() => {
+    pingWebAppPresence();
+    const id = window.setInterval(() => {
+      if (document.visibilityState === "visible") pingWebAppPresence();
+    }, 120_000);
+    const onVis = () => {
+      if (document.visibilityState === "visible") pingWebAppPresence();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, []);
   useEffect(() => {
     if (location === "/" || location === "") {
       const pref = localStorage.getItem("pref-startpage");
