@@ -119,7 +119,7 @@ ${allUrls.join("\n")}
 </urlset>`;
 }
 
-router.get("/sitemap.xml", async (_req, res) => {
+router.get(["/sitemap.xml", "/sitemap-nova.xml"], async (_req, res) => {
   try {
     if (_cached && Date.now() - _cachedAt < CACHE_TTL) {
       res.setHeader("Content-Type", "application/xml; charset=utf-8");
