@@ -1,4 +1,15 @@
 User-agent: *
 Allow: /
+Allow: /api/anilist
+Allow: /api/anime/
+Allow: /api/manga/
+Allow: /api/dubbed/
+Allow: /api/aw-dubbed/
+Allow: /api/stardima/
+Allow: /api/animation/
+Disallow: /api/admin/
+Disallow: /api/auth/
+Disallow: /auth/callback
+Disallow: /admin
 
 Sitemap: https://animenovaa.duckdns.org/sitemap.xml

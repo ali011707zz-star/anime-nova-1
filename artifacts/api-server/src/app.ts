@@ -343,7 +343,7 @@ export async function createApp(): Promise<Express> {
   // Serve official APK endpoints (/nova.apk for Android TV Downloader 2576388, /Anime-Nova.apk for web/mobile)
   // with strict no-cache headers so Downloader & browsers always fetch the latest v1.0.7 build.
   app.get(["/nova.apk", "/Anime-Nova.apk", "/Anime-Nova-TV.apk", "/Anime Nova.apk"], (req, res, next) => {
-    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    res.setHeader("Cache-Control", "public, max-age=60, must-revalidate");
     res.setHeader("Pragma", "no-cache");
     res.setHeader("Expires", "0");
     res.setHeader("Content-Type", "application/vnd.android.package-archive");
@@ -437,14 +437,14 @@ export async function createApp(): Promise<Express> {
       const rawHtml = fs.readFileSync(path.join(frontendDist, "index.html"), "utf8");
       const cleanPath = reqPath === "/" ? "/" : reqPath.replace(/\/+$/, "");
       const canonicalUrl = `https://animenovaa.duckdns.org${cleanPath === "/" ? "/" : cleanPath}`;
-      let title = "أنمي نوفا | تطبيق وموقع Anime NOVA لمشاهدة وتحميل الأنمي المترجم والمدبلج والمانجا";
-      let desc = "موقع وتطبيق أنمي نوفا (Anime NOVA) الرسمي لمشاهدة وتحميل الأنمي المترجم والمدبلج، قراءة المانجا والمانهوا، ومسلسلات سبيستون والكرتون مجاناً بجودة عالية FHD بدون إعلانات. حمل تطبيق انمي نوفا للأندرويد والتلفاز الذكي الآن.";
+      let title = "انمي نوفا (أنمي نوفا) | تطبيق انمي نوفا وموقع مشاهدة الأنمي المترجم والمدبلج Anime NOVA";
+      let desc = "موقع وتطبيق انمي نوفا (أنمي نوفا - Anime NOVA) الرسمي لمشاهدة وتحميل الأنمي المترجم والمدبلج، قراءة المانجا والمانهوا، ومسلسلات سبيستون والكرتون مجاناً بجودة عالية FHD بدون إعلانات. حمل تطبيق انمي نوفا للأندرويد والتلفاز الذكي (كود Downloader: 2576388).";
       let ogImage = "https://animenovaa.duckdns.org/opengraph.jpg";
       let rootSeoHtml = "";
 
       const animeMatch = cleanPath.match(/^\/anime\/(\d+)/);
       if (cleanPath === "/app") {
-        title = "تطبيق أنمي نوفا الرسمي | تحميل تطبيق انمي نوفا للأندرويد والتلفاز الذكي Anime NOVA APK";
+        title = "تطبيق انمي نوفا (أنمي نوفا APK v1.0.9) | تحميل تطبيق Anime NOVA للأندرويد والتلفاز الذكي";
         desc = "حمل تطبيق أنمي نوفا (Anime NOVA APK v1.0.9) الأصلي مجاناً للهواتف وشاشات التلفاز الذكية Android TV (كود Downloader: 2576388). مشاهدة وتحميل الأنمي المترجم والمدبلج، قراءة المانجا والمانهوا، ومسلسلات سبيستون والكرتون بدون إعلانات.";
         rootSeoHtml = `<main dir="rtl" style="max-width:960px;margin:0 auto;padding:24px;color:#f4f4f5;font-family:Cairo,sans-serif;">
           <h1>تطبيق أنمي نوفا الرسمي | تحميل تطبيق انمي نوفا للأندرويد والتلفاز الذكي (Anime NOVA APK v1.0.9)</h1>

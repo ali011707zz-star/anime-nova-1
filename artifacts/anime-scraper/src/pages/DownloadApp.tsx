@@ -1,3 +1,4 @@
+import SEO from "@/components/SEO";
 import React, { useState, useEffect } from "react";
 import {
   Download,
@@ -25,7 +26,7 @@ import {
   Globe,
 } from "lucide-react";
 
-const APP_VERSION = "1.0.8";
+const APP_VERSION = "1.0.9";
 const MOBILE_APK_URL = `/Anime-Nova.apk?v=${APP_VERSION}`;
 const TV_APK_URL = `/nova.apk?v=${APP_VERSION}`;
 const DOWNLOADER_CODE = "2576388";
@@ -209,7 +210,7 @@ export default function DownloadApp({ onBack }: { onBack?: () => void }) {
   useEffect(() => {
     const prevTitle = document.title;
     document.title =
-      "تطبيق أنمي نوفا الرسمي | تحميل تطبيق انمي نوفا للأندرويد والتلفاز الذكي Anime NOVA APK";
+      "تطبيق انمي نوفا (أنمي نوفا APK v1.0.9) | تحميل تطبيق Anime NOVA للأندرويد والتلفاز الذكي";
     const canonical = document.querySelector('link[rel="canonical"]') as HTMLLinkElement | null;
     const prevCanonical = canonical?.href;
     if (canonical) {
@@ -262,6 +263,11 @@ export default function DownloadApp({ onBack }: { onBack?: () => void }) {
         lightMode ? "bg-[#F4F6FA] text-[#0F172A]" : "bg-[#07090E] text-[#F1F5F9]"
       }`}
     >
+      <SEO
+        title="تطبيق انمي نوفا (أنمي نوفا APK v1.0.9) | تحميل تطبيق Anime NOVA للأندرويد والتلفاز الذكي"
+        description="حمل تطبيق انمي نوفا الرسمي (تطبيق أنمي نوفا Anime NOVA APK v1.0.9) مجاناً لهواتف الأندرويد وشاشات التلفاز الذكية Android TV (كود Downloader: 2576388). مشاهدة وتحميل الأنمي المترجم والمدبلج، قراءة المانجا والمانهوا، ومسلسلات سبيستون بدون إعلانات."
+        path="/app"
+      />
       {/* ── Standalone Top Bar (Independent from Web App) ── */}
       <header
         className={`sticky top-0 z-40 backdrop-blur-xl border-b transition-colors ${
@@ -383,8 +389,8 @@ export default function DownloadApp({ onBack }: { onBack?: () => void }) {
               <span>مجاني بالكامل</span>
             </div>
 
-            <h1 className="text-[34px] sm:text-[50px] lg:text-[54px] font-black leading-[1.18] tracking-tight">
-              كل الأنمي والمانجا وسبيستون في{" "}
+            <h1 className="text-[32px] sm:text-[46px] lg:text-[50px] font-black leading-[1.18] tracking-tight">
+              تطبيق انمي نوفا الرسمي — كل الأنمي والمانجا وسبيستون في{" "}
               <span className="text-transparent bg-clip-text bg-gradient-to-l from-[#06b6d4] via-[#0284c7] to-[#7c3aed]">
                 أنمي نوفا
               </span>

@@ -495,8 +495,8 @@ export default function Home() {
       dir="rtl"
     >
       <SEO
-        title="Anime NOVA | أنمي نوفا - مشاهدة وتحميل الأنمي مترجم ومدبلج"
-        description="أنمي نوفا — مشاهدة وتحميل الأنمي المترجم والمدبلج والمانجا مجاناً بجودة عالية."
+        title="انمي نوفا (أنمي نوفا) | تطبيق انمي نوفا وموقع مشاهدة الأنمي المترجم والمدبلج Anime NOVA"
+        description="موقع وتطبيق انمي نوفا (أنمي نوفا - Anime NOVA) الرسمي لمشاهدة وتحميل الأنمي المترجم والمدبلج، قراءة المانجا والمانهوا، ومسلسلات سبيستون والكرتون مجاناً بجودة FHD بدون إعلانات. حمل تطبيق انمي نوفا للأندرويد والتلفاز الذكي (كود Downloader: 2576388)."
         path="/"
       />
 
@@ -1235,6 +1235,51 @@ export default function Home() {
             ))}
           </div>
         )}
+
+        {/* ── قسم تعريفي وفهرسة محركات البحث (SEO Semantic Section) ── */}
+        <section
+          aria-label="عن تطبيق وموقع انمي نوفا"
+          className="mt-10 mx-3.5 rounded-2xl border border-white/10 bg-white/[0.02] p-5 text-right"
+        >
+          <h1 className="text-base sm:text-lg font-black text-white mb-2">
+            انمي نوفا (أنمي نوفا) — تطبيق وموقع Anime NOVA الرسمي لمشاهدة وتحميل الأنمي المترجم والمدبلج والمانجا
+          </h1>
+          <p className="text-xs sm:text-sm leading-relaxed text-zinc-400 mb-3">
+            مرحباً بك في <strong>انمي نوفا (أنمي نوفا - Anime NOVA)</strong>، المنصة العربية المتكاملة لمشاهدة وتحميل مسلسلات وأفلام الأنمي المترجم والمدبلج بجودة عالية 1080p FHD، وقراءة فصول المانجا اليابانية والمانهوا الكورية الملونة المترجمة للعربية، بالإضافة إلى مكتبة شاملة لأعمال سبيستون والكرتون المدبلج والأنيميشن مجاناً وبدون إعلانات مزعجة.
+          </p>
+          <h2 className="text-sm sm:text-base font-extrabold text-cyan-400 mb-1.5">
+            تحميل تطبيق انمي نوفا للأندرويد والتلفاز الذكي (Anime NOVA APK v1.0.9)
+          </h2>
+          <p className="text-xs sm:text-sm leading-relaxed text-zinc-400 mb-4">
+            يمكنك تحميل <strong>تطبيق انمي نوفا</strong> الرسمي لهواتف الأندرويد وشاشات التلفاز الذكية (Android TV / Google TV / Fire TV) عبر صفحة التحميل الرسمية أو بإدخال كود تطبيق Downloader رقم <strong>2576388</strong> مباشرة على التلفاز.
+          </p>
+          <nav aria-label="روابط سريعة في انمي نوفا" className="flex flex-wrap gap-2 text-xs font-bold">
+            <a href="/app" className="rounded-lg bg-cyan-500/15 border border-cyan-400/30 px-3 py-1.5 text-cyan-300 hover:bg-cyan-500/25">
+              تحميل تطبيق انمي نوفا APK
+            </a>
+            <a href="/browse" className="rounded-lg bg-white/5 border border-white/10 px-3 py-1.5 text-zinc-300 hover:bg-white/10">
+              تصفح الأنمي المترجم
+            </a>
+            <a href="/manga" className="rounded-lg bg-white/5 border border-white/10 px-3 py-1.5 text-zinc-300 hover:bg-white/10">
+              مكتبة المانجا والمانهوا
+            </a>
+            <a href="/spacetoon" className="rounded-lg bg-white/5 border border-white/10 px-3 py-1.5 text-zinc-300 hover:bg-white/10">
+              مسلسلات سبيستون المدبلجة
+            </a>
+            <a href="/cartoon" className="rounded-lg bg-white/5 border border-white/10 px-3 py-1.5 text-zinc-300 hover:bg-white/10">
+              كرتون مدبلج ومترجم
+            </a>
+            <a href="/animation" className="rounded-lg bg-white/5 border border-white/10 px-3 py-1.5 text-zinc-300 hover:bg-white/10">
+              أفلام ومسلسلات الأنيميشن
+            </a>
+            <a href="/updates" className="rounded-lg bg-white/5 border border-white/10 px-3 py-1.5 text-zinc-300 hover:bg-white/10">
+              أحدث حلقات الأنمي اليوم
+            </a>
+            <a href="/schedule" className="rounded-lg bg-white/5 border border-white/10 px-3 py-1.5 text-zinc-300 hover:bg-white/10">
+              جدول مواعيد عرض الأنمي
+            </a>
+          </nav>
+        </section>
       </div>
     </main>
   );

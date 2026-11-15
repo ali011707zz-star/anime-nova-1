@@ -543,8 +543,8 @@ export default function AnimeDetail() {
   return (
     <main className="bg-[#09090B] min-h-screen pb-32 text-white" dir="rtl">
       <SEO
-        title={displayTitle}
-        description={descAr || "جاري ترجمة الوصف…"}
+        title={arTitle && arTitle !== displayTitle ? `مشاهدة أنمي ${arTitle} (${displayTitle}) مترجم | انمي نوفا Anime NOVA` : `مشاهدة أنمي ${displayTitle} مترجم | انمي نوفا Anime NOVA`}
+        description={descAr || `شاهد وحمّل جميع حلقات أنمي ${arTitle && arTitle !== displayTitle ? `${arTitle} (${displayTitle})` : displayTitle} مترجم للعربية بجودة عالية 1080p FHD مجاناً وبدون إعلانات عبر موقع وتطبيق انمي نوفا (أنمي نوفا - Anime NOVA).`}
         image={anime.coverImage?.extraLarge || anime.coverImage?.large || anime.bannerImage}
         path={`/anime/${params.id}`}
       />

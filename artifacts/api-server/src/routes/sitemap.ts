@@ -1,44 +1,41 @@
-/**
- * sitemap.ts — Dynamic XML Sitemap Generator
- *
- * يولّد Sitemap.xml ديناميكياً يشمل:
- * 1. الصفحات الثابتة (الرئيسية، المكتبة، الجدول...)
- * 2. أعلى 200 أنيمي رائج من AniList API
- * 3. أعلى 200 سلسلة أنيميشن من FaselHD
- * 4. الكارتون المدبلج من StarCima
- *
- * يُخزَّن في ذاكرة مؤقتة 6 ساعات لتقليل الضغط على الـ APIs.
- */
-
 import { Router } from "express";
+import curatedTitlesRaw from "../data/anime-titles-ar.json";
 
 const router = Router();
-
 const BASE = "https://animenovaa.duckdns.org";
-const CACHE_TTL = 6 * 3_600_000; // 6 ساعات
+
 let _cached: string | null = null;
 let _cachedAt = 0;
+const CACHE_TTL = 6 * 3600_000;
 
 function escXml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
 }
 
-function url(loc: string, priority: string, changefreq: string, lastmod?: string): string {
-  return `  <url>
-    <loc>${escXml(loc)}</loc>
-    <changefreq>${changefreq}</changefreq>
-    <priority>${priority}</priority>${lastmod ? `\n    <lastmod>${lastmod}</lastmod>` : ""}
-  </url>`;
+function url(loc: string, priority = "0.7", changefreq = "weekly", lastmod?: string): string {
+  return [
+    "  <url>",
+    `    <loc>${escXml(loc)}</loc>`,
+    lastmod ? `    <lastmod>${lastmod}</lastmod>` : "",
+    `    <changefreq>${changefreq}</changefreq>`,
+    `    <priority>${priority}</priority>`,
+    "  </url>",
+  ].filter(Boolean).join("\n");
 }
 
-async function fetchAnilistTrending(page: number): Promise<{ id: number; slug: string; updatedAt: number }[]> {
+async function fetchAnilistTrending(page = 1): Promise<{ id: number; slug: string; updatedAt?: number }[]> {
   const query = `query($page:Int){Page(page:$page,perPage:50){media(type:ANIME,sort:TRENDING_DESC,isAdult:false){id slug updatedAt}}}`;
   try {
     const r = await fetch("https://graphql.anilist.co", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ query, variables: { page } }),
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(6000),
     });
     if (!r.ok) return [];
     const d = await r.json() as any;
@@ -56,7 +53,7 @@ async function fetchDubbedSlugs(): Promise<string[]> {
     for (let p = 1; p <= 4; p++) {
       const r = await fetch(`https://starcima.com/api/dubbed/catalog?page=${p}`, {
         headers: { "User-Agent": "Mozilla/5.0", Accept: "application/json" },
-        signal: AbortSignal.timeout(8000),
+        signal: AbortSignal.timeout(6000),
       });
       if (!r.ok) break;
       const d = await r.json() as any;
@@ -71,7 +68,6 @@ async function fetchDubbedSlugs(): Promise<string[]> {
 async function buildSitemap(): Promise<string> {
   const today = new Date().toISOString().split("T")[0];
 
-  // ── الصفحات الثابتة ──
   const staticUrls = [
     url(`${BASE}/`,           "1.0", "daily",   today),
     url(`${BASE}/app`,        "1.0", "daily",   today),
@@ -85,27 +81,33 @@ async function buildSitemap(): Promise<string> {
     url(`${BASE}/search`,     "0.7", "weekly",  today),
   ];
 
-  // ── أنيمي رائج (صفحتان من AniList = 100 عنوان) ──
   const [p1, p2] = await Promise.all([fetchAnilistTrending(1), fetchAnilistTrending(2)]);
-  const animeList = [...p1, ...p2];
-  const animeUrls = animeList.map(a => {
+  const seenAnimeIds = new Set<number>();
+  const animeUrls: string[] = [];
+
+  for (const a of [...p1, ...p2]) {
+    if (!a?.id || seenAnimeIds.has(a.id)) continue;
+    seenAnimeIds.add(a.id);
     const lastmod = a.updatedAt ? new Date(a.updatedAt * 1000).toISOString().split("T")[0] : today;
-    return url(`${BASE}/anime/${a.id}`, "0.8", "weekly", lastmod);
-  });
+    animeUrls.push(url(`${BASE}/anime/${a.id}`, "0.8", "weekly", lastmod));
+  }
 
-  // ── أنيميشن من FaselHD (صفحات المكتبة فقط — لا نعرف الـ slugs بدون DB) ──
-  // نضيف pagination URLs كـ alternative discovery
-  const animationPageUrls = Array.from({ length: 20 }, (_, i) =>
-    url(`${BASE}/animations?page=${i + 1}`, "0.5", "daily", today)
-  );
+  // Always include top 350 curated Arabic-titled anime so sitemap stays rich even if AniList rate-limits
+  const curatedList = Array.isArray(curatedTitlesRaw) ? (curatedTitlesRaw as any[]) : [];
+  for (const entry of curatedList) {
+    if (seenAnimeIds.size >= 450) break;
+    const id = Number(entry?.anilistId);
+    if (!Number.isSafeInteger(id) || id <= 0 || seenAnimeIds.has(id)) continue;
+    seenAnimeIds.add(id);
+    animeUrls.push(url(`${BASE}/anime/${id}`, "0.8", "weekly", today));
+  }
 
-  // ── كارتون مدبلج ──
   const dubbedSlugs = await fetchDubbedSlugs();
   const dubbedUrls = dubbedSlugs.map(slug =>
     url(`${BASE}/dubbed/${encodeURIComponent(slug)}`, "0.7", "weekly", today)
   );
 
-  const allUrls = [...staticUrls, ...animeUrls, ...animationPageUrls, ...dubbedUrls];
+  const allUrls = [...staticUrls, ...animeUrls, ...dubbedUrls];
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <urlset
@@ -117,20 +119,17 @@ ${allUrls.join("\n")}
 </urlset>`;
 }
 
-// ── GET /sitemap.xml ──────────────────────────────────────────────────────
 router.get("/sitemap.xml", async (_req, res) => {
   try {
     if (_cached && Date.now() - _cachedAt < CACHE_TTL) {
       res.setHeader("Content-Type", "application/xml; charset=utf-8");
-      res.setHeader("Cache-Control", "public, max-age=21600"); // 6h
+      res.setHeader("Cache-Control", "public, max-age=21600");
       res.send(_cached);
       return;
     }
-
     const xml = await buildSitemap();
     _cached = xml;
     _cachedAt = Date.now();
-
     res.setHeader("Content-Type", "application/xml; charset=utf-8");
     res.setHeader("Cache-Control", "public, max-age=21600");
     res.send(xml);
@@ -139,15 +138,20 @@ router.get("/sitemap.xml", async (_req, res) => {
   }
 });
 
-// ── GET /robots.txt — يُعيد robots.txt ديناميكي يشير للـ sitemap ──────────
 router.get("/robots.txt", (_req, res) => {
   res.setHeader("Content-Type", "text/plain; charset=utf-8");
-  res.setHeader("Cache-Control", "public, max-age=86400");
+  res.setHeader("Cache-Control", "public, max-age=3600");
   res.send(`User-agent: *
 Allow: /
-
-# لا تُفهرس صفحات الإدارة والمصادر الداخلية
-Disallow: /api/
+Allow: /api/anilist
+Allow: /api/anime/
+Allow: /api/manga/
+Allow: /api/dubbed/
+Allow: /api/aw-dubbed/
+Allow: /api/stardima/
+Allow: /api/animation/
+Disallow: /api/admin/
+Disallow: /api/auth/
 Disallow: /auth/callback
 Disallow: /admin
 

@@ -13,8 +13,13 @@ interface SEOProps {
 }
 
 export default function SEO({ title, description, image, path, type = "website" }: SEOProps) {
-  const fullTitle = title.includes(SITE_NAME) ? title : `${title} | ${SITE_NAME}`;
-  const desc = description || "أنمي نوفا — مشاهدة وتحميل الأنمي المترجم والمدبلج مجاناً بجودة عالية.";
+  const fullTitle =
+    title.includes("نوفا") || title.includes(SITE_NAME)
+      ? title
+      : `${title} | انمي نوفا (أنمي نوفا - ${SITE_NAME})`;
+  const desc =
+    description ||
+    "موقع وتطبيق انمي نوفا (أنمي نوفا - Anime NOVA) الرسمي لمشاهدة وتحميل الأنمي المترجم والمدبلج وقراءة المانجا مجاناً بجودة عالية FHD بدون إعلانات.";
   const url = path ? `${SITE_URL}${path}` : SITE_URL;
   const img = image || DEFAULT_IMAGE;
 

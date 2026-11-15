@@ -2,7 +2,7 @@ import { Download, Smartphone, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 
-const APP_VERSION = "1.0.8";
+const APP_VERSION = "1.0.9";
 const APK_URL = `/Anime-Nova.apk?v=${APP_VERSION}`;
 const TV_APK_URL = `/nova.apk?v=${APP_VERSION}`;
 const DOWNLOADER_CODE = "2576388";
@@ -17,6 +17,11 @@ export function WebAppDownloadModal() {
       setOpen(false);
       return;
     }
+    const ua = typeof navigator !== "undefined" ? navigator.userAgent || "" : "";
+    const isBot =
+      (typeof navigator !== "undefined" && Boolean((navigator as any).webdriver)) ||
+      /bot|google|crawl|spider|slurp|bing|duckduck|yandex|baidu|lighthouse|inspection|headless/i.test(ua);
+    if (isBot) return;
     const timer = window.setTimeout(() => setOpen(true), 1800);
     return () => window.clearTimeout(timer);
   }, [location]);
@@ -56,7 +61,7 @@ export function WebAppDownloadModal() {
             </span>
             <a
               href={TV_APK_URL}
-              download="Anime-Nova-TV-v1.0.8.apk"
+              download="Anime-Nova-TV-v1.0.9.apk"
               className="rounded-lg bg-cyan-500/20 px-2 py-0.5 text-[10px] font-black text-cyan-200 hover:bg-cyan-500/30"
             >
               تحميل مباشر (nova.apk)
