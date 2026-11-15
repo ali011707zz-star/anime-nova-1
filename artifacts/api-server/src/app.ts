@@ -396,7 +396,7 @@ export async function createApp(): Promise<Express> {
     String(v || "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
   const resolveAnimeSeoMeta = async (animeId: number): Promise<{ titleAr: string; titleEn: string }> => {
-    const local = getAnimeSeoEntryById(animeId);
+    const local = await getAnimeSeoEntryById(animeId);
     if (local && local.titleAr && local.titleEn) return local;
     const cached = _animeSeoExtraCache.get(animeId);
     if (cached && Date.now() - cached.ts < 6 * 3_600_000) return { titleAr: cached.titleAr, titleEn: cached.titleEn };

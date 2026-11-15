@@ -890,13 +890,11 @@ export async function resolveArabicAnimeTitle(
 }
 
 
-export function getAnimeSeoEntryById(anilistId: number): { titleAr: string; titleEn: string } | null {
+export async function getAnimeSeoEntryById(anilistId: number): Promise<{ titleAr: string; titleEn: string } | null> {
   if (!Number.isFinite(anilistId) || anilistId <= 0) return null;
-  const curated = ANIME_AR_BY_ANILIST_ID[anilistId];
-  const fileEntry = getFileCacheMap().get(anilistId);
-  const dbEntry = _dbCache.get(anilistId);
-  const titleAr = curated || fileEntry?.titleAr || dbEntry?.titleAr || "";
-  const titleEn = fileEntry?.englishTitle || "";
+  const cache = await loadDatabaseCache().catch(() => null);
+  const titleAr = CURATED_IDS[anilistId] || curatedJsonMap.get(anilistId) || cache?.anilist.get(anilistId) || wdAnilistMap.get(anilistId) || "";
+  const titleEn = englishFromJsonMap.get(anilistId) || cache?.englishById.get(anilistId) || "";
   if (!titleAr && !titleEn) return null;
   return { titleAr, titleEn };
 }
