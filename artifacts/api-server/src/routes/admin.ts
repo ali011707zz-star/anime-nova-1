@@ -572,16 +572,25 @@ router.get("/admin/stats", async (req: Request, res: Response) => {
     const allMobileDevices = new Set<string>();
     const allWebVisitors = new Set<string>();
 
+    const loggedInVisitorKeys = new Set<string>();
+    for (const row of [...allSessions, ...episodeViews]) {
+      const platform = String(row.platform || "mobile");
+      const visitorId = String(row.visitor_id || "").trim();
+      const userId = row.user_id ? String(row.user_id).trim() : "";
+      if (userId && visitorId) loggedInVisitorKeys.add(`${platform}:${visitorId}`);
+    }
+
     const recordVisitorRow = (row: any) => {
       const platform = String(row.platform || "mobile");
       const visitorId = String(row.visitor_id || "").trim();
       const userId = row.user_id ? String(row.user_id).trim() : "";
+      const key = `${platform}:${visitorId}`;
       if (visitorId) {
         if (platform === "mobile") allMobileDevices.add(visitorId);
         else if (platform === "web") allWebVisitors.add(visitorId);
       }
-      if (!userId && visitorId) {
-        guestVisitorsAll.add(`${platform}:${visitorId}`);
+      if (!userId && visitorId && !loggedInVisitorKeys.has(key)) {
+        guestVisitorsAll.add(key);
         if (platform === "mobile") guestMobileVisitors.add(visitorId);
         else if (platform === "web") guestWebVisitors.add(visitorId);
       }

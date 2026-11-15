@@ -889,6 +889,18 @@ export async function resolveArabicAnimeTitle(
   }
 }
 
+
+export function getAnimeSeoEntryById(anilistId: number): { titleAr: string; titleEn: string } | null {
+  if (!Number.isFinite(anilistId) || anilistId <= 0) return null;
+  const curated = ANIME_AR_BY_ANILIST_ID[anilistId];
+  const fileEntry = getFileCacheMap().get(anilistId);
+  const dbEntry = _dbCache.get(anilistId);
+  const titleAr = curated || fileEntry?.titleAr || dbEntry?.titleAr || "";
+  const titleEn = fileEntry?.englishTitle || "";
+  if (!titleAr && !titleEn) return null;
+  return { titleAr, titleEn };
+}
+
 export async function getArabicAnimeTitleById(
   id: number,
   fallback?: Omit<ResolveArabicInput, "id">,

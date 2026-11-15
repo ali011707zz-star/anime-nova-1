@@ -20,6 +20,7 @@ import { logger } from "./lib/logger";
 import { sbSelect } from "./lib/supabaseClient.js";
 import { setupSession, registerEmailAuthRoutes, registerGoogleAuthRoutes, registerGithubAuthRoutes } from "./auth/index.js";
 import sitemapRouter from "./routes/sitemap.js";
+import { getAnimeSeoEntryById, getArabicAnimeTitleById } from "./lib/arabicAnimeTitles.js";
 import crashReportRouter from "./routes/crashReport.js";
 import hlsProxyRouter from "./routes/hlsProxy.js";
 import { registerWebAdminRoutes } from "./routes/webAdmin.js";
@@ -389,22 +390,64 @@ export async function createApp(): Promise<Express> {
   // Dynamic sitemap.xml & robots.txt (must precede static files so /app + 100 anime URLs are always served)
   app.use(sitemapRouter);
 
-  // Dynamic SSR SEO injection for /, /app, /browse, /manga, /spacetoon, /cartoon, /animation
-  const renderSeoHtml = (reqPath: string): string | null => {
+  // Dynamic SSR SEO injection for /, /app, /browse, /manga, /spacetoon, /cartoon, /animation, /updates, /schedule, /search, /anime/:id
+  const _animeSeoExtraCache = new Map<number, { titleAr: string; titleEn: string; ts: number }>();
+  const escHtmlAttr = (v: string): string =>
+    String(v || "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  const resolveAnimeSeoMeta = async (animeId: number): Promise<{ titleAr: string; titleEn: string }> => {
+    const local = getAnimeSeoEntryById(animeId);
+    if (local && local.titleAr && local.titleEn) return local;
+    const cached = _animeSeoExtraCache.get(animeId);
+    if (cached && Date.now() - cached.ts < 6 * 3_600_000) return { titleAr: cached.titleAr, titleEn: cached.titleEn };
+    let titleEn = local?.titleEn || "";
+    let titleAr = local?.titleAr || "";
+    try {
+      const resp = await fetch("https://graphql.anilist.co", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          query: "query($id:Int){Media(id:$id,type:ANIME){id title{english romaji native} synonyms}}",
+          variables: { id: animeId },
+        }),
+        signal: AbortSignal.timeout(1800),
+      });
+      if (resp.ok) {
+        const json = await resp.json() as any;
+        const m = json?.data?.Media;
+        if (m) {
+          titleEn = m.title?.english || m.title?.romaji || titleEn;
+          if (!titleAr) {
+            titleAr = await getArabicAnimeTitleById(animeId, {
+              english: m.title?.english,
+              romaji: m.title?.romaji,
+              native: m.title?.native,
+              synonyms: m.synonyms,
+            });
+          }
+        }
+      }
+    } catch {}
+    _animeSeoExtraCache.set(animeId, { titleAr, titleEn, ts: Date.now() });
+    return { titleAr, titleEn };
+  };
+
+  const renderSeoHtml = async (reqPath: string): Promise<string | null> => {
     try {
       const rawHtml = fs.readFileSync(path.join(frontendDist, "index.html"), "utf8");
       const cleanPath = reqPath === "/" ? "/" : reqPath.replace(/\/+$/, "");
       const canonicalUrl = `https://animenovaa.duckdns.org${cleanPath === "/" ? "/" : cleanPath}`;
-
       let title = "أنمي نوفا | تطبيق وموقع Anime NOVA لمشاهدة وتحميل الأنمي المترجم والمدبلج والمانجا";
       let desc = "موقع وتطبيق أنمي نوفا (Anime NOVA) الرسمي لمشاهدة وتحميل الأنمي المترجم والمدبلج، قراءة المانجا والمانهوا، ومسلسلات سبيستون والكرتون مجاناً بجودة عالية FHD بدون إعلانات. حمل تطبيق انمي نوفا للأندرويد والتلفاز الذكي الآن.";
+      let ogImage = "https://animenovaa.duckdns.org/opengraph.jpg";
       let rootSeoHtml = "";
 
+      const animeMatch = cleanPath.match(/^\/anime\/(\d+)/);
       if (cleanPath === "/app") {
         title = "تطبيق أنمي نوفا الرسمي | تحميل تطبيق انمي نوفا للأندرويد والتلفاز الذكي Anime NOVA APK";
-        desc = "حمل تطبيق أنمي نوفا (Anime NOVA APK) الأصلي مجاناً للهواتف وشاشات التلفاز الذكية Android TV (كود Downloader: 2576388). مشاهدة وتحميل الأنمي المترجم والمدبلج، قراءة المانجا والمانهوا، ومسلسلات سبيستون والكرتون بدون إعلانات.";
+        desc = "حمل تطبيق أنمي نوفا (Anime NOVA APK v1.0.9) الأصلي مجاناً للهواتف وشاشات التلفاز الذكية Android TV (كود Downloader: 2576388). مشاهدة وتحميل الأنمي المترجم والمدبلج، قراءة المانجا والمانهوا، ومسلسلات سبيستون والكرتون بدون إعلانات.";
         rootSeoHtml = `<main dir="rtl" style="max-width:960px;margin:0 auto;padding:24px;color:#f4f4f5;font-family:Cairo,sans-serif;">
-          <h1>تطبيق أنمي نوفا الرسمي | تحميل تطبيق انمي نوفا للأندرويد والتلفاز الذكي (Anime NOVA APK v1.0.7)</h1>
+          <h1>تطبيق أنمي نوفا الرسمي | تحميل تطبيق انمي نوفا للأندرويد والتلفاز الذكي (Anime NOVA APK v1.0.9)</h1>
           <p>حمل <strong>تطبيق أنمي نوفا (Anime NOVA)</strong> الأصلي مجاناً لهواتف الأندرويد وشاشات التلفاز الذكية Android TV و Google TV و Fire TV عبر <strong>كود تطبيق Downloader: 2576388</strong> أو الرابط المباشر <a href="https://aftv.news/2576388">aftv.news/2576388</a>.</p>
           <h2>مميزات تطبيق أنمي نوفا للهاتف والتلفاز الذكي</h2>
           <ul>
@@ -415,33 +458,74 @@ export async function createApp(): Promise<Express> {
           </ul>
           <p><a href="https://animenovaa.duckdns.org/Anime-Nova.apk">تحميل تطبيق أنمي نوفا للهاتف (APK)</a> | <a href="https://animenovaa.duckdns.org/nova.apk">تحميل نسخة التلفاز الذكي (Android TV APK)</a> | <a href="https://animenovaa.duckdns.org/">تصفح موقع أنمي نوفا</a></p>
         </main>`;
+      } else if (animeMatch) {
+        const animeId = Number(animeMatch[1]);
+        const meta = await resolveAnimeSeoMeta(animeId);
+        const mainTitle = meta.titleAr || meta.titleEn || `أنمي #${animeId}`;
+        const subTitle = meta.titleEn && meta.titleAr && meta.titleEn !== meta.titleAr ? ` (${meta.titleEn})` : "";
+        title = `مشاهدة وتحميل أنمي ${mainTitle}${subTitle} مترجم | أنمي نوفا Anime NOVA`;
+        desc = `شاهد وحمّل جميع حلقات أنمي ${mainTitle}${subTitle} مترجمة بالعربية بجودة عالية 1080p FHD مجاناً وبدون إعلانات على موقع وتطبيق أنمي نوفا Anime NOVA.`;
+        ogImage = `https://img.anili.st/media/${animeId}`;
+        rootSeoHtml = `<main dir="rtl" style="max-width:960px;margin:0 auto;padding:24px;color:#f4f4f5;font-family:Cairo,sans-serif;">
+          <h1>أنمي ${escHtmlAttr(mainTitle)}${escHtmlAttr(subTitle)} مترجم — أنمي نوفا</h1>
+          <p>${escHtmlAttr(desc)}</p>
+          <nav aria-label="روابط أنمي نوفا">
+            <ul>
+              <li><a href="https://animenovaa.duckdns.org/">الرئيسية - أنمي نوفا</a></li>
+              <li><a href="https://animenovaa.duckdns.org/browse">تصفح مكتبة الأنمي</a></li>
+              <li><a href="https://animenovaa.duckdns.org/app">تحميل تطبيق أنمي نوفا APK v1.0.9</a></li>
+            </ul>
+          </nav>
+        </main>`;
       } else if (cleanPath === "/browse") {
         title = "تصفح مكتبة الأنمي المترجم | أنمي نوفا Anime NOVA";
         desc = "تصفح آلاف مسلسلات وأفلام الأنمي المترجمة بالعربية في موقع وتطبيق أنمي نوفا (Anime NOVA) مع فلترة متقدمة حسب التصنيف، السنة، والتقييم العالمي.";
+        rootSeoHtml = `<main dir="rtl" style="max-width:960px;margin:0 auto;padding:24px;color:#f4f4f5;font-family:Cairo,sans-serif;"><h1>تصفح مكتبة الأنمي المترجم | أنمي نوفا</h1><p>${escHtmlAttr(desc)}</p></main>`;
       } else if (cleanPath === "/manga") {
         title = "مكتبة المانجا والمانهوا المترجمة | تطبيق أنمي نوفا Anime NOVA";
         desc = "اقرأ وحمل أشهر أعمال المانجا اليابانية والمانهوا الكورية الملونة المترجمة للعربية حصرياً عبر تطبيق أنمي نوفا (Anime NOVA).";
+        rootSeoHtml = `<main dir="rtl" style="max-width:960px;margin:0 auto;padding:24px;color:#f4f4f5;font-family:Cairo,sans-serif;"><h1>مكتبة المانجا والمانهوا المترجمة | أنمي نوفا</h1><p>${escHtmlAttr(desc)}</p></main>`;
       } else if (cleanPath === "/spacetoon") {
         title = "مسلسلات وأفلام سبيستون المدبلجة | تطبيق أنمي نوفا Anime NOVA";
         desc = "شاهد وحمل أجمل مسلسلات وأفلام سبيستون الكلاسيكية والحديثة المدبلجة للعربية بجودة عالية عبر تطبيق أنمي نوفا (Anime NOVA).";
+        rootSeoHtml = `<main dir="rtl" style="max-width:960px;margin:0 auto;padding:24px;color:#f4f4f5;font-family:Cairo,sans-serif;"><h1>مسلسلات وأفلام سبيستون المدبلجة | أنمي نوفا</h1><p>${escHtmlAttr(desc)}</p></main>`;
       } else if (cleanPath === "/cartoon") {
         title = "كرتون مدبلج ومترجم | تطبيق وموقع أنمي نوفا Anime NOVA";
         desc = "مشاهدة وتحميل مسلسلات وأفلام الكرتون المدبلجة والمترجمة بالعربية بجودة عالية عبر تطبيق أنمي نوفا (Anime NOVA).";
+        rootSeoHtml = `<main dir="rtl" style="max-width:960px;margin:0 auto;padding:24px;color:#f4f4f5;font-family:Cairo,sans-serif;"><h1>كرتون مدبلج ومترجم | أنمي نوفا</h1><p>${escHtmlAttr(desc)}</p></main>`;
       } else if (cleanPath === "/animation") {
         title = "أفلام ومسلسلات الأنيميشن | تطبيق وموقع أنمي نوفا Anime NOVA";
         desc = "مشاهدة وتحميل أحدث أفلام ومسلسلات الأنيميشن العالمية مترجمة ومدبلجة بجودة 1080p FHD عبر تطبيق أنمي نوفا (Anime NOVA).";
+        rootSeoHtml = `<main dir="rtl" style="max-width:960px;margin:0 auto;padding:24px;color:#f4f4f5;font-family:Cairo,sans-serif;"><h1>أفلام ومسلسلات الأنيميشن | أنمي نوفا</h1><p>${escHtmlAttr(desc)}</p></main>`;
+      } else if (cleanPath === "/updates") {
+        title = "أحدث حلقات الأنمي المضافة اليوم | أنمي نوفا Anime NOVA";
+        desc = "تابع أحدث حلقات الأنمي المترجمة فور صدورها يومياً بجودة عالية FHD وبدون إعلانات عبر أنمي نوفا.";
+        rootSeoHtml = `<main dir="rtl" style="max-width:960px;margin:0 auto;padding:24px;color:#f4f4f5;font-family:Cairo,sans-serif;"><h1>أحدث حلقات الأنمي المضافة اليوم | أنمي نوفا</h1><p>${escHtmlAttr(desc)}</p></main>`;
+      } else if (cleanPath === "/schedule") {
+        title = "جدول مواعيد عرض حلقات الأنمي الأسبوعي | أنمي نوفا Anime NOVA";
+        desc = "تعرّف على جدول مواعيد عرض الحلقات الجديدة للأنميات الموسمية على مدار الأسبوع بتوقيتك المحلي في أنمي نوفا.";
+        rootSeoHtml = `<main dir="rtl" style="max-width:960px;margin:0 auto;padding:24px;color:#f4f4f5;font-family:Cairo,sans-serif;"><h1>جدول مواعيد عرض حلقات الأنمي الأسبوعي | أنمي نوفا</h1><p>${escHtmlAttr(desc)}</p></main>`;
+      } else if (cleanPath === "/search") {
+        title = "البحث في مكتبة الأنمي والمانجا | أنمي نوفا Anime NOVA";
+        desc = "ابحث باللغة العربية أو الإنجليزية عن أي أنمي أو مانجا أو كرتون مدبلج وشاهده مجاناً عبر أنمي نوفا.";
+        rootSeoHtml = `<main dir="rtl" style="max-width:960px;margin:0 auto;padding:24px;color:#f4f4f5;font-family:Cairo,sans-serif;"><h1>البحث في مكتبة أنمي نوفا</h1><p>${escHtmlAttr(desc)}</p></main>`;
       }
 
+      const safeTitle = escHtmlAttr(title);
+      const safeDesc = escHtmlAttr(desc);
+      const safeCanonical = escHtmlAttr(canonicalUrl);
+      const safeOgImg = escHtmlAttr(ogImage);
       let html = rawHtml
-        .replace(/<title>[\s\S]*?<\/title>/i, `<title>${title}</title>`)
-        .replace(/<meta name="description" content="[^"]*" \/>/i, `<meta name="description" content="${desc}" />`)
-        .replace(/<link rel="canonical" href="[^"]*" \/>/i, `<link rel="canonical" href="${canonicalUrl}" />`)
-        .replace(/<meta property="og:title" content="[^"]*" \/>/i, `<meta property="og:title" content="${title}" />`)
-        .replace(/<meta property="og:description" content="[^"]*" \/>/i, `<meta property="og:description" content="${desc}" />`)
-        .replace(/<meta property="og:url" content="[^"]*" \/>/i, `<meta property="og:url" content="${canonicalUrl}" />`)
-        .replace(/<meta name="twitter:title" content="[^"]*" \/>/i, `<meta name="twitter:title" content="${title}" />`)
-        .replace(/<meta name="twitter:description" content="[^"]*" \/>/i, `<meta name="twitter:description" content="${desc}" />`);
-
+        .replace(/<title>[\s\S]*?<\/title>/i, `<title>${safeTitle}</title>`)
+        .replace(/<meta name="description" content="[^"]*" \/>/i, `<meta name="description" content="${safeDesc}" />`)
+        .replace(/<link rel="canonical" href="[^"]*" \/>/i, `<link rel="canonical" href="${safeCanonical}" />`)
+        .replace(/<meta property="og:title" content="[^"]*" \/>/i, `<meta property="og:title" content="${safeTitle}" />`)
+        .replace(/<meta property="og:description" content="[^"]*" \/>/i, `<meta property="og:description" content="${safeDesc}" />`)
+        .replace(/<meta property="og:url" content="[^"]*" \/>/i, `<meta property="og:url" content="${safeCanonical}" />`)
+        .replace(/<meta property="og:image" content="[^"]*" \/>/i, `<meta property="og:image" content="${safeOgImg}" />`)
+        .replace(/<meta name="twitter:title" content="[^"]*" \/>/i, `<meta name="twitter:title" content="${safeTitle}" />`)
+        .replace(/<meta name="twitter:description" content="[^"]*" \/>/i, `<meta name="twitter:description" content="${safeDesc}" />`)
+        .replace(/<meta name="twitter:image" content="[^"]*" \/>/i, `<meta name="twitter:image" content="${safeOgImg}" />`);
       if (rootSeoHtml) {
         html = html.replace(/<div id="root">[\s\S]*?<\/main>\s*<\/div>/i, `<div id="root">${rootSeoHtml}</div>`);
       }
@@ -453,9 +537,10 @@ export async function createApp(): Promise<Express> {
 
   // Serve static files except index.html so "/" also goes through renderSeoHtml with no-cache
   app.use(express.static(frontendDist, { maxAge: 0, etag: true, index: false }));
-  app.get("/{*path}", (req, res) => {
+
+  app.get("/{*path}", async (req, res) => {
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-    const html = renderSeoHtml(req.path || "/");
+    const html = await renderSeoHtml(req.path || "/");
     if (html) {
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.status(200).send(html);
