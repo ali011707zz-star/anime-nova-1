@@ -1,7 +1,7 @@
 import { API_BASE } from "@/lib/apiBase";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useLocation, useSearch } from "wouter";
-import { ChevronRight, Play, Loader2 } from "lucide-react";
+import { ChevronRight, Play, Loader2, Eye, EyeOff } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AnimeMascot } from "@/components/AnimeMascot";
 import SEO from "@/components/SEO";
@@ -28,6 +28,7 @@ export default function AwDubbedDetail() {
   const [episodes,   setEpisodes]   = useState<Episode[]>([]);
   const [epLoading,  setEpLoading]  = useState(false);
   const [epProgress, setEpProgress] = useState<Record<number, number>>({});
+  const [watchedSet, setWatchedSet] = useState<Set<number>>(new Set());
   const [epOrder, setEpOrder] = useState<"desc" | "asc">("desc");
   const [exclusiveEpisode, setExclusiveEpisode] = useState<number | null>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -47,6 +48,28 @@ export default function AwDubbedDetail() {
       .then(d => { setEpisodes(d.episodes || []); setEpLoading(false); })
       .catch(() => setEpLoading(false));
   }, [curSeason?.animeId]);
+
+  const watchedStorageKey = `watched-aw-dubbed-${curSeason?.animeId || key || ""}`;
+
+  useEffect(() => {
+    if (!curSeason) return;
+    try {
+      const raw = localStorage.getItem(watchedStorageKey);
+      setWatchedSet(new Set(raw ? JSON.parse(raw) : []));
+    } catch {
+      setWatchedSet(new Set());
+    }
+  }, [curSeason, watchedStorageKey]);
+
+  const toggleWatched = (epNum: number) => {
+    setWatchedSet(prev => {
+      const next = new Set(prev);
+      if (next.has(epNum)) next.delete(epNum);
+      else next.add(epNum);
+      try { localStorage.setItem(watchedStorageKey, JSON.stringify([...next])); } catch {}
+      return next;
+    });
+  };
 
   /* تقدم المشاهدة */
   useEffect(() => {
@@ -193,7 +216,7 @@ export default function AwDubbedDetail() {
         ) : (
           [...episodes].sort((a, b) => epOrder === "desc" ? b.number - a.number : a.number - b.number).map((ep, i) => {
             const pct     = progressPct(ep);
-            const watched = pct >= 90;
+            const watched = watchedSet.has(ep.number) || pct >= 90;
             const progSec = epProgress[ep.number] || 0;
             return (
               <motion.div key={ep.number}
@@ -241,7 +264,14 @@ export default function AwDubbedDetail() {
 
                 {/* Info */}
                 <div className="flex-1 min-w-0 text-right">
-                  <p className="text-[12px] font-black text-white font-['Cairo'] leading-tight">الحلقة {ep.number}</p>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-[12px] font-black text-white font-['Cairo'] leading-tight">الحلقة {ep.number}</p>
+                    {watched && (
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold font-['Cairo'] bg-emerald-500/15 border border-emerald-500/35 text-emerald-400">
+                        تمت المشاهدة
+                      </span>
+                    )}
+                  </div>
                   {progSec > 30 && !watched && (
                     <span className="text-[8.5px] text-emerald-400/70 font-['Cairo'] font-bold mt-0.5 block">
                       {Math.floor(progSec / 60)}:{String(Math.floor(progSec % 60)).padStart(2, "0")} ▶
@@ -249,8 +279,20 @@ export default function AwDubbedDetail() {
                   )}
                 </div>
 
-                {/* Play button */}
-                <div className="shrink-0">
+                {/* Eye toggle + Play button */}
+                <div className="shrink-0 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); toggleWatched(ep.number); }}
+                    aria-label={watched ? `إلغاء مشاهدة الحلقة ${ep.number}` : `تحديد الحلقة ${ep.number} كمشاهدة`}
+                    className={`w-8 h-8 rounded-xl flex items-center justify-center border transition-all active:scale-90 ${
+                      watched
+                        ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-400"
+                        : "bg-white/5 border-white/10 text-white/35 hover:text-white/60"
+                    }`}
+                  >
+                    {watched ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                  </button>
                   <div className="w-8 h-8 rounded-xl flex items-center justify-center"
                     style={{ background: "rgba(16,185,129,0.10)", border: "1px solid rgba(16,185,129,0.22)" }}>
                     <Play className="w-3.5 h-3.5 text-emerald-400 fill-emerald-400" />

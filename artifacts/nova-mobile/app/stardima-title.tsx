@@ -227,12 +227,41 @@ export default function StardimaTitleScreen() {
       fontSize: 9,
       fontFamily: "Cairo_700Bold",
     },
-    episodeInfo: { flex: 1, alignItems: ALIGN_RIGHT },
+    episodeMain: { flex: 1, flexDirection: ROW_RTL, alignItems: "center", gap: 12 },
+    episodeInfo: { flex: 1, alignItems: ALIGN_RIGHT, gap: 2 },
+    episodeTitleRow: { flexDirection: ROW_RTL, alignItems: "center", gap: 8 },
     episodeTitle: {
       color: colors.textPrimary,
       fontFamily: "Cairo_700Bold",
       fontSize: 14,
       textAlign: "right",
+    },
+    watchedBadge: {
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      borderRadius: 6,
+      backgroundColor: "rgba(16,185,129,0.16)",
+      borderWidth: 1,
+      borderColor: "rgba(16,185,129,0.35)",
+    },
+    watchedBadgeText: {
+      fontSize: 10,
+      fontFamily: "Cairo_700Bold",
+      color: "#10B981",
+    },
+    eyeBtn: {
+      width: 36,
+      height: 36,
+      borderRadius: 11,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.surfaceElevated,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    eyeBtnWatched: {
+      backgroundColor: "rgba(16,185,129,0.16)",
+      borderColor: "rgba(16,185,129,0.45)",
     },
     episodeMeta: {
       color: colors.textSecondary,
@@ -269,7 +298,20 @@ export default function StardimaTitleScreen() {
   const [episodes, setEpisodes] = useState<CatalogEpisode[]>([]);
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
   const [episodeProgress, setEpisodeProgress] = useState<Record<string, EpisodeProgress>>({});
+  const [watchedSet, setWatchedSet] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
+  const watchedStorageKey = `watched-stardima-${providerTitleId}-s${selectedSeason || 1}`;
+
+  const toggleWatched = useCallback((epNum: number) => {
+    if (!providerTitleId) return;
+    setWatchedSet((prev) => {
+      const next = new Set(prev);
+      if (next.has(epNum)) next.delete(epNum);
+      else next.add(epNum);
+      void AsyncStorage.setItem(watchedStorageKey, JSON.stringify([...next])).catch(() => {});
+      return next;
+    });
+  }, [providerTitleId, watchedStorageKey]);
   const [error, setError] = useState("");
   const requestRef = useRef<AbortController | null>(null);
 
@@ -334,6 +376,16 @@ export default function StardimaTitleScreen() {
 
   useFocusEffect(useCallback(() => {
     let active = true;
+    if (providerTitleId) {
+      void AsyncStorage.getItem(watchedStorageKey).then((raw) => {
+        if (!active) return;
+        try {
+          setWatchedSet(new Set(raw ? JSON.parse(raw) : []));
+        } catch {
+          setWatchedSet(new Set());
+        }
+      }).catch(() => {});
+    }
     if (!providerTitleId || visibleEpisodes.length === 0) {
       setEpisodeProgress({});
       return () => { active = false; };
@@ -375,80 +427,124 @@ export default function StardimaTitleScreen() {
     const progressPercent = progress?.duration
       ? Math.min(100, Math.max(0, (progress.position / progress.duration) * 100))
       : 0;
+    const isEpWatched = watchedSet.has(episodeNumber) || progressPercent >= 90;
+
     return (
-      <Pressable
-        onPress={() => router.push({
-          pathname: "/stardima-servers" as any,
-          params: {
-            providerTitleId,
-            episodeId: String(item.id || ""),
-            episodeNumber: String(episodeNumber),
-            seasonNumber: String(Number(item.season_number) || 1),
-            episodeTitle: isMovie ? "الفيلم" : item.title || "",
-            title: titleText(title),
-            mediaType: isMovie ? "movie" : "series",
-            poster: title?.poster_url || "",
-            episodeIndex: String(Math.max(0, globalIndex)),
-            totalEpisodes: String(orderedEpisodes.length),
-            ...(previous ? {
-              prevEpisodeId: String(previous.id),
-              prevEpisodeNumber: String(Number(previous.episode_number) || 1),
-              prevSeasonNumber: String(Number(previous.season_number) || 1),
-              prevEpisodeTitle: previous.title || `الحلقة ${previous.episode_number}`,
-              prevEpisodeIndex: String(globalIndex - 1),
-            } : {}),
-            ...(next ? {
-              nextEpisodeId: String(next.id),
-              nextEpisodeNumber: String(Number(next.episode_number) || 1),
-              nextSeasonNumber: String(Number(next.season_number) || 1),
-              nextEpisodeTitle: next.title || `الحلقة ${next.episode_number}`,
-              nextEpisodeIndex: String(globalIndex + 1),
-            } : {}),
-          },
-        })}
-        focusable={tvMode}
-        accessibilityRole="button"
-        accessibilityLabel={isMovie ? "عرض روابط مشاهدة الفيلم" : `عرض روابط الحلقة ${episodeNumber}`}
-        style={({ pressed, focused }) => [
+      <View
+        style={[
           styles.episodeRow,
-          { opacity: pressed ? 0.78 : 1 },
-          tvMode && focused && tvFocusStyle(true),
+          { borderColor: isEpWatched ? "rgba(16,185,129,0.28)" : colors.border },
         ]}
       >
-        <View style={styles.episodeThumb}>
-          {title?.poster_url ? (
-            <Image source={{ uri: title.poster_url }} style={StyleSheet.absoluteFill} resizeMode="cover" />
-          ) : null}
-          <View style={styles.episodePlayOverlay}>
-            <View style={styles.episodePlayCircle}>
-              <Ionicons name="play" size={12} color="#fff" style={{ marginLeft: 1 }} />
+        <Pressable
+          onPress={() => {
+            if (providerTitleId) {
+              setWatchedSet((prev) => {
+                const nextSet = new Set(prev);
+                nextSet.add(episodeNumber);
+                void AsyncStorage.setItem(watchedStorageKey, JSON.stringify([...nextSet])).catch(() => {});
+                return nextSet;
+              });
+            }
+            router.push({
+              pathname: "/stardima-servers" as any,
+              params: {
+                providerTitleId,
+                episodeId: String(item.id || ""),
+                episodeNumber: String(episodeNumber),
+                seasonNumber: String(Number(item.season_number) || 1),
+                episodeTitle: isMovie ? "الفيلم" : item.title || "",
+                title: titleText(title),
+                mediaType: isMovie ? "movie" : "series",
+                poster: title?.poster_url || "",
+                episodeIndex: String(Math.max(0, globalIndex)),
+                totalEpisodes: String(orderedEpisodes.length),
+                ...(previous ? {
+                  prevEpisodeId: String(previous.id),
+                  prevEpisodeNumber: String(Number(previous.episode_number) || 1),
+                  prevSeasonNumber: String(Number(previous.season_number) || 1),
+                  prevEpisodeTitle: previous.title || `الحلقة ${previous.episode_number}`,
+                  prevEpisodeIndex: String(globalIndex - 1),
+                } : {}),
+                ...(next ? {
+                  nextEpisodeId: String(next.id),
+                  nextEpisodeNumber: String(Number(next.episode_number) || 1),
+                  nextSeasonNumber: String(Number(next.season_number) || 1),
+                  nextEpisodeTitle: next.title || `الحلقة ${next.episode_number}`,
+                  nextEpisodeIndex: String(globalIndex + 1),
+                } : {}),
+              },
+            });
+          }}
+          focusable={tvMode}
+          accessibilityRole="button"
+          accessibilityLabel={isMovie ? "عرض روابط مشاهدة الفيلم" : `عرض روابط الحلقة ${episodeNumber}`}
+          style={({ pressed, focused }) => [
+            styles.episodeMain,
+            { opacity: pressed ? 0.78 : 1 },
+            tvMode && focused && tvFocusStyle(true),
+          ]}
+        >
+          <View style={styles.episodeThumb}>
+            {title?.poster_url ? (
+              <Image source={{ uri: title.poster_url }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+            ) : null}
+            <View style={styles.episodePlayOverlay}>
+              <View style={styles.episodePlayCircle}>
+                <Ionicons
+                  name={isEpWatched ? "checkmark" : "play"}
+                  size={isEpWatched ? 15 : 12}
+                  color="#fff"
+                  style={isEpWatched ? undefined : { marginLeft: 1 }}
+                />
+              </View>
+            </View>
+            <View style={styles.episodeNumBadge}>
+              <Text style={styles.episodeNumText}>{episodeNumber}</Text>
             </View>
           </View>
-          <View style={styles.episodeNumBadge}>
-            <Text style={styles.episodeNumText}>{episodeNumber}</Text>
-          </View>
-        </View>
-        <View style={styles.episodeInfo}>
-          <Text style={[styles.episodeTitle, tvMode && { fontSize: 16 }]}>
-            {isMovie ? "تشغيل الفيلم" : item.title || `الحلقة ${episodeNumber}`}
-          </Text>
-          <Text style={[styles.episodeMeta, tvMode && { fontSize: 12 }]}>
-            {isMovie
-              ? "فيلم كامل"
-              : `الموسم ${Number(item.season_number) || 1}`}
-            {progress?.position ? ` · متابعة من ${Math.floor(progress.position / 60)} دقيقة` : ""}
-          </Text>
-          {progressPercent > 0 && progressPercent < 90 ? (
-            <View style={styles.progressTrack}>
-              <View style={[styles.progressFill, { width: `${progressPercent}%` }]} />
+          <View style={styles.episodeInfo}>
+            <View style={styles.episodeTitleRow}>
+              <Text style={[styles.episodeTitle, tvMode && { fontSize: 16 }]}>
+                {isMovie ? "تشغيل الفيلم" : item.title || `الحلقة ${episodeNumber}`}
+              </Text>
+              {isEpWatched ? (
+                <View style={styles.watchedBadge}>
+                  <Text style={styles.watchedBadgeText}>تمت المشاهدة</Text>
+                </View>
+              ) : null}
             </View>
-          ) : null}
-          {progressPercent >= 90 ? (
-            <Text style={[styles.episodeMeta, { color: "#10B981" }]}>تمت المشاهدة</Text>
-          ) : null}
-        </View>
-        <Ionicons name="chevron-back" size={16} color={colors.textMuted} />
-      </Pressable>
+            <Text style={[styles.episodeMeta, tvMode && { fontSize: 12 }]}>
+              {isMovie
+                ? "فيلم كامل"
+                : `الموسم ${Number(item.season_number) || 1}`}
+              {progress?.position ? ` · متابعة من ${Math.floor(progress.position / 60)} دقيقة` : ""}
+            </Text>
+            {progressPercent > 0 && progressPercent < 90 && !isEpWatched ? (
+              <View style={styles.progressTrack}>
+                <View style={[styles.progressFill, { width: `${progressPercent}%` }]} />
+              </View>
+            ) : null}
+          </View>
+        </Pressable>
+        <Pressable
+          onPress={() => toggleWatched(episodeNumber)}
+          focusable={tvMode}
+          style={({ focused }) => [
+            styles.eyeBtn,
+            isEpWatched && styles.eyeBtnWatched,
+            tvMode && focused && tvFocusStyle(true),
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel={isEpWatched ? `إلغاء مشاهدة الحلقة ${episodeNumber}` : `تحديد الحلقة ${episodeNumber} كمشاهدة`}
+        >
+          <Ionicons
+            name={isEpWatched ? "eye-outline" : "eye-off-outline"}
+            size={tvMode ? 17 : 16}
+            color={isEpWatched ? "#10B981" : colors.textMuted}
+          />
+        </Pressable>
+      </View>
     );
   };
 
