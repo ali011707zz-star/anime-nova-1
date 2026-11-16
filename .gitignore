@@ -89,3 +89,6 @@ archive/prototypes/nova-mobile-2/extracted/
 .env.prev
 artifacts/anime-scraper/.env.production
 artifacts/nova-mobile/.env.production
+
+# Expo OTA build output
+artifacts/nova-mobile/ota-dist/

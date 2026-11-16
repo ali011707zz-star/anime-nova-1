@@ -23,6 +23,7 @@ import sitemapRouter from "./routes/sitemap.js";
 import { getAnimeSeoEntryById, getArabicAnimeTitleById } from "./lib/arabicAnimeTitles.js";
 import crashReportRouter from "./routes/crashReport.js";
 import hlsProxyRouter from "./routes/hlsProxy.js";
+import otaRouter from "./routes/ota.js";
 import { registerWebAdminRoutes } from "./routes/webAdmin.js";
 import analyticsRouter from "./routes/analytics.js";
 import deviceLinkRouter from "./routes/deviceLink.js";
@@ -181,8 +182,9 @@ export async function createApp(): Promise<Express> {
   registerGithubAuthRoutes(app);
   registerWebAdminRoutes(app);
 
-  // ── توكن المصادقة (يجب أن يسبق Middleware الحماية) ──
+  // ── توكن المصادقة وتحديثات OTA الهوائية (تسبق Middleware الحماية) ──
   app.use(authTokenRouter);
+  app.use("/api/ota", otaRouter);
 
   // ── Mobile release gate ───────────────────────────────────────────────────
   // Web requests remain public as before. Any request identifying itself as the
