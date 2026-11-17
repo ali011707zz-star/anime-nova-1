@@ -295,6 +295,7 @@ let lastNewReleasesCheckAt = 0;
 let catalogBuildPromise: Promise<void> | null = null;
 let subClassifierRunning = false;
 let diskLoaded = false;
+let cachedPublicCatalog: StardimaV2CatalogItem[] | null = null;
 
 const detailCache = new Map<string, { expiresAt: number; value: StardimaV2Detail }>();
 const detailInFlight = new Map<string, Promise<StardimaV2Detail>>();
@@ -370,6 +371,7 @@ function loadDiskCacheIfNeeded(): void {
 }
 
 function saveDiskCache(): void {
+  cachedPublicCatalog = null;
   try {
     const filePath = resolveDataFilePath();
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -746,17 +748,19 @@ function toPublicEntry(item: RawScrapedItem): StardimaV2CatalogItem {
 
 export async function getStardimaV2Catalog(forceRefresh = false): Promise<StardimaV2CatalogItem[]> {
   loadDiskCacheIfNeeded();
-
   if (forceRefresh || rawCatalog.length === 0) {
     await rebuildFullCatalog();
+    cachedPublicCatalog = null;
   } else if (Date.now() - lastCatalogBuildAt > CATALOG_TTL_MS) {
     void rebuildFullCatalog();
   } else {
     void refreshNewReleases();
     startBackgroundSubClassifier();
   }
-
-  return rawCatalog.filter(isItemEligible).map(toPublicEntry);
+  if (!cachedPublicCatalog) {
+    cachedPublicCatalog = rawCatalog.filter(isItemEligible).map(toPublicEntry);
+  }
+  return cachedPublicCatalog;
 }
 
 export function findStardimaV2ByIdOrSlug(slugOrId: string): StardimaV2CatalogItem | null {

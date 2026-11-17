@@ -89,7 +89,11 @@ interface Cartoon2CacheEntry {
 type TabKey = "animation" | "spacetoon" | "cartoon" | "cartoon2";
 type Cartoon2TypeFilter = "all" | "series" | "movie";
 type Cartoon2OrderFilter = "newest" | "oldest" | "title";
+const CARTOON2_CATALOG_CACHE_KEY = "nova:cartoon2-catalog:v1";
 const cartoon2CatalogCache = new Map<string, Cartoon2CacheEntry>();
+let cartoon2StorageHydrated = false;
+let cartoon2PrewarmPromise: Promise<void> | null = null;
+
 function rememberCartoon2Catalog(key: string, entry: Cartoon2CacheEntry): void {
   cartoon2CatalogCache.delete(key);
   cartoon2CatalogCache.set(key, entry);
@@ -98,6 +102,60 @@ function rememberCartoon2Catalog(key: string, entry: Cartoon2CacheEntry): void {
     if (oldest === undefined) break;
     cartoon2CatalogCache.delete(oldest);
   }
+  if (key === "all|newest|" && entry.items.length > 0) {
+    AsyncStorage.setItem(
+      CARTOON2_CATALOG_CACHE_KEY,
+      JSON.stringify({
+        items: entry.items.slice(0, 72),
+        page: entry.page,
+        totalPages: entry.totalPages,
+        savedAt: entry.savedAt,
+      }),
+    ).catch(() => {});
+  }
+}
+
+async function hydrateAndPrewarmCartoon2Catalog(): Promise<void> {
+  if (!cartoon2StorageHydrated) {
+    cartoon2StorageHydrated = true;
+    try {
+      const raw = await AsyncStorage.getItem(CARTOON2_CATALOG_CACHE_KEY);
+      if (raw && !cartoon2CatalogCache.has("all|newest|")) {
+        const parsed = JSON.parse(raw) as Cartoon2CacheEntry;
+        if (parsed && Array.isArray(parsed.items) && parsed.items.length > 0) {
+          cartoon2CatalogCache.set("all|newest|", {
+            items: parsed.items,
+            page: Number(parsed.page) || 1,
+            totalPages: Math.max(1, Number(parsed.totalPages) || 1),
+            savedAt: Number(parsed.savedAt) || 0,
+          });
+        }
+      }
+    } catch {}
+  }
+  const existing = cartoon2CatalogCache.get("all|newest|");
+  if (existing && Date.now() - existing.savedAt < 5 * 60_000) return;
+  if (cartoon2PrewarmPromise) return cartoon2PrewarmPromise;
+  cartoon2PrewarmPromise = (async () => {
+    try {
+      const BASE = getBaseUrl();
+      const r = await fetch(`${BASE}/api/dubbed/sd2/catalog?page=1&limit=36&type=all&order=newest`);
+      if (!r.ok) return;
+      const d = await r.json();
+      const results: Cartoon2Item[] = Array.isArray(d?.results) ? d.results.filter(isCartoon2Item) : [];
+      if (results.length > 0) {
+        rememberCartoon2Catalog("all|newest|", {
+          items: results,
+          page: 1,
+          totalPages: Math.max(1, Number(d?.totalPages) || 1),
+          savedAt: Date.now(),
+        });
+      }
+    } catch {} finally {
+      cartoon2PrewarmPromise = null;
+    }
+  })();
+  return cartoon2PrewarmPromise;
 }
 const CARTOON_CATALOG_CACHE_KEY = "nova:cartoon-catalog:v2";
 const CARTOON_CATALOG_CACHE_LIMIT = 60;
@@ -1131,6 +1189,17 @@ function Cartoon2List({ searchQ }: { searchQ: string }) {
       setFailedPage(null);
     }
     if (cached && Date.now() - cached.savedAt < SPACETOON_CATALOG_CACHE_TTL_MS) return;
+    if (!cached && cacheKey === "all|newest|") {
+      void hydrateAndPrewarmCartoon2Catalog().then(() => {
+        const hydrated = cartoon2CatalogCache.get("all|newest|");
+        if (hydrated && hydrated.items.length > 0) {
+          setItems(hydrated.items);
+          setPage(hydrated.page);
+          setTotalPages(hydrated.totalPages);
+          setLoading(false);
+        }
+      });
+    }
     const timer = setTimeout(() => { void loadPage(1, true); }, queryPart ? 300 : 0);
     return () => clearTimeout(timer);
   }, [cacheKey, loadPage, queryPart]);
@@ -1302,6 +1371,10 @@ export default function DubbedTabScreen() {
   // Tab underline slide animation
   const tabPosition = (tab: TabKey) => tab === "animation" ? 0 : tab === "spacetoon" ? 1 : tab === "cartoon" ? 2 : 3;
   const slideAnim = useRef(new Animated.Value(tabPosition(requestedTab))).current;
+  useEffect(() => {
+    void hydrateAndPrewarmCartoon2Catalog();
+  }, []);
+
   useEffect(() => {
     setActiveTab(requestedTab);
     slideAnim.setValue(tabPosition(requestedTab));

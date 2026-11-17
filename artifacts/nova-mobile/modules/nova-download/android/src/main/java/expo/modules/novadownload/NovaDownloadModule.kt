@@ -65,6 +65,7 @@ class NovaDownloadModule : Module() {
         throw IllegalStateException("Cannot create downloads directory")
       }
 
+      runCatching { destination.resolve(safeFileName).delete() }
       val request = DownloadManager.Request(Uri.parse(url))
         .setTitle(title.take(120))
         .setDescription(description.take(240))

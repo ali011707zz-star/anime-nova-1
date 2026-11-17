@@ -981,20 +981,39 @@ export default function DubbedWatchScreen() {
   const fhdSlots = slots.filter((s) => s.quality === "1080p");
   const hdSlots = slots.filter((s) => s.quality === "720p");
 
+  const isLightTheme =
+    colors.background.toLowerCase() === "#ffffff" ||
+    colors.background.toLowerCase() === "#f8fafc" ||
+    colors.textPrimary.toLowerCase().startsWith("#0") ||
+    colors.textPrimary.toLowerCase().startsWith("#1");
+
+  const compactSeason = (() => {
+    const raw = String(season || "").trim();
+    if (!raw) return isMovieEntry ? "الفيلم" : "";
+    const sMatch = raw.match(/(?:\bS|Season\s*|الموسم\s*)(\d{1,2})\b/i);
+    if (sMatch) return `الموسم ${parseInt(sMatch[1], 10)}`;
+    if (raw.length > 18) return isMovieEntry ? "الفيلم" : "الموسم 1";
+    return raw;
+  })();
+
   /* ── Unified Server Picker Screen ── */
   return (
     <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
       <RewardedAdPrompt />
 
       {/* Top Header with Refresh + Next + Previous + Title + Back */}
-      <View style={styles.header}>
+      <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <View style={styles.epNavRow}>
           <Pressable
             onPress={() => void runAvailabilityQuery()}
             focusable={tvMode}
-            style={({ focused }) => [styles.refreshBtn, tvMode && tvFocusStyle(focused)]}
+            style={({ focused }) => [
+              styles.refreshBtn,
+              isLightTheme && { backgroundColor: "rgba(124,58,237,0.10)", borderColor: "rgba(124,58,237,0.28)" },
+              tvMode && tvFocusStyle(focused),
+            ]}
           >
-            <Ionicons name="refresh" size={15} color="#A78BFA" />
+            <Ionicons name="refresh" size={15} color={isLightTheme ? "#7C3AED" : "#A78BFA"} />
           </Pressable>
 
           <Pressable
@@ -1003,12 +1022,28 @@ export default function DubbedWatchScreen() {
             focusable={tvMode && Boolean(nextEpRef)}
             style={({ focused }) => [
               styles.epNavBtn,
-              !nextEpRef && styles.epNavBtnDisabled,
+              isLightTheme && { backgroundColor: "rgba(124,58,237,0.10)", borderColor: "rgba(124,58,237,0.28)" },
+              !nextEpRef && [
+                styles.epNavBtnDisabled,
+                isLightTheme && { backgroundColor: "rgba(15,23,42,0.04)", borderColor: colors.border },
+              ],
               tvMode && tvFocusStyle(focused),
             ]}
           >
-            <Ionicons name="chevron-back" size={13} color={nextEpRef ? "#C4B5FD" : "rgba(255,255,255,0.2)"} />
-            <Text style={[styles.epNavText, !nextEpRef && styles.epNavTextDisabled]}>التالية</Text>
+            <Ionicons
+              name="chevron-back"
+              size={13}
+              color={nextEpRef ? (isLightTheme ? "#6D28D9" : "#C4B5FD") : colors.textMuted}
+            />
+            <Text
+              style={[
+                styles.epNavText,
+                { color: isLightTheme ? "#6D28D9" : "#DDD6FE" },
+                !nextEpRef && { color: colors.textMuted },
+              ]}
+            >
+              التالية
+            </Text>
           </Pressable>
 
           <Pressable
@@ -1017,34 +1052,56 @@ export default function DubbedWatchScreen() {
             focusable={tvMode && Boolean(prevEpRef)}
             style={({ focused }) => [
               styles.epNavBtn,
-              !prevEpRef && styles.epNavBtnDisabled,
+              isLightTheme && { backgroundColor: "rgba(124,58,237,0.10)", borderColor: "rgba(124,58,237,0.28)" },
+              !prevEpRef && [
+                styles.epNavBtnDisabled,
+                isLightTheme && { backgroundColor: "rgba(15,23,42,0.04)", borderColor: colors.border },
+              ],
               tvMode && tvFocusStyle(focused),
             ]}
           >
-            <Text style={[styles.epNavText, !prevEpRef && styles.epNavTextDisabled]}>السابقة</Text>
-            <Ionicons name="chevron-forward" size={13} color={prevEpRef ? "#C4B5FD" : "rgba(255,255,255,0.2)"} />
+            <Text
+              style={[
+                styles.epNavText,
+                { color: isLightTheme ? "#6D28D9" : "#DDD6FE" },
+                !prevEpRef && { color: colors.textMuted },
+              ]}
+            >
+              السابقة
+            </Text>
+            <Ionicons
+              name="chevron-forward"
+              size={13}
+              color={prevEpRef ? (isLightTheme ? "#6D28D9" : "#C4B5FD") : colors.textMuted}
+            />
           </Pressable>
         </View>
 
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>{title}</Text>
-          <Text style={[styles.headerSub, { color: colors.textSecondary }]}>
-            {season ? `${season} · ` : ""}الحلقة {episodeNumber}
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1} ellipsizeMode="tail">
+            {title}
+          </Text>
+          <Text style={[styles.headerSub, { color: colors.textSecondary }]} numberOfLines={1} ellipsizeMode="tail">
+            {compactSeason ? `${compactSeason} · ` : ""}الحلقة {episodeNumber}
           </Text>
         </View>
 
         <Pressable
           onPress={handleBack}
           focusable={tvMode}
-          style={({ focused }) => [styles.backBtn, tvMode && tvFocusStyle(focused)]}
+          style={({ focused }) => [
+            styles.backBtn,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+            tvMode && tvFocusStyle(focused),
+          ]}
         >
-          <Ionicons name="chevron-forward" size={20} color="#fff" />
+          <Ionicons name="chevron-forward" size={20} color={colors.textPrimary} />
         </Pressable>
       </View>
 
       <ScrollView contentContainerStyle={styles.pickerContent} showsVerticalScrollIndicator={false}>
         {/* Info Banner Card */}
-        <View style={styles.infoCard}>
+        <View style={[styles.infoCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
           {posterUrl ? (
             <Image source={{ uri: posterUrl }} style={styles.posterThumb} resizeMode="cover" />
           ) : (
@@ -1053,22 +1110,31 @@ export default function DubbedWatchScreen() {
             </View>
           )}
           <View style={styles.infoTextWrap}>
-            <Text style={styles.infoTitle} numberOfLines={2}>{title}</Text>
-            <View style={styles.epPill}>
-              <Ionicons name="play-circle" size={13} color="#C4B5FD" />
-              <Text style={styles.epPillText}>الحلقة {episodeNumber}</Text>
+            <Text style={[styles.infoTitle, { color: colors.textPrimary }]} numberOfLines={2}>
+              {title}
+            </Text>
+            <View
+              style={[
+                styles.epPill,
+                isLightTheme && { backgroundColor: "rgba(124,58,237,0.10)", borderColor: "rgba(124,58,237,0.28)" },
+              ]}
+            >
+              <Ionicons name="play-circle" size={13} color={isLightTheme ? "#6D28D9" : "#C4B5FD"} />
+              <Text style={[styles.epPillText, isLightTheme && { color: "#6D28D9" }]}>
+                {compactSeason ? `${compactSeason} · ` : ""}الحلقة {episodeNumber}
+              </Text>
             </View>
           </View>
         </View>
 
-        <Text style={styles.noticeText}>
+        <Text style={[styles.noticeText, { color: colors.textSecondary }]}>
           التوفر مؤشر أولي وليس تأكيداً للتشغيل. عند الاختيار يُجلب رابط الحلقة المطلوب، وتُجرّب الروابط الاحتياطية عند فشل التشغيل.
         </Text>
 
         {error ? (
           <View style={styles.errorBanner}>
-            <Ionicons name="alert-circle" size={18} color="#f87171" />
-            <Text style={styles.errorBannerText}>{error}</Text>
+            <Ionicons name="alert-circle" size={18} color="#EF4444" />
+            <Text style={[styles.errorBannerText, isLightTheme && { color: "#DC2626" }]}>{error}</Text>
           </View>
         ) : null}
 
@@ -1076,10 +1142,18 @@ export default function DubbedWatchScreen() {
         {fhdSlots.length > 0 && (
           <View style={styles.qualityBlock}>
             <View style={styles.qualityHeader}>
-              <Text style={[styles.qualityTitle, { color: "#FBBF24" }]}>1080P</Text>
-              <View style={[styles.qualityDot, { backgroundColor: "#FBBF24" }]} />
+              <Text style={[styles.qualityTitle, { color: isLightTheme ? "#D97706" : "#FBBF24" }]}>1080P</Text>
+              <View style={[styles.qualityDot, { backgroundColor: isLightTheme ? "#D97706" : "#FBBF24" }]} />
             </View>
-            <View style={styles.serverListCard}>
+            <View
+              style={[
+                styles.serverListCard,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: isLightTheme ? "rgba(16, 185, 129, 0.32)" : "rgba(16, 185, 129, 0.18)",
+                },
+              ]}
+            >
               {fhdSlots.map((slot, idx) => {
                 const isBusy = slot.state === "fetching" || checkingAvailability;
                 return (
@@ -1090,7 +1164,7 @@ export default function DubbedWatchScreen() {
                     focusable={tvMode}
                     style={({ focused }) => [
                       styles.serverRow,
-                      idx > 0 && styles.serverRowBorder,
+                      idx > 0 && [styles.serverRowBorder, { borderTopColor: colors.border }],
                       tvMode && tvFocusStyle(focused),
                     ]}
                   >
@@ -1105,9 +1179,9 @@ export default function DubbedWatchScreen() {
                       )}
                     </View>
                     <View style={styles.serverRightInfo}>
-                      <Text style={styles.serverRowTitle}>السيرفر {slot.shortName}</Text>
+                      <Text style={[styles.serverRowTitle, { color: colors.textPrimary }]}>السيرفر {slot.shortName}</Text>
                       {checkingAvailability ? (
-                        <ActivityIndicator size={10} color="#34D399" />
+                        <ActivityIndicator size={10} color="#10B981" />
                       ) : (
                         <View style={[styles.statusDot, { backgroundColor: slot.state === "failed" ? "#EF4444" : "#10B981" }]} />
                       )}
@@ -1123,10 +1197,18 @@ export default function DubbedWatchScreen() {
         {hdSlots.length > 0 && (
           <View style={styles.qualityBlock}>
             <View style={styles.qualityHeader}>
-              <Text style={[styles.qualityTitle, { color: "#10B981" }]}>720P</Text>
-              <View style={[styles.qualityDot, { backgroundColor: "#10B981" }]} />
+              <Text style={[styles.qualityTitle, { color: isLightTheme ? "#059669" : "#10B981" }]}>720P</Text>
+              <View style={[styles.qualityDot, { backgroundColor: isLightTheme ? "#059669" : "#10B981" }]} />
             </View>
-            <View style={styles.serverListCard}>
+            <View
+              style={[
+                styles.serverListCard,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: isLightTheme ? "rgba(16, 185, 129, 0.32)" : "rgba(16, 185, 129, 0.18)",
+                },
+              ]}
+            >
               {hdSlots.map((slot, idx) => {
                 const isBusy = slot.state === "fetching" || checkingAvailability;
                 return (
@@ -1137,7 +1219,7 @@ export default function DubbedWatchScreen() {
                     focusable={tvMode}
                     style={({ focused }) => [
                       styles.serverRow,
-                      idx > 0 && styles.serverRowBorder,
+                      idx > 0 && [styles.serverRowBorder, { borderTopColor: colors.border }],
                       tvMode && tvFocusStyle(focused),
                     ]}
                   >
@@ -1152,9 +1234,9 @@ export default function DubbedWatchScreen() {
                       )}
                     </View>
                     <View style={styles.serverRightInfo}>
-                      <Text style={styles.serverRowTitle}>السيرفر {slot.shortName}</Text>
+                      <Text style={[styles.serverRowTitle, { color: colors.textPrimary }]}>السيرفر {slot.shortName}</Text>
                       {checkingAvailability ? (
-                        <ActivityIndicator size={10} color="#34D399" />
+                        <ActivityIndicator size={10} color="#10B981" />
                       ) : (
                         <View style={[styles.statusDot, { backgroundColor: slot.state === "failed" ? "#EF4444" : "#10B981" }]} />
                       )}
@@ -1169,22 +1251,39 @@ export default function DubbedWatchScreen() {
         {/* Download Servers Section (سيرفرات التحميل المباشر) */}
         <View style={styles.dlSection}>
           <View style={styles.dlSectionHeader}>
-            <View style={styles.dlHeaderBadge}>
-              <Ionicons name="cloud-download" size={14} color="#38BDF8" />
-              <Text style={styles.dlHeaderBadgeText}>تنزيل مباشر بالخلفية</Text>
+            <View
+              style={[
+                styles.dlHeaderBadge,
+                isLightTheme && { backgroundColor: "rgba(2, 132, 199, 0.10)", borderColor: "rgba(2, 132, 199, 0.28)" },
+              ]}
+            >
+              <Ionicons name="cloud-download" size={14} color={isLightTheme ? "#0284C7" : "#38BDF8"} />
+              <Text style={[styles.dlHeaderBadgeText, isLightTheme && { color: "#0284C7" }]}>تنزيل مباشر بالخلفية</Text>
             </View>
             <View style={styles.dlHeaderTitleRow}>
-              <Text style={styles.dlSectionTitle}>سيرفرات التحميل المباشر</Text>
-              <View style={styles.dlAccentBar} />
+              <Text style={[styles.dlSectionTitle, { color: colors.textPrimary }]}>سيرفرات التحميل المباشر</Text>
+              <View style={[styles.dlAccentBar, isLightTheme && { backgroundColor: "#0284C7" }]} />
             </View>
           </View>
 
-          <View style={styles.dlCardsContainer}>
+          <View
+            style={[
+              styles.dlCardsContainer,
+              {
+                backgroundColor: colors.card,
+                borderColor: isLightTheme ? "rgba(2, 132, 199, 0.28)" : "rgba(56, 189, 248, 0.22)",
+              },
+            ]}
+          >
             {slots.map((slot, idx) => {
               const dlState = dlStates[slot.key] ?? "idle";
               const prog = dlProgress[slot.key] ?? 0;
               const isBusy = dlState === "fetching" || dlState === "downloading";
-              const qColor = slot.quality === "1080p" ? "#FBBF24" : "#34D399";
+              const qColor =
+                slot.quality === "1080p"
+                  ? isLightTheme ? "#D97706" : "#FBBF24"
+                  : isLightTheme ? "#059669" : "#34D399";
+              const dlAccent = isLightTheme ? "#0284C7" : "#38BDF8";
               return (
                 <Pressable
                   key={`dl-${slot.key}`}
@@ -1193,7 +1292,7 @@ export default function DubbedWatchScreen() {
                   focusable={tvMode}
                   style={({ focused }) => [
                     styles.dlRow,
-                    idx > 0 && styles.serverRowBorder,
+                    idx > 0 && [styles.serverRowBorder, { borderTopColor: colors.border }],
                     dlState === "done" && styles.dlRowDone,
                     tvMode && tvFocusStyle(focused),
                   ]}
@@ -1201,31 +1300,32 @@ export default function DubbedWatchScreen() {
                   <View
                     style={[
                       styles.dlActionBtn,
+                      isLightTheme && { backgroundColor: "rgba(2, 132, 199, 0.10)", borderColor: "rgba(2, 132, 199, 0.30)" },
                       dlState === "done" && styles.dlActionBtnDone,
                       dlState === "error" && styles.dlActionBtnError,
                     ]}
                   >
                     {isBusy ? (
                       <>
-                        <ActivityIndicator size={12} color="#38BDF8" />
-                        <Text style={styles.dlActionBtnText}>
+                        <ActivityIndicator size={12} color={dlAccent} />
+                        <Text style={[styles.dlActionBtnText, { color: dlAccent }]}>
                           {dlState === "downloading" && prog > 0 ? `${prog}%` : "جاري..."}
                         </Text>
                       </>
                     ) : dlState === "done" ? (
                       <>
-                        <Ionicons name="checkmark-circle" size={14} color="#34D399" />
-                        <Text style={[styles.dlActionBtnText, { color: "#34D399" }]}>مكتمل</Text>
+                        <Ionicons name="checkmark-circle" size={14} color={isLightTheme ? "#059669" : "#34D399"} />
+                        <Text style={[styles.dlActionBtnText, { color: isLightTheme ? "#059669" : "#34D399" }]}>مكتمل</Text>
                       </>
                     ) : dlState === "error" ? (
                       <>
-                        <Ionicons name="refresh" size={13} color="#F87171" />
-                        <Text style={[styles.dlActionBtnText, { color: "#F87171" }]}>إعادة</Text>
+                        <Ionicons name="refresh" size={13} color="#EF4444" />
+                        <Text style={[styles.dlActionBtnText, { color: "#EF4444" }]}>إعادة</Text>
                       </>
                     ) : (
                       <>
-                        <Ionicons name="download-outline" size={14} color="#38BDF8" />
-                        <Text style={styles.dlActionBtnText}>تنزيل الحلقة</Text>
+                        <Ionicons name="download-outline" size={14} color={dlAccent} />
+                        <Text style={[styles.dlActionBtnText, { color: dlAccent }]}>تنزيل الحلقة</Text>
                       </>
                     )}
                   </View>
@@ -1235,8 +1335,8 @@ export default function DubbedWatchScreen() {
                       <Text style={[styles.dlQualityTagText, { color: qColor }]}>{slot.quality.toUpperCase()}</Text>
                     </View>
                     <View style={{ alignItems: "flex-end" }}>
-                      <Text style={styles.dlServerName}>سيرفر التحميل {slot.shortName}</Text>
-                      <Text style={styles.dlServerSub}>
+                      <Text style={[styles.dlServerName, { color: colors.textPrimary }]}>سيرفر التحميل {slot.shortName}</Text>
+                      <Text style={[styles.dlServerSub, { color: colors.textSecondary }]}>
                         {dlState === "downloading"
                           ? `جاري التنزيل في الخلفية · ${prog}%`
                           : dlState === "done"
