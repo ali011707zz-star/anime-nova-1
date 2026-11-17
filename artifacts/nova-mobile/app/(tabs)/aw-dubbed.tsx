@@ -107,11 +107,19 @@ const spacetoonCatalogCache = new Map<string, SpacetoonCatalogCacheEntry>();
 
 function posterRequestUri(uri: string | null): string | null {
   if (!uri) return null;
+  const base = getBaseUrl().replace(/\/+$/, "");
+  if (uri.startsWith("/api/")) return `${base}${uri}`;
   const match = uri.match(
     /^https:\/\/image\.tmdb\.org\/t\/p\/(w92|w154|w185|w342|w500|w780|w1280|original)\/([A-Za-z0-9_-]+\.(?:jpe?g|png|webp))(?:\?[^#]*)?(?:#.*)?$/i,
   );
-  if (!match) return uri;
-  return `${getBaseUrl().replace(/\/+$/, "")}/api/source-catalog/tmdb-poster/${match[1]}/${match[2]}`;
+  if (match) {
+    const size = match[1] === "w500" ? "w342" : match[1];
+    return `${base}/api/source-catalog/tmdb-poster/${size}/${match[2]}`;
+  }
+  if (/^https?:\/\/watch-\d+\.stardima\.com\.im\/storage\//i.test(uri)) {
+    return `${base}/api/dubbed/sd2/poster?url=${encodeURIComponent(uri)}`;
+  }
+  return uri;
 }
 
 function spacetoonQueryKey(searchQ: string): string {
@@ -1080,6 +1088,12 @@ function Cartoon2List({ searchQ }: { searchQ: string }) {
       setItems(nextItems);
       setPage(nextCachedPage);
       setTotalPages(responseTotalPages);
+      if (nextPage === 1) {
+        for (const it of results.slice(0, 12)) {
+          const pUri = posterRequestUri(it.image || null);
+          if (pUri) Image.prefetch(pUri).catch(() => {});
+        }
+      }
       setLoadError(false);
       setFailedPage(null);
     } catch {

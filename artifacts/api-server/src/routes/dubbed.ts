@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+import crypto from "node:crypto";
 import { Router } from "express";
 import { load } from "cheerio";
 import { logger } from "../lib/logger";
@@ -9,6 +12,7 @@ import {
   getStardimaV2Episodes,
   getStardimaV2Servers,
   isAllowedHyperwatchingUrl,
+  warmStardimaV2CatalogSlice,
   resolveStardimaV2Stream,
 } from "../lib/stardimaV2Source.js";
 import {
@@ -734,8 +738,10 @@ router.get("/dubbed/sd2/catalog", async (req, res) => {
     });
     const totalPages = Math.max(1, Math.ceil(sorted.length / limit));
     const start = (page - 1) * limit;
+    const pageSlice = sorted.slice(start, start + limit);
+    warmStardimaV2CatalogSlice(pageSlice.map((it) => ({ slug: it.slug, mediaType: it.mediaType })));
     res.setHeader("Cache-Control", req.query.refresh === "1" ? "no-store" : "public, max-age=300");
-    res.json({ results: sorted.slice(start, start + limit), page, limit, totalResults: sorted.length, totalPages, counts: { all: all.length, series: all.filter((e) => e.mediaType === "series").length, movies: all.filter((e) => e.mediaType === "movie").length } });
+    res.json({ results: pageSlice, page, limit, totalResults: sorted.length, totalPages, counts: { all: all.length, series: all.filter((e) => e.mediaType === "series").length, movies: all.filter((e) => e.mediaType === "movie").length } });
   } catch (error) {
     logger.warn({ err: error }, "dubbed: StarDima V2 catalog unavailable");
     res.status(502).json({ error: "تعذر تحميل كتالوج كرتون مدبلج 2" });
@@ -783,18 +789,68 @@ router.get("/dubbed/sd2/servers", async (req, res) => {
     res.status(502).json({ error: error?.message || "تعذر جلب سيرفرات التشغيل" });
   }
 });
+const SD2_POSTER_CACHE_DIR = "/opt/nova-cache/sd2-posters";
+try { fs.mkdirSync(SD2_POSTER_CACHE_DIR, { recursive: true }); } catch {}
+
+router.get("/dubbed/sd2/poster", async (req, res) => {
+  const rawUrl = String(req.query.url || "").trim();
+  if (!rawUrl || !/^https?:\/\/watch-\d+\.stardima\.com\.im\/storage\//i.test(rawUrl)) {
+    res.status(400).end();
+    return;
+  }
+  const hash = crypto.createHash("sha1").update(rawUrl).digest("hex");
+  const extMatch = rawUrl.match(/\.(webp|jpe?g|png)(?:[?#]|$)/i);
+  const ext = (extMatch ? extMatch[1] : "webp").toLowerCase();
+  const contentType = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
+  const cacheFile = path.join(SD2_POSTER_CACHE_DIR, hash + "." + ext);
+
+  try {
+    if (fs.existsSync(cacheFile)) {
+      const buf = fs.readFileSync(cacheFile);
+      if (buf.length > 100) {
+        res.setHeader("Content-Type", contentType);
+        res.setHeader("Cache-Control", "public, max-age=2592000, immutable");
+        res.send(buf);
+        return;
+      }
+    }
+    const r = await fetch(rawUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        Referer: "https://watch-79.stardima.com.im/",
+        Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+      },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!r.ok) {
+      res.status(502).end();
+      return;
+    }
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (buf.length > 100) {
+      try { fs.writeFileSync(cacheFile, buf); } catch {}
+    }
+    res.setHeader("Content-Type", r.headers.get("content-type") || contentType);
+    res.setHeader("Cache-Control", "public, max-age=2592000, immutable");
+    res.send(buf);
+  } catch {
+    res.status(502).end();
+  }
+});
+
 router.get("/dubbed/sd2/watch-src", async (req, res) => {
   const watchUrl = String(req.query.watchUrl || "").trim();
   const serverId = String(req.query.serverId || "").trim() || undefined;
+  const preferMp4 = req.query.preferMp4 === "1" || req.query.forDownload === "1";
   if (!watchUrl || !isAllowedHyperwatchingUrl(watchUrl)) { res.status(400).json({ error: "valid watchUrl is required" }); return; }
   try {
-    const resolved = await resolveStardimaV2Stream(watchUrl, serverId);
+    const resolved = await resolveStardimaV2Stream(watchUrl, serverId, preferMp4);
     const isHls = resolved.type === "hls";
     const proxyPath = isHls ? "/api/anime/hls-proxy" : "/api/anime/video-proxy";
     const proxiedUrl = proxyPath + "?url=" + encodeURIComponent(resolved.streamUrl) + "&ref=" + encodeURIComponent(resolved.referer);
     res.setHeader("Cache-Control", "no-store");
     res.json({ hlsUrl: proxiedUrl, rawUrl: resolved.streamUrl, referer: resolved.referer, type: resolved.type, serverId: resolved.serverId, serverName: resolved.serverName, quality: resolved.quality });
-  } catch (error) {
+  } catch (error: any) {
     logger.warn({ err: error, watchUrl, serverId }, "dubbed: StarDima V2 stream unavailable");
     res.status(502).json({ error: error?.message || "تعذر استخراج رابط الفيديو" });
   }

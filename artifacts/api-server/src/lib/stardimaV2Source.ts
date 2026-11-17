@@ -9,11 +9,13 @@ const HYPERWATCHING_ORIGIN = "https://v2.hyperwatching.com";
 const HTTP_TIMEOUT_MS = 15_000;
 const CATALOG_TTL_MS = 6 * 3600_000;
 const NEW_RELEASES_TTL_MS = 20 * 60_000;
-const DETAIL_TTL_MS = 15 * 60_000;
+const DETAIL_TTL_MS = 7 * 24 * 3600_000;
 const SERVER_LIST_TTL_MS = 10 * 60_000;
-
+const RESOLVED_STREAM_TTL_MS = 10 * 60_000;
+const PUBLIC_BASE = (process.env.NOVA_PUBLIC_URL || "https://animenovaa.duckdns.org").replace(/\/+$/, "");
 const BROWSER_UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+const ACCEPT_LANG = "ar,en-US;q=0.9,en;q=0.8";
 
 const ANIME_CATEGORIES_TO_EXCLUDE = [
   "anmy",
@@ -74,6 +76,8 @@ export interface StardimaV2Detail {
 export interface StardimaV2Server {
   id: string;
   name: string;
+  providerKey: "uqload" | "lulu" | "mixdrop" | "other";
+  quality: "1080p" | "720p";
   status: string;
   priority: number;
 }
@@ -156,6 +160,22 @@ function safePosterUrl(raw: unknown): string {
     if (u.protocol === "http:" || u.protocol === "https:") return u.toString();
   } catch {}
   return "";
+}
+
+export function toPublicPosterUrl(raw: unknown): string {
+  const safe = safePosterUrl(raw);
+  if (!safe) return "";
+  if (safe.startsWith(PUBLIC_BASE + "/api/")) return safe;
+  const tmdbMatch = safe.match(
+    /^https?:\/\/image\.tmdb\.org\/t\/p\/(?:w\d+|original)\/([A-Za-z0-9_-]+\.(?:jpe?g|png|webp))(?:\?[^#]*)?(?:#.*)?$/i,
+  );
+  if (tmdbMatch) {
+    return PUBLIC_BASE + "/api/source-catalog/tmdb-poster/w342/" + tmdbMatch[1];
+  }
+  if (/^https?:\/\/watch-\d+\.stardima\.com\.im\/storage\//i.test(safe)) {
+    return PUBLIC_BASE + "/api/dubbed/sd2/poster?url=" + encodeURIComponent(safe);
+  }
+  return safe;
 }
 
 async function fetchText(url: string, headers: Record<string, string> = {}, timeoutMs = HTTP_TIMEOUT_MS): Promise<string> {
@@ -279,23 +299,74 @@ let diskLoaded = false;
 const detailCache = new Map<string, { expiresAt: number; value: StardimaV2Detail }>();
 const detailInFlight = new Map<string, Promise<StardimaV2Detail>>();
 const serverListCache = new Map<string, { expiresAt: number; value: StardimaV2Server[] }>();
+const resolvedStreamCache = new Map<string, { expiresAt: number; value: StardimaV2ResolvedStream }>();
+const streamWarmupInFlight = new Map<string, Promise<void>>();
+let detailSaveTimer: ReturnType<typeof setTimeout> | null = null;
+let detailWarmupRunning = false;
+
+function resolveDetailsFilePath(): string {
+  return path.join(path.dirname(resolveDataFilePath()), "stardima-v2-details.json");
+}
+
+function scheduleSaveDetailsDiskCache(): void {
+  if (detailSaveTimer) return;
+  detailSaveTimer = setTimeout(() => {
+    detailSaveTimer = null;
+    try {
+      const filePath = resolveDetailsFilePath();
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      const entries: Record<string, { expiresAt: number; value: StardimaV2Detail }> = {};
+      const now = Date.now();
+      for (const [k, v] of detailCache.entries()) {
+        if (v.expiresAt > now) entries[k] = v;
+      }
+      const tmp = filePath + ".tmp";
+      fs.writeFileSync(tmp, JSON.stringify({ version: 1, updatedAt: now, entries }), "utf8");
+      fs.renameSync(tmp, filePath);
+    } catch {}
+  }, 4000);
+}
 
 function loadDiskCacheIfNeeded(): void {
   if (diskLoaded) return;
   diskLoaded = true;
   try {
     const filePath = resolveDataFilePath();
-    if (!fs.existsSync(filePath)) return;
-    const raw = JSON.parse(fs.readFileSync(filePath, "utf8")) as DiskCatalogPayload;
-    if (Array.isArray(raw.items) && raw.items.length > 0) {
-      rawCatalog = raw.items;
-      lastCatalogBuildAt = Number(raw.updatedAt) || 0;
-      anmySubSet = new Set(Array.isArray(raw.anmySubSlugs) ? raw.anmySubSlugs : []);
-      subClassMap = new Map(Object.entries(raw.subClassification || {}));
+    if (fs.existsSync(filePath)) {
+      const raw = JSON.parse(fs.readFileSync(filePath, "utf8")) as DiskCatalogPayload;
+      if (Array.isArray(raw.items) && raw.items.length > 0) {
+        rawCatalog = raw.items;
+        lastCatalogBuildAt = Number(raw.updatedAt) || 0;
+        anmySubSet = new Set(Array.isArray(raw.anmySubSlugs) ? raw.anmySubSlugs : []);
+        subClassMap = new Map(Object.entries(raw.subClassification || {}));
+      }
     }
-  } catch {
-    // Ignore corrupt disk cache; fresh crawl will regenerate it.
-  }
+  } catch {}
+  try {
+    const detailsPath = resolveDetailsFilePath();
+    if (fs.existsSync(detailsPath)) {
+      const rawDetails = JSON.parse(fs.readFileSync(detailsPath, "utf8")) as {
+        entries?: Record<string, { expiresAt: number; value: StardimaV2Detail }>;
+      };
+      const now = Date.now();
+      for (const [k, v] of Object.entries(rawDetails?.entries || {})) {
+        if (v && v.value && Array.isArray(v.value.seasons)) {
+          const rewrittenImage = toPublicPosterUrl(v.value.image);
+          const seasons = v.value.seasons.map((s) => ({
+            ...s,
+            episodes: (s.episodes || []).map((ep) => ({
+              ...ep,
+              thumbnail: toPublicPosterUrl(ep.thumbnail || rewrittenImage),
+            })),
+          }));
+          detailCache.set(k, {
+            expiresAt: Math.max(Number(v.expiresAt) || 0, now + DETAIL_TTL_MS),
+            value: { ...v.value, image: rewrittenImage, seasons },
+          });
+        }
+      }
+    }
+  } catch {}
 }
 
 function saveDiskCache(): void {
@@ -312,9 +383,7 @@ function saveDiskCache(): void {
     const tmp = filePath + ".tmp";
     fs.writeFileSync(tmp, JSON.stringify(payload), "utf8");
     fs.renameSync(tmp, filePath);
-  } catch {
-    // Best-effort persistence.
-  }
+  } catch {}
 }
 
 function extractEnglishCandidateFromPageTitle(pageTitle: string): string {
@@ -664,7 +733,7 @@ function toPublicEntry(item: RawScrapedItem): StardimaV2CatalogItem {
     provider: "sd2",
     providerLabel: item.languageLabel,
     title: item.title,
-    image: item.image,
+    image: toPublicPosterUrl(item.image),
     mediaType: item.mediaType,
     isMovie: item.mediaType === "movie",
     year: item.year,
@@ -737,7 +806,7 @@ export async function getStardimaV2Episodes(
         cleanText($("h1").first().text()) ||
         extractEnglishCandidateFromPageTitle(cleanText($("title").text())) ||
         slug;
-      const poster = known?.image || safePosterUrl($("meta[property=\"og:image\"]").attr("content"));
+      const poster = toPublicPosterUrl(known?.image || $("meta[property=\"og:image\"]").attr("content"));
       if (!watchUrl) {
         throw new Error("لم يتم العثور على مشغل هذا الفيلم");
       }
@@ -768,6 +837,8 @@ export async function getStardimaV2Episodes(
         ],
       };
       detailCache.set(cacheKey, { expiresAt: Date.now() + DETAIL_TTL_MS, value: detail });
+      scheduleSaveDetailsDiskCache();
+      void warmStardimaV2Streams(watchUrl);
       return detail;
     }
 
@@ -779,9 +850,9 @@ export async function getStardimaV2Episodes(
       known?.title ||
       cleanText($show("meta[property=\"og:title\"]").attr("content")) ||
       slug;
-    const poster =
-      known?.image ||
-      safePosterUrl($show("meta[property=\"og:image\"]").attr("content"));
+    const poster = toPublicPosterUrl(
+      known?.image || $show("meta[property=\"og:image\"]").attr("content"),
+    );
 
     let playPageUrl =
       safeUrlOrEmpty($show("meta[property=\"og:video\"]").attr("content")) ||
@@ -909,6 +980,11 @@ export async function getStardimaV2Episodes(
       seasons,
     };
     detailCache.set(cacheKey, { expiresAt: Date.now() + DETAIL_TTL_MS, value: detail });
+    scheduleSaveDetailsDiskCache();
+    const firstEpWatchUrl = seasons[0]?.episodes?.[0]?.watchUrl;
+    if (firstEpWatchUrl) {
+      void warmStardimaV2Streams(firstEpWatchUrl);
+    }
     return detail;
   })();
 
@@ -942,35 +1018,100 @@ export function isAllowedHyperwatchingUrl(raw: string): boolean {
   }
 }
 
-function serverPriority(name: string): number {
-  const n = name.toLowerCase();
-  if (n.includes("uqload")) return 120;
-  if (n.includes("lulu")) return 85;
-  if (n.includes("mixdrop")) return 80;
-  if (n.includes("savefiles")) return 40;
-  if (n.includes("streamhg") || n.includes("hgcloud")) return 20;
+function classifyServerProvider(rawName: string): "uqload" | "lulu" | "mixdrop" | "other" | "dead" {
+  const n = rawName.toLowerCase();
+  if (n.includes("savefiles") || n.includes("streamhg") || n.includes("hgcloud") || n.includes("vidmoly") || n.includes("earnvids")) {
+    return "dead";
+  }
+  if (n.includes("uqload")) return "uqload";
+  if (n.includes("lulu")) return "lulu";
+  if (n.includes("mixdrop")) return "mixdrop";
+  return "other";
+}
+
+function serverPriorityByProvider(providerKey: "uqload" | "lulu" | "mixdrop" | "other"): number {
+  if (providerKey === "uqload") return 120;
+  if (providerKey === "lulu") return 95;
+  if (providerKey === "mixdrop") return 85;
   return 50;
 }
 
-async function verifyStreamReadable(streamUrl: string, referer: string, type: "hls" | "mp4"): Promise<boolean> {
+async function verifyAndNormalizeStream(
+  streamUrl: string,
+  referer: string,
+  type: "hls" | "mp4",
+): Promise<string | null> {
   try {
     const res = await fetch(streamUrl, {
       headers: {
         "User-Agent": BROWSER_UA,
+        "Accept-Language": ACCEPT_LANG,
         Referer: referer,
         ...(type === "mp4" ? { Range: "bytes=0-1023" } : {}),
       },
       signal: AbortSignal.timeout(5500),
     });
-    if (!res.ok) return false;
+    if (!res.ok) return null;
     if (type === "hls") {
-      const head = (await res.text()).slice(0, 64);
-      return head.includes("#EXTM3U");
+      const text = await res.text();
+      if (!text.includes("#EXTM3U")) return null;
+      if (text.includes("#EXT-X-STREAM-INF")) {
+        const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+        let arabicTrackId = "";
+        for (const line of lines) {
+          if (line.startsWith("#EXT-X-MEDIA:") && line.includes("TYPE=AUDIO")) {
+            if (/LANGUAGE="ar"|NAME="[^"]*(?:عرب|العربية|Arabic)[^"]*"/i.test(line)) {
+              const uriMatch = line.match(/URI="([^"]+)"/i);
+              const trackMatch = uriMatch?.[1]?.match(/index-(a\d+)\.m3u8/i);
+              if (trackMatch) {
+                arabicTrackId = trackMatch[1];
+                break;
+              }
+            }
+          }
+        }
+        let variantLine = "";
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].startsWith("#EXT-X-STREAM-INF")) {
+            for (let j = i + 1; j < lines.length; j++) {
+              if (!lines[j].startsWith("#")) {
+                variantLine = lines[j];
+                break;
+              }
+            }
+            if (variantLine) break;
+          }
+        }
+        if (variantLine) {
+          const variantUrl = new URL(variantLine, streamUrl).toString();
+          if (arabicTrackId && variantUrl.includes("-v1-a1.m3u8") && arabicTrackId !== "a1") {
+            const candidateArUrl = variantUrl.replace("-v1-a1.m3u8", "-v1-" + arabicTrackId + ".m3u8");
+            try {
+              const arRes = await fetch(candidateArUrl, {
+                headers: {
+                  "User-Agent": BROWSER_UA,
+                  "Accept-Language": ACCEPT_LANG,
+                  Referer: referer,
+                },
+                signal: AbortSignal.timeout(4000),
+              });
+              if (arRes.ok) {
+                const arText = (await arRes.text()).slice(0, 64);
+                if (arText.includes("#EXTM3U")) {
+                  return candidateArUrl;
+                }
+              }
+            } catch {}
+          }
+          return variantUrl;
+        }
+      }
+      return streamUrl;
     }
     const ct = (res.headers.get("content-type") || "").toLowerCase();
-    return !ct.includes("text/html");
+    return !ct.includes("text/html") ? streamUrl : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -979,7 +1120,10 @@ export async function getStardimaV2Servers(watchUrl: string): Promise<StardimaV2
     throw new Error("رابط المشاهدة غير مدعوم");
   }
   const cached = serverListCache.get(watchUrl);
-  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  if (cached && cached.expiresAt > Date.now()) {
+    void warmStardimaV2Streams(watchUrl, cached.value);
+    return cached.value;
+  }
 
   const html = await fetchText(watchUrl, { Referer: STARDIMA_BASE + "/" });
   const dpMatch = html.match(/data-page="([^"]+)"/);
@@ -994,21 +1138,33 @@ export async function getStardimaV2Servers(watchUrl: string): Promise<StardimaV2
     .replace(/&gt;/g, ">");
   const pageData = JSON.parse(decoded) as any;
   const rawServers: any[] = pageData?.props?.video?.servers || [];
-  const servers: StardimaV2Server[] = rawServers
-    .filter((s) => s && !s.is_vip && s.id != null)
+  const filtered = rawServers
+    .filter((s) => s && !s.is_vip && s.id != null && String(s.status || "completed") === "completed")
     .map((s) => {
-      const name = cleanText(s.name || "سيرفر");
+      const rawName = cleanText(s.name || "سيرفر");
+      const providerKey = classifyServerProvider(rawName);
       return {
         id: String(s.id),
-        name,
-        status: String(s.status || "completed"),
-        priority: serverPriority(name),
+        rawName,
+        providerKey,
+        status: "completed",
+        priority: providerKey === "dead" ? -1 : serverPriorityByProvider(providerKey),
       };
     })
-    .filter((s) => s.status === "completed")
+    .filter((s) => s.providerKey !== "dead")
     .sort((a, b) => b.priority - a.priority);
 
+  const servers: StardimaV2Server[] = filtered.map((s, idx) => ({
+    id: s.id,
+    name: String(idx + 1),
+    providerKey: s.providerKey as "uqload" | "lulu" | "mixdrop" | "other",
+    quality: idx === 0 || s.providerKey === "uqload" ? "1080p" : "720p",
+    status: s.status,
+    priority: s.priority,
+  }));
+
   serverListCache.set(watchUrl, { expiresAt: Date.now() + SERVER_LIST_TTL_MS, value: servers });
+  void warmStardimaV2Streams(watchUrl, servers);
   return servers;
 }
 
@@ -1073,9 +1229,112 @@ function extractDirectStreamFromHtml(
   return null;
 }
 
+async function resolveSingleStardimaV2Server(
+  watchUrl: string,
+  hashid: string,
+  srv: StardimaV2Server,
+): Promise<StardimaV2ResolvedStream | null> {
+  const cacheKey = watchUrl + "|" + srv.id;
+  const cached = resolvedStreamCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+
+  const urlEndpoint =
+    HYPERWATCHING_ORIGIN + "/embed/" + encodeURIComponent(hashid) + "/server/" + encodeURIComponent(srv.id) + "/url";
+  const resJsonText = await fetchText(urlEndpoint, {
+    Referer: watchUrl,
+    "X-Requested-With": "XMLHttpRequest",
+    Accept: "application/json, text/plain, */*",
+  }, 8_000);
+  const parsed = JSON.parse(resJsonText) as { watch_url?: string };
+  if (!parsed.watch_url) return null;
+
+  const embedUrl = unwrapEmbedUrl(parsed.watch_url);
+  const embedHost = (() => {
+    try {
+      return new URL(embedUrl).origin + "/";
+    } catch {
+      return HYPERWATCHING_ORIGIN + "/";
+    }
+  })();
+  const embedHtml = await fetchText(embedUrl, { Referer: HYPERWATCHING_ORIGIN + "/" }, 8_000);
+  const extracted = extractDirectStreamFromHtml(embedHtml, embedUrl);
+  if (!extracted?.url) return null;
+
+  const normalizedUrl = await verifyAndNormalizeStream(extracted.url, embedHost, extracted.type);
+  if (!normalizedUrl) return null;
+
+  const resolved: StardimaV2ResolvedStream = {
+    streamUrl: normalizedUrl,
+    type: extracted.type,
+    referer: embedHost,
+    serverId: srv.id,
+    serverName: srv.name,
+    quality: srv.quality,
+  };
+  resolvedStreamCache.set(cacheKey, {
+    expiresAt: Date.now() + RESOLVED_STREAM_TTL_MS,
+    value: resolved,
+  });
+  return resolved;
+}
+
+const streamWarmupDoneUntil = new Map<string, number>();
+
+export function warmStardimaV2Streams(watchUrl: string, knownServers?: StardimaV2Server[]): Promise<void> {
+  if (!watchUrl || !isAllowedHyperwatchingUrl(watchUrl)) return Promise.resolve();
+  const doneUntil = streamWarmupDoneUntil.get(watchUrl) || 0;
+  if (doneUntil > Date.now()) return Promise.resolve();
+  const existing = streamWarmupInFlight.get(watchUrl);
+  if (existing) return existing;
+
+  const task = Promise.resolve().then(async () => {
+    try {
+      const hashid = watchUrl.replace(/\/+$/, "").split("/").pop() || "";
+      if (!hashid) return;
+      const servers = knownServers || (await getStardimaV2Servers(watchUrl));
+      await Promise.allSettled(
+        servers.map((srv) => resolveSingleStardimaV2Server(watchUrl, hashid, srv)),
+      );
+      streamWarmupDoneUntil.set(watchUrl, Date.now() + RESOLVED_STREAM_TTL_MS);
+    } catch {}
+  });
+  streamWarmupInFlight.set(watchUrl, task);
+  void task.finally(() => {
+    streamWarmupInFlight.delete(watchUrl);
+  });
+  return task;
+}
+
+export function warmStardimaV2CatalogSlice(
+  items: { slug: string; mediaType: StardimaV2MediaType }[],
+): void {
+  if (detailWarmupRunning || !items.length) return;
+  const uncached = items.filter((it) => {
+    const key = it.mediaType + ":" + it.slug;
+    const hit = detailCache.get(key);
+    return !hit || hit.expiresAt <= Date.now();
+  });
+  if (!uncached.length) return;
+  detailWarmupRunning = true;
+  void (async () => {
+    try {
+      await mapConcurrent(uncached.slice(0, 36), 3, async (it) => {
+        try {
+          await getStardimaV2Episodes(it.slug, it.mediaType, false);
+        } catch {}
+      });
+    } finally {
+      detailWarmupRunning = false;
+    }
+  })();
+}
+
 export async function resolveStardimaV2Stream(
   watchUrl: string,
   requestedServerId?: string,
+  preferMp4 = false,
 ): Promise<StardimaV2ResolvedStream> {
   if (!isAllowedHyperwatchingUrl(watchUrl)) {
     throw new Error("رابط المشاهدة غير مدعوم");
@@ -1086,46 +1345,26 @@ export async function resolveStardimaV2Stream(
   const servers = await getStardimaV2Servers(watchUrl);
   if (!servers.length) throw new Error("لا توجد سيرفرات متاحة حالياً");
 
-  const ordered = requestedServerId
-    ? [
-        ...servers.filter((s) => s.id === requestedServerId),
-        ...servers.filter((s) => s.id !== requestedServerId),
-      ]
-    : servers;
+  let ordered: StardimaV2Server[];
+  if (preferMp4) {
+    const mp4Servers = servers.filter((s) => s.providerKey === "mixdrop");
+    const requested = requestedServerId ? servers.filter((s) => s.id === requestedServerId && s.providerKey !== "mixdrop") : [];
+    const rest = servers.filter((s) => s.providerKey !== "mixdrop" && s.id !== requestedServerId);
+    ordered = [...mp4Servers, ...requested, ...rest];
+  } else if (requestedServerId) {
+    ordered = [
+      ...servers.filter((s) => s.id === requestedServerId),
+      ...servers.filter((s) => s.id !== requestedServerId),
+    ];
+  } else {
+    ordered = servers;
+  }
 
   let lastError = "تعذر استخراج رابط الفيديو";
   for (const srv of ordered) {
     try {
-      const urlEndpoint =
-        HYPERWATCHING_ORIGIN + "/embed/" + encodeURIComponent(hashid) + "/server/" + encodeURIComponent(srv.id) + "/url";
-      const resJsonText = await fetchText(urlEndpoint, {
-        Referer: watchUrl,
-        "X-Requested-With": "XMLHttpRequest",
-        Accept: "application/json, text/plain, */*",
-      }, 10_000);
-      const parsed = JSON.parse(resJsonText) as { watch_url?: string };
-      if (!parsed.watch_url) continue;
-
-      const embedUrl = unwrapEmbedUrl(parsed.watch_url);
-      const embedHost = (() => {
-        try {
-          return new URL(embedUrl).origin + "/";
-        } catch {
-          return HYPERWATCHING_ORIGIN + "/";
-        }
-      })();
-      const embedHtml = await fetchText(embedUrl, { Referer: HYPERWATCHING_ORIGIN + "/" }, 10_000);
-      const extracted = extractDirectStreamFromHtml(embedHtml, embedUrl);
-      if (extracted?.url && (await verifyStreamReadable(extracted.url, embedHost, extracted.type))) {
-        return {
-          streamUrl: extracted.url,
-          type: extracted.type,
-          referer: embedHost,
-          serverId: srv.id,
-          serverName: srv.name,
-          quality: extracted.type === "hls" ? "1080p" : "720p",
-        };
-      }
+      const resolved = await resolveSingleStardimaV2Server(watchUrl, hashid, srv);
+      if (resolved) return resolved;
     } catch (err: any) {
       lastError = err?.message || lastError;
     }

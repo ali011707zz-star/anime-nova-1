@@ -107,7 +107,7 @@ export default function DubbedWatchScreen() {
   const lastTimeRef = useRef(0);
   const lastDurationRef = useRef(0);
   const savedOnExitRef = useRef(false);
-  const preloadedMediaRef = useRef<{ url: string; contentType: "hls" | "progressive"; rawUrl?: string } | null>(null);
+  const preloadedMediaRef = useRef<{ url: string; contentType: "hls" | "progressive"; rawUrl?: string; serverId?: string } | null>(null);
 
   const onToggleOrientation = useWatchPlayerOrientation(screen === "player" && sources.length > 0, tvMode);
 
@@ -411,13 +411,15 @@ export default function DubbedWatchScreen() {
   const resolveSd2Media = useCallback(async (
     signal: AbortSignal,
     serverId?: string,
-  ): Promise<{ url: string; contentType: "hls" | "progressive"; rawUrl: string } | null> => {
+    preferMp4 = false,
+  ): Promise<{ url: string; contentType: "hls" | "progressive"; rawUrl: string; serverId?: string } | null> => {
     const BASE = getBaseUrl();
     const wUrl = await ensureSd2WatchUrl(signal);
     if (!wUrl || signal.aborted) return null;
     try {
       const params = new URLSearchParams({ watchUrl: wUrl });
       if (serverId) params.set("serverId", serverId);
+      if (preferMp4) params.set("preferMp4", "1");
       const res = await fetch(`${BASE}/api/dubbed/sd2/watch-src?${params}`, { signal, cache: "no-store" });
       if (signal.aborted || !res.ok) return null;
       const d = await res.json();
@@ -429,6 +431,7 @@ export default function DubbedWatchScreen() {
         url: withPlaybackTrace(proxyUrl, playbackTraceId, BASE),
         contentType: d.type === "hls" ? "hls" : "progressive",
         rawUrl: proxyUrl,
+        serverId: d.serverId ? String(d.serverId) : serverId,
       };
     } catch {
       return null;
@@ -449,18 +452,18 @@ export default function DubbedWatchScreen() {
       const defaultSd2Slots: DubbedServerSlot[] = [
         {
           key: "SD2_AUTO_1080p",
-          site: "dubbed_sd2_1080",
-          shortName: "Uqload",
-          label: "سيرفر كرتون مدبلج 2 الرئيسي FHD",
+          site: "dubbed_sd2_1",
+          shortName: "1",
+          label: "السيرفر 1",
           quality: "1080p",
           mode: "api",
           state: "checking",
         },
         {
           key: "SD2_FALLBACK_720p",
-          site: "dubbed_sd2_720",
-          shortName: "احتياطي",
-          label: "السيرفر الاحتياطي التلقائي HD",
+          site: "dubbed_sd2_2",
+          shortName: "2",
+          label: "السيرفر 2",
           quality: "720p",
           mode: "direct",
           state: "checking",
@@ -476,23 +479,31 @@ export default function DubbedWatchScreen() {
             const srvJson = await srvRes.json();
             const list: any[] = Array.isArray(srvJson?.servers) ? srvJson.servers : [];
             if (list.length > 0) {
-              const dynamicSlots: DubbedServerSlot[] = list.map((srv, idx) => ({
-                key: `SD2_${srv.id}_${idx === 0 ? "1080p" : "720p"}`,
-                site: `dubbed_sd2_${String(srv.name || "srv").toLowerCase().replace(/[^a-z0-9]+/g, "_")}`,
-                shortName: String(srv.name || `سيرفر ${idx + 1}`),
-                label: `سيرفر ${String(srv.name || idx + 1)}`,
-                quality: idx === 0 || String(srv.name || "").toLowerCase().includes("uqload") ? "1080p" : "720p",
-                mode: "api",
-                state: "checking",
-                serverId: String(srv.id),
-              }));
+              const dynamicSlots: DubbedServerSlot[] = list.map((srv, idx) => {
+                const numName = String(idx + 1);
+                return {
+                  key: `SD2_${srv.id}_${idx === 0 ? "1080p" : "720p"}`,
+                  site: `dubbed_sd2_${numName}`,
+                  shortName: numName,
+                  label: `السيرفر ${numName}`,
+                  quality: srv.quality === "1080p" || idx === 0 ? "1080p" : "720p",
+                  mode: "api",
+                  state: "available",
+                  serverId: String(srv.id),
+                };
+              });
               setSlots(dynamicSlots);
+              setCheckingAvailability(false);
             }
           }
-          const resolved = await resolveSd2Media(ctrl.signal);
-          if (resolved && !ctrl.signal.aborted && mountedRef.current) {
-            preloadedMediaRef.current = resolved;
-          }
+          setSlots((prev) => prev.map((s) => ({ ...s, state: "available" })));
+          setCheckingAvailability(false);
+          void resolveSd2Media(ctrl.signal).then((resolved) => {
+            if (resolved && !ctrl.signal.aborted && mountedRef.current) {
+              preloadedMediaRef.current = resolved;
+            }
+          });
+          return;
         }
       } catch (e: any) {
         if (e?.name === "AbortError" || !mountedRef.current) return;
@@ -596,18 +607,26 @@ export default function DubbedWatchScreen() {
     signal: AbortSignal,
     bypassCache = false,
     serverId?: string,
+    preferMp4 = false,
   ): Promise<{ url: string; contentType: "hls" | "progressive"; rawUrl: string } | null> => {
     if (isSd2Source) {
-      if (!bypassCache && !serverId && preloadedMediaRef.current) {
+      if (
+        !bypassCache &&
+        !preferMp4 &&
+        preloadedMediaRef.current &&
+        (!serverId || !preloadedMediaRef.current.serverId || serverId === preloadedMediaRef.current.serverId)
+      ) {
         return {
           url: preloadedMediaRef.current.url,
           contentType: preloadedMediaRef.current.contentType,
           rawUrl: preloadedMediaRef.current.rawUrl || preloadedMediaRef.current.url,
         };
       }
-      const resolved = await resolveSd2Media(signal, serverId);
+      const resolved = await resolveSd2Media(signal, serverId, preferMp4);
       if (resolved) {
-        if (!serverId) preloadedMediaRef.current = resolved;
+        if (!preferMp4 && (!serverId || serverId === resolved.serverId)) {
+          preloadedMediaRef.current = resolved;
+        }
         return resolved;
       }
       return null;
@@ -735,7 +754,7 @@ export default function DubbedWatchScreen() {
       return;
     }
 
-    const extracted = await extractPlayableSource(slot.mode, ctrl.signal, false, slot.serverId);
+    const extracted = await extractPlayableSource(slot.mode, ctrl.signal, false, slot.serverId, isSd2Source);
     if (ctrl.signal.aborted || !mountedRef.current) return;
 
     if (!extracted) {
