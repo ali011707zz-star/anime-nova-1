@@ -299,6 +299,10 @@ type TvPressableState = PressableStateCallbackType & { focused: boolean };
 type TvPressableProps = Omit<PressableProps, "style"> & {
   style?: StyleProp<ViewStyle> | ((state: TvPressableState) => StyleProp<ViewStyle>);
   onKeyDown?: (event: any) => void;
+  nextFocusLeft?: number;
+  nextFocusRight?: number;
+  nextFocusUp?: number;
+  nextFocusDown?: number;
 };
 
 export const TvPressable = React.forwardRef<View, TvPressableProps>(function TvPressable(

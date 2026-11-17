@@ -244,6 +244,7 @@ function normalizeServerFromSSE(raw: any, index: number, base: string): FilmServ
     embedUrl: isEmbed ? rawUrl : undefined,
     subtitleUrl: subRaw,
     headers: raw.headers && typeof raw.headers === "object" ? raw.headers : undefined,
+    hardsubbed: Boolean(raw.hardsubbed),
     note: isEmbed
       ? "مشغل مضمّن احتياطي"
       : isHls

@@ -269,7 +269,7 @@ export async function saveDownloadToGallery(item: DownloadItem): Promise<Downloa
   }
 
   const asset = await MediaLibrary.createAssetAsync(fileUri);
-  const albumName = "Nova Anime";
+  const albumName = "NOVA FILM";
   try {
     const existingAlbum = await MediaLibrary.getAlbumAsync(albumName);
     if (existingAlbum) {
@@ -491,7 +491,7 @@ function completeNotification(entry: RuntimeDownload, error = false): void {
         await Notifications.scheduleNotificationAsync({
           identifier: `nova-download-${entry.id}`,
           content: {
-            title: "Nova Anime",
+            title: "NOVA FILM",
             body: error
               ? `فشل تنزيل ${entry.title} — الحلقة ${entry.ep}`
               : `اكتمل تنزيل ${entry.title} — الحلقة ${entry.ep}`,
@@ -578,7 +578,7 @@ function requestHeaders(params: StartDownloadParams): Record<string, string> {
      global CORS middleware correctly rejects an API request whose Origin is
      megaplay/mediafire/etc.; the proxy URL already contains the provider
      referrer and the VPS supplies it upstream. */
-  const isNovaApiUrl = /\/api\/(?:anime|animation)\//i.test(params.url);
+  const isNovaApiUrl = /\/api\/(?:anime|animation|film)\//i.test(params.url);
   const sourceHeaders = isNovaApiUrl
     ? Object.fromEntries(
         Object.entries(params.headers || {}).filter(
@@ -743,11 +743,19 @@ async function pollNativeDownload(entry: RuntimeDownload): Promise<void> {
 
     if (record.status === "successful") {
       entry.status = "downloading";
-      await saveCompleted(entry);
-      active.delete(entry.id);
-      entry.nativePollTimer = undefined;
-      await forgetNativeDownload(entry.id);
-      notifyListeners();
+      try {
+        await saveCompleted(entry);
+        active.delete(entry.id);
+        entry.nativePollTimer = undefined;
+        await forgetNativeDownload(entry.id);
+        notifyListeners();
+      } catch (err) {
+        entry.status = "error";
+        entry.errorMessage = err instanceof Error ? err.message : "فشل التحقق من ملف التنزيل.";
+        entry.nativePollTimer = undefined;
+        await forgetNativeDownload(entry.id).catch(() => {});
+        notifyListeners();
+      }
       return;
     }
 
@@ -927,8 +935,9 @@ async function saveCompleted(entry: RuntimeDownload): Promise<void> {
     if (retryInfo?.exists) fileSize = (retryInfo as { size?: number }).size ?? 0;
   }
 
-  if (fileSize <= 0) {
-    fileSize = Math.max(1024, entry.bytesWritten || entry.totalBytes || 1024);
+  if (fileSize < 64 * 1024) {
+    await FileSystem.deleteAsync(targetPath, { idempotent: true }).catch(() => {});
+    throw new Error("ملف الفيديو غير مكتمل أو غير صالح للتشغيل.");
   }
   /* Some Android builds report completion before the final progress callback.
      Use the actual file size so a valid file is not persisted or displayed as

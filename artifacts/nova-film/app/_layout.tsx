@@ -256,7 +256,7 @@ function RootLayout() {
           .then((m) => m.restoreInterruptedDownloads())
           .catch(() => {});
       }
-    }, 1000);
+    }, 2400);
     const interval = setInterval(() => {
       if (AppState.currentState === "active") {
         pingMobileAppPresence();
@@ -277,7 +277,7 @@ function RootLayout() {
     const t = setTimeout(() => {
       setBrandSplashVisible(false);
       SplashScreen.hideAsync().catch(() => {});
-    }, 3500);
+    }, 1500);
     return () => clearTimeout(t);
   }, []);
 
@@ -286,7 +286,7 @@ function RootLayout() {
       const t = setTimeout(() => {
         setBrandSplashVisible(false);
         SplashScreen.hideAsync().catch(() => {});
-      }, tvMode ? 350 : 900);
+      }, tvMode ? 120 : 180);
       return () => clearTimeout(t);
     }
   }, [fontsLoaded, fontError, tvMode]);

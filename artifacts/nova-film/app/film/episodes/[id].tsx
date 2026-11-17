@@ -116,7 +116,7 @@ const EpisodeRow = React.memo(function EpisodeRow({
             </Text>
             {watched ? (
               <View style={ep_s.watchedBadge}>
-                <Text style={ep_s.watchedBadgeText}>مشاهدة</Text>
+                <Text style={ep_s.watchedBadgeText}>تمت المشاهدة</Text>
               </View>
             ) : null}
           </View>
@@ -157,7 +157,7 @@ const EpisodeRow = React.memo(function EpisodeRow({
           ]}
         >
           <Ionicons
-            name={watched ? "eye" : "eye-outline"}
+            name={watched ? "eye-outline" : "eye-off-outline"}
             size={17}
             color={watched ? "#10B981" : colors.textSecondary}
           />
@@ -325,6 +325,9 @@ export default function FilmEpisodesScreen() {
 
   const watchEp = useCallback(
     (epNum: number) => {
+      void toggleEpisodeWatched(filmId, selectedSeason, epNum, reqType, true)
+        .then(setWatchedMap)
+        .catch(() => {});
       router.push({
         pathname: "/film/watch",
         params: {

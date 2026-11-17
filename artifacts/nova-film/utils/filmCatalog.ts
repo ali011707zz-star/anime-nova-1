@@ -22,6 +22,7 @@ export type FilmStreamSource = {
   note?: string;
   isArabic?: boolean;
   isEmbed?: boolean;
+  hardsubbed?: boolean;
 };
 
 export type FilmServerLink = FilmStreamSource;

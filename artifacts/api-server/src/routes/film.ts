@@ -1,12 +1,17 @@
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { spawn } from "node:child_process";
+import { pipeline } from "node:stream/promises";
 import { Router, type Request, type Response } from "express";
-import { issueAnonToken } from "../lib/security.js";
+import { issueAnonToken, validateAnonToken, validateDownloadToken } from "../lib/security.js";
 import { pool } from "../lib/db.js";
 
 const router = Router();
 
 const TMDB_KEY = process.env.TMDB_API_KEY || "4ef0d7355d9ffb5151e987764708ce96";
 const TMDB_BASE = "https://api.themoviedb.org/3";
-const TMDB_IMG_POSTER = "https://image.tmdb.org/t/p/w500";
+const TMDB_IMG_POSTER = "https://image.tmdb.org/t/p/w780";
 const TMDB_IMG_BACKDROP = "https://image.tmdb.org/t/p/w1280";
 const TMDB_IMG_PROFILE = "https://image.tmdb.org/t/p/w185";
 
@@ -27,6 +32,7 @@ type ResolvedSource = {
   proxyUrl?: string;
   isEmbed: boolean;
   subtitleUrl?: string;
+  hardsubbed?: boolean;
 };
 
 function encodeMediaUrl(raw?: string | null): string | null {
@@ -113,6 +119,7 @@ async function tmdbFetchOptional(path: string, lang = "ar"): Promise<any | null>
 
 async function enrichDetailFromTmdb(row: any): Promise<{
   tmdbId: number | null;
+  posterUrl: string | null;
   backdropUrl: string | null;
   overviewAr: string;
   runtimeMin: number;
@@ -143,6 +150,7 @@ async function enrichDetailFromTmdb(row: any): Promise<{
   if (!tmdbId) {
     return {
       tmdbId: null,
+      posterUrl: null,
       backdropUrl: null,
       overviewAr: String(row.synopsis || "").trim(),
       runtimeMin: type === "tv" ? 45 : 112,
@@ -168,6 +176,7 @@ async function enrichDetailFromTmdb(row: any): Promise<{
   if (!data) {
     return {
       tmdbId,
+      posterUrl: null,
       backdropUrl: null,
       overviewAr: String(row.synopsis || "").trim(),
       runtimeMin: type === "tv" ? 45 : 112,
@@ -180,20 +189,35 @@ async function enrichDetailFromTmdb(row: any): Promise<{
     };
   }
 
+  const posterUrl = data.poster_path ? `${TMDB_IMG_POSTER}${data.poster_path}` : null;
   const backdropUrl = data.backdrop_path ? `${TMDB_IMG_BACKDROP}${data.backdrop_path}` : null;
-  if (backdropUrl && (!row.tmdb_id || !row.backdrop_url || row.backdrop_url === row.poster_url)) {
+  const curPoster = String(row.poster_url || "");
+  const curBackdrop = String(row.backdrop_url || "");
+  const needsPosterUpgrade = Boolean(posterUrl && (!curPoster.includes("image.tmdb.org/t/p/w780") || curPoster.includes("moviztime")));
+  const needsBackdropUpgrade = Boolean(backdropUrl && (!curBackdrop.includes("image.tmdb.org") || curBackdrop === curPoster));
+  if (!row.tmdb_id || needsPosterUpgrade || needsBackdropUpgrade) {
     pool
-      .query(`UPDATE film_vault_titles SET tmdb_id = $1, backdrop_url = $2 WHERE id = $3`, [
-        tmdbId,
-        backdropUrl,
-        row.id,
-      ])
+      .query(
+        `UPDATE film_vault_titles
+         SET tmdb_id = COALESCE($1, tmdb_id),
+             poster_url = COALESCE($2, poster_url),
+             backdrop_url = COALESCE($3, backdrop_url)
+         WHERE id = $4`,
+        [
+          tmdbId,
+          needsPosterUpgrade ? posterUrl : null,
+          needsBackdropUpgrade ? backdropUrl : null,
+          row.id,
+        ],
+      )
       .catch(() => {});
   }
 
-  const allVideos: any[] = [...(arData?.videos?.results || []), ...(enData?.videos?.results || [])];
+  const allVideos: any[] = [...(enData?.videos?.results || []), ...(arData?.videos?.results || [])];
   const trailer =
+    allVideos.find((v) => v.site === "YouTube" && v.type === "Trailer" && v.official !== false) ||
     allVideos.find((v) => v.site === "YouTube" && v.type === "Trailer") ||
+    allVideos.find((v) => v.site === "YouTube" && v.type === "Teaser" && v.official !== false) ||
     allVideos.find((v) => v.site === "YouTube" && v.type === "Teaser") ||
     allVideos.find((v) => v.site === "YouTube");
 
@@ -222,6 +246,7 @@ async function enrichDetailFromTmdb(row: any): Promise<{
 
   return {
     tmdbId,
+    posterUrl,
     backdropUrl,
     overviewAr: String(row.synopsis || "").trim() || String(arData?.overview || enData?.overview || "").trim(),
     runtimeMin: Number(data?.runtime || (Array.isArray(data?.episode_run_time) ? data.episode_run_time[0] : 0) || (type === "tv" ? 45 : 112)),
@@ -279,6 +304,7 @@ function extractFirePlayerConfig(html: string): any | null {
 async function resolveMoviztimeServer(
   srv: { name?: string; url: string; host?: string },
   idx: number,
+  isHardsubbed = true,
 ): Promise<{ sources: ResolvedSource[]; tracks: SubTrack[] }> {
   const outSources: ResolvedSource[] = [];
   const outTracks: SubTrack[] = [];
@@ -351,7 +377,7 @@ async function resolveMoviztimeServer(
               else if (/854x480|640x360|480p/i.test(streamInf)) tier = "480p SD";
 
               const proxyUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(masterUrl)}&ref=${encodeURIComponent(refForHls)}`;
-              const subUrl = outTracks.find((t) => t.lang === "ar")?.url;
+              const subUrl = isHardsubbed ? undefined : outTracks.find((t) => t.lang === "ar")?.url;
               outSources.push({
                 site: "vidhls",
                 label: `${srvLabel} · ${tier.replace("1080p FHD", "1080p FHD مباشر").replace("720p HD", "720p HD مباشر").replace("4K UHD", "4K UHD مباشر")}`,
@@ -361,6 +387,7 @@ async function resolveMoviztimeServer(
                 proxyUrl,
                 isEmbed: false,
                 subtitleUrl: subUrl,
+                hardsubbed: isHardsubbed,
               });
 
               const childLine = mText
@@ -379,6 +406,7 @@ async function resolveMoviztimeServer(
                   proxyUrl: childProxyUrl,
                   isEmbed: false,
                   subtitleUrl: subUrl,
+                  hardsubbed: isHardsubbed,
                 });
               }
               return { sources: outSources, tracks: outTracks };
@@ -406,10 +434,11 @@ async function resolveEpisodeFromVault(
   }
 
   const titleRes = await pool.query(
-    `SELECT id, title_ar, title_en, tmdb_id, tmdb_type FROM film_vault_titles WHERE id = $1 AND is_archived = FALSE LIMIT 1`,
+    `SELECT id, title_ar, title_en, tmdb_id, tmdb_type, audio_label FROM film_vault_titles WHERE id = $1 AND is_archived = FALSE LIMIT 1`,
     [titleId],
   );
   const titleRow = titleRes.rows[0];
+  const isHardsubbed = !titleRow?.audio_label || /مترجم|hardsub/i.test(String(titleRow.audio_label));
 
   let epRow: any = null;
   if (tmdbType === "movie") {
@@ -435,7 +464,7 @@ async function resolveEpisodeFromVault(
   const resolvedAll: ResolvedSource[] = [];
   const tracksAll: SubTrack[] = [];
 
-  const results = await Promise.all(orderedServers.slice(0, 4).map((srv, idx) => resolveMoviztimeServer(srv, idx)));
+  const results = await Promise.all(orderedServers.slice(0, 4).map((srv, idx) => resolveMoviztimeServer(srv, idx, isHardsubbed)));
   for (const r of results) {
     resolvedAll.push(...r.sources);
     tracksAll.push(...r.tracks);
@@ -455,10 +484,10 @@ async function resolveEpisodeFromVault(
 
   if (resolvedAll.length === 0 && titleId > 0) {
     if (tmdbType === "movie") {
-      pool.query("UPDATE film_vault_titles SET has_live_server = FALSE WHERE id = ", [titleId]).catch(() => {});
-      pool.query("UPDATE film_vault_episodes SET has_live_server = FALSE WHERE title_id = ", [titleId]).catch(() => {});
+      pool.query("UPDATE film_vault_titles SET has_live_server = FALSE WHERE id = $1", [titleId]).catch(() => {});
+      pool.query("UPDATE film_vault_episodes SET has_live_server = FALSE WHERE title_id = $1", [titleId]).catch(() => {});
     } else {
-      pool.query("UPDATE film_vault_episodes SET has_live_server = FALSE WHERE title_id =  AND season_number =  AND episode_number = ", [titleId, season, episode]).catch(() => {});
+      pool.query("UPDATE film_vault_episodes SET has_live_server = FALSE WHERE title_id = $1 AND season_number = $2 AND episode_number = $3", [titleId, season, episode]).catch(() => {});
     }
   }
   if (resolvedAll.length > 0) {
@@ -786,6 +815,7 @@ router.get("/detail", async (req: Request, res: Response) => {
 
     res.json({
       ...summary,
+      posterUrl: tmdbExtra.posterUrl || summary.posterUrl,
       backdropUrl: tmdbExtra.backdropUrl || summary.backdropUrl,
       overviewAr: tmdbExtra.overviewAr || summary.overviewAr || "لا يوجد ملخص متوفر حالياً.",
       runtimeMin: tmdbExtra.runtimeMin,
@@ -1047,6 +1077,349 @@ router.get("/subtitle-tracks", async (req: Request, res: Response) => {
     res.json({ tracks });
   } catch (err: any) {
     res.json({ tracks: [], error: String(err?.message || err) });
+  }
+});
+
+
+// ── 9. Real HLS -> MP4 Download Converter (with Range + Single-Flight Cache) ─
+const FILM_DL_CACHE_DIR = "/tmp/nova-film-dl-cache";
+const _filmDlInFlight = new Map<string, Promise<string>>();
+
+function cleanupFilmDlCache() {
+  try {
+    if (!fs.existsSync(FILM_DL_CACHE_DIR)) return;
+    const now = Date.now();
+    for (const name of fs.readdirSync(FILM_DL_CACHE_DIR)) {
+      const fp = path.join(FILM_DL_CACHE_DIR, name);
+      try {
+        const st = fs.statSync(fp);
+        if (now - st.mtimeMs > 25 * 60_000) fs.rmSync(fp, { force: true });
+      } catch {}
+    }
+  } catch {}
+}
+
+function buildLocalProxyUrl(rawUrl: string): string | null {
+  const s = String(rawUrl || "").trim();
+  if (!s) return null;
+  const port = Number(process.env.PORT || 5000);
+  if (s.startsWith("/api/anime/hls-proxy") || s.startsWith("/api/anime/video-proxy")) {
+    return `http://127.0.0.1:${port}${s}`;
+  }
+  try {
+    const u = new URL(s);
+    if (u.pathname === "/api/anime/hls-proxy" || u.pathname === "/api/anime/video-proxy") {
+      return `http://127.0.0.1:${port}${u.pathname}${u.search}`;
+    }
+    if (u.protocol === "http:" || u.protocol === "https:") {
+      return u.toString();
+    }
+  } catch {}
+  return null;
+}
+
+function runFfmpegToMp4(inputUrl: string, outputPath: string, referer?: string): Promise<void> {
+  const spawnOnce = (extraArgs: string[]) =>
+    new Promise<void>((resolve, reject) => {
+      const headerArg = referer
+        ? ["-headers", `Referer: ${referer}\r\nUser-Agent: ${BROWSER_UA}\r\n`]
+        : ["-headers", `User-Agent: ${BROWSER_UA}\r\n`];
+      const args = [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-rw_timeout",
+        "120000000",
+        "-protocol_whitelist",
+        "file,http,https,tcp,tls,crypto",
+        "-allowed_extensions",
+        "ALL",
+        ...headerArg,
+        "-i",
+        inputUrl,
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a:0?",
+        ...extraArgs,
+        outputPath,
+      ];
+      const child = spawn("/usr/bin/ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"] });
+      let stderr = "";
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderr = (stderr + chunk.toString()).slice(-3000);
+      });
+      child.once("error", reject);
+      child.once("close", (code) => {
+        if (code === 0 && fs.existsSync(outputPath) && fs.statSync(outputPath).size > 32 * 1024) {
+          resolve();
+        } else {
+          reject(new Error(`ffmpeg exited ${code}: ${stderr}`));
+        }
+      });
+    });
+
+  return spawnOnce(["-c", "copy", "-bsf:a", "aac_adtstoasc", "-movflags", "+faststart"])
+    .catch(() => {
+      fs.rmSync(outputPath, { force: true });
+      return spawnOnce(["-c", "copy", "-movflags", "+faststart"]);
+    })
+    .catch(() => {
+      fs.rmSync(outputPath, { force: true });
+      return spawnOnce([
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "23",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        "-movflags",
+        "+faststart",
+      ]);
+    });
+}
+
+function streamFfmpegFragMp4(
+  inputUrl: string,
+  tmpMp4: string,
+  cachedMp4: string,
+  referer: string | undefined,
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const headerArg = referer
+    ? ["-headers", `Referer: ${referer}\r\nUser-Agent: ${BROWSER_UA}\r\n`]
+    : ["-headers", `User-Agent: ${BROWSER_UA}\r\n`];
+
+  const attempt = (codecArgs: string[]) =>
+    new Promise<void>((resolve, reject) => {
+      const args = [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-rw_timeout",
+        "120000000",
+        "-protocol_whitelist",
+        "file,http,https,tcp,tls,crypto",
+        "-allowed_extensions",
+        "ALL",
+        ...headerArg,
+        "-i",
+        inputUrl,
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a:0?",
+        ...codecArgs,
+        "-f",
+        "mp4",
+        "-movflags",
+        "frag_keyframe+empty_moov+default_base_moof",
+        "pipe:1",
+      ];
+
+      const child = spawn("/usr/bin/ffmpeg", args, { stdio: ["ignore", "pipe", "pipe"] });
+      let stderr = "";
+      let headersSent = false;
+      let totalBytes = 0;
+      let clientClosed = false;
+      let fileStream: fs.WriteStream | null = null;
+
+      const cleanupTmp = () => {
+        try { fileStream?.destroy(); } catch {}
+        try { fs.rmSync(tmpMp4, { force: true }); } catch {}
+      };
+
+      const onClientClose = () => {
+        if (!res.writableFinished) {
+          clientClosed = true;
+          if (!child.killed) child.kill("SIGTERM");
+          cleanupTmp();
+          resolve();
+        }
+      };
+      req.once("close", onClientClose);
+      res.once("close", onClientClose);
+
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderr = (stderr + chunk.toString()).slice(-3000);
+      });
+
+      child.stdout.on("data", (chunk: Buffer) => {
+        if (clientClosed || res.destroyed) return;
+        if (!headersSent) {
+          headersSent = true;
+          res.status(200);
+          res.setHeader("Content-Type", "video/mp4");
+          res.setHeader("Content-Disposition", 'attachment; filename="nova-film.mp4"');
+          res.setHeader("Cache-Control", "no-store");
+          fileStream = fs.createWriteStream(tmpMp4);
+          fileStream.on("error", () => {});
+        }
+        totalBytes += chunk.length;
+        try {
+          fileStream?.write(chunk);
+        } catch {}
+        const ok = res.write(chunk);
+        if (!ok) {
+          child.stdout.pause();
+          res.once("drain", () => {
+            if (!clientClosed && !res.destroyed) child.stdout.resume();
+          });
+        }
+      });
+
+      child.once("error", (err) => {
+        req.removeListener("close", onClientClose);
+        res.removeListener("close", onClientClose);
+        cleanupTmp();
+        reject(err);
+      });
+
+      child.once("close", (code) => {
+        req.removeListener("close", onClientClose);
+        res.removeListener("close", onClientClose);
+        if (clientClosed) return;
+        if (code === 0 && headersSent && totalBytes > 64 * 1024) {
+          const finalize = () => {
+            try {
+              if (fs.existsSync(tmpMp4) && fs.statSync(tmpMp4).size > 64 * 1024) {
+                fs.renameSync(tmpMp4, cachedMp4);
+              }
+            } catch {
+              cleanupTmp();
+            }
+            if (!res.writableEnded) res.end();
+            resolve();
+          };
+          if (fileStream) fileStream.end(finalize);
+          else finalize();
+        } else {
+          cleanupTmp();
+          if (headersSent) {
+            if (!res.writableEnded) res.destroy();
+            resolve();
+          } else {
+            reject(new Error(`ffmpeg exited ${code}: ${stderr}`));
+          }
+        }
+      });
+    });
+
+  return attempt(["-c", "copy", "-bsf:a", "aac_adtstoasc"])
+    .catch((err) => {
+      if (res.headersSent) throw err;
+      return attempt(["-c", "copy"]);
+    })
+    .catch((err) => {
+      if (res.headersSent) throw err;
+      return attempt([
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "128k",
+      ]);
+    });
+}
+
+router.get("/download-mp4", async (req: Request, res: Response) => {
+  try {
+    const token = String((req.headers["x-app-token"] as string) || (req.query._tok as string) || "").trim();
+    const dlToken = String((req.headers["x-download-token"] as string) || (req.query.dlToken as string) || (req.query.downloadToken as string) || "").trim();
+    if (!validateAnonToken(token) && !validateDownloadToken(dlToken)) {
+      res.status(403).json({ error: "Access denied", code: "INVALID_TOKEN" });
+      return;
+    }
+    const rawUrl = String(req.query.url || "").trim();
+    const refParam = String(req.query.ref || "").trim() || undefined;
+    const sourceUrl = buildLocalProxyUrl(rawUrl);
+    if (!sourceUrl) {
+      res.status(400).send("invalid media url");
+      return;
+    }
+
+    fs.mkdirSync(FILM_DL_CACHE_DIR, { recursive: true });
+    cleanupFilmDlCache();
+
+    const hash = crypto.createHash("sha1").update(sourceUrl).digest("hex");
+    const cachedMp4 = path.join(FILM_DL_CACHE_DIR, `${hash}.mp4`);
+    const tmpMp4 = path.join(FILM_DL_CACHE_DIR, `${hash}.${Date.now()}.tmp.mp4`);
+    const hasValidCache = fs.existsSync(cachedMp4) && fs.statSync(cachedMp4).size > 64 * 1024;
+    const range = String(req.headers.range || "").trim();
+
+    if (!hasValidCache) {
+      if (!range) {
+        await streamFfmpegFragMp4(sourceUrl, tmpMp4, cachedMp4, refParam, req, res);
+        return;
+      }
+      let pending = _filmDlInFlight.get(hash);
+      if (!pending) {
+        pending = (async () => {
+          try {
+            await runFfmpegToMp4(sourceUrl, tmpMp4, refParam);
+            fs.renameSync(tmpMp4, cachedMp4);
+            return cachedMp4;
+          } catch (err) {
+            fs.rmSync(tmpMp4, { force: true });
+            throw err;
+          } finally {
+            _filmDlInFlight.delete(hash);
+          }
+        })();
+        _filmDlInFlight.set(hash, pending);
+      }
+      await pending;
+    }
+
+    const finalPath = cachedMp4;
+    const size = fs.statSync(finalPath).size;
+    if (size <= 0) {
+      res.status(502).send("empty converted video");
+      return;
+    }
+    let streamStart = 0;
+    let streamEnd = size - 1;
+    let statusCode = 200;
+    if (range) {
+      const match = /^bytes=(\d*)-(\d*)$/i.exec(range);
+      if (!match || (!match[1] && !match[2])) {
+        res.status(416).setHeader("Content-Range", `bytes */${size}`).end();
+        return;
+      }
+      if (match[1]) {
+        streamStart = Number(match[1]);
+        streamEnd = match[2] ? Math.min(Number(match[2]), size - 1) : size - 1;
+      } else {
+        const suffixLength = Number(match[2]);
+        streamStart = Math.max(0, size - suffixLength);
+        streamEnd = size - 1;
+      }
+      if (!Number.isSafeInteger(streamStart) || !Number.isSafeInteger(streamEnd) || streamStart < 0 || streamStart >= size || streamStart > streamEnd) {
+        res.status(416).setHeader("Content-Range", `bytes */${size}`).end();
+        return;
+      }
+      statusCode = 206;
+    }
+
+    res.status(statusCode);
+    res.setHeader("Content-Type", "video/mp4");
+    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Content-Length", String(streamEnd - streamStart + 1));
+    if (statusCode === 206) {
+      res.setHeader("Content-Range", `bytes ${streamStart}-${streamEnd}/${size}`);
+    }
+    res.setHeader("Content-Disposition", 'attachment; filename="nova-film.mp4"');
+    await pipeline(fs.createReadStream(finalPath, { start: streamStart, end: streamEnd }), res);
+  } catch (err: any) {
+    if (!res.headersSent && !res.destroyed) {
+      res.status(502).send(`film conversion failed: ${err?.message || "unknown error"}`);
+    }
   }
 });
 

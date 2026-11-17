@@ -1,8 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import * as ScreenOrientation from "expo-screen-orientation";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -18,9 +17,9 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { WebView } from "react-native-webview";
 
 import { SafePosterImage } from "@/components/SafePosterImage";
+import { YoutubeTrailerModal } from "@/components/YoutubeTrailerModal";
 import type { ThemePalette } from "@/constants/colors";
 import { useColors } from "@/hooks/useColors";
 import { fetchFilmDetail } from "@/utils/filmApi";
@@ -32,6 +31,8 @@ import {
   loadFavoriteFilmIds,
   loadSavedCast,
   loadUserRating,
+  loadWatchedMap,
+  makeEpisodeKey,
   saveUserRating,
   toggleFavoriteFilm,
   toggleSavedCastMember,
@@ -96,128 +97,6 @@ function MetaCard({
   );
 }
 
-function YoutubeTrailerModal({
-  visible,
-  videoId,
-  title,
-  onClose,
-  tvMode = false,
-}: {
-  visible: boolean;
-  videoId: string | null;
-  title?: string;
-  onClose: () => void;
-  tvMode?: boolean;
-}) {
-  const insets = useSafeAreaInsets();
-  const colors = useColors();
-  const d = useMemo(() => createDetailStyles(colors), [colors]);
-  const [webLoading, setWebLoading] = useState(true);
-  const topPad = Platform.OS === "web" ? 20 : insets.top;
-
-  useEffect(() => {
-    if (!visible) return;
-    setWebLoading(true);
-  }, [visible, videoId]);
-
-  if (!videoId || !visible) return null;
-
-  const trailerHtml = `<!DOCTYPE html>
-<html>
-<head>
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<style>
-  * { margin:0; padding:0; box-sizing:border-box; }
-  html, body { width:100%; height:100%; background:#000; overflow:hidden; }
-  iframe { width:100%; height:100%; border:none; display:block; }
-</style>
-</head>
-<body>
-<iframe
-  src="https://www.youtube.com/embed/${videoId}?autoplay=1&playsinline=1&rel=0&modestbranding=1"
-  allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-  allowfullscreen
-></iframe>
-</body>
-</html>`;
-
-  const content = (
-    <View style={{ flex: 1, backgroundColor: "#000" }} testID="nova-tv-modal-root">
-      <View style={[d.trailerSheetHeader, { paddingTop: topPad + 8 }]}>
-        <Pressable
-          onPress={onClose}
-          focusable={tvMode}
-          hasTVPreferredFocus={tvMode}
-          testID={tvMode ? "nova-tv-preferred-focus" : undefined}
-          style={({ focused }) => [d.trailerCloseBtn, tvMode && tvFocusStyle(focused)]}
-        >
-          <Ionicons name="close" size={20} color={colors.textPrimary} />
-        </Pressable>
-        <View style={{ flex: 1, alignItems: "flex-end" }}>
-          <Text style={d.trailerModalTitle} numberOfLines={1}>
-            {title || "العرض الدعائي"}
-          </Text>
-          <Text style={{ fontSize: 10, color: colors.textMuted, fontFamily: "Cairo_400Regular" }}>
-            العرض الدعائي الرسمي
-          </Text>
-        </View>
-        <View style={{ width: 32, height: 32, backgroundColor: "#FF0000", borderRadius: 9, alignItems: "center", justifyContent: "center" }}>
-          <Ionicons name="logo-youtube" size={18} color="#fff" />
-        </View>
-      </View>
-
-      <View style={{ flex: 1, backgroundColor: "#000", position: "relative" }}>
-        {Platform.OS === "web" ? (
-          // @ts-ignore
-          <iframe
-            src={`https://www.youtube.com/embed/${videoId}?autoplay=1&playsinline=1&rel=0&modestbranding=1`}
-            style={{ width: "100%", height: "100%", border: "none" }}
-            allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-            allowFullScreen
-          />
-        ) : (
-          <WebView
-            source={{ html: trailerHtml, baseUrl: "https://www.youtube.com" }}
-            style={{ flex: 1, backgroundColor: "#000" }}
-            allowsFullscreenVideo
-            allowsInlineMediaPlayback
-            mediaPlaybackRequiresUserAction={false}
-            javaScriptEnabled
-            domStorageEnabled
-            originWhitelist={["*"]}
-            mixedContentMode="always"
-            userAgent="Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
-            onLoadEnd={() => setWebLoading(false)}
-            onError={() => setWebLoading(false)}
-          />
-        )}
-        {webLoading && Platform.OS !== "web" && (
-          <View style={[StyleSheet.absoluteFill, { backgroundColor: "#000", alignItems: "center", justifyContent: "center", gap: 12 }]}>
-            <ActivityIndicator size="large" color={colors.accent} />
-            <Text style={{ color: "rgba(255,255,255,0.5)", fontSize: 12, fontFamily: "Cairo_400Regular" }}>
-              جارٍ تحميل العرض الدعائي...
-            </Text>
-          </View>
-        )}
-      </View>
-    </View>
-  );
-
-  if (tvMode || Platform.OS === "android") {
-    return (
-      <View style={[StyleSheet.absoluteFillObject, { zIndex: 9999, elevation: 9999 }]}>
-        {content}
-      </View>
-    );
-  }
-
-  return (
-    <Modal visible={visible} animationType="fade" statusBarTranslucent onRequestClose={onClose}>
-      {content}
-    </Modal>
-  );
-}
-
 export default function FilmDetailScreen() {
   const params = useLocalSearchParams<{
     id: string;
@@ -246,6 +125,7 @@ export default function FilmDetailScreen() {
   const [showTrailer, setShowTrailer] = useState(false);
 
   const [favIds, setFavIds] = useState<number[]>([]);
+  const [watchedMap, setWatchedMap] = useState<Record<string, boolean>>({});
   const [myRating, setMyRating] = useState<number>(0);
   const [savedCastIds, setSavedCastIds] = useState<Set<number>>(new Set());
   const [warnDismissed, setWarnDismissed] = useState(false);
@@ -256,6 +136,14 @@ export default function FilmDetailScreen() {
   }, []);
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
+
+  useFocusEffect(
+    useCallback(() => {
+      loadWatchedMap()
+        .then((m) => setWatchedMap(m))
+        .catch(() => {});
+    }, []),
+  );
 
   useEffect(() => {
     if (!showRating && !showTrailer) return;
@@ -338,22 +226,7 @@ export default function FilmDetailScreen() {
     };
   }, [filmId, reqType, cacheKey, retryTick]);
 
-  useEffect(() => {
-    if (tvMode) {
-      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
-      return;
-    }
-    if (showTrailer) {
-      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT).catch(() => {});
-    } else {
-      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
-    }
-    return () => {
-      if (!tvMode) {
-        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
-      }
-    };
-  }, [showTrailer, tvMode]);
+// Trailer orientation is owned cleanly by YoutubeTrailerModal
 
   const isFav = detail ? favIds.includes(detail.id) : false;
 
@@ -497,6 +370,12 @@ export default function FilmDetailScreen() {
   }
 
   const isSeries = detail.tmdbType === "tv";
+  const isMovieWatched = !isSeries && Boolean(watchedMap[makeEpisodeKey(filmId, 1, 1, "movie")]);
+  const watchedSeriesCount = useMemo(() => {
+    if (!isSeries) return 0;
+    const prefix = `tv:${filmId}:`;
+    return Object.entries(watchedMap).filter(([k, v]) => v && k.startsWith(prefix)).length;
+  }, [isSeries, filmId, watchedMap]);
   const totalEpisodesCount = isSeries
     ? detail.seasons.reduce((acc, s) => acc + (s.episodeCount || 0), 0) || detail.episodes.length
     : 1;
@@ -607,6 +486,25 @@ export default function FilmDetailScreen() {
                 <View style={[d.badge, d.badgeScore]}>
                   <Ionicons name="star" size={10} color="#FBBF24" />
                   <Text style={d.badgeScoreText}>{scoreStr}</Text>
+                </View>
+              ) : null}
+              {(isMovieWatched || watchedSeriesCount > 0) ? (
+                <View
+                  style={[
+                    d.badge,
+                    {
+                      backgroundColor: "rgba(16,185,129,0.16)",
+                      borderColor: "rgba(16,185,129,0.45)",
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 4,
+                    },
+                  ]}
+                >
+                  <Ionicons name="eye-outline" size={11} color="#10B981" />
+                  <Text style={{ color: "#10B981", fontSize: 10, fontFamily: "Cairo_700Bold" }}>
+                    {isSeries ? `تمت مشاهدة ${watchedSeriesCount}` : "تمت المشاهدة"}
+                  </Text>
                 </View>
               ) : null}
             </View>

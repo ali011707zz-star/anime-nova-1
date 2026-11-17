@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import * as ScreenOrientation from "expo-screen-orientation";
+import { useWatchPlayerOrientation } from "@/utils/watchOrientation";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
@@ -92,15 +92,16 @@ function normalizeQualityBucket(src: FilmStreamSource): "1080p" | "720p" | "480p
 
 function serverShortTag(src: FilmStreamSource, idx: number): string {
   const s = (src.site || "").toLowerCase();
-  if (s === "vidhls") return `VH-${idx + 1}`;
-  if (s === "vidhls-alt") return `CDN-${idx + 1}`;
-  if (s.includes("dahmer")) return `DH-${idx + 1}`;
-  if (s.includes("vidfast")) return `VF-${idx + 1}`;
-  if (s.includes("starcima")) return `SC-${idx + 1}`;
-  if (s.includes("dulo")) return `DL-${idx + 1}`;
-  if (s.includes("nebula")) return `NB-${idx + 1}`;
-  if (s.includes("vidbolt")) return `VB-${idx + 1}`;
-  return `S${idx + 1}`;
+  if (s === "vidhls") return "VH";
+  if (s === "vidhls-alt") return "CD";
+  if (s.includes("dahmer")) return "DH";
+  if (s.includes("vidfast")) return "VF";
+  if (s.includes("starcima")) return "SC";
+  if (s.includes("dulo")) return "DL";
+  if (s.includes("nebula")) return "NB";
+  if (s.includes("vidbolt")) return "VB";
+  if (s.includes("moviztime")) return "MT";
+  return s ? s.slice(0, 2).toUpperCase() : `S${idx + 1}`;
 }
 
 function serverDisplayName(src: FilmStreamSource, idx: number): string {
@@ -153,23 +154,7 @@ export default function FilmWatchScreen() {
 
   const topPad = Platform.OS === "web" ? 20 : insets.top;
 
-  // Orientation management matching Anime NOVA watch.tsx
-  useEffect(() => {
-    if (tvMode) {
-      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
-      return;
-    }
-    if (screen === "player") {
-      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT).catch(() => {});
-    } else {
-      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
-    }
-    return () => {
-      if (!tvMode) {
-        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
-      }
-    };
-  }, [screen, tvMode]);
+  const onToggleOrientation = useWatchPlayerOrientation(screen === "player", tvMode);
 
   // Sync download progress
   useEffect(() => {
@@ -405,18 +390,24 @@ export default function FilmWatchScreen() {
         lower.includes("/proxy/hls") ||
         lower.includes(".m3u8") ||
         lower.includes("master.txt");
+      const siteLower = String(src.site || "").toLowerCase();
+      const isHardsub = Boolean(src.hardsubbed) || siteLower === "vidhls" || siteLower === "vidhls-alt";
+      const tag = serverShortTag(src, idx);
       return {
         url: playUrl,
-        label: serverDisplayName(src, idx),
+        label: `السيرفر ${tag}`,
         quality: normalizeQualityBucket(src),
         contentType: isHls ? "hls" : "progressive",
         site: src.site || `film-${idx + 1}`,
-        subtitleUrl: src.subtitleUrl
-          ? src.subtitleUrl.startsWith("http")
-            ? src.subtitleUrl
-            : `${getBaseUrl()}${src.subtitleUrl}`
-          : arSubTrackUrl,
+        subtitleUrl: isHardsub
+          ? undefined
+          : src.subtitleUrl
+            ? src.subtitleUrl.startsWith("http")
+              ? src.subtitleUrl
+              : `${getBaseUrl()}${src.subtitleUrl}`
+            : arSubTrackUrl,
         isArabic: true,
+        hardsubbed: isHardsub,
         headers: src.headers,
       };
     });
@@ -428,6 +419,27 @@ export default function FilmWatchScreen() {
     if (!picked) return playerSources;
     return [picked, ...playerSources.filter((_, i) => i !== selectedIndex)];
   }, [playerSources, selectedIndex]);
+
+  const [sessionPlaySources, setSessionPlaySources] = useState<PlayerSource[]>([]);
+  const handleRiftBack = useCallback(() => {
+    setScreen("picker");
+  }, []);
+  const startPlaybackAt = useCallback(
+    (index: number) => {
+      const list = playerSources;
+      const picked = list[index];
+      const ordered = picked
+        ? [picked, ...list.filter((_, i) => i !== index)]
+        : list;
+      setSelectedIndex(index);
+      setSessionPlaySources(ordered);
+      setScreen("player");
+      void toggleEpisodeWatched(filmId, currentSeason, currentEpNum, tmdbType, true)
+        .then(setWatchedMap)
+        .catch(() => {});
+    },
+    [playerSources, filmId, currentSeason, currentEpNum, tmdbType],
+  );
 
   const handleProgress = useCallback(
     (posSec: number, durSec: number) => {
@@ -474,7 +486,16 @@ export default function FilmWatchScreen() {
       setDownloadStates((prev) => ({ ...prev, [stateKey]: "downloading" }));
       try {
         const [token, downloadToken] = await Promise.all([getAuthToken(), getDownloadToken()]);
-        const isHls = playUrl.includes("/api/anime/hls-proxy") || playUrl.includes(".m3u8");
+        const isHls =
+          playUrl.includes("/api/anime/hls-proxy") ||
+          playUrl.includes(".m3u8") ||
+          playUrl.includes("master.txt");
+        const siteLower = String(src.site || "").toLowerCase();
+        const isHardsub = Boolean(src.hardsubbed) || siteLower === "vidhls" || siteLower === "vidhls-alt";
+        const base = getBaseUrl();
+        const downloadUrl = isHls
+          ? `${base}/api/film/download-mp4?site=${encodeURIComponent(siteTag)}&url=${encodeURIComponent(playUrl)}`
+          : playUrl;
         await startGlobalDownload({
           animeId: filmId,
           ep: currentEpNum,
@@ -482,12 +503,12 @@ export default function FilmWatchScreen() {
           cover: coverUrl,
           site: siteTag,
           quality: qk,
-          url: playUrl,
+          url: downloadUrl,
           authToken: token,
           downloadToken,
           headers: src.headers,
-          subtitleUrl: arSubTrackUrl,
-          hlsManifestUrl: isHls ? playUrl : undefined,
+          subtitleUrl: isHardsub ? undefined : arSubTrackUrl,
+          hlsManifestUrl: isHls && !isHardsub ? playUrl : undefined,
         });
       } catch {
         setDownloadStates((prev) => ({ ...prev, [stateKey]: "error" }));
@@ -511,13 +532,14 @@ export default function FilmWatchScreen() {
   }, [sources]);
 
   /* ══════════════ RIFT PLAYER (Original Glassy v5 Player) ══════════════ */
-  if (screen === "player" && orderedPlaySources.length > 0) {
+  const activePlayerSources = sessionPlaySources.length > 0 ? sessionPlaySources : orderedPlaySources;
+  if (screen === "player" && activePlayerSources.length > 0) {
     return (
       <RiftPlayer
         key={`film-${filmId}-s${currentSeason}-e${currentEpNum}-${selectedIndex}`}
-        sources={orderedPlaySources}
+        sources={activePlayerSources}
         initialSourceIndex={0}
-        animePlayback={false}
+        animePlayback={true}
         title={displayTitle}
         episode={currentEpNum}
         episodeTitle={
@@ -527,7 +549,8 @@ export default function FilmWatchScreen() {
         }
         initialPosition={savedResumeSec}
         totalEps={tmdbType === "tv" ? episodes.length : 1}
-        onBack={() => setScreen("picker")}
+        onBack={handleRiftBack}
+        onToggleOrientation={onToggleOrientation}
         onError={handleRiftError}
         onProgress={handleProgress}
         onNextEpisode={canGoNextEpisode ? handleNextEpisode : undefined}
@@ -791,10 +814,7 @@ export default function FilmWatchScreen() {
                       <Pressable
                         key={slotKey}
                         testID={shouldPreferTvFocus ? "nova-tv-preferred-focus" : undefined}
-                        onPress={() => {
-                          setSelectedIndex(index);
-                          setScreen("player");
-                        }}
+                        onPress={() => startPlaybackAt(index)}
                         focusable={tvMode}
                         hasTVPreferredFocus={shouldPreferTvFocus}
                         onFocus={() => {
@@ -880,7 +900,7 @@ export default function FilmWatchScreen() {
                             ]}
                             numberOfLines={1}
                           >
-                            السيرفر {tag} · {serverDisplayName(src, index)}
+                            السيرفر {tag}
                           </Text>
                           <View
                             style={[

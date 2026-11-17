@@ -646,7 +646,7 @@ export default function DownloadsScreen() {
     try {
       await saveDownloadToGallery(item);
       await loadDownloads();
-      Alert.alert("تم الحفظ", "أصبحت الحلقة متاحة الآن في معرض الصور والفيديوهات داخل ألبوم Nova Anime.");
+      Alert.alert("تم الحفظ", "أصبحت الحلقة متاحة الآن في معرض الصور والفيديوهات داخل ألبوم NOVA FILM.");
     } catch (error) {
       if (error instanceof GalleryPermissionError) {
         Alert.alert(
