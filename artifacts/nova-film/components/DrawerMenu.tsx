@@ -222,7 +222,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
               <View style={[s.logoAccent, { backgroundColor: colors.homeAccent }]} />
               <View style={{ alignItems: "flex-end" }}>
                 <Text style={[s.logoText, tvMode && s.tvLogoText, { color: colors.textPrimary }]}>
-                  ANIME <Text style={{ color: colors.homeAccent }}>NOVA</Text>
+                  NOVA <Text style={{ color: "#F59E0B" }}>FILM</Text>
                 </Text>
                 <Text style={[s.logoSub, tvMode && s.tvLogoSub, { color: colors.textMuted }]}>منصة الأفلام والمسلسلات والأنميشن</Text>
               </View>

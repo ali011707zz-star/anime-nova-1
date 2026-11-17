@@ -14,10 +14,7 @@ const DOWNLOAD_TOKEN_EXP_KEY = "nova_download_token_exp";
 // معرّف ثابت للتطبيق (Client Identifier)
 const CLIENT_ID = "nova-anime-mobile-v1";
 const APP_VERSION = Constants.expoConfig?.version || "1.0.0";
-const APP_PACKAGE =
-  Constants.expoConfig?.android?.package ||
-  Constants.expoConfig?.ios?.bundleIdentifier ||
-  "com.nova.film";
+const APP_PACKAGE = "com.nova.anime";
 const APP_UA = `NovaAnime/${APP_VERSION} (Mobile)`;
 
 let _cachedToken: string | null = null;

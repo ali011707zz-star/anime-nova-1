@@ -128,7 +128,6 @@ export default function NovaFilmHomeScreen() {
       <FlatList
         data={items}
         horizontal
-        inverted
         keyExtractor={(item) => `${browseType}-${item.id}`}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={{ paddingHorizontal: 14, gap: 10 }}
@@ -370,7 +369,6 @@ export default function NovaFilmHomeScreen() {
             <FlatList
               data={liveDubbed}
               horizontal
-              inverted
               keyExtractor={(item, i) => `live-${item.key || i}`}
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={{ paddingHorizontal: 14, gap: 10 }}

@@ -348,7 +348,7 @@ function RootContent({
 
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: colors.background }}>
-      <PushRegistrationBridge disabled={tvMode || !RUNTIME_INTEGRITY.trusted} />
+      <PushRegistrationBridge disabled={true} />
       <RootLayoutNav />
       {brandSplashVisible && (
         <View style={[StyleSheet.absoluteFill, { zIndex: 99999, elevation: 99999 }]}>
@@ -356,7 +356,7 @@ function RootContent({
         </View>
       )}
       
-      {!brandSplashVisible && <AppUpdateModal />}
+      {false && !brandSplashVisible && <AppUpdateModal />}
     </GestureHandlerRootView>
   );
 }

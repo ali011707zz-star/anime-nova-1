@@ -28,10 +28,7 @@ const DOWNLOADS_ROOT = `${FileSystem.documentDirectory ?? ""}downloads/`;
 const MAX_RETRIES = 3;
 const NOTIFICATION_CHANNEL = "nova-downloads";
 const MOBILE_CLIENT_ID = "nova-anime-mobile-v1";
-const MOBILE_PACKAGE_NAME =
-  Constants.expoConfig?.android?.package ||
-  Constants.expoConfig?.ios?.bundleIdentifier ||
-  "com.nova.film";
+const MOBILE_PACKAGE_NAME = "com.nova.anime";
 const MOBILE_VERSION = Constants.expoConfig?.version || "1.0.0";
 
 export interface DownloadItem {

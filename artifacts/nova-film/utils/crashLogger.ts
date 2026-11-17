@@ -28,15 +28,13 @@ export interface CrashEntry {
 /* ─── حفظ محلي ─── */
 export async function logCrash(entry: Omit<CrashEntry, "ts">): Promise<void> {
   const full: CrashEntry = { ...entry, ts: Date.now() };
+  uploadCrash(full).catch(() => {});
   try {
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
     const existing: CrashEntry[] = raw ? JSON.parse(raw) : [];
     const updated = [full, ...existing].slice(0, MAX_ENTRIES);
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
   } catch {}
-
-  // رفع للسيرفر في الخلفية (لا نُعيق التطبيق)
-  uploadCrash(full).catch(() => {});
 }
 
 /* ─── معلومات الجهاز (تُقرأ مرة واحدة فقط) ─── */
@@ -110,7 +108,7 @@ export function installGlobalCrashHandlers(): void {
           stack: error?.stack?.slice(0, 1000),
         }).catch(() => {});
         try { Sentry.captureException(error); } catch {}
-        if (prev) prev(error, isFatal);
+        if (prev && __DEV__) prev(error, false);
       });
     }
   } catch {}
