@@ -26,6 +26,7 @@ async function buildAll() {
     external: [
       "*.node",
       "sharp",
+      "node:sqlite",
       "better-sqlite3",
       "sqlite3",
       "canvas",

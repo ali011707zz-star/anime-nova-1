@@ -24,6 +24,7 @@ import { getAnimeSeoEntryById, getArabicAnimeTitleById } from "./lib/arabicAnime
 import crashReportRouter from "./routes/crashReport.js";
 import hlsProxyRouter from "./routes/hlsProxy.js";
 import otaRouter from "./routes/ota.js";
+import mediaVaultRouter from "./routes/mediaVault.js";
 import { registerWebAdminRoutes } from "./routes/webAdmin.js";
 import analyticsRouter from "./routes/analytics.js";
 import deviceLinkRouter from "./routes/deviceLink.js";
@@ -185,6 +186,7 @@ export async function createApp(): Promise<Express> {
   // ── توكن المصادقة وتحديثات OTA الهوائية (تسبق Middleware الحماية) ──
   app.use(authTokenRouter);
   app.use("/api/ota", otaRouter);
+  app.use("/api/media-vault", mediaVaultRouter);
 
   // ── Mobile release gate ───────────────────────────────────────────────────
   // Web requests remain public as before. Any request identifying itself as the

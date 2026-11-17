@@ -8,6 +8,8 @@ APP_DIR="/opt/anime-nova"
 cd "$APP_DIR"
 
 echo "🔄 جاري تحديث Anime NOVA..."
+mkdir -p /var/lib/anime-nova-vault /var/backups/anime-nova-vault
+bash "$APP_DIR/scripts/backup-media-vault.sh" 2>/dev/null || true
 
 git fetch origin main && git reset --hard origin/main
 
@@ -28,5 +30,6 @@ pm2 delete anime-nova-api 2>/dev/null || true
 pm2 start "$APP_DIR/ecosystem.config.cjs" --only anime-nova-api
 pm2 save
 
+bash "$APP_DIR/scripts/backup-media-vault.sh" 2>/dev/null || true
 echo "✅ التحديث اكتمل!"
 pm2 status
