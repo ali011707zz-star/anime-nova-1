@@ -206,7 +206,9 @@ function CharCard({ e, animeId, animeTitle, favIds, onToggle, tvMode = false, co
   );
 }
 
-const _animeMemoryCache = new Map<string, { anime: any; descAr?: string }>();
+const _animeMemoryCache: Map<string, { anime: any; descAr?: string }> =
+  (globalThis as any).__novaAnimeDetailCache ||
+  ((globalThis as any).__novaAnimeDetailCache = new Map<string, { anime: any; descAr?: string }>());
 
 export default function AnimeDetailScreen() {
   const { colors, d } = useDetailStyles();
@@ -302,6 +304,18 @@ export default function AnimeDetailScreen() {
       setLoading(true);
       setAnime(null);
       setDescAr(null);
+      AsyncStorage.getItem(`nova:anime-detail:v1:${id}`).then(raw => {
+        if (!raw || !isMountedRef.current) return;
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed?.anime) {
+            _animeMemoryCache.set(String(id), parsed);
+            setAnime((prev: any) => prev || parsed.anime);
+            if (parsed.descAr) setDescAr((prev: any) => prev || parsed.descAr);
+            setLoading(false);
+          }
+        } catch {}
+      }).catch(() => {});
     }
     setLoadError(false);
 
@@ -389,6 +403,8 @@ export default function AnimeDetailScreen() {
       if (!a) { setLoadError(true); return; }
       setAnime(a);
       _animeMemoryCache.set(String(id), { anime: a });
+      if (a?.id) _animeMemoryCache.set(String(a.id), { anime: a });
+      AsyncStorage.setItem(`nova:anime-detail:v1:${id}`, JSON.stringify({ anime: a })).catch(() => {});
       if (a?.nextAiringEpisode?.timeUntilAiring) {
         setCountdown(a.nextAiringEpisode.timeUntilAiring);
       }

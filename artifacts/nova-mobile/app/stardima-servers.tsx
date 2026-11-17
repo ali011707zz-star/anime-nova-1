@@ -338,16 +338,56 @@ export default function StardimaServersScreen() {
     }
   }, [episodeId, episodeSubheading, openingServerId, params, providerTitleId, router, title]);
 
+  const isLightTheme = !colors.background.startsWith("#0");
+
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
-      <View style={[styles.header, { paddingTop: Platform.OS === "web" ? 10 : insets.top + 8 }]}>
+      <View
+        style={[
+          styles.header,
+          {
+            paddingTop: Platform.OS === "web" ? 10 : insets.top + 6,
+            borderBottomColor: colors.border,
+          },
+        ]}
+      >
+        <TvPressable
+          onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)" as any))}
+          accessibilityRole="button"
+          accessibilityLabel="رجوع"
+          focusable={tvMode}
+          style={({ focused }) => [
+            styles.back,
+            { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
+            tvMode && focused && tvFocusStyle(true),
+          ]}
+        >
+          <Ionicons name="chevron-forward" size={19} color={colors.textPrimary} />
+        </TvPressable>
+
+        <View style={styles.headerCenter}>
+          <Text numberOfLines={1} style={[styles.heading, { color: colors.textPrimary }, tvMode && { fontSize: 19 }]}>
+            {title}
+          </Text>
+          <Text numberOfLines={1} style={[styles.subheading, { color: colors.textMuted }, tvMode && { fontSize: 13 }]}>
+            {episodeSubheading}
+          </Text>
+        </View>
+
         <View style={styles.epNavRow}>
           <TvPressable
-            onPress={() => setRetryKey((v) => v + 1)}
-            focusable={tvMode}
-            style={({ focused }) => [styles.refreshBtn, tvMode && focused && tvFocusStyle(true)]}
+            onPress={() => navigateAdjacentEpisode("prev")}
+            disabled={!prevEpisodeId}
+            focusable={tvMode && Boolean(prevEpisodeId)}
+            style={({ focused }) => [
+              styles.epNavBtn,
+              { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
+              !prevEpisodeId && { opacity: 0.32 },
+              tvMode && focused && tvFocusStyle(true),
+            ]}
           >
-            <Ionicons name="refresh" size={15} color="#A78BFA" />
+            <Ionicons name="chevron-forward" size={12} color={colors.textSecondary} />
+            <Text style={[styles.epNavText, { color: colors.textSecondary }]}>السابقة</Text>
           </TvPressable>
 
           <TvPressable
@@ -356,95 +396,107 @@ export default function StardimaServersScreen() {
             focusable={tvMode && Boolean(nextEpisodeId)}
             style={({ focused }) => [
               styles.epNavBtn,
-              !nextEpisodeId && styles.epNavBtnDisabled,
+              { backgroundColor: colors.accentSurface, borderColor: colors.accentBorder },
+              !nextEpisodeId && { opacity: 0.32 },
               tvMode && focused && tvFocusStyle(true),
             ]}
           >
-            <Ionicons name="chevron-back" size={13} color={nextEpisodeId ? "#C4B5FD" : "rgba(255,255,255,0.2)"} />
-            <Text style={[styles.epNavText, !nextEpisodeId && styles.epNavTextDisabled]}>التالية</Text>
+            <Text style={[styles.epNavText, { color: colors.accent }]}>التالية</Text>
+            <Ionicons name="chevron-back" size={12} color={colors.accent} />
           </TvPressable>
 
           <TvPressable
-            onPress={() => navigateAdjacentEpisode("prev")}
-            disabled={!prevEpisodeId}
-            focusable={tvMode && Boolean(prevEpisodeId)}
+            onPress={() => setRetryKey((v) => v + 1)}
+            focusable={tvMode}
             style={({ focused }) => [
-              styles.epNavBtn,
-              !prevEpisodeId && styles.epNavBtnDisabled,
+              styles.refreshBtn,
+              { backgroundColor: colors.accentSurface, borderColor: colors.accentBorder },
               tvMode && focused && tvFocusStyle(true),
             ]}
           >
-            <Text style={[styles.epNavText, !prevEpisodeId && styles.epNavTextDisabled]}>السابقة</Text>
-            <Ionicons name="chevron-forward" size={13} color={prevEpisodeId ? "#C4B5FD" : "rgba(255,255,255,0.2)"} />
+            <Ionicons name="refresh" size={13} color={colors.accent} />
           </TvPressable>
         </View>
-
-        <View style={{ flex: 1 }}>
-          <Text numberOfLines={1} style={[styles.heading, tvMode && { fontSize: 20 }]}>
-            {title}
-          </Text>
-          <Text numberOfLines={1} style={[styles.subheading, tvMode && { fontSize: 13 }]}>
-            {episodeSubheading}
-          </Text>
-        </View>
-
-        <TvPressable
-          onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)/browse" as any)}
-          accessibilityRole="button"
-          accessibilityLabel="رجوع إلى الحلقات"
-          focusable={tvMode}
-          style={({ focused }) => [styles.back, tvMode && focused && tvFocusStyle(true)]}
-        >
-          <Ionicons name="chevron-forward" size={20} color="#fff" />
-        </TvPressable>
       </View>
 
       {loading ? (
         <View style={styles.center}>
           <ActivityIndicator size="large" color={colors.accent} />
-          <Text style={styles.message}>جارٍ الاستعلام عن خوادم الحلقة وجوداتها...</Text>
+          <Text style={[styles.message, { color: colors.textSecondary }]}>جارٍ الاستعلام عن خوادم الحلقة وجوداتها...</Text>
         </View>
       ) : error ? (
         <View style={styles.center}>
           <Ionicons name="cloud-offline-outline" size={34} color={colors.textMuted} />
-          <Text style={styles.message}>{error}</Text>
+          <Text style={[styles.message, { color: colors.textSecondary }]}>{error}</Text>
           <TvPressable
             onPress={() => setRetryKey((value) => value + 1)}
             accessibilityRole="button"
             accessibilityLabel="إعادة الاستعلام عن السيرفرات"
             focusable={tvMode}
-            style={({ focused }) => [styles.action, tvMode && focused && tvFocusStyle(true)]}
+            style={({ focused }) => [
+              styles.action,
+              { backgroundColor: colors.accentSurface, borderColor: colors.accentBorder },
+              tvMode && focused && tvFocusStyle(true),
+            ]}
           >
-            <Text style={styles.actionText}>إعادة الاستعلام</Text>
+            <Text style={[styles.actionText, { color: colors.accent }]}>إعادة الاستعلام</Text>
             <Ionicons name="refresh" size={16} color={colors.accent} />
           </TvPressable>
         </View>
       ) : (
         <ScrollView contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 20) + 28 }]}>
-          <View style={styles.infoCard}>
-            {poster ? (
-              <Image source={{ uri: poster }} style={styles.posterThumb} resizeMode="cover" />
-            ) : (
-              <View style={[styles.posterThumb, { backgroundColor: "rgba(124,58,237,0.15)", alignItems: "center", justifyContent: "center" }]}>
-                <Ionicons name="film-outline" size={24} color="#A78BFA" />
-              </View>
-            )}
+          <View style={[styles.infoCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={styles.infoPosterWrap}>
+              <View style={[styles.infoPosterGlow, { backgroundColor: colors.accentSurface }]} />
+              {poster ? (
+                <Image
+                  source={{ uri: poster }}
+                  style={[styles.posterThumb, { borderColor: colors.accentBorder }]}
+                  resizeMode="cover"
+                />
+              ) : (
+                <View
+                  style={[
+                    styles.posterThumb,
+                    {
+                      backgroundColor: colors.accentSurface,
+                      borderColor: colors.accentBorder,
+                      alignItems: "center",
+                      justifyContent: "center",
+                    },
+                  ]}
+                >
+                  <Ionicons name="film-outline" size={24} color={colors.accent} />
+                </View>
+              )}
+            </View>
             <View style={styles.infoTextWrap}>
-              <Text style={styles.infoTitle} numberOfLines={2}>{title}</Text>
-              <View style={styles.epPill}>
-                <Ionicons name="play-circle" size={13} color="#C4B5FD" />
-                <Text style={styles.epPillText}>{isMovie ? "الفيلم" : `الحلقة ${numericEp}`}</Text>
+              <Text style={[styles.infoTitle, { color: colors.textPrimary }]} numberOfLines={2}>{title}</Text>
+              <View style={styles.infoEpRow}>
+                <View
+                  style={[
+                    styles.epPill,
+                    { backgroundColor: colors.accentSurface, borderColor: colors.accentBorder },
+                  ]}
+                >
+                  <Ionicons name="play-circle" size={12} color={colors.accent} />
+                  <Text style={[styles.epPillText, { color: colors.accent }]}>
+                    {isMovie ? "الفيلم" : `الحلقة ${numericEp}`}
+                  </Text>
+                </View>
               </View>
             </View>
           </View>
 
-          <Text style={[styles.intro, tvMode && { fontSize: 16, lineHeight: 26 }]}>
+          <Text style={[styles.intro, { color: colors.textSecondary }, tvMode && { fontSize: 16, lineHeight: 26 }]}>
             التوفر مؤشر أولي وليس تأكيداً للتشغيل. عند الاختيار يُستخرج رابط الحلقة المباشر فوراً ويُفتح داخل المشغل.
           </Text>
 
           {qualityGroups.map(([quality, group]) => {
             const isFhd = /1080/i.test(quality);
-            const qColor = isFhd ? "#FBBF24" : "#10B981";
+            const qColor = isFhd
+              ? (isLightTheme ? "#D97706" : "#fbbf24")
+              : (isLightTheme ? "#059669" : "#34d399");
             return (
               <View key={quality} style={styles.qualitySection}>
                 <View style={styles.qualityHeader}>
@@ -453,10 +505,16 @@ export default function StardimaServersScreen() {
                   </Text>
                   <View style={[styles.qualityDot, { backgroundColor: qColor }]} />
                 </View>
-                <View style={styles.serverListCard}>
+
+                <View
+                  style={[
+                    styles.serverListCard,
+                    { backgroundColor: colors.card, borderColor: colors.border },
+                  ]}
+                >
                   {group.map((server, idx) => {
                     const serverId = String(server.id || server.server_key || "");
-                    const serverName = String(server.server_name || server.source_host || "StarDima");
+                    const serverName = String(server.server_name || server.source_host || (idx + 1));
                     const isOpening = openingServerId === String(server.id || "");
                     return (
                       <TvPressable
@@ -467,7 +525,7 @@ export default function StardimaServersScreen() {
                         focusable={tvMode}
                         style={({ focused, pressed }) => [
                           styles.serverRow,
-                          idx > 0 && styles.serverRowBorder,
+                          idx < group.length - 1 && [styles.serverRowBorder, { borderBottomColor: colors.border }],
                           { opacity: pressed || (openingServerId && !isOpening) ? 0.7 : 1 },
                           tvMode && focused && tvFocusStyle(true),
                         ]}
@@ -477,16 +535,20 @@ export default function StardimaServersScreen() {
                             <ActivityIndicator size={13} color="#fff" />
                           ) : (
                             <>
-                              <Text style={styles.playActionText}>تشغيل</Text>
                               <Ionicons name="play" size={11} color="#fff" />
+                              <Text style={styles.playActionText}>تشغيل</Text>
                             </>
                           )}
                         </View>
+
                         <View style={styles.serverRightInfo}>
-                          <Text numberOfLines={1} style={[styles.serverName, tvMode && { fontSize: 16 }]}>
+                          <Text
+                            numberOfLines={1}
+                            style={[styles.serverName, { color: colors.textPrimary }, tvMode && { fontSize: 16 }]}
+                          >
                             السيرفر {serverName}
                           </Text>
-                          <View style={[styles.statusDot, { backgroundColor: "#10B981" }]} />
+                          <View style={[styles.statusDot, { backgroundColor: "#34d399" }]} />
                         </View>
                       </TvPressable>
                     );
@@ -498,38 +560,80 @@ export default function StardimaServersScreen() {
 
           {/* Download Servers Section */}
           {servers.length > 0 && (
-            <View style={styles.dlSection}>
+            <View
+              style={[
+                styles.dlSection,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: isLightTheme ? "rgba(2, 132, 199, 0.30)" : "rgba(6, 182, 212, 0.24)",
+                },
+              ]}
+            >
               <View style={styles.dlSectionHeader}>
-                <View style={styles.dlHeaderBadge}>
-                  <Ionicons name="cloud-download" size={14} color="#38BDF8" />
-                  <Text style={styles.dlHeaderBadgeText}>تنزيل مباشر بالخلفية</Text>
+                <View style={styles.dlHeaderTitleWrap}>
+                  <View
+                    style={[
+                      styles.dlHeaderIcon,
+                      {
+                        backgroundColor: isLightTheme ? "rgba(2, 132, 199, 0.10)" : "rgba(6, 182, 212, 0.14)",
+                        borderColor: isLightTheme ? "rgba(2, 132, 199, 0.28)" : "rgba(6, 182, 212, 0.35)",
+                      },
+                    ]}
+                  >
+                    <Ionicons name="cloud-download-outline" size={18} color={isLightTheme ? "#0284C7" : "#22d3ee"} />
+                  </View>
+                  <View style={styles.dlHeaderTexts}>
+                    <Text style={[styles.dlSectionTitle, { color: colors.textPrimary }]} numberOfLines={1}>
+                      سيرفرات التحميل المباشر
+                    </Text>
+                    <Text style={[styles.dlSectionSub, { color: colors.textSecondary }]} numberOfLines={1}>
+                      تحميل مباشر سريع للحلقة المدبلجة يعمل في الخلفية
+                    </Text>
+                  </View>
                 </View>
-                <View style={styles.dlHeaderTitleRow}>
-                  <Text style={styles.dlSectionTitle}>سيرفرات التحميل المباشر</Text>
-                  <View style={styles.dlAccentBar} />
+                <View
+                  style={[
+                    styles.dlCountBadge,
+                    {
+                      backgroundColor: isLightTheme ? "rgba(2, 132, 199, 0.10)" : "rgba(6, 182, 212, 0.14)",
+                      borderColor: isLightTheme ? "rgba(2, 132, 199, 0.28)" : "rgba(6, 182, 212, 0.30)",
+                    },
+                  ]}
+                >
+                  <Text style={[styles.dlCountBadgeText, { color: isLightTheme ? "#0284C7" : "#22d3ee" }]}>
+                    {servers.length} سيرفر
+                  </Text>
                 </View>
               </View>
 
-              <View style={styles.dlCardsContainer}>
+              <View
+                style={[
+                  styles.dlCardsContainer,
+                  { backgroundColor: colors.surface, borderColor: colors.border },
+                ]}
+              >
                 {servers.map((server, idx) => {
                   const sId = String(server.id || "");
-                  const serverName = String(server.server_name || server.source_host || "StarDima");
+                  const serverName = String(server.server_name || server.source_host || (idx + 1));
                   const qualityLabel = String(server.quality || "720p").trim();
                   const dlState = dlStates[sId] ?? "idle";
                   const prog = dlProgress[sId] ?? 0;
                   const isBusy = dlState === "fetching" || dlState === "downloading";
-                  const qColor = /1080/i.test(qualityLabel) ? "#FBBF24" : "#34D399";
+                  const qColor = /1080/i.test(qualityLabel)
+                    ? (isLightTheme ? "#D97706" : "#fbbf24")
+                    : (isLightTheme ? "#059669" : "#34d399");
+
                   return (
                     <TvPressable
                       key={`dl-${sId || idx}`}
                       onPress={() => void handleDownloadServer(server)}
                       disabled={isBusy || dlState === "done"}
                       focusable={tvMode}
-                      style={({ focused }) => [
+                      style={({ focused, pressed }) => [
                         styles.dlRow,
-                        idx > 0 && styles.serverRowBorder,
-                        dlState === "done" && styles.dlRowDone,
+                        idx < servers.length - 1 && [styles.serverRowBorder, { borderBottomColor: colors.border }],
                         tvMode && focused && tvFocusStyle(true),
+                        pressed && { opacity: 0.78 },
                       ]}
                     >
                       <View
@@ -541,25 +645,25 @@ export default function StardimaServersScreen() {
                       >
                         {isBusy ? (
                           <>
-                            <ActivityIndicator size={12} color="#38BDF8" />
+                            <ActivityIndicator size={13} color="#ffffff" />
                             <Text style={styles.dlActionBtnText}>
                               {dlState === "downloading" && prog > 0 ? `${prog}%` : "جاري..."}
                             </Text>
                           </>
                         ) : dlState === "done" ? (
                           <>
-                            <Ionicons name="checkmark-circle" size={14} color="#34D399" />
-                            <Text style={[styles.dlActionBtnText, { color: "#34D399" }]}>مكتمل</Text>
+                            <Ionicons name="checkmark-circle" size={14} color="#ffffff" />
+                            <Text style={styles.dlActionBtnText}>مكتمل</Text>
                           </>
                         ) : dlState === "error" ? (
                           <>
-                            <Ionicons name="refresh" size={13} color="#F87171" />
-                            <Text style={[styles.dlActionBtnText, { color: "#F87171" }]}>إعادة</Text>
+                            <Ionicons name="refresh" size={13} color="#ffffff" />
+                            <Text style={styles.dlActionBtnText}>إعادة</Text>
                           </>
                         ) : (
                           <>
-                            <Ionicons name="download-outline" size={14} color="#38BDF8" />
-                            <Text style={styles.dlActionBtnText}>تنزيل الحلقة</Text>
+                            <Ionicons name="download-outline" size={14} color="#ffffff" />
+                            <Text style={styles.dlActionBtnText}>تنزيل</Text>
                           </>
                         )}
                       </View>
@@ -568,16 +672,9 @@ export default function StardimaServersScreen() {
                         <View style={[styles.dlQualityTag, { borderColor: `${qColor}44`, backgroundColor: `${qColor}18` }]}>
                           <Text style={[styles.dlQualityTagText, { color: qColor }]}>{qualityLabel.toUpperCase()}</Text>
                         </View>
-                        <View style={{ alignItems: ALIGN_RIGHT }}>
-                          <Text style={styles.dlServerName}>سيرفر التحميل {serverName}</Text>
-                          <Text style={styles.dlServerSub}>
-                            {dlState === "downloading"
-                              ? `جاري التنزيل في الخلفية · ${prog}%`
-                              : dlState === "done"
-                                ? "تم حفظ الحلقة في تنزيلاتي"
-                                : "MP4 مباشر · يدعم الاستكمال بالخلفية"}
-                          </Text>
-                        </View>
+                        <Text style={[styles.dlServerName, { color: colors.textPrimary }]} numberOfLines={1}>
+                          السيرفر {serverName}
+                        </Text>
                       </View>
                     </TvPressable>
                   );
@@ -587,7 +684,7 @@ export default function StardimaServersScreen() {
           )}
 
           {omittedServerCount > 0 ? (
-            <Text style={[styles.message, { paddingVertical: 8 }]}>
+            <Text style={[styles.message, { color: colors.textMuted, paddingVertical: 8 }]}>
               أُخفي {omittedServerCount} رابطًا فشل فحصه مؤخرًا.
             </Text>
           ) : null}
@@ -599,143 +696,148 @@ export default function StardimaServersScreen() {
 }
 
 const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
-const ROW_LTR = I18nManager.isRTL ? "row-reverse" : "row";
 const ALIGN_RIGHT = I18nManager.isRTL ? "flex-start" : "flex-end";
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#08080f" },
+  screen: { flex: 1 },
   header: {
-    flexDirection: ROW_LTR,
+    flexDirection: ROW_RTL,
     alignItems: "center",
-    gap: 10,
-    paddingHorizontal: 14,
-    paddingBottom: 12,
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingBottom: 10,
     borderBottomWidth: 1,
-    borderBottomColor: "rgba(255,255,255,0.06)",
-  },
-  epNavRow: {
-    flexDirection: ROW_LTR,
-    alignItems: "center",
-    gap: 6,
-  },
-  refreshBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    backgroundColor: "rgba(124,58,237,0.14)",
-    borderWidth: 1,
-    borderColor: "rgba(167,139,250,0.3)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  epNavBtn: {
-    flexDirection: ROW_LTR,
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 10,
-    height: 34,
-    borderRadius: 10,
-    backgroundColor: "rgba(124,58,237,0.16)",
-    borderWidth: 1,
-    borderColor: "rgba(167,139,250,0.32)",
-  },
-  epNavBtnDisabled: {
-    backgroundColor: "rgba(255,255,255,0.03)",
-    borderColor: "rgba(255,255,255,0.07)",
-  },
-  epNavText: {
-    color: "#DDD6FE",
-    fontSize: 11,
-    fontFamily: "Cairo_700Bold",
-  },
-  epNavTextDisabled: {
-    color: "rgba(255,255,255,0.22)",
   },
   back: {
-    width: 38,
-    height: 38,
+    width: 36,
+    height: 36,
     borderRadius: 12,
+    borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.10)",
+    flexShrink: 0,
+  },
+  headerCenter: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: ALIGN_RIGHT,
   },
   heading: {
-    color: "#fff",
-    fontFamily: "Cairo_700Bold",
-    fontSize: 14,
+    fontFamily: "Cairo_800ExtraBold",
+    fontSize: 13,
     textAlign: "right",
   },
   subheading: {
-    color: "rgba(255,255,255,0.45)",
     fontFamily: "Cairo_400Regular",
-    fontSize: 11,
+    fontSize: 10,
     textAlign: "right",
   },
-  content: { padding: 16, gap: 16 },
+  epNavRow: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    gap: 5,
+    flexShrink: 0,
+  },
+  epNavBtn: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    gap: 3,
+    paddingHorizontal: 8,
+    height: 32,
+    borderRadius: 10,
+    borderWidth: 1,
+    justifyContent: "center",
+  },
+  epNavText: {
+    fontSize: 10,
+    fontFamily: "Cairo_700Bold",
+  },
+  refreshBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  content: { padding: 14, paddingBottom: 80, gap: 12 },
   infoCard: {
     flexDirection: ROW_RTL,
     alignItems: "flex-start",
     gap: 14,
     padding: 14,
     borderRadius: 18,
-    backgroundColor: "rgba(19, 20, 32, 0.95)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+  },
+  infoPosterWrap: {
+    width: 72,
+    height: 102,
+    position: "relative",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  infoPosterGlow: {
+    position: "absolute",
+    width: 80,
+    height: 110,
+    borderRadius: 20,
   },
   posterThumb: {
     width: 72,
-    height: 96,
+    height: 102,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "rgba(167,139,250,0.3)",
   },
   infoTextWrap: {
     flex: 1,
-    gap: 8,
+    minWidth: 0,
+    gap: 6,
+    paddingTop: 1,
+    alignItems: ALIGN_RIGHT,
   },
   infoTitle: {
-    color: "#fff",
-    fontSize: 16,
-    fontFamily: "Cairo_700Bold",
+    fontSize: 15,
+    fontFamily: "Cairo_800ExtraBold",
     textAlign: "right",
+    lineHeight: 22,
+    width: "100%",
+  },
+  infoEpRow: {
+    flexDirection: ROW_RTL,
+    gap: 8,
+    flexWrap: "wrap",
   },
   epPill: {
     flexDirection: ROW_RTL,
-    alignSelf: "flex-start",
     alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 12,
+    gap: 5,
+    paddingHorizontal: 10,
     paddingVertical: 5,
-    borderRadius: 10,
-    backgroundColor: "rgba(124,58,237,0.18)",
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: "rgba(167,139,250,0.32)",
   },
   epPillText: {
-    color: "#DDD6FE",
-    fontSize: 12,
+    fontSize: 11,
     fontFamily: "Cairo_700Bold",
   },
   intro: {
-    color: "rgba(255,255,255,0.65)",
     fontFamily: "Cairo_400Regular",
     fontSize: 12,
     lineHeight: 20,
-    textAlign: "right",
+    textAlign: "center",
   },
   qualitySection: { gap: 8 },
   qualityHeader: {
-    flexDirection: ROW_LTR,
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "flex-end",
     gap: 6,
+    paddingHorizontal: 4,
   },
   qualityDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+    width: 7,
+    height: 7,
+    borderRadius: 4,
   },
   qualityHeading: {
     fontFamily: "Cairo_700Bold",
@@ -743,44 +845,45 @@ const styles = StyleSheet.create({
     textAlign: "right",
   },
   serverListCard: {
-    borderRadius: 16,
-    backgroundColor: "rgba(16, 24, 24, 0.92)",
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: "rgba(16, 185, 129, 0.18)",
     overflow: "hidden",
   },
   serverRow: {
-    flexDirection: ROW_LTR,
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    minHeight: 52,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 8,
   },
   serverRowBorder: {
-    borderTopWidth: 1,
-    borderTopColor: "rgba(255,255,255,0.06)",
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   playActionPill: {
-    flexDirection: ROW_LTR,
+    flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 4,
     paddingHorizontal: 14,
     paddingVertical: 6,
     borderRadius: 10,
-    backgroundColor: "#10B981",
+    backgroundColor: "#10b981",
   },
   playActionText: {
-    color: "#fff",
+    color: "#ffffff",
     fontSize: 12,
     fontFamily: "Cairo_700Bold",
   },
   serverRightInfo: {
-    flexDirection: ROW_LTR,
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
     alignItems: "center",
+    justifyContent: "flex-end",
     gap: 8,
   },
   serverName: {
-    color: "#fff",
     fontFamily: "Cairo_700Bold",
     fontSize: 13,
     textAlign: "right",
@@ -792,135 +895,149 @@ const styles = StyleSheet.create({
   },
   dlSection: {
     marginTop: 6,
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 14,
     gap: 10,
   },
   dlSectionHeader: {
-    flexDirection: ROW_LTR,
+    flexDirection: ROW_RTL,
     alignItems: "center",
     justifyContent: "space-between",
+    gap: 10,
   },
-  dlHeaderTitleRow: {
-    flexDirection: ROW_LTR,
+  dlHeaderTitleWrap: {
+    flexDirection: ROW_RTL,
     alignItems: "center",
-    gap: 8,
+    gap: 10,
+    flex: 1,
+    minWidth: 0,
   },
-  dlAccentBar: {
-    width: 4,
-    height: 18,
-    borderRadius: 2,
-    backgroundColor: "#38BDF8",
+  dlHeaderIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  dlHeaderTexts: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: ALIGN_RIGHT,
   },
   dlSectionTitle: {
-    color: "#F8FAFC",
-    fontSize: 14,
-    fontFamily: "Cairo_700Bold",
+    fontSize: 13.5,
+    fontFamily: "Cairo_800ExtraBold",
+    textAlign: "right",
+    width: "100%",
   },
-  dlHeaderBadge: {
-    flexDirection: ROW_LTR,
-    alignItems: "center",
-    gap: 5,
+  dlSectionSub: {
+    fontSize: 10,
+    fontFamily: "Cairo_600SemiBold",
+    textAlign: "right",
+    width: "100%",
+  },
+  dlCountBadge: {
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 999,
-    backgroundColor: "rgba(56, 189, 248, 0.12)",
     borderWidth: 1,
-    borderColor: "rgba(56, 189, 248, 0.28)",
+    flexShrink: 0,
   },
-  dlHeaderBadgeText: {
-    color: "#38BDF8",
+  dlCountBadgeText: {
     fontSize: 10,
     fontFamily: "Cairo_700Bold",
   },
   dlCardsContainer: {
-    borderRadius: 16,
-    backgroundColor: "rgba(15, 23, 42, 0.9)",
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: "rgba(56, 189, 248, 0.22)",
     overflow: "hidden",
   },
   dlRow: {
-    flexDirection: ROW_LTR,
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  dlRowDone: {
-    backgroundColor: "rgba(16, 185, 129, 0.06)",
+    minHeight: 54,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 8,
   },
   dlActionBtn: {
-    flexDirection: ROW_LTR,
+    flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
+    justifyContent: "center",
+    gap: 5,
+    minWidth: 92,
+    height: 36,
+    paddingHorizontal: 14,
     borderRadius: 10,
-    backgroundColor: "rgba(56, 189, 248, 0.14)",
+    backgroundColor: "#0284c7",
     borderWidth: 1,
-    borderColor: "rgba(56, 189, 248, 0.35)",
+    borderColor: "#38bdf8",
   },
   dlActionBtnDone: {
-    backgroundColor: "rgba(16, 185, 129, 0.14)",
-    borderColor: "rgba(16, 185, 129, 0.35)",
+    backgroundColor: "#059669",
+    borderColor: "#34d399",
   },
   dlActionBtnError: {
-    backgroundColor: "rgba(239, 68, 68, 0.14)",
-    borderColor: "rgba(239, 68, 68, 0.35)",
+    backgroundColor: "#dc2626",
+    borderColor: "#f87171",
   },
   dlActionBtnText: {
-    color: "#38BDF8",
+    color: "#ffffff",
     fontSize: 11,
     fontFamily: "Cairo_700Bold",
   },
   dlRightInfo: {
-    flexDirection: ROW_LTR,
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    justifyContent: "flex-end",
+    gap: 8,
   },
   dlQualityTag: {
     paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingVertical: 2,
     borderRadius: 7,
     borderWidth: 1,
   },
   dlQualityTagText: {
     fontSize: 10,
-    fontFamily: "Cairo_700Bold",
+    fontFamily: "Cairo_800ExtraBold",
   },
   dlServerName: {
-    color: "#F1F5F9",
-    fontSize: 13,
+    fontSize: 12.5,
     fontFamily: "Cairo_700Bold",
     textAlign: "right",
+    flexShrink: 1,
   },
-  dlServerSub: {
-    color: "rgba(255,255,255,0.48)",
-    fontSize: 10,
-    fontFamily: "Cairo_400Regular",
-    textAlign: "right",
-  },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 26, gap: 10 },
-  message: {
-    color: "rgba(255,255,255,0.6)",
-    fontFamily: "Cairo_400Regular",
-    fontSize: 12,
-    textAlign: "center",
-    lineHeight: 20,
-    paddingHorizontal: 24,
-  },
-  action: {
-    flexDirection: "row",
+  center: {
+    flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
-    marginTop: 7,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 12,
-    backgroundColor: "rgba(124,58,237,0.18)",
-    borderWidth: 1,
-    borderColor: "rgba(167,139,250,0.32)",
+    gap: 12,
+    padding: 24,
   },
-  actionText: { color: "#C4B5FD", fontFamily: "Cairo_700Bold", fontSize: 12 },
+  message: {
+    fontFamily: "Cairo_400Regular",
+    fontSize: 13,
+    textAlign: "center",
+    lineHeight: 22,
+  },
+  action: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 11,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  actionText: {
+    fontFamily: "Cairo_700Bold",
+    fontSize: 13,
+  },
 });
-

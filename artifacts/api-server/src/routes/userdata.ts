@@ -89,11 +89,11 @@ router.get("/user/history", async (req: Request, res: Response) => {
   const userId = getUserId(req);
   if (!userId) return res.status(401).json({ error: "غير مصرّح" });
   try {
-    const limit  = Math.min(Number(req.query.limit) || 60, 100);
+    const limit  = Math.min(Number(req.query.limit) || 100, 150);
     const offset = Number(req.query.offset) || 0;
     const rows = await sbSelect("watch_history",
       { user_id: `eq.${userId}`, order: "watched_at.desc" },
-      { limit: limit + offset, strict: true },
+      { limit: Math.min((limit + offset) * 3, 300), strict: true },
     );
     const unpacked = rows.map(unpackHistoryRow);
     // Deduplicate by (anime_id, episode_number, season_number) keeping the newest first

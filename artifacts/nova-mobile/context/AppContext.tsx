@@ -354,7 +354,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   ): Promise<boolean> => {
     try {
       const [historyResponse, favoritesResponse] = await Promise.all([
-        secureFetch(accountUrl("/user/history")),
+        secureFetch(accountUrl("/user/history?limit=100")),
         secureFetch(accountUrl("/user/favorites")),
       ]);
       if (!historyResponse.ok || !favoritesResponse.ok) return false;
@@ -442,7 +442,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const remote = historyClearPending === "1" ? undefined : remoteHistoryByKey.get(historyKey(item));
         if (!remote || item.updatedAt >= remote.updatedAt) {
           mergedHistory.set(historyKey(item), item);
-          if (!remote || item.updatedAt > remote.updatedAt || historyClearPending === "1") {
+          if (!remote || (item.updatedAt - remote.updatedAt > 10000) || historyClearPending === "1") {
             historyToUpload.push(item);
           }
         }
@@ -471,8 +471,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       // Upload local-only/newer rows. Failures intentionally leave local state
       // and tombstones intact; the next auth restore can retry safely.
-      const historyUploadResults = await Promise.all(historyToUpload.map(postHistory));
-      const favoriteUploadResults = await Promise.all(favoritesToUpload.map(postFavorite));
+      const runBatched = async <T,>(items: T[], fn: (item: T) => Promise<boolean>): Promise<boolean[]> => {
+        const results: boolean[] = [];
+        const capped = items.slice(0, 12);
+        for (let i = 0; i < capped.length; i += 2) {
+          const chunk = capped.slice(i, i + 2);
+          const r = await Promise.all(chunk.map(fn));
+          results.push(...r);
+        }
+        return results;
+      };
+      const historyUploadResults = await runBatched(historyToUpload, postHistory);
+      const favoriteUploadResults = await runBatched(favoritesToUpload, postFavorite);
       const historyUploadsSucceeded = historyUploadResults.every(Boolean);
       const favoriteUploadsSucceeded = favoriteUploadResults.every(Boolean);
 

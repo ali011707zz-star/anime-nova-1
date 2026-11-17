@@ -951,7 +951,7 @@ export default function MangaDetailScreen() {
             />
           ) : null}
           <LinearGradient
-            colors={["rgba(9,9,11,0.3)", "rgba(9,9,11,0.86)", colors.background]}
+            colors={["rgba(9,9,11,0.35)", "rgba(9,9,11,0.84)", "rgba(9,9,11,0.95)"]}
             style={StyleSheet.absoluteFill}
           />
 
@@ -1043,7 +1043,7 @@ export default function MangaDetailScreen() {
           >
             <View style={styles.chaptersCtaRight}>
               <View style={styles.chaptersCtaIcon}>
-                <Ionicons name="book" size={19} color="#09090B" />
+                <Ionicons name="book" size={19} color="#FFFFFF" />
               </View>
               <View style={styles.chaptersCtaTextWrap}>
                 <Text style={styles.chaptersCtaTitle}>قراءة الفصول</Text>
@@ -1061,7 +1061,7 @@ export default function MangaDetailScreen() {
               <Text style={styles.chaptersCtaPillText}>
                 {totalChaptersCount > 0 ? `${totalChaptersCount} فصل` : "الفصول"}
               </Text>
-              <Ionicons name="chevron-back" size={15} color="#09090B" />
+              <Ionicons name="chevron-back" size={15} color="#FFFFFF" />
             </View>
           </Pressable>
         </View>
@@ -2092,17 +2092,20 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
   },
   typeBadgeText: {
-    color: "#09090B",
-    fontSize: 10,
+    color: "#FFFFFF",
+    fontSize: 10.5,
     fontFamily: "Cairo_700Bold",
   },
   title: {
     fontSize: 19,
     lineHeight: 26,
-    fontFamily: "Cairo_700Bold",
+    fontFamily: "Cairo_800ExtraBold",
     textAlign: "right",
     writingDirection: "rtl",
     width: "100%",
+    textShadowColor: "rgba(0,0,0,0.75)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
   },
   subTitle: {
     fontSize: 12.5,
@@ -2110,6 +2113,9 @@ const styles = StyleSheet.create({
     fontFamily: "Cairo_600SemiBold",
     textAlign: "right",
     width: "100%",
+    textShadowColor: "rgba(0,0,0,0.65)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
   statsRow: {
     flexDirection: ROW_RTL,
@@ -2121,20 +2127,22 @@ const styles = StyleSheet.create({
     flexDirection: ROW_RTL,
     alignItems: "center",
     gap: 4,
-    backgroundColor: "rgba(255,255,255,0.09)",
+    backgroundColor: "rgba(255,255,255,0.14)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.20)",
     borderRadius: 999,
     paddingHorizontal: 9,
     paddingVertical: 4,
   },
   statText: {
-    color: "#fff",
+    color: "#FFFFFF",
     fontSize: 11,
     fontFamily: "Cairo_700Bold",
   },
   /* Primary CTA Button: قراءة الفصول */
   ctaWrap: {
     paddingHorizontal: 16,
-    marginTop: 8,
+    marginTop: 12,
     marginBottom: 10,
   },
   chaptersCtaBtn: {
@@ -2160,7 +2168,7 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 12,
-    backgroundColor: "rgba(9,9,11,0.16)",
+    backgroundColor: "rgba(255,255,255,0.18)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -2169,13 +2177,13 @@ const styles = StyleSheet.create({
     alignItems: ALIGN_RIGHT,
   },
   chaptersCtaTitle: {
-    color: "#09090B",
+    color: "#FFFFFF",
     fontSize: 15,
     fontFamily: "Cairo_800ExtraBold",
     textAlign: "right",
   },
   chaptersCtaSub: {
-    color: "rgba(9,9,11,0.72)",
+    color: "rgba(255,255,255,0.88)",
     fontSize: 10.5,
     fontFamily: "Cairo_600SemiBold",
     textAlign: "right",
@@ -2185,13 +2193,13 @@ const styles = StyleSheet.create({
     flexDirection: ROW_RTL,
     alignItems: "center",
     gap: 4,
-    backgroundColor: "rgba(9,9,11,0.14)",
+    backgroundColor: "rgba(255,255,255,0.18)",
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 999,
   },
   chaptersCtaPillText: {
-    color: "#09090B",
+    color: "#FFFFFF",
     fontSize: 11.5,
     fontFamily: "Cairo_700Bold",
   },

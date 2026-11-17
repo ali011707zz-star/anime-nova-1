@@ -391,6 +391,13 @@ function EpisodeRow({
   );
 }
 
+const _episodesMemoryCache: Map<string, { anime: any; seasons: any[] }> =
+  (globalThis as any).__novaAnimeEpisodesCache ||
+  ((globalThis as any).__novaAnimeEpisodesCache = new Map<string, { anime: any; seasons: any[] }>());
+const _sharedDetailCache: Map<string, { anime: any; descAr?: string }> =
+  (globalThis as any).__novaAnimeDetailCache ||
+  ((globalThis as any).__novaAnimeDetailCache = new Map<string, { anime: any; descAr?: string }>());
+
 export default function EpisodeListScreen() {
   const colors = useColors();
   const ep_s = useMemo(() => createEpStyles(colors), [colors]);
@@ -445,10 +452,38 @@ export default function EpisodeListScreen() {
   useEffect(() => {
     if (!id) return;
     const ctrl = new AbortController();
-    setLoading(true);
-    setAnime(null);
-    setSeasons([]);
-    setSelectedSeasonId("");
+    const cachedEp = _episodesMemoryCache.get(String(id));
+    const cachedDetail = _sharedDetailCache.get(String(id));
+    const initialAnime = cachedEp?.anime || cachedDetail?.anime || null;
+    const initialSeasons = cachedEp?.seasons?.length
+      ? cachedEp.seasons
+      : initialAnime
+        ? [{ ...initialAnime, relations: undefined }]
+        : [];
+    if (initialAnime) {
+      setAnime(initialAnime);
+      setSeasons(initialSeasons);
+      setSelectedSeasonId(String(initialAnime.id || id));
+      setLoading(false);
+    } else {
+      setLoading(true);
+      setAnime(null);
+      setSeasons([]);
+      setSelectedSeasonId("");
+      AsyncStorage.getItem(`nova:anime-episodes:v1:${id}`).then(raw => {
+        if (!raw || ctrl.signal.aborted) return;
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed?.anime) {
+            _episodesMemoryCache.set(String(id), parsed);
+            setAnime((prev: any) => prev || parsed.anime);
+            setSeasons((prev: any[]) => prev.length ? prev : (parsed.seasons || [{ ...parsed.anime, relations: undefined }]));
+            setSelectedSeasonId((prev: string) => prev || String(parsed.anime.id || id));
+            setLoading(false);
+          }
+        } catch {}
+      }).catch(() => {});
+    }
     setEpData([]); setEpisodeCatalogTotal(0); setSearch(""); setRangeStart(null);
     setEpisodeTitlesAr({});
 
@@ -521,14 +556,19 @@ export default function EpisodeListScreen() {
       }
 
       const rootSeason = { ...a, relations: undefined };
-      setSeasons([rootSeason]);
-      setSelectedSeasonId(String(a.id || id));
+      _episodesMemoryCache.set(String(id), { anime: a, seasons: [rootSeason] });
+      AsyncStorage.setItem(`nova:anime-episodes:v1:${id}`, JSON.stringify({ anime: a, seasons: [rootSeason] })).catch(() => {});
+      setSeasons(prev => prev.length > 1 ? prev : [rootSeason]);
+      setSelectedSeasonId(current => current || String(a.id || id));
+      setLoading(false);
       if (source === "mal" || source === "kitsu" || Number(a.id) <= 0) return;
 
       loadAnimeSeries(a, base, ctrl.signal)
         .then(series => {
           if (ctrl.signal.aborted) return;
           const nextSeasons = series.length ? series : [rootSeason];
+          _episodesMemoryCache.set(String(id), { anime: a, seasons: nextSeasons });
+          AsyncStorage.setItem(`nova:anime-episodes:v1:${id}`, JSON.stringify({ anime: a, seasons: nextSeasons })).catch(() => {});
           setSeasons(nextSeasons);
           setSelectedSeasonId(current =>
             nextSeasons.some(item => String(item?.id) === current)

@@ -19754,9 +19754,9 @@ function metaTtl(body: any): number {
   const q    = JSON.stringify(body?.query ?? "");
   const rawQ: string = body?.query ?? "";
   if (q.includes("airingSchedules"))  return 1800;      // 30 دقيقة — الجداول الزمنية
-  if (rawQ.includes("nextAiringEpisode")) return 300;   // live schedule — 5 دقائق
-  if (body?.variables?.search)         return 3600;      // 1 ساعة — بحث (نتائج تتغير)
-  if (body?.variables?.id)             return 7776000;   // 90 يوم — metadata ثابتة (بوسترات، وصف، تقييم)
+  if (body?.variables?.id || body?.variables?.ids) return 7776000; // 90 يوم — تفاصيل ومواسم الأنمي
+  if (body?.variables?.search)         return 86400;     // 24 ساعة — بحث
+  if (rawQ.includes("nextAiringEpisode")) return 86400; // 24 ساعة مع تحديث خلفي سريع
   if (q.includes("TRENDING_DESC"))     return 86400;     // 24 ساعة — trending
   if (q.includes("POPULARITY_DESC"))   return 2592000;   // 30 يوم — الأكثر شعبية
   if (q.includes("SCORE_DESC"))        return 2592000;   // 30 يوم — الأعلى تقييماً
@@ -19765,41 +19765,58 @@ function metaTtl(body: any): number {
   return 2592000; // 30 يوم افتراضي
 }
 
-/** عتبة إعادة التحديث الخلفي (30 يوم) — يُخدَّم الكاش فوراً لكن يُحدَّث في الخلفية */
-const META_REFRESH_AGE = 2592000; // 30 يوم بالثواني
+/** عتبة إعادة التحديث الخلفي (15 دقيقة) — يُخدَّم الكاش فوراً بدون أي تأخير ويُحدَّث في الخلفية */
+const META_REFRESH_AGE = 900;
 
 function metaHash(body: any): string {
   const rawQ = String(body?.query || "");
-  // Live airing queries need a separate namespace so old long-lived detail
-  // rows cannot continue serving a stale nextAiringEpisode value.
   const version = rawQ.includes("nextAiringEpisode") ? "|live-schedule-v2" : "";
   return createHash("sha256").update(JSON.stringify(body) + version).digest("hex").slice(0, 40);
 }
 
-/** نتيجة الكاش مع عمرها — stale=true يعني تجاوزت 30 يوم ويجب تحديثها خلفياً */
 interface MetaCacheResult { data: any; stale: boolean; source?: string; }
 
+const _anilistMemCache = new Map<string, { data: any; createdAtMs: number; source?: string }>();
+const ANILIST_MEM_MAX = 800;
+
 async function metaCacheGet(key: string): Promise<MetaCacheResult | null> {
+  const mem = _anilistMemCache.get(key);
+  if (mem) {
+    const ageSec = (Date.now() - mem.createdAtMs) / 1000;
+    return { data: mem.data, stale: ageSec > META_REFRESH_AGE, source: mem.source };
+  }
   try {
     const rows = await sbSelect<{ data: any; created_at: string; ttl_seconds: number; source?: string }>(
       "anime_meta_cache",
-      { cache_key: `eq.${key}` },
+      { cache_key: "eq." + key },
       { limit: 1, select: "data,created_at,ttl_seconds,source" }
     );
     if (!rows.length) return null;
-    const { data, created_at, ttl_seconds, source } = rows[0];
-    const ageSeconds = (Date.now() - new Date(created_at).getTime()) / 1000;
-    if (ageSeconds > ttl_seconds) return null;              // منتهي الصلاحية تماماً
-    const stale = ageSeconds > META_REFRESH_AGE;            // تجاوز 30 يوم → يحتاج تحديث خلفي
+    const { data, created_at, source } = rows[0];
+    const createdAtMs = new Date(created_at).getTime() || Date.now();
+    const ageSeconds = (Date.now() - createdAtMs) / 1000;
+    // Serve Stale-While-Revalidate up to 180 days so users NEVER wait on a cold AniList fetch
+    if (ageSeconds > 180 * 86400) return null;
+    if (_anilistMemCache.size >= ANILIST_MEM_MAX) {
+      const firstKey = _anilistMemCache.keys().next().value;
+      if (firstKey) _anilistMemCache.delete(firstKey);
+    }
+    _anilistMemCache.set(key, { data, createdAtMs, source });
+    const stale = ageSeconds > META_REFRESH_AGE;
     return { data, stale, source };
   } catch { return null; }
 }
 
 async function metaCacheSet(key: string, data: any, ttl: number, source: string): Promise<void> {
+  if (_anilistMemCache.size >= ANILIST_MEM_MAX) {
+    const firstKey = _anilistMemCache.keys().next().value;
+    if (firstKey) _anilistMemCache.delete(firstKey);
+  }
+  _anilistMemCache.set(key, { data, createdAtMs: Date.now(), source });
   try {
     await sbUpsert(
       "anime_meta_cache",
-      { cache_key: key, data, ttl_seconds: ttl, source, created_at: new Date().toISOString() },
+      { cache_key: key, data, ttl_seconds: Math.max(ttl, 86400), source, created_at: new Date().toISOString() },
       "cache_key"
     );
   } catch {}
@@ -20330,8 +20347,7 @@ async function handleAnilistRequest(req: Request, res: Response) {
   // 1️⃣ PostgreSQL cache — أسرع مصدر
   // استثناء: استعلامات Media(id) أثناء انقطاع AniList — الكاش قد يحتوي على
   // بيانات Jikan بـ MAL IDs، فنتخطاه حتى تعود AniList للعمل
-  const skipCache = isIdQuery && _anilistDown;
-  if (!skipCache) {
+  if (true) {
     const cached = await metaCacheGet(cacheKey);
     if (cached) {
       // ✅ Stale-While-Revalidate: إذا تجاوز الكاش 30 يوم → أرسله فوراً وحدّث خلفياً

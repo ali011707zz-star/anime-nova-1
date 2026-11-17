@@ -981,11 +981,7 @@ export default function DubbedWatchScreen() {
   const fhdSlots = slots.filter((s) => s.quality === "1080p");
   const hdSlots = slots.filter((s) => s.quality === "720p");
 
-  const isLightTheme =
-    colors.background.toLowerCase() === "#ffffff" ||
-    colors.background.toLowerCase() === "#f8fafc" ||
-    colors.textPrimary.toLowerCase().startsWith("#0") ||
-    colors.textPrimary.toLowerCase().startsWith("#1");
+  const isLightTheme = !colors.background.startsWith("#0");
 
   const compactSeason = (() => {
     const raw = String(season || "").trim();
@@ -996,133 +992,135 @@ export default function DubbedWatchScreen() {
     return raw;
   })();
 
-  /* ── Unified Server Picker Screen ── */
+  const tierGroups: Array<{ quality: "1080p" | "720p"; label: string; dotColor: string; items: DubbedServerSlot[] }> = [
+    { quality: "1080p", label: "1080P", dotColor: isLightTheme ? "#D97706" : "#fbbf24", items: fhdSlots },
+    { quality: "720p", label: "720P", dotColor: isLightTheme ? "#059669" : "#34d399", items: hdSlots },
+  ].filter(g => g.items.length > 0);
+
+  /* ── Unified Server Picker Screen (Matching app/watch.tsx) ── */
   return (
-    <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <RewardedAdPrompt />
-
-      {/* Top Header with Refresh + Next + Previous + Title + Back */}
-      <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <View style={styles.epNavRow}>
-          <Pressable
-            onPress={() => void runAvailabilityQuery()}
-            focusable={tvMode}
-            style={({ focused }) => [
-              styles.refreshBtn,
-              isLightTheme && { backgroundColor: "rgba(124,58,237,0.10)", borderColor: "rgba(124,58,237,0.28)" },
-              tvMode && tvFocusStyle(focused),
-            ]}
-          >
-            <Ionicons name="refresh" size={15} color={isLightTheme ? "#7C3AED" : "#A78BFA"} />
-          </Pressable>
-
-          <Pressable
-            onPress={() => navigateToEpisode(nextEpRef)}
-            disabled={!nextEpRef}
-            focusable={tvMode && Boolean(nextEpRef)}
-            style={({ focused }) => [
-              styles.epNavBtn,
-              isLightTheme && { backgroundColor: "rgba(124,58,237,0.10)", borderColor: "rgba(124,58,237,0.28)" },
-              !nextEpRef && [
-                styles.epNavBtnDisabled,
-                isLightTheme && { backgroundColor: "rgba(15,23,42,0.04)", borderColor: colors.border },
-              ],
-              tvMode && tvFocusStyle(focused),
-            ]}
-          >
-            <Ionicons
-              name="chevron-back"
-              size={13}
-              color={nextEpRef ? (isLightTheme ? "#6D28D9" : "#C4B5FD") : colors.textMuted}
-            />
-            <Text
-              style={[
-                styles.epNavText,
-                { color: isLightTheme ? "#6D28D9" : "#DDD6FE" },
-                !nextEpRef && { color: colors.textMuted },
-              ]}
-            >
-              التالية
-            </Text>
-          </Pressable>
-
-          <Pressable
-            onPress={() => navigateToEpisode(prevEpRef)}
-            disabled={!prevEpRef}
-            focusable={tvMode && Boolean(prevEpRef)}
-            style={({ focused }) => [
-              styles.epNavBtn,
-              isLightTheme && { backgroundColor: "rgba(124,58,237,0.10)", borderColor: "rgba(124,58,237,0.28)" },
-              !prevEpRef && [
-                styles.epNavBtnDisabled,
-                isLightTheme && { backgroundColor: "rgba(15,23,42,0.04)", borderColor: colors.border },
-              ],
-              tvMode && tvFocusStyle(focused),
-            ]}
-          >
-            <Text
-              style={[
-                styles.epNavText,
-                { color: isLightTheme ? "#6D28D9" : "#DDD6FE" },
-                !prevEpRef && { color: colors.textMuted },
-              ]}
-            >
-              السابقة
-            </Text>
-            <Ionicons
-              name="chevron-forward"
-              size={13}
-              color={prevEpRef ? (isLightTheme ? "#6D28D9" : "#C4B5FD") : colors.textMuted}
-            />
-          </Pressable>
-        </View>
-
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1} ellipsizeMode="tail">
-            {title}
-          </Text>
-          <Text style={[styles.headerSub, { color: colors.textSecondary }]} numberOfLines={1} ellipsizeMode="tail">
-            {compactSeason ? `${compactSeason} · ` : ""}الحلقة {episodeNumber}
-          </Text>
-        </View>
-
+      {/* ── Header (Matching app/watch.tsx) ── */}
+      <View style={[styles.header, { paddingTop: topPad + 6, borderBottomColor: colors.border }]}>
         <Pressable
           onPress={handleBack}
           focusable={tvMode}
           style={({ focused }) => [
-            styles.backBtn,
-            { backgroundColor: colors.surface, borderColor: colors.border },
+            styles.headerBack,
+            { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
             tvMode && tvFocusStyle(focused),
           ]}
         >
-          <Ionicons name="chevron-forward" size={20} color={colors.textPrimary} />
+          <Ionicons name="chevron-forward" size={19} color={colors.textPrimary} />
         </Pressable>
+
+        <View style={styles.headerCenter}>
+          <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1} ellipsizeMode="tail">
+            {title}
+          </Text>
+          <Text style={[styles.headerSub, { color: colors.textMuted }]} numberOfLines={1} ellipsizeMode="tail">
+            {compactSeason ? `${compactSeason} · ` : ""}الحلقة {episodeNumber}
+          </Text>
+        </View>
+
+        <View style={styles.headerLeft}>
+          <Pressable
+            disabled={!prevEpRef}
+            onPress={() => navigateToEpisode(prevEpRef)}
+            focusable={tvMode && Boolean(prevEpRef)}
+            style={({ focused }) => [
+              styles.epNavBtn,
+              { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
+              !prevEpRef && { opacity: 0.32 },
+              tvMode && tvFocusStyle(focused),
+            ]}
+          >
+            <Ionicons name="chevron-forward" size={12} color={colors.textSecondary} />
+            <Text style={[styles.epNavText, { color: colors.textSecondary }]}>السابقة</Text>
+          </Pressable>
+
+          <Pressable
+            disabled={!nextEpRef}
+            onPress={() => navigateToEpisode(nextEpRef)}
+            focusable={tvMode && Boolean(nextEpRef)}
+            style={({ focused }) => [
+              styles.epNavBtn,
+              { backgroundColor: colors.accentSurface, borderColor: colors.accentBorder },
+              !nextEpRef && { opacity: 0.32 },
+              tvMode && tvFocusStyle(focused),
+            ]}
+          >
+            <Text style={[styles.epNavText, { color: colors.accent }]}>التالية</Text>
+            <Ionicons name="chevron-back" size={12} color={colors.accent} />
+          </Pressable>
+
+          <Pressable
+            onPress={() => void runAvailabilityQuery()}
+            focusable={tvMode}
+            style={({ focused }) => [
+              styles.headerRefreshBtn,
+              { backgroundColor: colors.accentSurface, borderColor: colors.accentBorder },
+              tvMode && tvFocusStyle(focused),
+            ]}
+          >
+            <Ionicons name="refresh" size={13} color={colors.accent} />
+          </Pressable>
+        </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.pickerContent} showsVerticalScrollIndicator={false}>
-        {/* Info Banner Card */}
+      <ScrollView
+        contentContainerStyle={styles.pickerContent}
+        showsVerticalScrollIndicator={false}
+        removeClippedSubviews={false}
+      >
+        {/* ── Info Card (Matching app/watch.tsx) ── */}
         <View style={[styles.infoCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          {posterUrl ? (
-            <Image source={{ uri: posterUrl }} style={styles.posterThumb} resizeMode="cover" />
-          ) : (
-            <View style={[styles.posterThumb, { backgroundColor: "rgba(124,58,237,0.15)", alignItems: "center", justifyContent: "center" }]}>
-              <Ionicons name="film-outline" size={24} color="#A78BFA" />
-            </View>
-          )}
-          <View style={styles.infoTextWrap}>
+          <View style={styles.infoPosterWrap}>
+            <View style={[styles.infoPosterGlow, { backgroundColor: colors.accentSurface }]} />
+            {posterUrl ? (
+              <Image
+                source={{ uri: posterUrl }}
+                style={[styles.posterThumb, { borderColor: colors.accentBorder }]}
+                resizeMode="cover"
+              />
+            ) : (
+              <View
+                style={[
+                  styles.posterThumb,
+                  {
+                    backgroundColor: colors.accentSurface,
+                    borderColor: colors.accentBorder,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  },
+                ]}
+              >
+                <Ionicons name="film-outline" size={24} color={colors.accent} />
+              </View>
+            )}
+          </View>
+          <View style={styles.infoMeta}>
             <Text style={[styles.infoTitle, { color: colors.textPrimary }]} numberOfLines={2}>
               {title}
             </Text>
-            <View
-              style={[
-                styles.epPill,
-                isLightTheme && { backgroundColor: "rgba(124,58,237,0.10)", borderColor: "rgba(124,58,237,0.28)" },
-              ]}
-            >
-              <Ionicons name="play-circle" size={13} color={isLightTheme ? "#6D28D9" : "#C4B5FD"} />
-              <Text style={[styles.epPillText, isLightTheme && { color: "#6D28D9" }]}>
-                {compactSeason ? `${compactSeason} · ` : ""}الحلقة {episodeNumber}
+            {compactSeason ? (
+              <Text style={[styles.infoSeasonSub, { color: colors.textSecondary }]} numberOfLines={1}>
+                {compactSeason}
               </Text>
+            ) : null}
+            <View style={styles.infoEpRow}>
+              <View
+                style={[
+                  styles.infoEpBadge,
+                  { backgroundColor: colors.accentSurface, borderColor: colors.accentBorder },
+                ]}
+              >
+                <Ionicons name="play-circle" size={12} color={colors.accent} />
+                <Text style={[styles.infoEpText, { color: colors.accent }]}>
+                  {isMovieEntry ? "الفيلم" : `الحلقة ${episodeNumber}`}
+                </Text>
+              </View>
             </View>
           </View>
         </View>
@@ -1132,58 +1130,72 @@ export default function DubbedWatchScreen() {
         </Text>
 
         {error ? (
-          <View style={styles.errorBanner}>
-            <Ionicons name="alert-circle" size={18} color="#EF4444" />
-            <Text style={[styles.errorBannerText, isLightTheme && { color: "#DC2626" }]}>{error}</Text>
+          <View style={[styles.errorBanner, { backgroundColor: colors.destructiveSurface, borderColor: colors.destructiveBorder }]}>
+            <Ionicons name="alert-circle" size={18} color={colors.destructive} />
+            <Text style={[styles.errorBannerText, { color: colors.destructive }]}>{error}</Text>
           </View>
         ) : null}
 
-        {/* 1080P Section */}
-        {fhdSlots.length > 0 && (
-          <View style={styles.qualityBlock}>
+        {/* ── Quality Sections (Matching app/watch.tsx) ── */}
+        {tierGroups.map((group) => (
+          <View key={group.quality} style={styles.qualityBlock}>
             <View style={styles.qualityHeader}>
-              <Text style={[styles.qualityTitle, { color: isLightTheme ? "#D97706" : "#FBBF24" }]}>1080P</Text>
-              <View style={[styles.qualityDot, { backgroundColor: isLightTheme ? "#D97706" : "#FBBF24" }]} />
+              <Text style={[styles.qualityTitle, { color: group.dotColor }]}>{group.label}</Text>
+              <View style={[styles.qualityDot, { backgroundColor: group.dotColor }]} />
             </View>
             <View
               style={[
                 styles.serverListCard,
-                {
-                  backgroundColor: colors.card,
-                  borderColor: isLightTheme ? "rgba(16, 185, 129, 0.32)" : "rgba(16, 185, 129, 0.18)",
-                },
+                { backgroundColor: colors.card, borderColor: colors.border },
               ]}
             >
-              {fhdSlots.map((slot, idx) => {
+              {group.items.map((slot, idx) => {
                 const isBusy = slot.state === "fetching" || checkingAvailability;
+                const isFailed = slot.state === "failed";
                 return (
                   <Pressable
                     key={slot.key}
                     onPress={() => void handlePickSlot(slot)}
                     disabled={isBusy}
                     focusable={tvMode}
-                    style={({ focused }) => [
+                    style={({ focused, pressed }) => [
                       styles.serverRow,
-                      idx > 0 && [styles.serverRowBorder, { borderTopColor: colors.border }],
+                      idx < group.items.length - 1 && [styles.serverRowBorder, { borderBottomColor: colors.border }],
                       tvMode && tvFocusStyle(focused),
+                      pressed && { opacity: 0.75 },
                     ]}
                   >
-                    <View style={styles.playActionPill}>
-                      {slot.state === "fetching" ? (
-                        <ActivityIndicator size={13} color="#fff" />
-                      ) : (
-                        <>
-                          <Text style={styles.playActionText}>تشغيل</Text>
-                          <Ionicons name="play" size={11} color="#fff" />
-                        </>
-                      )}
+                    <View style={styles.webRowActions}>
+                      <View style={styles.playActionPill}>
+                        {slot.state === "fetching" ? (
+                          <ActivityIndicator size={13} color="#fff" />
+                        ) : (
+                          <>
+                            <Ionicons name="play" size={11} color="#ffffff" />
+                            <Text style={styles.playActionText}>تشغيل</Text>
+                          </>
+                        )}
+                      </View>
                     </View>
                     <View style={styles.serverRightInfo}>
-                      <Text style={[styles.serverRowTitle, { color: colors.textPrimary }]}>السيرفر {slot.shortName}</Text>
+                      <Text
+                        style={[
+                          styles.serverRowTitle,
+                          { color: isFailed ? colors.destructive : colors.textPrimary },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        السيرفر {slot.shortName}
+                      </Text>
                       {checkingAvailability ? (
-                        <ActivityIndicator size={10} color="#10B981" />
+                        <ActivityIndicator size={10} color="#10b981" />
                       ) : (
-                        <View style={[styles.statusDot, { backgroundColor: slot.state === "failed" ? "#EF4444" : "#10B981" }]} />
+                        <View
+                          style={[
+                            styles.statusDot,
+                            { backgroundColor: isFailed ? colors.destructive : "#34d399" },
+                          ]}
+                        />
                       )}
                     </View>
                   </Pressable>
@@ -1191,288 +1203,299 @@ export default function DubbedWatchScreen() {
               })}
             </View>
           </View>
-        )}
+        ))}
 
-        {/* 720P Section */}
-        {hdSlots.length > 0 && (
-          <View style={styles.qualityBlock}>
-            <View style={styles.qualityHeader}>
-              <Text style={[styles.qualityTitle, { color: isLightTheme ? "#059669" : "#10B981" }]}>720P</Text>
-              <View style={[styles.qualityDot, { backgroundColor: isLightTheme ? "#059669" : "#10B981" }]} />
-            </View>
-            <View
-              style={[
-                styles.serverListCard,
-                {
-                  backgroundColor: colors.card,
-                  borderColor: isLightTheme ? "rgba(16, 185, 129, 0.32)" : "rgba(16, 185, 129, 0.18)",
-                },
-              ]}
-            >
-              {hdSlots.map((slot, idx) => {
-                const isBusy = slot.state === "fetching" || checkingAvailability;
-                return (
-                  <Pressable
-                    key={slot.key}
-                    onPress={() => void handlePickSlot(slot)}
-                    disabled={isBusy}
-                    focusable={tvMode}
-                    style={({ focused }) => [
-                      styles.serverRow,
-                      idx > 0 && [styles.serverRowBorder, { borderTopColor: colors.border }],
-                      tvMode && tvFocusStyle(focused),
-                    ]}
-                  >
-                    <View style={styles.playActionPill}>
-                      {slot.state === "fetching" ? (
-                        <ActivityIndicator size={13} color="#fff" />
-                      ) : (
-                        <>
-                          <Text style={styles.playActionText}>تشغيل</Text>
-                          <Ionicons name="play" size={11} color="#fff" />
-                        </>
-                      )}
-                    </View>
-                    <View style={styles.serverRightInfo}>
-                      <Text style={[styles.serverRowTitle, { color: colors.textPrimary }]}>السيرفر {slot.shortName}</Text>
-                      {checkingAvailability ? (
-                        <ActivityIndicator size={10} color="#10B981" />
-                      ) : (
-                        <View style={[styles.statusDot, { backgroundColor: slot.state === "failed" ? "#EF4444" : "#10B981" }]} />
-                      )}
-                    </View>
-                  </Pressable>
-                );
-              })}
-            </View>
-          </View>
-        )}
-
-        {/* Download Servers Section (سيرفرات التحميل المباشر) */}
-        <View style={styles.dlSection}>
-          <View style={styles.dlSectionHeader}>
-            <View
-              style={[
-                styles.dlHeaderBadge,
-                isLightTheme && { backgroundColor: "rgba(2, 132, 199, 0.10)", borderColor: "rgba(2, 132, 199, 0.28)" },
-              ]}
-            >
-              <Ionicons name="cloud-download" size={14} color={isLightTheme ? "#0284C7" : "#38BDF8"} />
-              <Text style={[styles.dlHeaderBadgeText, isLightTheme && { color: "#0284C7" }]}>تنزيل مباشر بالخلفية</Text>
-            </View>
-            <View style={styles.dlHeaderTitleRow}>
-              <Text style={[styles.dlSectionTitle, { color: colors.textPrimary }]}>سيرفرات التحميل المباشر</Text>
-              <View style={[styles.dlAccentBar, isLightTheme && { backgroundColor: "#0284C7" }]} />
-            </View>
-          </View>
-
+        {/* ── Download Servers Section (سيرفرات التحميل المباشر) ── */}
+        {slots.length > 0 && (
           <View
             style={[
-              styles.dlCardsContainer,
+              styles.dlSection,
               {
                 backgroundColor: colors.card,
-                borderColor: isLightTheme ? "rgba(2, 132, 199, 0.28)" : "rgba(56, 189, 248, 0.22)",
+                borderColor: isLightTheme ? "rgba(2, 132, 199, 0.30)" : "rgba(6, 182, 212, 0.24)",
               },
             ]}
           >
-            {slots.map((slot, idx) => {
-              const dlState = dlStates[slot.key] ?? "idle";
-              const prog = dlProgress[slot.key] ?? 0;
-              const isBusy = dlState === "fetching" || dlState === "downloading";
-              const qColor =
-                slot.quality === "1080p"
-                  ? isLightTheme ? "#D97706" : "#FBBF24"
-                  : isLightTheme ? "#059669" : "#34D399";
-              const dlAccent = isLightTheme ? "#0284C7" : "#38BDF8";
-              return (
-                <Pressable
-                  key={`dl-${slot.key}`}
-                  onPress={() => void handleDownloadSlot(slot)}
-                  disabled={isBusy || dlState === "done"}
-                  focusable={tvMode}
-                  style={({ focused }) => [
-                    styles.dlRow,
-                    idx > 0 && [styles.serverRowBorder, { borderTopColor: colors.border }],
-                    dlState === "done" && styles.dlRowDone,
-                    tvMode && tvFocusStyle(focused),
+            <View style={styles.dlSectionHeader}>
+              <View style={styles.dlHeaderTitleWrap}>
+                <View
+                  style={[
+                    styles.dlHeaderIcon,
+                    {
+                      backgroundColor: isLightTheme ? "rgba(2, 132, 199, 0.10)" : "rgba(6, 182, 212, 0.14)",
+                      borderColor: isLightTheme ? "rgba(2, 132, 199, 0.28)" : "rgba(6, 182, 212, 0.35)",
+                    },
                   ]}
                 >
-                  <View
-                    style={[
-                      styles.dlActionBtn,
-                      isLightTheme && { backgroundColor: "rgba(2, 132, 199, 0.10)", borderColor: "rgba(2, 132, 199, 0.30)" },
-                      dlState === "done" && styles.dlActionBtnDone,
-                      dlState === "error" && styles.dlActionBtnError,
+                  <Ionicons name="cloud-download-outline" size={18} color={isLightTheme ? "#0284C7" : "#22d3ee"} />
+                </View>
+                <View style={styles.dlHeaderTexts}>
+                  <Text style={[styles.dlSectionTitle, { color: colors.textPrimary }]} numberOfLines={1}>
+                    سيرفرات التحميل المباشر
+                  </Text>
+                  <Text style={[styles.dlSectionSub, { color: colors.textSecondary }]} numberOfLines={1}>
+                    تحميل مباشر سريع للحلقة المدبلجة يعمل في الخلفية
+                  </Text>
+                </View>
+              </View>
+              <View
+                style={[
+                  styles.dlCountBadge,
+                  {
+                    backgroundColor: isLightTheme ? "rgba(2, 132, 199, 0.10)" : "rgba(6, 182, 212, 0.14)",
+                    borderColor: isLightTheme ? "rgba(2, 132, 199, 0.28)" : "rgba(6, 182, 212, 0.30)",
+                  },
+                ]}
+              >
+                <Text style={[styles.dlCountBadgeText, { color: isLightTheme ? "#0284C7" : "#22d3ee" }]}>
+                  {slots.length} سيرفر
+                </Text>
+              </View>
+            </View>
+
+            <View
+              style={[
+                styles.dlCardsContainer,
+                {
+                  backgroundColor: colors.surface,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              {slots.map((slot, idx) => {
+                const dlState = dlStates[slot.key] ?? "idle";
+                const prog = dlProgress[slot.key] ?? 0;
+                const isBusy = dlState === "fetching" || dlState === "downloading";
+                const qColor =
+                  slot.quality === "1080p"
+                    ? isLightTheme ? "#D97706" : "#fbbf24"
+                    : isLightTheme ? "#059669" : "#34d399";
+                return (
+                  <Pressable
+                    key={`dl-${slot.key}`}
+                    onPress={() => void handleDownloadSlot(slot)}
+                    disabled={isBusy || dlState === "done"}
+                    focusable={tvMode}
+                    style={({ focused, pressed }) => [
+                      styles.dlRow,
+                      idx < slots.length - 1 && [styles.serverRowBorder, { borderBottomColor: colors.border }],
+                      tvMode && tvFocusStyle(focused),
+                      pressed && { opacity: 0.78 },
                     ]}
                   >
-                    {isBusy ? (
-                      <>
-                        <ActivityIndicator size={12} color={dlAccent} />
-                        <Text style={[styles.dlActionBtnText, { color: dlAccent }]}>
-                          {dlState === "downloading" && prog > 0 ? `${prog}%` : "جاري..."}
-                        </Text>
-                      </>
-                    ) : dlState === "done" ? (
-                      <>
-                        <Ionicons name="checkmark-circle" size={14} color={isLightTheme ? "#059669" : "#34D399"} />
-                        <Text style={[styles.dlActionBtnText, { color: isLightTheme ? "#059669" : "#34D399" }]}>مكتمل</Text>
-                      </>
-                    ) : dlState === "error" ? (
-                      <>
-                        <Ionicons name="refresh" size={13} color="#EF4444" />
-                        <Text style={[styles.dlActionBtnText, { color: "#EF4444" }]}>إعادة</Text>
-                      </>
-                    ) : (
-                      <>
-                        <Ionicons name="download-outline" size={14} color={dlAccent} />
-                        <Text style={[styles.dlActionBtnText, { color: dlAccent }]}>تنزيل الحلقة</Text>
-                      </>
-                    )}
-                  </View>
+                    <View style={styles.webRowActions}>
+                      <View
+                        style={[
+                          styles.dlActionBtn,
+                          dlState === "done" && styles.dlActionBtnDone,
+                          dlState === "error" && styles.dlActionBtnError,
+                        ]}
+                      >
+                        {isBusy ? (
+                          <>
+                            <ActivityIndicator size={13} color="#ffffff" />
+                            <Text style={styles.dlActionBtnText}>
+                              {dlState === "downloading" && prog > 0 ? `${prog}%` : "جاري..."}
+                            </Text>
+                          </>
+                        ) : dlState === "done" ? (
+                          <>
+                            <Ionicons name="checkmark-circle" size={14} color="#ffffff" />
+                            <Text style={styles.dlActionBtnText}>مكتمل</Text>
+                          </>
+                        ) : dlState === "error" ? (
+                          <>
+                            <Ionicons name="refresh" size={14} color="#ffffff" />
+                            <Text style={styles.dlActionBtnText}>إعادة</Text>
+                          </>
+                        ) : (
+                          <>
+                            <Ionicons name="download-outline" size={14} color="#ffffff" />
+                            <Text style={styles.dlActionBtnText}>تنزيل</Text>
+                          </>
+                        )}
+                      </View>
+                    </View>
 
-                  <View style={styles.dlRightInfo}>
-                    <View style={[styles.dlQualityTag, { borderColor: `${qColor}44`, backgroundColor: `${qColor}18` }]}>
-                      <Text style={[styles.dlQualityTagText, { color: qColor }]}>{slot.quality.toUpperCase()}</Text>
-                    </View>
-                    <View style={{ alignItems: "flex-end" }}>
-                      <Text style={[styles.dlServerName, { color: colors.textPrimary }]}>سيرفر التحميل {slot.shortName}</Text>
-                      <Text style={[styles.dlServerSub, { color: colors.textSecondary }]}>
-                        {dlState === "downloading"
-                          ? `جاري التنزيل في الخلفية · ${prog}%`
-                          : dlState === "done"
-                            ? "تم حفظ الحلقة في تنزيلاتي"
-                            : "MP4 مباشر · يدعم الاستكمال بالخلفية"}
+                    <View style={styles.dlRightInfo}>
+                      <View
+                        style={[
+                          styles.dlQualityTag,
+                          { borderColor: `${qColor}44`, backgroundColor: `${qColor}18` },
+                        ]}
+                      >
+                        <Text style={[styles.dlQualityTagText, { color: qColor }]}>
+                          {slot.quality.toUpperCase()}
+                        </Text>
+                      </View>
+                      <Text
+                        style={[styles.dlServerName, { color: colors.textPrimary }]}
+                        numberOfLines={1}
+                      >
+                        السيرفر {slot.shortName}
                       </Text>
+                      <View
+                        style={[
+                          styles.dlTagBadge,
+                          {
+                            backgroundColor: isLightTheme ? "rgba(2, 132, 199, 0.10)" : "rgba(6, 182, 212, 0.14)",
+                            borderColor: isLightTheme ? "rgba(2, 132, 199, 0.28)" : "rgba(6, 182, 212, 0.32)",
+                          },
+                        ]}
+                      >
+                        <Text style={{ color: isLightTheme ? "#0284C7" : "#22d3ee", fontSize: 10, fontFamily: "Cairo_800ExtraBold" }}>
+                          {slot.shortName}
+                        </Text>
+                      </View>
                     </View>
-                  </View>
-                </Pressable>
-              );
-            })}
+                  </Pressable>
+                );
+              })}
+            </View>
           </View>
-        </View>
+        )}
       </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#08080f" },
+  container: { flex: 1 },
   header: {
-    flexDirection: ROW_LTR,
+    flexDirection: ROW_RTL,
     alignItems: "center",
-    gap: 10,
-    paddingHorizontal: 14,
-    paddingTop: 10,
-    paddingBottom: 12,
+    paddingHorizontal: 12,
+    paddingBottom: 10,
     borderBottomWidth: 1,
-    borderBottomColor: "rgba(255,255,255,0.06)",
+    gap: 8,
   },
-  epNavRow: {
-    flexDirection: ROW_LTR,
-    alignItems: "center",
-    gap: 6,
-  },
-  refreshBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    backgroundColor: "rgba(124,58,237,0.14)",
+  headerBack: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: "rgba(167,139,250,0.3)",
     alignItems: "center",
     justifyContent: "center",
+    flexShrink: 0,
+  },
+  headerCenter: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: ALIGN_RIGHT,
+  },
+  headerTitle: {
+    fontSize: 13,
+    fontFamily: "Cairo_800ExtraBold",
+    textAlign: "right",
+  },
+  headerSub: {
+    fontSize: 10,
+    fontFamily: "Cairo_400Regular",
+    textAlign: "right",
+  },
+  headerLeft: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    gap: 5,
+    flexShrink: 0,
   },
   epNavBtn: {
-    flexDirection: ROW_LTR,
+    flexDirection: ROW_RTL,
     alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 10,
-    height: 34,
+    gap: 3,
+    height: 32,
     borderRadius: 10,
-    backgroundColor: "rgba(124,58,237,0.16)",
     borderWidth: 1,
-    borderColor: "rgba(167,139,250,0.32)",
-  },
-  epNavBtnDisabled: {
-    backgroundColor: "rgba(255,255,255,0.03)",
-    borderColor: "rgba(255,255,255,0.07)",
+    paddingHorizontal: 8,
+    justifyContent: "center",
   },
   epNavText: {
-    color: "#DDD6FE",
-    fontSize: 11,
+    fontSize: 10,
     fontFamily: "Cairo_700Bold",
   },
-  epNavTextDisabled: {
-    color: "rgba(255,255,255,0.22)",
-  },
-  backBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    backgroundColor: "rgba(255,255,255,0.06)",
+  headerRefreshBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.10)",
     alignItems: "center",
     justifyContent: "center",
   },
-  headerTitle: { color: "#fff", fontSize: 14, fontFamily: "Cairo_700Bold", textAlign: "right" },
-  headerSub: { color: "rgba(255,255,255,0.45)", fontSize: 11, fontFamily: "Cairo_400Regular", textAlign: "right" },
   pickerContent: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 42,
-    gap: 16,
+    padding: 14,
+    paddingBottom: 80,
+    gap: 12,
   },
   infoCard: {
     flexDirection: ROW_RTL,
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: 14,
     padding: 14,
     borderRadius: 18,
-    backgroundColor: "rgba(19, 20, 32, 0.95)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+  },
+  infoPosterWrap: {
+    width: 72,
+    height: 102,
+    position: "relative",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  infoPosterGlow: {
+    position: "absolute",
+    width: 80,
+    height: 110,
+    borderRadius: 20,
   },
   posterThumb: {
     width: 72,
-    height: 96,
+    height: 102,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "rgba(167,139,250,0.3)",
   },
-  infoTextWrap: {
+  infoMeta: {
     flex: 1,
+    minWidth: 0,
+    gap: 6,
+    paddingTop: 1,
     alignItems: ALIGN_RIGHT,
-    gap: 8,
   },
   infoTitle: {
-    color: "#fff",
-    fontSize: 16,
-    fontFamily: "Cairo_700Bold",
+    fontSize: 15,
+    fontFamily: "Cairo_800ExtraBold",
     textAlign: "right",
+    lineHeight: 22,
+    width: "100%",
   },
-  epPill: {
+  infoSeasonSub: {
+    fontSize: 12,
+    fontFamily: "Cairo_600SemiBold",
+    textAlign: "right",
+    width: "100%",
+  },
+  infoEpRow: {
+    flexDirection: ROW_RTL,
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  infoEpBadge: {
     flexDirection: ROW_RTL,
     alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 10,
-    backgroundColor: "rgba(124,58,237,0.18)",
+    gap: 5,
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: "rgba(167,139,250,0.32)",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
   },
-  epPillText: {
-    color: "#DDD6FE",
-    fontSize: 12,
+  infoEpText: {
+    fontSize: 11,
     fontFamily: "Cairo_700Bold",
   },
   noticeText: {
-    color: "rgba(255,255,255,0.65)",
     fontSize: 12,
     lineHeight: 20,
     fontFamily: "Cairo_400Regular",
-    textAlign: "right",
+    textAlign: "center",
   },
   errorBanner: {
     flexDirection: ROW_RTL,
@@ -1480,13 +1503,10 @@ const styles = StyleSheet.create({
     gap: 8,
     padding: 12,
     borderRadius: 12,
-    backgroundColor: "rgba(239,68,68,0.12)",
     borderWidth: 1,
-    borderColor: "rgba(239,68,68,0.3)",
   },
   errorBannerText: {
     flex: 1,
-    color: "#FCA5A5",
     fontSize: 12,
     fontFamily: "Cairo_600SemiBold",
     textAlign: "right",
@@ -1495,61 +1515,70 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   qualityHeader: {
-    flexDirection: ROW_LTR,
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: ALIGN_RIGHT,
+    justifyContent: "flex-end",
     gap: 6,
+    paddingHorizontal: 4,
   },
   qualityDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+    width: 7,
+    height: 7,
+    borderRadius: 4,
   },
   qualityTitle: {
     fontSize: 13,
     fontFamily: "Cairo_700Bold",
   },
   serverListCard: {
-    borderRadius: 16,
-    backgroundColor: "rgba(16, 24, 24, 0.92)",
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: "rgba(16, 185, 129, 0.18)",
     overflow: "hidden",
   },
   serverRow: {
-    flexDirection: ROW_LTR,
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    minHeight: 52,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 8,
   },
   serverRowBorder: {
-    borderTopWidth: 1,
-    borderTopColor: "rgba(255,255,255,0.06)",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  webRowActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    flexShrink: 0,
   },
   playActionPill: {
-    flexDirection: ROW_LTR,
+    flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 4,
     paddingHorizontal: 14,
     paddingVertical: 6,
     borderRadius: 10,
-    backgroundColor: "#10B981",
+    backgroundColor: "#10b981",
   },
   playActionText: {
-    color: "#fff",
+    color: "#ffffff",
     fontSize: 12,
     fontFamily: "Cairo_700Bold",
   },
   serverRightInfo: {
-    flexDirection: ROW_LTR,
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
     alignItems: "center",
+    justifyContent: "flex-end",
     gap: 8,
   },
   serverRowTitle: {
-    color: "#fff",
     fontSize: 13,
     fontFamily: "Cairo_700Bold",
+    textAlign: "right",
   },
   statusDot: {
     width: 8,
@@ -1558,112 +1587,132 @@ const styles = StyleSheet.create({
   },
   dlSection: {
     marginTop: 6,
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 14,
     gap: 10,
   },
   dlSectionHeader: {
-    flexDirection: ROW_LTR,
+    flexDirection: ROW_RTL,
     alignItems: "center",
     justifyContent: "space-between",
+    gap: 10,
   },
-  dlHeaderTitleRow: {
-    flexDirection: ROW_LTR,
+  dlHeaderTitleWrap: {
+    flexDirection: ROW_RTL,
     alignItems: "center",
-    gap: 8,
+    gap: 10,
+    flex: 1,
+    minWidth: 0,
   },
-  dlAccentBar: {
-    width: 4,
-    height: 18,
-    borderRadius: 2,
-    backgroundColor: "#38BDF8",
+  dlHeaderIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  dlHeaderTexts: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: ALIGN_RIGHT,
   },
   dlSectionTitle: {
-    color: "#F8FAFC",
-    fontSize: 14,
-    fontFamily: "Cairo_700Bold",
+    fontSize: 13.5,
+    fontFamily: "Cairo_800ExtraBold",
+    textAlign: "right",
+    width: "100%",
   },
-  dlHeaderBadge: {
-    flexDirection: ROW_LTR,
-    alignItems: "center",
-    gap: 5,
+  dlSectionSub: {
+    fontSize: 10,
+    fontFamily: "Cairo_600SemiBold",
+    textAlign: "right",
+    width: "100%",
+  },
+  dlCountBadge: {
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 999,
-    backgroundColor: "rgba(56, 189, 248, 0.12)",
     borderWidth: 1,
-    borderColor: "rgba(56, 189, 248, 0.28)",
+    flexShrink: 0,
   },
-  dlHeaderBadgeText: {
-    color: "#38BDF8",
+  dlCountBadgeText: {
     fontSize: 10,
     fontFamily: "Cairo_700Bold",
   },
   dlCardsContainer: {
-    borderRadius: 16,
-    backgroundColor: "rgba(15, 23, 42, 0.9)",
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: "rgba(56, 189, 248, 0.22)",
     overflow: "hidden",
   },
   dlRow: {
-    flexDirection: ROW_LTR,
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  dlRowDone: {
-    backgroundColor: "rgba(16, 185, 129, 0.06)",
+    minHeight: 54,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 8,
   },
   dlActionBtn: {
-    flexDirection: ROW_LTR,
+    flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
+    justifyContent: "center",
+    gap: 5,
+    minWidth: 92,
+    height: 36,
+    paddingHorizontal: 14,
     borderRadius: 10,
-    backgroundColor: "rgba(56, 189, 248, 0.14)",
+    backgroundColor: "#0284c7",
     borderWidth: 1,
-    borderColor: "rgba(56, 189, 248, 0.35)",
+    borderColor: "#38bdf8",
   },
   dlActionBtnDone: {
-    backgroundColor: "rgba(16, 185, 129, 0.14)",
-    borderColor: "rgba(16, 185, 129, 0.35)",
+    backgroundColor: "#059669",
+    borderColor: "#34d399",
   },
   dlActionBtnError: {
-    backgroundColor: "rgba(239, 68, 68, 0.14)",
-    borderColor: "rgba(239, 68, 68, 0.35)",
+    backgroundColor: "#dc2626",
+    borderColor: "#f87171",
   },
   dlActionBtnText: {
-    color: "#38BDF8",
+    color: "#ffffff",
     fontSize: 11,
     fontFamily: "Cairo_700Bold",
   },
   dlRightInfo: {
-    flexDirection: ROW_LTR,
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    justifyContent: "flex-end",
+    gap: 8,
   },
   dlQualityTag: {
     paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingVertical: 2,
     borderRadius: 7,
     borderWidth: 1,
   },
   dlQualityTagText: {
     fontSize: 10,
-    fontFamily: "Cairo_700Bold",
+    fontFamily: "Cairo_800ExtraBold",
   },
   dlServerName: {
-    color: "#F1F5F9",
-    fontSize: 13,
+    fontSize: 12.5,
     fontFamily: "Cairo_700Bold",
     textAlign: "right",
+    flexShrink: 1,
   },
-  dlServerSub: {
-    color: "rgba(255,255,255,0.48)",
-    fontSize: 10,
-    fontFamily: "Cairo_400Regular",
-    textAlign: "right",
+  dlTagBadge: {
+    width: 30,
+    height: 30,
+    borderRadius: 9,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
   },
 });
-

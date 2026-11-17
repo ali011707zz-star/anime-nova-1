@@ -92,6 +92,8 @@ function EpisodeArtwork({
   );
 }
 
+const _dubbedEpMemCache = new Map<string, { seasons?: Season[]; episodes: Episode[] }>();
+
 export default function DubbedDetailScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -152,9 +154,17 @@ export default function DubbedDetailScreen() {
   useEffect(() => {
     if (!isSd2Entry) return;
     const ctrl = new AbortController();
-    setEpLoading(true);
-    setEpisodes([]);
-    setSd2Seasons([]);
+    const cacheKey = `sd2:${sd2Slug}`;
+    const cached = _dubbedEpMemCache.get(cacheKey);
+    if (cached?.seasons?.length) {
+      setSd2Seasons(cached.seasons);
+      setEpisodes(cached.seasons[0].episodes || []);
+      setEpLoading(false);
+    } else {
+      setEpLoading(true);
+      setEpisodes([]);
+      setSd2Seasons([]);
+    }
     setSelSeason(0);
     const endpoint = `${apiBase()}/api/dubbed/sd2/episodes?slug=${encodeURIComponent(sd2Slug)}&mediaType=${isMovie ? "movie" : "series"}`;
     fetch(endpoint, { signal: ctrl.signal })
@@ -179,6 +189,7 @@ export default function DubbedDetailScreen() {
           };
         });
         if (mappedSeasons.length > 0) {
+          _dubbedEpMemCache.set(`sd2:${sd2Slug}`, { seasons: mappedSeasons, episodes: mappedSeasons[0].episodes || [] });
           setSd2Seasons(mappedSeasons);
           setEpisodes(mappedSeasons[0].episodes || []);
         } else {
@@ -199,8 +210,15 @@ export default function DubbedDetailScreen() {
     }
     if (!curSeason) return;
     const ctrl = new AbortController();
-    setEpLoading(true);
-    setEpisodes([]);
+    const cacheKey = isCarateenEntry ? `${carateenProvider}:${showId}` : `at:${curSeason.arabicToonsId}`;
+    const cached = _dubbedEpMemCache.get(cacheKey);
+    if (cached?.episodes?.length) {
+      setEpisodes(cached.episodes);
+      setEpLoading(false);
+    } else {
+      setEpLoading(true);
+      setEpisodes([]);
+    }
     const endpoint = isCarateenEntry
       ? `${apiBase()}/api/dubbed/carateen/episodes?provider=${carateenProvider}&showId=${showId}`
       : `${apiBase()}/api/dubbed/episodes?series=${encodeURIComponent(curSeason.arabicToonsId)}`;
@@ -218,6 +236,7 @@ export default function DubbedDetailScreen() {
             const pref = String(raw.pref || raw.title || "").trim();
             return { number, epId, url, thumbnail, videoId, pref };
           });
+          _dubbedEpMemCache.set(cacheKey, { episodes: normalized });
           setEpisodes(normalized);
           setEpLoading(false);
         }
