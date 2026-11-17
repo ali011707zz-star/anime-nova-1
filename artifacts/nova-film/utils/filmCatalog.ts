@@ -176,7 +176,7 @@ export const NOVA_FILM_CATALOG: FilmTitle[] = [
     year: 2026,
     imdbRating: 8.9,
     durationOrSeasons: "112 دقيقة",
-    audioLabel: "مدبلج عربي",
+    audioLabel: "مترجم عربي",
     qualityBadge: "1080p BluRay",
     ageRating: "G - عائلي",
     country: "الولايات المتحدة / اليابان",
