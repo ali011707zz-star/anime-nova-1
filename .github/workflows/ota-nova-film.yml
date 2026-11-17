@@ -135,6 +135,7 @@ jobs:
 
             # Ensure VPS app.ts is clean (restore from git if a previous copy patched extra imports)
             if [ -d "${APP_DIR}/.git" ]; then
+              git config --global --add safe.directory "${APP_DIR}" 2>/dev/null || true
               git -C "${APP_DIR}" checkout -- artifacts/api-server/src/app.ts artifacts/api-server/src/routes/ota.ts 2>/dev/null || true
             fi
 
@@ -159,6 +160,15 @@ jobs:
             import pathlib, sys
             p = pathlib.Path(sys.argv[1])
             s = p.read_text()
+            import re
+            routes_dir = p.parent / "routes"
+            # Guard against any orphaned route import whose .ts file does not exist on VPS
+            for m in list(re.finditer(r'^import\s+(\w+)\s+from\s+"\./routes/([^"]+)\.js";?\r?\n', s, re.M)):
+                ident, mod = m.group(1), m.group(2)
+                if not (routes_dir / f"{mod}.ts").exists():
+                    print(f"Removing missing route import: {ident} ({mod}.ts)")
+                    s = s.replace(m.group(0), "")
+                    s = re.sub(rf'^.*\b{re.escape(ident)}\b.*\r?\n', '', s, flags=re.M)
             if "otaFilmRouter" not in s:
                 imp = 'import otaFilmRouter from "./routes/otaFilm.js";\n'
                 if 'import authTokenRouter' in s:
@@ -172,8 +182,8 @@ jobs:
                     s = s.replace('// ── Mobile release gate', mount + '  // ── Mobile release gate', 1)
                 else:
                     raise SystemExit("Could not find authTokenRouter or Mobile release gate in app.ts")
-                p.write_text(s)
-                print("Patched app.ts with /api/ota-film")
+            p.write_text(s)
+            print("Patched app.ts cleanly with /api/ota-film")
             PY
               cd "${APP_DIR}"
               pnpm --filter @workspace/api-server run build
