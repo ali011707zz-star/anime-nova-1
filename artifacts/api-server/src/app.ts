@@ -25,6 +25,7 @@ import crashReportRouter from "./routes/crashReport.js";
 import hlsProxyRouter from "./routes/hlsProxy.js";
 import otaRouter from "./routes/ota.js";
 import otaFilmRouter from "./routes/otaFilm.js";
+import filmRouter from "./routes/film.js";
 import mediaVaultRouter from "./routes/mediaVault.js";
 import { registerWebAdminRoutes } from "./routes/webAdmin.js";
 import analyticsRouter from "./routes/analytics.js";
@@ -307,6 +308,7 @@ export async function createApp(): Promise<Express> {
   });
 
   app.use("/api", router);
+  app.use("/api/film", filmRouter);
   app.use("/api/push", pushRouter);
   app.use("/api", pushRouter);
   app.use("/api", newsRouter);

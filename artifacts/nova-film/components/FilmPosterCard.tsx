@@ -1,82 +1,84 @@
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import React from "react";
-import { Image, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { Image, StyleSheet, Text, View } from "react-native";
 import { useColors } from "@/hooks/useColors";
-import type { FilmTitle } from "@/utils/filmCatalog";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
+import { getImageSource, type FilmSummary } from "@/utils/filmCatalog";
+import { tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 
-type Props = {
-  item: FilmTitle;
-  cardWidth?: number;
-  progress?: number;
-  watchedCount?: number;
-  onFocus?: () => void;
-  tvFocusable?: boolean;
-};
-
-export function getFilmRailCardWidth(windowWidth: number, visibleCards = 3, gap = 10) {
-  const wideLayout = windowWidth >= 700;
-  const maxRailWidth = wideLayout ? 1400 : 960;
-  const sidePad = windowWidth >= 900 ? 64 : windowWidth >= 600 ? 44 : 28;
-  const railWidth = Math.min(Math.max(windowWidth - sidePad, 0), maxRailWidth);
-  const targetVisibleCards =
-    windowWidth >= 1200 ? 6 : windowWidth >= 900 ? 5 : windowWidth >= 600 ? 4 : visibleCards;
-  const minCardWidth = wideLayout ? 124 : 104;
-  const maxCardWidth = wideLayout ? 185 : 165;
-  const calculated = Math.floor((railWidth - gap * (targetVisibleCards - 1)) / targetVisibleCards);
-  return Math.max(minCardWidth, Math.min(maxCardWidth, calculated));
+export function getFilmRailCardWidth(
+  screenWidth: number,
+  mobileColumns = 3,
+  gap = 10,
+  sidePadding = 28,
+): number {
+  const usable = Math.max(screenWidth - sidePadding, 260);
+  const cols = screenWidth >= 900 ? 5 : screenWidth >= 600 ? 4 : mobileColumns;
+  const raw = Math.floor((usable - (cols - 1) * gap) / cols);
+  return Math.max(102, Math.min(raw, 178));
 }
 
-export function getFilmGridColumnCount(windowWidth: number) {
-  if (windowWidth >= 1200) return 6;
-  if (windowWidth >= 900) return 5;
-  if (windowWidth >= 560) return 4;
+export function getFilmGridColumnCount(screenWidth: number): number {
+  if (screenWidth >= 960) return 5;
+  if (screenWidth >= 680) return 4;
   return 3;
 }
 
+type Props = {
+  item: FilmSummary;
+  cardWidth?: number;
+  watchedCount?: number;
+  progress?: number;
+  tvFocusable?: boolean;
+};
+
 export const FilmPosterCard = React.memo(function FilmPosterCard({
   item,
-  cardWidth,
-  progress,
+  cardWidth = 114,
   watchedCount = 0,
-  onFocus,
+  progress = 0,
   tvFocusable = true,
 }: Props) {
   const router = useRouter();
   const colors = useColors();
-  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
-  const { size: scaleSize } = useTvMetrics();
-  const tvMode = isTvDevice(windowWidth, windowHeight);
+  const { tv: tvMode, size: scaleSize } = useTvMetrics();
 
-  const cardW = cardWidth ?? getFilmRailCardWidth(windowWidth, 3);
-  const cardH = Math.round(cardW * 1.44);
-
-  const typeBadgeColor =
+  const cardHeight = Math.round(cardWidth * 1.48);
+  const posterSrc = getImageSource(item.posterUrl || item.backdropUrl);
+  const typeTag =
+    item.mediaType === "animation"
+      ? "أنميشن"
+      : item.mediaType === "series"
+        ? "مسلسل"
+        : "فيلم";
+  const badgeBg =
     item.mediaType === "series"
-      ? "#10B981"
+      ? "rgba(16,185,129,0.90)"
       : item.mediaType === "animation"
-        ? "#8B5CF6"
-        : "#0EA5E9";
-  const typeShortLabel =
-    item.mediaType === "series" ? "مسلسل" : item.mediaType === "animation" ? "أنميشن" : "فيلم";
+        ? "rgba(139,92,246,0.90)"
+        : "rgba(14,165,233,0.90)";
+
+  const openDetail = () => {
+    router.push({
+      pathname: "/film/[id]" as any,
+      params: {
+        id: String(item.id),
+        type: item.tmdbType,
+        title: item.titleAr,
+      },
+    });
+  };
 
   return (
     <Pressable
-      onPress={() =>
-        router.push({
-          pathname: "/film/[id]" as any,
-          params: { id: String(item.id) },
-        })
-      }
+      onPress={openDetail}
       focusable={tvMode && tvFocusable}
-      hitSlop={tvMode ? 8 : 4}
-      pressRetentionOffset={12}
-      onFocus={onFocus}
-      android_ripple={tvMode ? undefined : { color: "rgba(14,165,233,0.18)" }}
-      style={({ pressed, focused }) => [
+      accessibilityRole="button"
+      accessibilityLabel={item.titleAr}
+      style={({ focused, pressed }) => [
         styles.card,
-        { width: cardW, opacity: pressed ? 0.86 : 1 },
+        { width: cardWidth, opacity: pressed ? 0.86 : 1 },
         tvMode && styles.tvCard,
         tvMode && tvFocusStyle(focused),
       ]}
@@ -85,43 +87,48 @@ export const FilmPosterCard = React.memo(function FilmPosterCard({
         style={[
           styles.imageContainer,
           {
-            width: tvMode ? cardW - 10 : cardW,
-            height: cardH,
-            borderRadius: colors.radius - 3,
+            width: cardWidth,
+            height: cardHeight,
+            borderRadius: scaleSize(12, 14),
             borderColor: colors.border,
           },
         ]}
       >
-        <Image
-          source={item.posterSource}
-          style={[styles.image, { borderRadius: colors.radius - 3 }]}
-          resizeMode="cover"
+        {posterSrc ? (
+          <Image source={posterSrc} style={styles.image} resizeMode="cover" />
+        ) : (
+          <View style={styles.fallbackImg}>
+            <Ionicons name="film-outline" size={28} color="#475569" />
+          </View>
+        )}
+        <LinearGradient
+          colors={["transparent", "rgba(9,10,12,0.72)"]}
+          locations={[0.55, 1]}
+          style={StyleSheet.absoluteFill}
         />
 
-        {/* Top-right category pill matching AnimeCard */}
-        <View style={[styles.typeBadge, { backgroundColor: typeBadgeColor }]}>
-          <Text style={styles.typeBadgeText}>{typeShortLabel}</Text>
+        <View style={[styles.typeBadge, { backgroundColor: badgeBg }]}>
+          <Text style={styles.typeBadgeText}>{typeTag}</Text>
         </View>
 
-        {/* Bottom-left IMDB / platform star score */}
+        <View style={styles.qualityBadge}>
+          <Text style={styles.qualityText}>{item.qualityBadge}</Text>
+        </View>
+
         <View style={styles.scoreBadge}>
-          <Ionicons name="star" size={9.5} color="#FFD700" />
+          <Ionicons name="star" size={9} color="#FFD700" />
           <Text style={styles.scoreText}>{item.imdbRating.toFixed(1)}</Text>
         </View>
 
-        {/* Top-left quality chip */}
-        <View style={styles.qualityBadge}>
-          <Text style={styles.qualityText}>
-            {item.qualityBadge.includes("4K") ? "4K" : "FHD"}
-          </Text>
-        </View>
-
-        {progress !== undefined && progress > 0 ? (
+        {progress > 0 ? (
           <View style={styles.progressBar}>
             <View
               style={[
                 styles.progressFill,
-                { width: `${Math.min(progress * 100, 100)}%`, backgroundColor: "#0EA5E9" },
+                {
+                  width: `${Math.min(100, Math.round(progress * 100))}%`,
+                  backgroundColor: "#0EA5E9",
+                },
               ]}
             />
           </View>
@@ -129,47 +136,47 @@ export const FilmPosterCard = React.memo(function FilmPosterCard({
       </View>
 
       <Text
+        numberOfLines={2}
         style={[
           styles.title,
           {
-            fontSize: scaleSize(12, 14),
-            lineHeight: scaleSize(19, 22),
             color: colors.textPrimary,
+            fontSize: scaleSize(11.5, 14.5),
+            lineHeight: scaleSize(17, 21),
           },
         ]}
-        numberOfLines={2}
       >
         {item.titleAr}
       </Text>
 
       <Text
+        numberOfLines={1}
         style={[
           styles.subtitle,
           {
             color: colors.textSecondary,
-            fontSize: scaleSize(10, 11.5),
-            lineHeight: scaleSize(14, 16),
+            fontSize: scaleSize(9.5, 12),
+            lineHeight: scaleSize(14, 18),
           },
         ]}
-        numberOfLines={1}
       >
         {item.titleEn}
       </Text>
 
       <Text
+        numberOfLines={1}
         style={[
           styles.metaLine,
           {
-            fontSize: scaleSize(10, 12),
-            lineHeight: scaleSize(15, 18),
             color: colors.textMuted,
+            fontSize: scaleSize(9, 11.5),
+            lineHeight: scaleSize(13.5, 17),
           },
         ]}
-        numberOfLines={1}
       >
-        {item.episodes.length > 1
-          ? `${item.episodes.length} حلقة${watchedCount > 0 ? ` · شوهد ${watchedCount}` : ""}`
-          : `${item.year} · ${item.durationOrSeasons}`}
+        {watchedCount > 0
+          ? `تم مشاهدة ${watchedCount}`
+          : `${item.year} · ${item.categoryLabel}`}
       </Text>
     </Pressable>
   );
@@ -185,6 +192,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   image: { width: "100%", height: "100%" },
+  fallbackImg: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#14171C",
+  },
   typeBadge: {
     position: "absolute",
     top: 6,

@@ -8,6 +8,7 @@ on:
       - '!artifacts/nova-film/android/**'
       - '!artifacts/nova-film/ota-dist/**'
       - 'artifacts/api-server/src/routes/otaFilm.ts'
+      - 'artifacts/api-server/src/routes/film.ts'
       - 'artifacts/api-server/src/app.ts'
       - '.github/workflows/ota-nova-film.yml'
   workflow_dispatch:
@@ -88,7 +89,8 @@ jobs:
         run: |
           tar -czf nova-film-ota-stage.tar.gz \
             artifacts/nova-film/ota-dist \
-            artifacts/api-server/src/routes/otaFilm.ts
+            artifacts/api-server/src/routes/otaFilm.ts \
+            artifacts/api-server/src/routes/film.ts
           ls -lh nova-film-ota-stage.tar.gz
 
       - name: 🌐 Upload OTA payload to VPS
@@ -144,18 +146,27 @@ jobs:
                ! cmp -s "${STAGE}/artifacts/api-server/src/routes/otaFilm.ts" "${APP_DIR}/artifacts/api-server/src/routes/otaFilm.ts"; then
               NEED_REBUILD=1
             fi
+            if [ ! -f "${APP_DIR}/artifacts/api-server/src/routes/film.ts" ] || \
+               ! cmp -s "${STAGE}/artifacts/api-server/src/routes/film.ts" "${APP_DIR}/artifacts/api-server/src/routes/film.ts"; then
+              NEED_REBUILD=1
+            fi
 
-            if ! grep -q "otaFilmRouter" "${APP_DIR}/artifacts/api-server/src/app.ts"; then
+            if ! grep -q "otaFilmRouter" "${APP_DIR}/artifacts/api-server/src/app.ts" || \
+               ! grep -q "filmRouter" "${APP_DIR}/artifacts/api-server/src/app.ts"; then
               NEED_REBUILD=1
             fi
 
             if ! curl -sf "http://127.0.0.1:5000/api/ota-film/status" | grep -q '"nova-film"'; then
               NEED_REBUILD=1
             fi
+            if ! curl -sf "http://127.0.0.1:5000/api/film/config" | grep -q '"nova-film"'; then
+              NEED_REBUILD=1
+            fi
 
             if [ "$NEED_REBUILD" -eq 1 ]; then
-              echo "🔄 Patching /api/ota-film route into VPS api-server..."
+              echo "🔄 Patching /api/ota-film and /api/film routes into VPS api-server..."
               cp "${STAGE}/artifacts/api-server/src/routes/otaFilm.ts" "${APP_DIR}/artifacts/api-server/src/routes/otaFilm.ts"
+              cp "${STAGE}/artifacts/api-server/src/routes/film.ts" "${APP_DIR}/artifacts/api-server/src/routes/film.ts"
               python3 - "${APP_DIR}/artifacts/api-server/src/app.ts" <<'PY'
             import pathlib, sys
             p = pathlib.Path(sys.argv[1])
@@ -182,8 +193,19 @@ jobs:
                     s = s.replace('// ── Mobile release gate', mount + '  // ── Mobile release gate', 1)
                 else:
                     raise SystemExit("Could not find authTokenRouter or Mobile release gate in app.ts")
+            if "filmRouter" not in s:
+                imp = 'import filmRouter from "./routes/film.js";\n'
+                if 'import otaFilmRouter' in s:
+                    s = s.replace('import otaFilmRouter', imp + 'import otaFilmRouter', 1)
+                else:
+                    s = imp + s
+                mount = '  app.use("/api/film", filmRouter);\n'
+                if 'app.use("/api", router);' in s:
+                    s = s.replace('app.use("/api", router);', 'app.use("/api", router);\n' + mount.rstrip(), 1)
+                else:
+                    raise SystemExit('Could not find app.use("/api", router) in app.ts')
             p.write_text(s)
-            print("Patched app.ts cleanly with /api/ota-film")
+            print("Patched app.ts cleanly with /api/ota-film and /api/film")
             PY
               cd "${APP_DIR}"
               pnpm --filter @workspace/api-server run build
@@ -208,3 +230,6 @@ jobs:
             echo "⚠️ Live OTA endpoint did not return activeUpdate:true yet"
             exit 1
           fi
+          FILM_CFG=$(curl -s "https://animenovaa.duckdns.org/api/film/config" || true)
+          echo "Live /api/film/config: $FILM_CFG"
+          echo "$FILM_CFG" | grep -q '"nova-film"'

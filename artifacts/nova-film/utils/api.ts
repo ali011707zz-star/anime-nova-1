@@ -4,7 +4,7 @@ export { getBaseUrl };
 
 export async function fetchRemoteConfig() {
   try {
-    const res = await secureFetch(`${getBaseUrl()}/api/config`, {
+    const res = await secureFetch(`${getBaseUrl()}/api/film/config`, {
       headers: { Accept: "application/json" },
     });
     if (!res.ok) {

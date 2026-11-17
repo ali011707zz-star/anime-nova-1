@@ -284,7 +284,7 @@ export default function TvLinkScreen() {
           focusable={tvMode}
           style={({ focused }) => [styles.backButton, { top: insets.top + 8 }, tvMode && tvFocusStyle(focused)]}
         >
-          <Ionicons name="arrow-back" size={22} color={colors.text} style={{ transform: [{ scaleX: -1 }] }} />
+          <Ionicons name="chevron-forward" size={22} color={colors.text} />
         </Pressable>
         <ActivityIndicator color={colors.primary} />
       </View>
@@ -313,7 +313,7 @@ export default function TvLinkScreen() {
         focusable={tvMode}
         style={({ focused }) => [styles.backButton, { top: insets.top + 8 }, tvMode && tvFocusStyle(focused)]}
       >
-        <Ionicons name="arrow-back" size={22} color={colors.text} style={{ transform: [{ scaleX: -1 }] }} />
+        <Ionicons name="chevron-forward" size={22} color={colors.text} />
       </Pressable>
 
       <ScrollView
@@ -553,7 +553,7 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   backButton: {
     position: "absolute",
-    ...(I18nManager.isRTL ? { left: 16 } : { right: 16 }),
+    right: 16,
     zIndex: 10,
     width: 44,
     height: 44,
@@ -631,7 +631,7 @@ const styles = StyleSheet.create({
   },
   stepCopy: {
     flex: 1,
-    alignItems: "flex-end",
+    alignItems: I18nManager.isRTL ? "flex-start" : "flex-end",
   },
   stepLabel: {
     fontSize: 13,

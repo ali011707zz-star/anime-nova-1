@@ -21,6 +21,7 @@ import { useColors } from "@/hooks/useColors";
 import type { ThemePalette } from "@/constants/colors";
 
 const ROW_RTL = (I18nManager && I18nManager.isRTL) ? "row" : "row-reverse";
+const ALIGN_RIGHT = (I18nManager && I18nManager.isRTL) ? "flex-start" : "flex-end";
 
 function useDownloadsTheme() {
   const colors = useColors();
@@ -969,7 +970,7 @@ const createDownloadStyles = (colors: ThemePalette) => StyleSheet.create({
     gap: 12,
     flex: 1,
   },
-  headerInfo: { flex: 1, minWidth: 0, alignItems: "flex-end", gap: 2 },
+  headerInfo: { flex: 1, minWidth: 0, alignItems: ALIGN_RIGHT, gap: 2 },
   headerIcon: {
     width: 40, height: 40, borderRadius: 13,
     backgroundColor: colors.accent, borderWidth: 1,

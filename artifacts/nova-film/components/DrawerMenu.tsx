@@ -15,6 +15,7 @@ import { useColors } from "@/hooks/useColors";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch } from "@/utils/secureApi";
 import { isTvDevice, toggleTvMode, tvFocusStyle, TvPressable as Pressable, useTvModeOverride } from "@/utils/tv";
+import { loadAllPlaybackProgress, loadFavoriteFilms } from "@/utils/filmCatalog";
 import { useWindowDimensions } from "react-native";
 
 const { width: W } = Dimensions.get("window");
@@ -85,17 +86,16 @@ export function DrawerMenu({ visible, onClose }: Props) {
       ? Math.min(winW * 0.36, 280)
       : Math.min(winW * 0.72, 265);
   const topPad = Platform.OS === "web" ? 0 : insets.top;
-  const { watchHistory, favorites, theme, currentUser } = useApp();
+  const { theme, currentUser } = useApp();
+  const [filmFavCount, setFilmFavCount] = React.useState(0);
+  const [filmHistoryCount, setFilmHistoryCount] = React.useState(0);
   const colors = useColors();
   const [userData, setUserData] = React.useState<UserData | null>(null);
   const visibleNavMain = React.useMemo(
     () => (tvMode ? NAV_MAIN.filter((item) => item.route !== "/manga") : NAV_MAIN),
     [tvMode],
   );
-  const visibleFavoritesCount = React.useMemo(
-    () => (tvMode ? favorites.filter((f: any) => !f?.mangaId).length : favorites.length),
-    [favorites, tvMode],
-  );
+  const visibleFavoritesCount = filmFavCount;
 
   React.useEffect(() => {
     if (currentUser) {
@@ -112,6 +112,11 @@ export function DrawerMenu({ visible, onClose }: Props) {
   React.useEffect(() => {
     if (!visible) return;
     let isMounted = true;
+    Promise.all([loadFavoriteFilms(), loadAllPlaybackProgress()]).then(([favs, hist]) => {
+      if (!isMounted) return;
+      setFilmFavCount(favs.length);
+      setFilmHistoryCount(hist.length);
+    }).catch(() => {});
     const timer = setTimeout(async () => {
       let localUser: any = null;
       let overrideData: any = null;
@@ -289,7 +294,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
                 </View>
                 <Text style={[s.userSub, { color: colors.textSecondary }]} numberOfLines={1}>
                   {isLogged
-                    ? `${watchHistory.length} مشاهدة  •  ${visibleFavoritesCount} مفضلة`
+                    ? `${filmHistoryCount} مشاهدة  •  ${visibleFavoritesCount} مفضلة`
                     : "سجّل الدخول لمزامنة حسابك ومفضلتك"}
                 </Text>
               </View>
@@ -313,7 +318,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
             <DrawerItem
               key={item.label}
               item={item}
-              badge={item.label === "المفضلة" ? visibleFavoritesCount : watchHistory.length}
+              badge={item.label === "المفضلة" ? visibleFavoritesCount : filmHistoryCount}
               tvMode={tvMode}
               colors={colors}
               onPress={() => nav(item.route)}

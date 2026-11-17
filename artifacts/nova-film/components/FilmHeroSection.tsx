@@ -11,13 +11,13 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
-import type { FilmTitle } from "@/utils/filmCatalog";
+import { getImageSource, type FilmSummary } from "@/utils/filmCatalog";
 import { tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 
 const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
 
 type Props = {
-  items: FilmTitle[];
+  items: FilmSummary[];
   tvFocusable?: boolean;
 };
 
@@ -48,22 +48,20 @@ export function FilmHeroSection({ items, tvFocusable = true }: Props) {
 
   if (!items.length) return null;
 
-  const openDetails = (item: FilmTitle) => {
-    router.push({ pathname: "/film/[id]" as any, params: { id: String(item.id) } });
+  const openDetails = (item: FilmSummary) => {
+    router.push({ pathname: "/film/[id]" as any, params: { id: String(item.id), type: item.tmdbType, title: item.titleAr } });
   };
 
-  const quickWatch = (item: FilmTitle) => {
-    const firstEp = item.episodes[0];
-    if (!firstEp) {
-      openDetails(item);
-      return;
-    }
+  const quickWatch = (item: FilmSummary) => {
     router.push({
       pathname: "/film/watch" as any,
       params: {
-        titleId: String(item.id),
-        season: String(firstEp.seasonNumber),
-        episode: String(firstEp.episodeNumber),
+        id: String(item.id),
+        type: item.tmdbType,
+        season: "1",
+        episode: "1",
+        title: item.titleAr,
+        poster: item.posterUrl || item.backdropUrl || "",
       },
     });
   };
@@ -89,7 +87,7 @@ export function FilmHeroSection({ items, tvFocusable = true }: Props) {
           {items.map((item, slideIdx) => (
             <View key={item.id} style={{ width: slideWidth, height: heroHeight, position: "relative" }}>
               <Image
-                source={item.backdropSource || item.posterSource}
+                source={getImageSource(item.backdropUrl || item.posterUrl)}
                 style={StyleSheet.absoluteFill}
                 resizeMode="cover"
               />
@@ -143,7 +141,7 @@ export function FilmHeroSection({ items, tvFocusable = true }: Props) {
                 </Text>
 
                 <Text style={styles.subtitleLine} numberOfLines={1}>
-                  {item.titleEn} · {item.year} · {item.durationOrSeasons}
+                  {item.titleEn} · {item.year} · {item.categoryLabel}
                 </Text>
 
                 {/* Genre pills */}

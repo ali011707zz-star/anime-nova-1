@@ -14,11 +14,13 @@ import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch, setUserAuthToken } from "@/utils/secureApi";
 import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
+import { loadFavoriteFilms, removeFavoriteFilm, type FilmSummary } from "@/utils/filmCatalog";
 
 const AUTH_KEY = "nova-mobile-user";
 const PROFILE_OVERRIDE_KEY = "nova-profile-override";
 const USER_COMMENTS_KEY = "nova-user-comments-log";
 const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
+const ALIGN_RIGHT = I18nManager.isRTL ? "flex-start" : "flex-end";
 
 const AVATAR_COLORS = [
   ["#7c3aed", "#4c1d95"],
@@ -62,7 +64,8 @@ export default function ProfileScreen() {
   const base = getBaseUrl();
   const topPad = Platform.OS === "web" ? 0 : Math.max(insets.top, Platform.OS === "android" ? 28 : 44);
 
-  const { favorites, toggleFavorite, currentUser: globalUser, setCurrentUser: setGlobalUser } = useApp();
+  const { currentUser: globalUser, setCurrentUser: setGlobalUser } = useApp();
+  const [filmFavorites, setFilmFavorites] = useState<FilmSummary[]>([]);
 
   const [activeTab, setActiveTab] = useState<ProfileTab>("username");
   const [user, setUser] = useState<MobileUser | null>(globalUser || null);
@@ -78,6 +81,9 @@ export default function ProfileScreen() {
 
   useEffect(() => {
     let isMounted = true;
+    loadFavoriteFilms().then((list) => {
+      if (isMounted) setFilmFavorites(list);
+    }).catch(() => {});
     (async () => {
       let storedUser: MobileUser | null = null;
       let overrideData: Partial<MobileUser> = {};
@@ -281,20 +287,19 @@ export default function ProfileScreen() {
     await AsyncStorage.setItem(USER_COMMENTS_KEY, JSON.stringify(next));
   };
 
-  const realFavorites = favorites.map(f => ({
+  const realFavorites = filmFavorites.map(f => ({
     id: f.id,
-    title: f.title,
-    titleEn: f.english || f.title,
-    coverImage: f.thumbnail,
-    score: f.score ? Number((f.score > 10 ? f.score / 10 : f.score).toFixed(1)) : null,
-    episodes: f.episodes || null,
+    tmdbType: f.tmdbType,
+    title: f.titleAr,
+    titleEn: f.titleEn || f.titleAr,
+    coverImage: f.posterUrl || f.backdropUrl || "",
+    score: f.imdbRating ? Number(f.imdbRating.toFixed(1)) : null,
+    categoryLabel: f.categoryLabel || "عمل محفوظ",
   }));
 
-  const handleRemoveFavoriteItem = async (id: number) => {
-    const existing = favorites.find(f => f.id === id);
-    if (existing) {
-      await toggleFavorite(existing);
-    }
+  const handleRemoveFavoriteItem = async (id: number, tmdbType?: "movie" | "tv") => {
+    const next = await removeFavoriteFilm(id, tmdbType);
+    setFilmFavorites(next);
   };
 
   if (!user) {
@@ -319,7 +324,7 @@ export default function ProfileScreen() {
             focusable={tvMode}
             style={({ focused }) => [s.backBtn, tvMode && tvFocusStyle(focused)]}
           >
-            <Ionicons name="chevron-back" size={20} color="#f8fafc" style={{ transform: [{ scaleX: -1 }] }} />
+            <Ionicons name="chevron-forward" size={20} color="#f8fafc" />
           </Pressable>
           <View style={s.headerTitleBox}>
             <Text style={s.headerTitle}>إدارة الحساب</Text>
@@ -514,28 +519,33 @@ export default function ProfileScreen() {
           <View style={s.panelCard}>
             <View style={s.sectionTopRow}>
               <Text style={s.sectionMainTitle}>
-                قائمة أنمياتك المفضلة المرتبطة بالحساب ({realFavorites.length})
+                قائمة أعمالك المفضلة في NOVA FILM ({realFavorites.length})
               </Text>
-              <Text style={s.cloudSyncBadge}>✓ مُزامنة سحابياً</Text>
+              <Text style={s.cloudSyncBadge}>✓ محفوظة</Text>
             </View>
 
             {realFavorites.length === 0 ? (
               <View style={s.emptyBox}>
                 <Ionicons name="heart-outline" size={36} color="#475569" />
                 <Text style={s.emptyTitle}>لا توجد أعمال مضافة للمفضلة حالياً</Text>
-                <Text style={s.emptySub}>أضف أي أنمي إلى المفضلة ليظهر هنا تلقائياً</Text>
+                <Text style={s.emptySub}>أضف أي فيلم أو مسلسل إلى المفضلة ليظهر هنا تلقائياً</Text>
               </View>
             ) : (
               <View style={{ gap: 10 }}>
                 {realFavorites.map(item => (
-                  <View key={item.id} style={s.favRowCard}>
+                  <View key={`${item.tmdbType}-${item.id}`} style={s.favRowCard}>
                     <View style={s.favRightGroup}>
-                      <Image source={{ uri: item.coverImage }} style={s.favPoster} />
+                      {item.coverImage ? (
+                        <Image source={{ uri: item.coverImage }} style={s.favPoster} />
+                      ) : (
+                        <View style={[s.favPoster, { alignItems: "center", justifyContent: "center" }]}>
+                          <Ionicons name="film-outline" size={18} color="#64748b" />
+                        </View>
+                      )}
                       <View style={s.favMetaCol}>
                         <Text numberOfLines={1} style={s.favTitle}>{item.title}</Text>
                         <Text style={s.favSubMeta}>
-                          {item.score ? `★ ${item.score}` : "أنمي"}
-                          {item.episodes ? `  •  ${item.episodes} حلقة` : ""}
+                          {item.score ? `★ ${item.score}  •  ` : ""}{item.categoryLabel}
                         </Text>
                       </View>
                     </View>
@@ -543,16 +553,17 @@ export default function ProfileScreen() {
                     <View style={s.favActionsLeft}>
                       <Pressable
                         onPress={() =>
-                          router.push(
-                            `/anime/${item.id}?title=${encodeURIComponent(item.title)}&english=${encodeURIComponent(item.titleEn || item.title)}` as any
-                          )
+                          router.push({
+                            pathname: "/film/[id]" as any,
+                            params: { id: String(item.id), type: item.tmdbType, title: item.title },
+                          })
                         }
                         style={s.openItemBtn}
                       >
                         <Text style={s.openItemBtnText}>عرض</Text>
                       </Pressable>
                       <Pressable
-                        onPress={() => handleRemoveFavoriteItem(item.id)}
+                        onPress={() => handleRemoveFavoriteItem(item.id, item.tmdbType)}
                         style={s.deleteTrashBtn}
                       >
                         <Ionicons name="trash-outline" size={16} color="#f87171" />
@@ -661,7 +672,7 @@ const s = StyleSheet.create({
     flex: 1,
   },
   headerTitleBox: {
-    alignItems: "flex-end",
+    alignItems: ALIGN_RIGHT,
     flex: 1,
   },
   backBtn: {
@@ -733,7 +744,7 @@ const s = StyleSheet.create({
   },
   summaryInfoCol: {
     flex: 1,
-    alignItems: "flex-end",
+    alignItems: ALIGN_RIGHT,
     justifyContent: "center",
     gap: 4,
   },
@@ -1026,7 +1037,7 @@ const s = StyleSheet.create({
   },
   favMetaCol: {
     flex: 1,
-    alignItems: "flex-end",
+    alignItems: ALIGN_RIGHT,
     gap: 3,
   },
   favTitle: {

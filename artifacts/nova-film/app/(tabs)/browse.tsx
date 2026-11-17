@@ -1,7 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   FlatList,
   I18nManager,
   Platform,
@@ -17,86 +18,115 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DrawerMenu } from "@/components/DrawerMenu";
 import { FilmPosterCard, getFilmGridColumnCount } from "@/components/FilmPosterCard";
 import { useColors } from "@/hooks/useColors";
+import { fetchFilmBrowse } from "@/utils/filmApi";
 import {
-  NOVA_FILM_CATALOG,
-  loadWatchedMap,
-  makeEpisodeKey,
+  NOVA_FILM_GENRES,
+  type FilmSummary,
 } from "@/utils/filmCatalog";
 
-const ROW_HEADER = I18nManager.isRTL ? "row-reverse" : "row";
 const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
+const ALIGN_RIGHT = I18nManager.isRTL ? "flex-start" : "flex-end";
 
 const TYPE_TABS = [
   { id: "all", label: "الكل" },
   { id: "movie", label: "أفلام أجنبية" },
-  { id: "series", label: "مسلسلات عالمية" },
+  { id: "series", label: "مسلسلات" },
   { id: "animation", label: "أنميشن" },
 ] as const;
 
 const SORT_OPTIONS = [
+  { id: "popular", label: "الأكثر شعبية" },
   { id: "rating", label: "الأعلى تقييماً" },
   { id: "year", label: "الأحدث" },
-  { id: "popular", label: "الأكثر مشاهدة" },
 ] as const;
 
 export default function NovaFilmBrowseScreen() {
-  const params = useLocalSearchParams<{ type?: string }>();
   const colors = useColors();
-  const router = useRouter();
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const { width } = useWindowDimensions();
+  const params = useLocalSearchParams<{ type?: string; genre?: string }>();
 
   const [drawerVisible, setDrawerVisible] = useState(false);
-  const [selectedType, setSelectedType] = useState<string>("all");
-  const [selectedGenre, setSelectedGenre] = useState<string>("الكل");
-  const [sortBy, setSortBy] = useState<"rating" | "year" | "popular">("rating");
+  const [selectedType, setSelectedType] = useState<string>(params.type || "all");
+  const [selectedGenre, setSelectedGenre] = useState<string>(params.genre || "الكل");
+  const [sortBy, setSortBy] = useState<string>("popular");
   const [query, setQuery] = useState<string>("");
-  const [watchedMap, setWatchedMap] = useState<Record<string, boolean>>({});
+  const [debouncedQuery, setDebouncedQuery] = useState<string>("");
+
+  const [items, setItems] = useState<FilmSummary[]>([]);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const genRef = useRef(0);
 
   useEffect(() => {
-    if (params.type && ["all", "movie", "series", "animation"].includes(params.type)) {
-      setSelectedType(params.type);
-    }
-  }, [params.type]);
+    if (params.type) setSelectedType(params.type);
+    if (params.genre) setSelectedGenre(params.genre);
+  }, [params.type, params.genre]);
 
   useEffect(() => {
-    loadWatchedMap().then(setWatchedMap);
-  }, []);
+    const t = setTimeout(() => setDebouncedQuery(query.trim()), 350);
+    return () => clearTimeout(t);
+  }, [query]);
 
-  const allGenres = useMemo(() => {
-    const set = new Set<string>(["الكل"]);
-    NOVA_FILM_CATALOG.forEach((t) => t.genres.forEach((g) => set.add(g)));
-    return Array.from(set);
-  }, []);
+  const loadPage = useCallback(
+    async (pageNum: number, reset: boolean) => {
+      const myGen = ++genRef.current;
+      if (reset) {
+        setLoading(true);
+        setErrorMsg(null);
+      } else {
+        setLoadingMore(true);
+      }
+      try {
+        const res = await fetchFilmBrowse({
+          category: selectedType,
+          genre: selectedGenre,
+          sort: sortBy,
+          page: pageNum,
+          q: debouncedQuery || undefined,
+        });
+        if (genRef.current !== myGen) return;
+        const incoming = res.results || [];
+        setTotalPages(Math.max(1, res.totalPages || 1));
+        setPage(pageNum);
+        if (reset) {
+          setItems(incoming);
+        } else {
+          setItems((prev) => {
+            const seen = new Set(prev.map((x) => `${x.tmdbType}:${x.id}`));
+            return [...prev, ...incoming.filter((x) => !seen.has(`${x.tmdbType}:${x.id}`))];
+          });
+        }
+      } catch {
+        if (genRef.current === myGen && reset) {
+          setErrorMsg("تعذّر تحميل الأعمال من الخادم");
+        }
+      } finally {
+        if (genRef.current === myGen) {
+          setLoading(false);
+          setLoadingMore(false);
+        }
+      }
+    },
+    [selectedType, selectedGenre, sortBy, debouncedQuery],
+  );
+
+  useEffect(() => {
+    void loadPage(1, true);
+  }, [loadPage]);
 
   const cols = getFilmGridColumnCount(width);
   const gap = 10;
   const cardWidth = Math.floor((width - 28 - (cols - 1) * gap) / cols);
-
-  const items = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const filtered = NOVA_FILM_CATALOG.filter((item) => {
-      if (selectedType !== "all" && item.mediaType !== selectedType) return false;
-      if (selectedGenre !== "الكل" && !item.genres.includes(selectedGenre)) return false;
-      if (q) {
-        const hay = `${item.titleAr} ${item.titleEn} ${item.director} ${item.genres.join(" ")}`.toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      return true;
-    });
-
-    return filtered.sort((a, b) => {
-      if (sortBy === "year") return b.year - a.year || b.imdbRating - a.imdbRating;
-      if (sortBy === "popular") return (b.popularityCount || 0) - (a.popularityCount || 0);
-      return b.imdbRating - a.imdbRating;
-    });
-  }, [selectedType, selectedGenre, sortBy, query]);
-
   const topPad = Platform.OS === "web" ? 12 : Math.max(insets.top, Platform.OS === "android" ? 28 : 44);
 
   return (
     <View style={[s.container, { backgroundColor: colors.background }]}>
-      {/* CatalogPageHeader matching Anime NOVA */}
+      {/* CatalogPageHeader: Back + Title on Physical RIGHT, Menu on Physical LEFT */}
       <View
         style={[
           s.topHeader,
@@ -106,28 +136,31 @@ export default function NovaFilmBrowseScreen() {
           },
         ]}
       >
+        <View style={s.headerRightGroup}>
+          <Pressable
+            accessibilityLabel="رجوع"
+            onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)" as any))}
+            style={[s.iconBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
+          >
+            <Ionicons name="chevron-forward" size={20} color={colors.textPrimary} />
+          </Pressable>
+          <View style={s.headerTitleWrap}>
+            <Text style={[s.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>
+              تصفح مكتبة <Text style={{ color: "#0EA5E9" }}>NOVA FILM</Text>
+            </Text>
+          </View>
+        </View>
+
         <Pressable
+          accessibilityLabel="فتح القائمة"
           onPress={() => setDrawerVisible(true)}
           style={[s.iconBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
         >
           <Ionicons name="menu" size={20} color={colors.textPrimary} />
         </Pressable>
-
-        <View style={{ flex: 1, alignItems: "flex-end" }}>
-          <Text style={[s.headerTitle, { color: colors.textPrimary }]}>
-            تصفح مكتبة <Text style={{ color: "#0EA5E9" }}>NOVA FILM</Text>
-          </Text>
-        </View>
-
-        <Pressable
-          onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)" as any))}
-          style={[s.iconBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
-        >
-          <Ionicons name="chevron-forward" size={20} color={colors.textPrimary} />
-        </Pressable>
       </View>
 
-      {/* Category Underline Tabs (CatalogTabs style) */}
+      {/* Category Underline Tabs */}
       <View style={[s.tabsBar, { borderBottomColor: colors.border }]}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.tabsScroll}>
           {TYPE_TABS.map((tab) => {
@@ -153,19 +186,20 @@ export default function NovaFilmBrowseScreen() {
         </ScrollView>
       </View>
 
-      {/* Search + Sort + Genre Filters */}
+      {/* Live Search & Filter Bar */}
       <View style={s.filtersWrap}>
-        <View style={[s.searchBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <View style={[s.searchBox, { backgroundColor: colors.input, borderColor: colors.border }]}>
           <Ionicons name="search" size={16} color={colors.textMuted} />
           <TextInput
             value={query}
             onChangeText={setQuery}
-            placeholder="ابحث بالاسم العربي أو الإنجليزي أو المخرج..."
+            placeholder="ابحث عن فيلم، مسلسل، أنميشن..."
             placeholderTextColor={colors.textMuted}
             style={[s.searchInput, { color: colors.textPrimary }]}
+            returnKeyType="search"
           />
-          {query ? (
-            <Pressable onPress={() => setQuery("")}>
+          {query.length > 0 ? (
+            <Pressable onPress={() => setQuery("")} hitSlop={8}>
               <Ionicons name="close-circle" size={17} color={colors.textMuted} />
             </Pressable>
           ) : null}
@@ -192,8 +226,10 @@ export default function NovaFilmBrowseScreen() {
               </Pressable>
             );
           })}
+
           <View style={[s.chipDivider, { backgroundColor: colors.border }]} />
-          {allGenres.map((genre) => {
+
+          {NOVA_FILM_GENRES.map((genre) => {
             const active = selectedGenre === genre;
             return (
               <Pressable
@@ -216,36 +252,54 @@ export default function NovaFilmBrowseScreen() {
         </ScrollView>
       </View>
 
-      <FlatList
-        data={items}
-        key={`browse-grid-${cols}`}
-        numColumns={cols}
-        keyExtractor={(item) => String(item.id)}
-        contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 100, gap: 14 }}
-        columnWrapperStyle={{ gap, flexDirection: ROW_RTL }}
-        ListEmptyComponent={
-          <View style={s.emptyBox}>
-            <Ionicons name="film-outline" size={44} color={colors.textMuted} />
-            <Text style={[s.emptyText, { color: colors.textSecondary }]}>
-              لا توجد نتائج مطابقة للبحث الحالي
-            </Text>
-          </View>
-        }
-        renderItem={({ item }) => {
-          const watchedCount = item.episodes.filter(
-            (ep) => watchedMap[makeEpisodeKey(item.id, ep.seasonNumber, ep.episodeNumber)],
-          ).length;
-          const progress = item.episodes.length > 0 ? watchedCount / item.episodes.length : 0;
-          return (
-            <FilmPosterCard
-              item={item}
-              cardWidth={cardWidth}
-              watchedCount={watchedCount}
-              progress={progress}
-            />
-          );
-        }}
-      />
+      {loading ? (
+        <View style={s.emptyWrap}>
+          <ActivityIndicator size="large" color="#0EA5E9" />
+          <Text style={[s.emptyText, { color: colors.textSecondary }]}>جارٍ تحميل الأعمال...</Text>
+        </View>
+      ) : errorMsg && items.length === 0 ? (
+        <View style={s.emptyWrap}>
+          <Ionicons name="cloud-offline-outline" size={42} color="#F87171" />
+          <Text style={[s.emptyText, { color: colors.textSecondary }]}>{errorMsg}</Text>
+          <Pressable onPress={() => void loadPage(1, true)} style={s.retryBtn}>
+            <Text style={s.retryText}>إعادة المحاولة</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <FlatList
+          key={`grid-${cols}`}
+          data={items}
+          numColumns={cols}
+          keyExtractor={(item) => `${item.tmdbType}-${item.id}`}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 98, gap: 14 }}
+          columnWrapperStyle={{ gap }}
+          onEndReachedThreshold={0.45}
+          onEndReached={() => {
+            if (!loadingMore && !loading && page < totalPages) {
+              void loadPage(page + 1, false);
+            }
+          }}
+          ListFooterComponent={
+            loadingMore ? (
+              <View style={{ paddingVertical: 18 }}>
+                <ActivityIndicator size="small" color="#0EA5E9" />
+              </View>
+            ) : null
+          }
+          ListEmptyComponent={
+            <View style={s.emptyWrap}>
+              <Ionicons name="film-outline" size={42} color={colors.textMuted} />
+              <Text style={[s.emptyText, { color: colors.textSecondary }]}>
+                لا توجد نتائج مطابقة لبحثك
+              </Text>
+            </View>
+          }
+          renderItem={({ item }) => (
+            <FilmPosterCard item={item} cardWidth={cardWidth} tvFocusable={false} />
+          )}
+        />
+      )}
 
       <DrawerMenu visible={drawerVisible} onClose={() => setDrawerVisible(false)} />
     </View>
@@ -255,13 +309,25 @@ export default function NovaFilmBrowseScreen() {
 const s = StyleSheet.create({
   container: { flex: 1 },
   topHeader: {
-    flexDirection: ROW_HEADER,
+    flexDirection: ROW_RTL,
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 14,
     paddingBottom: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
     gap: 10,
+  },
+  headerRightGroup: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    gap: 10,
+  },
+  headerTitleWrap: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: ALIGN_RIGHT,
   },
   iconBtn: {
     width: 39,
@@ -276,6 +342,7 @@ const s = StyleSheet.create({
     lineHeight: 26,
     fontFamily: "Cairo_800ExtraBold",
     includeFontPadding: true,
+    textAlign: "right",
   },
   tabsBar: {
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -349,21 +416,37 @@ const s = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 7,
   },
-  chipDivider: { width: 1, height: 22, marginHorizontal: 2 },
+  chipDivider: {
+    width: 1,
+    height: 20,
+    marginHorizontal: 2,
+  },
   chipText: {
     fontSize: 12,
     lineHeight: 18,
     fontFamily: "Cairo_700Bold",
     includeFontPadding: true,
   },
-  emptyBox: {
+  emptyWrap: {
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 64,
+    paddingVertical: 72,
     gap: 10,
   },
   emptyText: {
-    fontSize: 14,
+    fontSize: 13.5,
     fontFamily: "Cairo_600SemiBold",
+  },
+  retryBtn: {
+    backgroundColor: "#0EA5E9",
+    paddingHorizontal: 20,
+    paddingVertical: 9,
+    borderRadius: 12,
+    marginTop: 4,
+  },
+  retryText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontFamily: "Cairo_700Bold",
   },
 });

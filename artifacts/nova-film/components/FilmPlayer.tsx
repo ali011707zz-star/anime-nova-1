@@ -21,9 +21,12 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
-import type { FilmServerLink } from "@/utils/filmCatalog";
+import type { FilmServerLink, FilmSubtitleTrack } from "@/utils/filmCatalog";
 
 const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
+const ROW_LTR = I18nManager.isRTL ? "row-reverse" : "row";
+const ALIGN_RIGHT = I18nManager.isRTL ? "flex-start" : "flex-end";
+
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 const FIT_MODES: { id: "contain" | "cover" | "fill"; label: string }[] = [
   { id: "contain", label: "افتراضي" },
@@ -62,6 +65,41 @@ function fmtSec(sec: number): string {
   const r = s % 60;
   const pad = (n: number) => String(n).padStart(2, "0");
   return h > 0 ? `${h}:${pad(m)}:${pad(r)}` : `${pad(m)}:${pad(r)}`;
+}
+
+type SubCue = { start: number; end: number; text: string };
+
+function parseTimestampSec(ts: string): number {
+  const clean = ts.trim().replace(",", ".");
+  const parts = clean.split(":").map(Number);
+  if (parts.some((n) => !Number.isFinite(n))) return -1;
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  return -1;
+}
+
+function parseSubtitleText(raw: string): SubCue[] {
+  const normalized = raw.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const blocks = normalized.split(/\n{2,}/);
+  const cues: SubCue[] = [];
+  for (const block of blocks) {
+    const lines = block.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (!lines.length) continue;
+    const timingLineIdx = lines.findIndex((l) => l.includes("-->"));
+    if (timingLineIdx < 0) continue;
+    const [left, right] = lines[timingLineIdx].split("-->");
+    const start = parseTimestampSec(left);
+    const end = parseTimestampSec((right || "").trim().split(/\s+/)[0] || "");
+    if (start < 0 || end <= start) continue;
+    const text = lines
+      .slice(timingLineIdx + 1)
+      .join("\n")
+      .replace(/<[^>]+>/g, "")
+      .replace(/\{[^}]+\}/g, "")
+      .trim();
+    if (text) cues.push({ start, end, text });
+  }
+  return cues;
 }
 
 function SpinRing({ size = 50 }: { size?: number }) {
@@ -105,23 +143,21 @@ function SpinRing({ size = 50 }: { size?: number }) {
   );
 }
 
-const EMBED_CLEANER_JS = `
-(function() {
+const EMBED_CLEANER_JS = `(function() {
   try {
     var style = document.createElement('style');
     style.innerHTML = 'html, body { background: #000 !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important; } iframe, video { max-width: 100vw !important; max-height: 100vh !important; } .ads, .ad-banner, [id*="ad_"], [class*="pop"] { display: none !important; }';
     document.head && document.head.appendChild(style);
     window.open = function() { return null; };
   } catch (e) {}
-})();
-true;
-`;
+})();true;`;
 
 export type FilmPlayerProps = {
   title: string;
   episodeLabel: string;
   servers: FilmServerLink[];
   activeServer: FilmServerLink;
+  subtitles?: FilmSubtitleTrack[];
   onSelectServer: (srv: FilmServerLink) => void;
   onBack: () => void;
   isWatched: boolean;
@@ -137,6 +173,7 @@ export function FilmPlayer({
   episodeLabel,
   servers,
   activeServer,
+  subtitles = [],
   onSelectServer,
   onBack,
   isWatched,
@@ -153,7 +190,8 @@ export function FilmPlayer({
   const [showServersSheet, setShowServersSheet] = useState(false);
   const [reloadNonce, setReloadNonce] = useState(0);
   const [sniffedDirectUrl, setSniffedDirectUrl] = useState<string | null>(null);
-
+  const [subMode, setSubMode] = useState<"ar" | "en" | "off">("ar");
+  const [subCues, setSubCues] = useState<SubCue[]>([]);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const scheduleHideHud = useCallback(() => {
@@ -171,7 +209,6 @@ export function FilmPlayer({
     };
   }, [scheduleHideHud]);
 
-  // Lock landscape cleanly while inside player, unlock back to portrait on exit
   useEffect(() => {
     ScreenOrientation.lockAsync(
       landscape
@@ -199,10 +236,45 @@ export function FilmPlayer({
     return () => sub.remove();
   }, [onBack, showServersSheet]);
 
-  // Reset sniffed stream when changing server
   useEffect(() => {
     setSniffedDirectUrl(null);
   }, [activeServer.id, reloadNonce]);
+
+  // Load selected subtitle track
+  const activeSubUrl = useMemo(() => {
+    if (subMode === "off") return null;
+    if (subMode === "ar") {
+      if (activeServer.subtitleUrl) return activeServer.subtitleUrl;
+      const ar = subtitles.find((t) => t.lang === "ar" || t.lang === "ar-auto");
+      return ar?.url || null;
+    }
+    const en = subtitles.find((t) => t.lang === "en");
+    return en?.url || null;
+  }, [subMode, activeServer.subtitleUrl, subtitles]);
+
+  useEffect(() => {
+    if (!activeSubUrl) {
+      setSubCues([]);
+      return;
+    }
+    let cancelled = false;
+    fetch(activeSubUrl)
+      .then((r) => (r.ok ? r.text() : ""))
+      .then((text) => {
+        if (!cancelled && text) setSubCues(parseSubtitleText(text));
+      })
+      .catch(() => {
+        if (!cancelled) setSubCues([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSubUrl]);
+
+  const cycleSubMode = () => {
+    setSubMode((prev) => (prev === "ar" ? "en" : prev === "en" ? "off" : "ar"));
+    scheduleHideHud();
+  };
 
   const directPlaybackUrl = activeServer.directUrl || sniffedDirectUrl || null;
   const isDirectEngine = Boolean(directPlaybackUrl);
@@ -212,76 +284,67 @@ export function FilmPlayer({
       <StatusBar hidden />
 
       {isDirectEngine && directPlaybackUrl ? (
-        <DirectRiftEngine
-          url={directPlaybackUrl}
-          streamMode={activeServer.streamMode}
+        <DirectPlayer
+          key={`${activeServer.id}-${reloadNonce}`}
+          uri={directPlaybackUrl}
+          headers={activeServer.headers}
           title={title}
           episodeLabel={episodeLabel}
           activeServer={activeServer}
-          initialPosition={initialPosition}
-          locked={locked}
+          servers={servers}
+          subMode={subMode}
+          subCues={subCues}
+          onCycleSubMode={cycleSubMode}
+          insets={insets}
           hudVisible={hudVisible}
-          insetsTop={insets.top}
-          onTapSurface={() => (hudVisible ? setHudVisible(false) : scheduleHideHud())}
-          onBack={onBack}
-          onToggleLock={() => {
-            setLocked((v) => !v);
-            scheduleHideHud();
-          }}
-          onToggleOrientation={() => {
-            setLandscape((v) => !v);
-            scheduleHideHud();
-          }}
-          onOpenServers={() => {
-            setShowServersSheet(true);
-            setHudVisible(true);
-          }}
+          locked={locked}
           isWatched={isWatched}
-          onToggleWatched={onToggleWatched}
-          onPrevEpisode={onPrevEpisode}
-          onNextEpisode={onNextEpisode}
-          onProgress={onProgress}
-          onFallbackToEmbed={() => setSniffedDirectUrl(null)}
-        />
-      ) : (
-        <EmbedRiftEngine
-          key={`${activeServer.id}:${activeServer.embedUrl}:${reloadNonce}`}
-          embedUrl={activeServer.embedUrl}
-          title={title}
-          episodeLabel={episodeLabel}
-          activeServer={activeServer}
-          locked={locked}
-          hudVisible={hudVisible}
-          onShowHud={scheduleHideHud}
+          initialPosition={initialPosition}
           onToggleHud={() => {
             if (hudVisible) setHudVisible(false);
             else scheduleHideHud();
           }}
-          onBack={onBack}
-          onToggleLock={() => {
-            setLocked((v) => !v);
-            scheduleHideHud();
-          }}
-          onToggleOrientation={() => {
-            setLandscape((v) => !v);
-            scheduleHideHud();
-          }}
-          onReload={() => {
-            setReloadNonce((n) => n + 1);
-            scheduleHideHud();
-          }}
-          onOpenServers={() => {
-            setShowServersSheet(true);
-            setHudVisible(true);
-          }}
-          isWatched={isWatched}
+          onInteract={scheduleHideHud}
+          onToggleLock={() => setLocked((v) => !v)}
+          onToggleOrientation={() => setLandscape((v) => !v)}
           onToggleWatched={onToggleWatched}
+          onOpenServers={() => setShowServersSheet(true)}
+          onSelectServer={onSelectServer}
           onPrevEpisode={onPrevEpisode}
           onNextEpisode={onNextEpisode}
+          onProgress={onProgress}
+          onBack={onBack}
+          onFallbackToEmbed={() => setSniffedDirectUrl(null)}
+        />
+      ) : (
+        <EmbedWebPlayer
+          key={`${activeServer.id}-${reloadNonce}`}
+          embedUrl={activeServer.embedUrl || activeServer.directUrl || ""}
+          title={title}
+          episodeLabel={episodeLabel}
+          activeServer={activeServer}
+          insets={insets}
+          hudVisible={hudVisible}
+          locked={locked}
+          isWatched={isWatched}
+          onToggleHud={() => {
+            if (hudVisible) setHudVisible(false);
+            else scheduleHideHud();
+          }}
+          onToggleLock={() => setLocked((v) => !v)}
+          onToggleOrientation={() => setLandscape((v) => !v)}
+          onToggleWatched={onToggleWatched}
+          onOpenServers={() => setShowServersSheet(true)}
+          onReload={() => setReloadNonce((n) => n + 1)}
+          onPrevEpisode={onPrevEpisode}
+          onNextEpisode={onNextEpisode}
+          onBack={onBack}
+          onSniffDirectStream={(url) => {
+            if (url && !sniffedDirectUrl) setSniffedDirectUrl(url);
+          }}
         />
       )}
 
-      {/* Built-in Glassy Server Switcher Overlay Drawer */}
       {showServersSheet ? (
         <View style={s.sheetBackdrop}>
           <Pressable
@@ -291,17 +354,14 @@ export function FilmPlayer({
           <View style={s.sheetCard}>
             <View style={s.sheetHeader}>
               <Pressable onPress={() => setShowServersSheet(false)} style={s.sheetCloseBtn}>
-                <Ionicons name="close" size={18} color="#F8FAFC" />
+                <Ionicons name="close" size={18} color="#E2E8F0" />
               </Pressable>
-              <View style={{ flex: 1, alignItems: "flex-end" }}>
-                <Text style={s.sheetTitle}>تبديل السيرفر</Text>
-                <Text style={s.sheetSub}>
-                  اختر سيرفر بديل للتشغيل الفوري بدون الخروج من المشغّل
-                </Text>
+              <View style={{ flex: 1, alignItems: ALIGN_RIGHT }}>
+                <Text style={s.sheetTitle}>تبديل السيرفر ({servers.length})</Text>
+                <Text style={s.sheetSub}>اختر السيرفر الأنسب لاتصالك ودقة المشاهدة</Text>
               </View>
             </View>
-
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+            <ScrollView style={{ maxHeight: 280 }} contentContainerStyle={{ gap: 8 }}>
               {servers.map((srv) => {
                 const active = srv.id === activeServer.id;
                 return (
@@ -310,29 +370,31 @@ export function FilmPlayer({
                     onPress={() => {
                       onSelectServer(srv);
                       setShowServersSheet(false);
-                      scheduleHideHud();
                     }}
-                    style={[
-                      s.sheetServerRow,
-                      active && s.sheetServerRowActive,
-                    ]}
+                    style={[s.sheetServerRow, active && s.sheetServerRowActive]}
                   >
                     <View
                       style={[
-                        s.sheetServerDot,
-                        { backgroundColor: active ? "#0EA5E9" : srv.badgeColor || "#10B981" },
+                        s.sheetSrvIcon,
+                        { backgroundColor: active ? "#0EA5E9" : "rgba(56,189,248,0.14)" },
                       ]}
-                    />
-                    <View style={{ flex: 1, alignItems: "flex-end", gap: 2 }}>
-                      <Text style={s.sheetServerName}>{srv.name}</Text>
-                      <Text style={s.sheetServerMeta}>
-                        {srv.speedLabel || srv.provider} · {srv.quality}
+                    >
+                      <Ionicons
+                        name={srv.kind === "embed" ? "globe-outline" : "play"}
+                        size={14}
+                        color={active ? "#FFFFFF" : "#38BDF8"}
+                      />
+                    </View>
+                    <View style={{ flex: 1, alignItems: ALIGN_RIGHT }}>
+                      <Text style={s.sheetSrvName} numberOfLines={1}>
+                        {srv.name}
+                      </Text>
+                      <Text style={s.sheetSrvMeta} numberOfLines={1}>
+                        {srv.note || srv.quality}
                       </Text>
                     </View>
-                    <View style={[s.sheetQBadge, active && { backgroundColor: "#0EA5E9" }]}>
-                      <Text style={[s.sheetQText, active && { color: "#FFFFFF" }]}>
-                        {active ? "يعمل الآن" : srv.quality}
-                      </Text>
+                    <View style={s.sheetQBadge}>
+                      <Text style={s.sheetQText}>{srv.qualityTier}</Text>
                     </View>
                   </Pressable>
                 );
@@ -345,137 +407,147 @@ export function FilmPlayer({
   );
 }
 
-/* ═══════════════ Direct Stream Engine (expo-video + full Rift HUD) ═══════════════ */
-function DirectRiftEngine({
-  url,
-  streamMode,
+/* ─────────────────── Direct Native Video Player Engine ─────────────────── */
+
+function DirectPlayer({
+  uri,
+  headers,
   title,
   episodeLabel,
   activeServer,
-  initialPosition,
-  locked,
+  servers,
+  subMode,
+  subCues,
+  onCycleSubMode,
+  insets,
   hudVisible,
-  onTapSurface,
-  onBack,
+  locked,
+  isWatched,
+  initialPosition,
+  onToggleHud,
+  onInteract,
   onToggleLock,
   onToggleOrientation,
-  onOpenServers,
-  isWatched,
   onToggleWatched,
+  onOpenServers,
+  onSelectServer,
   onPrevEpisode,
   onNextEpisode,
   onProgress,
+  onBack,
   onFallbackToEmbed,
 }: {
-  url: string;
-  streamMode?: string;
+  uri: string;
+  headers?: Record<string, string>;
   title: string;
   episodeLabel: string;
   activeServer: FilmServerLink;
-  initialPosition: number;
-  locked: boolean;
+  servers: FilmServerLink[];
+  subMode: "ar" | "en" | "off";
+  subCues: SubCue[];
+  onCycleSubMode: () => void;
+  insets: { top: number; bottom: number; left: number; right: number };
   hudVisible: boolean;
-  insetsTop: number;
-  onTapSurface: () => void;
-  onBack: () => void;
+  locked: boolean;
+  isWatched: boolean;
+  initialPosition: number;
+  onToggleHud: () => void;
+  onInteract: () => void;
   onToggleLock: () => void;
   onToggleOrientation: () => void;
-  onOpenServers: () => void;
-  isWatched: boolean;
   onToggleWatched: () => void;
+  onOpenServers: () => void;
+  onSelectServer: (srv: FilmServerLink) => void;
   onPrevEpisode?: () => void;
   onNextEpisode?: () => void;
-  onProgress?: (position: number, duration: number) => void;
+  onProgress?: (pos: number, dur: number) => void;
+  onBack: () => void;
   onFallbackToEmbed: () => void;
 }) {
+  const [isPlaying, setIsPlaying] = useState(true);
   const [buffering, setBuffering] = useState(true);
-  const [isPlaying, setIsPlaying] = useState(false);
+  const [hasError, setHasError] = useState(false);
   const [position, setPosition] = useState(initialPosition || 0);
   const [duration, setDuration] = useState(0);
-  const [speedIdx, setSpeedIdx] = useState(2); // 1x
+  const [speedIdx, setSpeedIdx] = useState(2);
   const [fitIdx, setFitIdx] = useState(0);
   const [ended, setEnded] = useState(false);
-  const initialSrcRef = useRef(
-    streamMode === "hls" || /\.m3u8/i.test(url)
-      ? { uri: url, contentType: "hls" as const }
-      : { uri: url, contentType: "progressive" as const },
+  const seekAppliedRef = useRef(false);
+
+  const sourceConfig = useMemo(
+    () => (headers && Object.keys(headers).length > 0 ? { uri, headers } : { uri }),
+    [uri, headers],
   );
 
-  const player = useVideoPlayer(initialSrcRef.current, (p) => {
-    p.preservesPitch = true;
+  const player = useVideoPlayer(sourceConfig, (p) => {
     p.loop = false;
-    p.volume = 1;
-    if (initialPosition > 5) {
-      try {
-        p.currentTime = initialPosition;
-      } catch {}
-    }
+    p.timeUpdateEventInterval = 0.4;
+    p.play();
   });
 
   useEffect(() => {
     const subs = [
-      player.addListener("statusChange", ({ status }) => {
+      player.addListener("statusChange", ({ status }: any) => {
         if (status === "readyToPlay") {
           setBuffering(false);
-          try {
-            player.play();
-            setIsPlaying(true);
-          } catch {}
+          setHasError(false);
+          if (initialPosition > 10 && !seekAppliedRef.current) {
+            seekAppliedRef.current = true;
+            try {
+              player.currentTime = initialPosition;
+            } catch {}
+          }
         } else if (status === "loading") {
           setBuffering(true);
         } else if (status === "error") {
           setBuffering(false);
-          onFallbackToEmbed();
+          setHasError(true);
         }
       }),
-      player.addListener("playingChange", ({ isPlaying: playing }) => {
-        setIsPlaying(playing);
+      player.addListener("playingChange", ({ isPlaying: playing }: any) => {
+        setIsPlaying(Boolean(playing));
       }),
-      player.addListener("playToEnd", () => {
-        setEnded(true);
-        setIsPlaying(false);
-      }),
-    ];
-
-    const poll = setInterval(() => {
-      try {
-        const cur = Number(player.currentTime || 0);
+      player.addListener("timeUpdate", ({ currentTime }: any) => {
+        const cur = Number(currentTime || 0);
         const dur = Number(player.duration || 0);
         setPosition(cur);
         if (dur > 0) setDuration(dur);
-        if (dur > 0) onProgress?.(cur, dur);
-      } catch {}
-    }, 500);
-
+        onProgress?.(cur, dur);
+      }),
+      player.addListener("playToEnd", () => {
+        setEnded(true);
+      }),
+    ];
     return () => {
-      clearInterval(poll);
-      subs.forEach((s) => {
-        try {
-          s.remove();
-        } catch {}
-      });
-      try {
-        player.pause();
-      } catch {}
+      subs.forEach((sub) => sub?.remove?.());
     };
-  }, [onFallbackToEmbed, onProgress, player]);
+  }, [player, initialPosition, onProgress]);
 
-  const seekBy = (delta: number) => {
-    const next = Math.max(0, Math.min(duration || 99999, position + delta));
-    try {
-      player.currentTime = next;
-      setPosition(next);
-    } catch {}
-  };
+  const activeCueText = useMemo(() => {
+    if (subMode === "off" || !subCues.length) return "";
+    const cue = subCues.find((c) => position >= c.start && position <= c.end);
+    return cue?.text || "";
+  }, [subMode, subCues, position]);
 
   const togglePlay = () => {
+    onInteract();
     try {
       if (isPlaying) player.pause();
       else player.play();
     } catch {}
   };
 
+  const seekBy = (delta: number) => {
+    onInteract();
+    try {
+      const target = Math.max(0, Math.min(duration || 99999, position + delta));
+      player.currentTime = target;
+      setPosition(target);
+    } catch {}
+  };
+
   const cycleSpeed = () => {
+    onInteract();
     const next = (speedIdx + 1) % SPEEDS.length;
     setSpeedIdx(next);
     try {
@@ -484,26 +556,56 @@ function DirectRiftEngine({
   };
 
   const cycleFit = () => {
+    onInteract();
     setFitIdx((i) => (i + 1) % FIT_MODES.length);
   };
 
-  const barWidth = useMemo(() => Math.max(240, Dimensions.get("window").width - 48), []);
-  const seekResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onPanResponderRelease: (evt) => {
-        if (!duration) return;
-        const pct = Math.max(0, Math.min(1, evt.nativeEvent.locationX / barWidth));
-        const target = pct * duration;
-        try {
-          player.currentTime = target;
-          setPosition(target);
-        } catch {}
-      },
-    }),
-  ).current;
+  const lastTapRef = useRef(0);
+  const { width: screenW } = Dimensions.get("window");
+  const onTapSurface = (evt: any) => {
+    const now = Date.now();
+    const x = evt?.nativeEvent?.locationX ?? screenW / 2;
+    if (now - lastTapRef.current < 260 && !locked) {
+      if (x < screenW * 0.35) seekBy(-10);
+      else if (x > screenW * 0.65) seekBy(10);
+      lastTapRef.current = 0;
+      return;
+    }
+    lastTapRef.current = now;
+    onToggleHud();
+  };
+
+  const trackWidthRef = useRef(1);
+  const seekResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => !locked && duration > 0,
+        onMoveShouldSetPanResponder: () => !locked && duration > 0,
+        onPanResponderGrant: (e) => {
+          trackWidthRef.current = trackWidthRef.current || 1;
+          const x = e.nativeEvent.locationX;
+          const pct = Math.max(0, Math.min(1, x / trackWidthRef.current));
+          const target = pct * duration;
+          try {
+            player.currentTime = target;
+            setPosition(target);
+          } catch {}
+        },
+        onPanResponderMove: (e) => {
+          const x = e.nativeEvent.locationX;
+          const pct = Math.max(0, Math.min(1, x / Math.max(1, trackWidthRef.current)));
+          const target = pct * duration;
+          try {
+            player.currentTime = target;
+            setPosition(target);
+          } catch {}
+        },
+      }),
+    [locked, duration, player],
+  );
 
   const progressRatio = duration > 0 ? Math.min(1, Math.max(0, position / duration)) : 0;
+  const nextAltServer = servers.find((srv) => srv.id !== activeServer.id);
 
   return (
     <View style={s.root}>
@@ -515,10 +617,41 @@ function DirectRiftEngine({
         surfaceType={Platform.OS === "android" ? "textureView" : undefined}
       />
 
-      {buffering ? (
+      {activeCueText ? (
+        <View pointerEvents="none" style={[s.subtitleWrap, { bottom: hudVisible ? 92 : 28 }]}>
+          <View style={s.subtitlePill}>
+            <Text style={s.subtitleText}>{activeCueText}</Text>
+          </View>
+        </View>
+      ) : null}
+
+      {buffering && !hasError ? (
         <View pointerEvents="none" style={s.loaderOverlay}>
           <SpinRing />
           <Text style={s.loaderText}>جارٍ تحضير البث المباشر ({activeServer.name})...</Text>
+        </View>
+      ) : null}
+
+      {hasError ? (
+        <View style={s.loaderOverlay}>
+          <Ionicons name="cloud-offline-outline" size={38} color="#F87171" />
+          <Text style={s.loaderText}>تعذّر التشغيل عبر {activeServer.name}</Text>
+          <View style={{ flexDirection: ROW_RTL, gap: 10, marginTop: 4 }}>
+            {nextAltServer ? (
+              <Pressable onPress={() => onSelectServer(nextAltServer)} style={s.endedNextBtn}>
+                <Ionicons name="swap-horizontal" size={15} color="#FFFFFF" />
+                <Text style={s.endedNextText}>تجربة سيرفر بديل</Text>
+              </Pressable>
+            ) : null}
+            <Pressable onPress={onOpenServers} style={s.endedReplayBtn}>
+              <Text style={s.endedReplayText}>قائمة السيرفرات</Text>
+            </Pressable>
+            {activeServer.embedUrl ? (
+              <Pressable onPress={onFallbackToEmbed} style={s.endedReplayBtn}>
+                <Text style={s.endedReplayText}>وضع المضمّن</Text>
+              </Pressable>
+            ) : null}
+          </View>
         </View>
       ) : null}
 
@@ -535,16 +668,14 @@ function DirectRiftEngine({
         ) : null
       ) : hudVisible ? (
         <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
-          {/* Top Gradient & Bar */}
           <LinearGradient
-            colors={["rgba(0,0,0,0.82)", "rgba(0,0,0,0.35)", "transparent"]}
-            style={s.topGrad}
+            colors={["rgba(0,0,0,0.84)", "rgba(0,0,0,0.35)", "transparent"]}
+            style={[s.topGrad, { paddingTop: Math.max(insets.top, 10) }]}
           >
             <View style={s.topHudRow}>
               <Pressable onPress={onBack} style={s.circleHudBtn}>
                 <Ionicons name="chevron-forward" size={20} color="#FFFFFF" />
               </Pressable>
-
               <View style={s.titleCol}>
                 <Text style={s.hudTitle} numberOfLines={1}>
                   {title}
@@ -553,11 +684,15 @@ function DirectRiftEngine({
                   {episodeLabel} · {activeServer.name}
                 </Text>
               </View>
-
               <View style={s.hudActionsGroup}>
                 <Pressable onPress={onOpenServers} style={s.serverPillBtn}>
                   <Ionicons name="layers-outline" size={14} color="#38BDF8" />
                   <Text style={s.serverPillText}>السيرفرات</Text>
+                </Pressable>
+                <Pressable onPress={onCycleSubMode} style={s.smallPillBtn}>
+                  <Text style={s.smallPillText}>
+                    {subMode === "ar" ? "CC عربي" : subMode === "en" ? "CC EN" : "CC إيقاف"}
+                  </Text>
                 </Pressable>
                 <Pressable onPress={cycleSpeed} style={s.smallPillBtn}>
                   <Text style={s.smallPillText}>{SPEEDS[speedIdx]}x</Text>
@@ -582,13 +717,11 @@ function DirectRiftEngine({
             </View>
           </LinearGradient>
 
-          {/* Center RiftPlayer Play / -10s / +10s Controls */}
           <View pointerEvents="box-none" style={s.centerControls}>
-            <Pressable onPress={() => seekBy(10)} style={s.seekStepBtn}>
-              <Ionicons name="play-forward" size={22} color="#FFFFFF" />
-              <Text style={s.seekStepLabel}>10+</Text>
+            <Pressable onPress={() => seekBy(-10)} style={s.seekStepBtn}>
+              <Ionicons name="play-back" size={22} color="#FFFFFF" />
+              <Text style={s.seekStepLabel}>10-</Text>
             </Pressable>
-
             <Pressable onPress={togglePlay} style={s.bigPlayBtn}>
               <Ionicons
                 name={isPlaying ? "pause" : "play"}
@@ -597,21 +730,25 @@ function DirectRiftEngine({
                 style={!isPlaying ? { marginLeft: 3 } : undefined}
               />
             </Pressable>
-
-            <Pressable onPress={() => seekBy(-10)} style={s.seekStepBtn}>
-              <Ionicons name="play-back" size={22} color="#FFFFFF" />
-              <Text style={s.seekStepLabel}>10-</Text>
+            <Pressable onPress={() => seekBy(10)} style={s.seekStepBtn}>
+              <Ionicons name="play-forward" size={22} color="#FFFFFF" />
+              <Text style={s.seekStepLabel}>10+</Text>
             </Pressable>
           </View>
 
-          {/* Bottom Seekbar & Episode Nav */}
           <LinearGradient
-            colors={["transparent", "rgba(0,0,0,0.48)", "rgba(0,0,0,0.88)"]}
-            style={s.bottomGrad}
+            colors={["transparent", "rgba(0,0,0,0.48)", "rgba(0,0,0,0.90)"]}
+            style={[s.bottomGrad, { paddingBottom: Math.max(insets.bottom, 12) }]}
           >
             <View style={s.seekRow}>
               <Text style={s.timeText}>{fmtSec(position)}</Text>
-              <View {...seekResponder.panHandlers} style={s.seekTrackHit}>
+              <View
+                {...seekResponder.panHandlers}
+                onLayout={(e) => {
+                  trackWidthRef.current = e.nativeEvent.layout.width || 1;
+                }}
+                style={s.seekTrackHit}
+              >
                 <View style={s.seekTrack}>
                   <View style={[s.seekFill, { width: `${progressRatio * 100}%` }]} />
                 </View>
@@ -634,7 +771,6 @@ function DirectRiftEngine({
                   </Pressable>
                 ) : null}
               </View>
-
               <Text style={s.engineBadgeText}>مشغّل NOVA FILM المباشر</Text>
             </View>
           </LinearGradient>
@@ -668,43 +804,46 @@ function DirectRiftEngine({
   );
 }
 
-/* ═══════════════ Embed Engine (Full-Screen WebView + Floating Rift HUD) ═══════════════ */
-function EmbedRiftEngine({
+/* ─────────────────── Sandboxed Ad-Filtered Embed Player ────────────────── */
+
+function EmbedWebPlayer({
   embedUrl,
   title,
   episodeLabel,
   activeServer,
-  locked,
+  insets,
   hudVisible,
-  onShowHud,
+  locked,
+  isWatched,
   onToggleHud,
-  onBack,
   onToggleLock,
   onToggleOrientation,
-  onReload,
-  onOpenServers,
-  isWatched,
   onToggleWatched,
+  onOpenServers,
+  onReload,
   onPrevEpisode,
   onNextEpisode,
+  onBack,
+  onSniffDirectStream,
 }: {
   embedUrl: string;
   title: string;
   episodeLabel: string;
   activeServer: FilmServerLink;
-  locked: boolean;
+  insets: { top: number; bottom: number; left: number; right: number };
   hudVisible: boolean;
-  onShowHud: () => void;
+  locked: boolean;
+  isWatched: boolean;
   onToggleHud: () => void;
-  onBack: () => void;
   onToggleLock: () => void;
   onToggleOrientation: () => void;
-  onReload: () => void;
-  onOpenServers: () => void;
-  isWatched: boolean;
   onToggleWatched: () => void;
+  onOpenServers: () => void;
+  onReload: () => void;
   onPrevEpisode?: () => void;
   onNextEpisode?: () => void;
+  onBack: () => void;
+  onSniffDirectStream: (url: string) => void;
 }) {
   const [loading, setLoading] = useState(true);
 
@@ -714,44 +853,43 @@ function EmbedRiftEngine({
         source={{ uri: embedUrl }}
         style={s.webview}
         allowsFullscreenVideo
+        allowsInlineMediaPlayback
         mediaPlaybackRequiresUserAction={false}
         javaScriptEnabled
         domStorageEnabled
-        setSupportMultipleWindows={false}
         injectedJavaScript={EMBED_CLEANER_JS}
-        onShouldStartLoadWithRequest={(req) => {
-          const url = req.url || "";
-          if (url.startsWith("http://") || url.startsWith("https://")) {
-            return !isBlockedAdUrl(url);
-          }
-          return false;
-        }}
+        setSupportMultipleWindows={false}
         onLoadStart={() => setLoading(true)}
         onLoadEnd={() => setLoading(false)}
+        onShouldStartLoadWithRequest={(req) => {
+          if (isBlockedAdUrl(req.url)) return false;
+          if (/\.m3u8(\?|$)|\.mp4(\?|$)/i.test(req.url)) {
+            onSniffDirectStream(req.url);
+            return false;
+          }
+          return true;
+        }}
       />
 
       {loading ? (
         <View pointerEvents="none" style={s.loaderOverlay}>
           <SpinRing />
-          <Text style={s.loaderText}>جارٍ الاتصال بالسيرفر ({activeServer.name})...</Text>
-          <Text style={s.loaderSub}>{activeServer.quality} · محمي من النوافذ المنبثقة</Text>
+          <Text style={s.loaderText}>جاري تجهيز البث عبر {activeServer.name}...</Text>
         </View>
       ) : null}
 
-      {/* Floating Toggle Chip when HUD is hidden — keeps WebView touch unobstructed! */}
-      {!hudVisible ? (
-        <Pressable onPress={onShowHud} style={s.floatingRevealChip}>
-          <Ionicons name={locked ? "lock-closed" : "options-outline"} size={15} color="#FFFFFF" />
-          <Text style={s.floatingRevealText}>{locked ? "مقفل" : "أدوات المشغّل"}</Text>
+      {!hudVisible && !locked ? (
+        <Pressable onPress={onToggleHud} style={[s.floatingRevealChip, { top: Math.max(insets.top, 10) }]}>
+          <Ionicons name="options-outline" size={14} color="#FFFFFF" />
+          <Text style={s.floatingRevealText}>إظهار أدوات المشغل</Text>
         </Pressable>
       ) : null}
 
-      {/* Top Glassy HUD Bar */}
       {hudVisible ? (
         locked ? (
           <View style={s.lockOnlyRow}>
             <Pressable onPress={onToggleLock} style={s.glassBtn}>
-              <Ionicons name="lock-closed" size={17} color="#38BDF8" />
+              <Ionicons name="lock-closed" size={18} color="#38BDF8" />
               <Text style={s.glassBtnText}>فك القفل</Text>
             </Pressable>
           </View>
@@ -760,13 +898,12 @@ function EmbedRiftEngine({
             <LinearGradient
               colors={["rgba(0,0,0,0.88)", "rgba(0,0,0,0.45)", "transparent"]}
               pointerEvents="box-none"
-              style={s.embedTopBar}
+              style={[s.embedTopBar, { paddingTop: Math.max(insets.top, 10) }]}
             >
               <View style={s.topHudRow}>
                 <Pressable onPress={onBack} style={s.circleHudBtn}>
                   <Ionicons name="chevron-forward" size={20} color="#FFFFFF" />
                 </Pressable>
-
                 <View style={s.titleCol}>
                   <Text style={s.hudTitle} numberOfLines={1}>
                     {title}
@@ -775,7 +912,6 @@ function EmbedRiftEngine({
                     {episodeLabel} · {activeServer.name} ({activeServer.quality})
                   </Text>
                 </View>
-
                 <View style={s.hudActionsGroup}>
                   <Pressable onPress={onOpenServers} style={s.serverPillBtn}>
                     <Ionicons name="layers-outline" size={14} color="#38BDF8" />
@@ -804,9 +940,8 @@ function EmbedRiftEngine({
               </View>
             </LinearGradient>
 
-            {/* Compact floating bottom bar for switching episodes without blocking embed play button */}
             {(onPrevEpisode || onNextEpisode) ? (
-              <View pointerEvents="box-none" style={s.embedBottomBar}>
+              <View pointerEvents="box-none" style={[s.embedBottomBar, { bottom: Math.max(insets.bottom + 36, 54) }]}>
                 {onPrevEpisode ? (
                   <Pressable onPress={onPrevEpisode} style={s.epActionBtn}>
                     <Ionicons name="play-skip-forward" size={14} color="#FFFFFF" />
@@ -836,39 +971,58 @@ const s = StyleSheet.create({
     backgroundColor: "rgba(7,8,12,0.88)",
     alignItems: "center",
     justifyContent: "center",
-    gap: 10,
+    gap: 12,
+    paddingHorizontal: 24,
   },
   loaderText: {
-    color: "#F8FAFC",
-    fontSize: 13.5,
-    lineHeight: 21,
+    color: "#E2E8F0",
+    fontSize: 13,
+    lineHeight: 20,
     fontFamily: "Cairo_700Bold",
     includeFontPadding: true,
+    textAlign: "center",
   },
-  loaderSub: {
-    color: "#38BDF8",
-    fontSize: 11,
-    lineHeight: 17,
-    fontFamily: "Cairo_600SemiBold",
+  subtitleWrap: {
+    position: "absolute",
+    left: 24,
+    right: 24,
+    alignItems: "center",
+    zIndex: 15,
+  },
+  subtitlePill: {
+    backgroundColor: "rgba(9,10,12,0.78)",
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+  },
+  subtitleText: {
+    color: "#FFFFFF",
+    fontSize: 15.5,
+    lineHeight: 23,
+    fontFamily: "Cairo_700Bold",
+    textAlign: "center",
     includeFontPadding: true,
+    textShadowColor: "rgba(0,0,0,0.9)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
   },
   topGrad: {
     position: "absolute",
     top: 0,
     left: 0,
     right: 0,
-    paddingTop: 14,
-    paddingBottom: 28,
-    paddingHorizontal: 18,
+    paddingHorizontal: 16,
+    paddingBottom: 22,
   },
   embedTopBar: {
     position: "absolute",
     top: 0,
     left: 0,
     right: 0,
-    paddingTop: 12,
-    paddingBottom: 22,
     paddingHorizontal: 16,
+    paddingBottom: 16,
   },
   topHudRow: {
     flexDirection: ROW_RTL,
@@ -878,47 +1032,48 @@ const s = StyleSheet.create({
   circleHudBtn: {
     width: 36,
     height: 36,
-    borderRadius: 12,
-    backgroundColor: "rgba(15,23,42,0.78)",
+    borderRadius: 18,
+    backgroundColor: "rgba(15,23,42,0.72)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.18)",
+    borderColor: "rgba(255,255,255,0.16)",
     alignItems: "center",
     justifyContent: "center",
   },
   titleCol: {
     flex: 1,
     minWidth: 0,
-    alignItems: "flex-end",
+    alignItems: ALIGN_RIGHT,
   },
   hudTitle: {
     color: "#FFFFFF",
     fontSize: 14,
-    lineHeight: 21,
+    lineHeight: 20,
     fontFamily: "Cairo_800ExtraBold",
     includeFontPadding: true,
+    textAlign: "right",
   },
   hudSub: {
-    color: "#CBD5E1",
+    color: "#94A3B8",
     fontSize: 11,
     lineHeight: 16,
     fontFamily: "Cairo_600SemiBold",
-    includeFontPadding: true,
+    textAlign: "right",
   },
   hudActionsGroup: {
     flexDirection: ROW_RTL,
     alignItems: "center",
-    gap: 7,
+    gap: 6,
   },
   serverPillBtn: {
     flexDirection: ROW_RTL,
     alignItems: "center",
     gap: 5,
-    paddingHorizontal: 12,
-    height: 36,
-    borderRadius: 12,
-    backgroundColor: "rgba(14,165,233,0.20)",
+    backgroundColor: "rgba(14,165,233,0.22)",
     borderWidth: 1,
     borderColor: "rgba(56,189,248,0.45)",
+    borderRadius: 12,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
   },
   serverPillText: {
     color: "#E0F2FE",
@@ -928,34 +1083,35 @@ const s = StyleSheet.create({
     includeFontPadding: true,
   },
   smallPillBtn: {
-    paddingHorizontal: 10,
-    height: 34,
-    borderRadius: 10,
-    backgroundColor: "rgba(15,23,42,0.78)",
+    backgroundColor: "rgba(15,23,42,0.72)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.18)",
-    alignItems: "center",
-    justifyContent: "center",
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
   },
   smallPillText: {
-    color: "#F8FAFC",
+    color: "#FFFFFF",
     fontSize: 11,
     fontFamily: "Cairo_700Bold",
   },
   centerControls: {
-    flex: 1,
-    flexDirection: "row",
+    position: "absolute",
+    top: "40%",
+    left: 0,
+    right: 0,
+    flexDirection: ROW_LTR,
     alignItems: "center",
     justifyContent: "center",
-    gap: 38,
+    gap: 36,
   },
   seekStepBtn: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: "rgba(15,23,42,0.68)",
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: "rgba(15,23,42,0.65)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.16)",
+    borderColor: "rgba(255,255,255,0.18)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -966,10 +1122,10 @@ const s = StyleSheet.create({
     marginTop: -2,
   },
   bigPlayBtn: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: "rgba(14,165,233,0.92)",
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: "rgba(14,165,233,0.88)",
     borderWidth: 2,
     borderColor: "rgba(255,255,255,0.35)",
     alignItems: "center",
@@ -977,29 +1133,28 @@ const s = StyleSheet.create({
   },
   bottomGrad: {
     position: "absolute",
-    bottom: 0,
     left: 0,
     right: 0,
-    paddingHorizontal: 22,
-    paddingTop: 28,
-    paddingBottom: 18,
-    gap: 10,
+    bottom: 0,
+    paddingHorizontal: 16,
+    paddingTop: 22,
+    gap: 8,
   },
   seekRow: {
-    flexDirection: "row",
+    flexDirection: ROW_LTR,
     alignItems: "center",
     gap: 10,
   },
   timeText: {
     color: "#E2E8F0",
-    fontSize: 11.5,
-    fontFamily: "Cairo_600SemiBold",
+    fontSize: 11,
+    fontFamily: "Cairo_700Bold",
     minWidth: 44,
     textAlign: "center",
   },
   seekTrackHit: {
     flex: 1,
-    height: 28,
+    paddingVertical: 10,
     justifyContent: "center",
   },
   seekTrack: {
@@ -1020,7 +1175,6 @@ const s = StyleSheet.create({
   },
   embedBottomBar: {
     position: "absolute",
-    bottom: 54,
     left: 16,
     right: 16,
     flexDirection: ROW_RTL,
@@ -1056,7 +1210,6 @@ const s = StyleSheet.create({
   },
   floatingRevealChip: {
     position: "absolute",
-    top: 12,
     left: 14,
     flexDirection: ROW_RTL,
     alignItems: "center",
@@ -1071,9 +1224,7 @@ const s = StyleSheet.create({
   floatingRevealText: {
     color: "#FFFFFF",
     fontSize: 11,
-    lineHeight: 16,
     fontFamily: "Cairo_700Bold",
-    includeFontPadding: true,
   },
   lockOnlyRow: {
     position: "absolute",
@@ -1083,24 +1234,48 @@ const s = StyleSheet.create({
   glassBtn: {
     flexDirection: ROW_RTL,
     alignItems: "center",
-    gap: 7,
+    gap: 6,
+    backgroundColor: "rgba(15,23,42,0.82)",
+    borderWidth: 1,
+    borderColor: "rgba(56,189,248,0.4)",
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 12,
-    backgroundColor: "rgba(15,23,42,0.88)",
+  },
+  glassBtnText: { color: "#FFFFFF", fontSize: 12, fontFamily: "Cairo_700Bold" },
+  endedCard: {
+    position: "absolute",
+    alignSelf: "center",
+    top: "35%",
+    backgroundColor: "rgba(15,23,42,0.95)",
     borderWidth: 1,
     borderColor: "rgba(56,189,248,0.45)",
+    borderRadius: 18,
+    padding: 20,
+    gap: 14,
+    alignItems: "center",
   },
-  glassBtnText: {
-    color: "#FFFFFF",
-    fontSize: 12,
-    lineHeight: 18,
-    fontFamily: "Cairo_700Bold",
-    includeFontPadding: true,
+  endedTitle: { color: "#FFFFFF", fontSize: 16, fontFamily: "Cairo_800ExtraBold" },
+  endedNextBtn: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#0EA5E9",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
   },
+  endedNextText: { color: "#FFFFFF", fontSize: 13, fontFamily: "Cairo_700Bold" },
+  endedReplayBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.10)",
+  },
+  endedReplayText: { color: "#E2E8F0", fontSize: 12.5, fontFamily: "Cairo_700Bold" },
   sheetBackdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.66)",
+    backgroundColor: "rgba(0,0,0,0.68)",
     justifyContent: "center",
     alignItems: "center",
     padding: 20,
@@ -1136,6 +1311,7 @@ const s = StyleSheet.create({
     lineHeight: 22,
     fontFamily: "Cairo_800ExtraBold",
     includeFontPadding: true,
+    textAlign: "right",
   },
   sheetSub: {
     color: "#94A3B8",
@@ -1143,6 +1319,7 @@ const s = StyleSheet.create({
     lineHeight: 17,
     fontFamily: "Cairo_400Regular",
     includeFontPadding: true,
+    textAlign: "right",
   },
   sheetServerRow: {
     flexDirection: ROW_RTL,
@@ -1150,82 +1327,45 @@ const s = StyleSheet.create({
     gap: 10,
     padding: 12,
     borderRadius: 14,
-    backgroundColor: "rgba(255,255,255,0.05)",
+    backgroundColor: "rgba(255,255,255,0.04)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.10)",
+    borderColor: "rgba(255,255,255,0.09)",
   },
   sheetServerRowActive: {
     backgroundColor: "rgba(14,165,233,0.14)",
-    borderColor: "rgba(56,189,248,0.45)",
+    borderColor: "rgba(56,189,248,0.55)",
   },
-  sheetServerDot: { width: 9, height: 9, borderRadius: 5 },
-  sheetServerName: {
+  sheetSrvIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sheetSrvName: {
     color: "#FFFFFF",
     fontSize: 13,
     lineHeight: 19,
     fontFamily: "Cairo_700Bold",
     includeFontPadding: true,
+    textAlign: "right",
   },
-  sheetServerMeta: {
+  sheetSrvMeta: {
     color: "#94A3B8",
-    fontSize: 11,
-    lineHeight: 16,
+    fontSize: 10.5,
+    lineHeight: 15,
     fontFamily: "Cairo_400Regular",
-    includeFontPadding: true,
+    textAlign: "right",
   },
   sheetQBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 9,
-    backgroundColor: "rgba(255,255,255,0.10)",
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+    borderRadius: 8,
+    backgroundColor: "rgba(56,189,248,0.16)",
   },
   sheetQText: {
-    color: "#E2E8F0",
-    fontSize: 10.5,
-    lineHeight: 16,
-    fontFamily: "Cairo_700Bold",
-    includeFontPadding: true,
-  },
-  endedCard: {
-    position: "absolute",
-    alignSelf: "center",
-    top: "38%",
-    backgroundColor: "rgba(15,23,42,0.94)",
-    borderWidth: 1,
-    borderColor: "rgba(56,189,248,0.45)",
-    borderRadius: 18,
-    padding: 18,
-    alignItems: "center",
-    gap: 12,
-  },
-  endedTitle: {
-    color: "#FFFFFF",
-    fontSize: 15,
+    color: "#38BDF8",
+    fontSize: 10,
     fontFamily: "Cairo_800ExtraBold",
-  },
-  endedNextBtn: {
-    flexDirection: ROW_RTL,
-    alignItems: "center",
-    gap: 6,
-    backgroundColor: "#0EA5E9",
-    paddingHorizontal: 16,
-    paddingVertical: 9,
-    borderRadius: 11,
-  },
-  endedNextText: {
-    color: "#FFFFFF",
-    fontSize: 12.5,
-    fontFamily: "Cairo_800ExtraBold",
-  },
-  endedReplayBtn: {
-    backgroundColor: "rgba(255,255,255,0.12)",
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: 11,
-  },
-  endedReplayText: {
-    color: "#E2E8F0",
-    fontSize: 12,
-    fontFamily: "Cairo_700Bold",
   },
 });

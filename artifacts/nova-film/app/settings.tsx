@@ -870,7 +870,7 @@ function AuthSheetInner({ open, onClose, onLogin, onLinkDevice }: {
                         إدخال رمز الربط (6 أرقام) الآن
                       </Text>
                     </View>
-                    <Ionicons name="arrow-back" size={18} color="#FFFFFF" style={{ transform: [{ scaleX: -1 }] }} />
+                    <Ionicons name="chevron-back" size={18} color="#FFFFFF" />
                   </Pressable>
 
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginVertical: 6 }}>
@@ -2278,7 +2278,7 @@ export default function SettingsScreen() {
               </View>
               <View style={ts.donationPillBtn}>
                 <Text style={ts.donationPillBtnText}>ادعم الآن</Text>
-                <Ionicons name="chevron-back" size={12} color="#10b981" style={{ transform: [{ scaleX: -1 }] }} />
+                <Ionicons name="chevron-back" size={12} color="#10b981" />
               </View>
             </View>
           </Pressable>
