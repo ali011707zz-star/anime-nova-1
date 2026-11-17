@@ -65,7 +65,7 @@
     "expo-notifications": "~0.32.17",
     "expo-nova-download": "file:./modules/nova-download",
     "expo-secure-store": "~15.0.8",
-    "expo-updates": "~29.0.18",
+    "expo-updates": "~29.0.20",
     "expo-video": "^3.0.16",
     "react": "19.1.0",
     "react-native": "0.81.5",
@@ -73,6 +73,11 @@
     "react-native-video": "^6.9.0",
     "react-native-view-shot": "^5.1.1",
     "react-native-webview": "~13.15.0",
-    "unity-levelplay-mediation": "9.2.0"
+    "unity-levelplay-mediation": "9.2.0",
+    "expo-manifests": "~1.0.11",
+    "expo-updates-interface": "~2.0.0",
+    "expo-structured-headers": "~5.0.0",
+    "expo-eas-client": "~1.0.8",
+    "expo-json-utils": "~0.15.0"
   }
 }

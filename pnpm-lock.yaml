@@ -593,9 +593,18 @@ importers:
       expo-brightness:
         specifier: ~13.0.1
         version: 13.0.3(expo@54.0.35)(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.1.17)(react@19.1.0))
+      expo-eas-client:
+        specifier: ~1.0.8
+        version: 1.0.8
       expo-file-system:
         specifier: ~18.0.7
         version: 18.0.12(expo@54.0.35)(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.1.17)(react@19.1.0))
+      expo-json-utils:
+        specifier: ~0.15.0
+        version: 0.15.0
+      expo-manifests:
+        specifier: ~1.0.11
+        version: 1.0.11(expo@54.0.35)
       expo-media-library:
         specifier: ~17.0.6
         version: 17.0.6(expo@54.0.35)(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.1.17)(react@19.1.0))
@@ -611,9 +620,15 @@ importers:
       expo-secure-store:
         specifier: ~15.0.8
         version: 15.0.8(expo@54.0.35)
+      expo-structured-headers:
+        specifier: ~5.0.0
+        version: 5.0.0
       expo-updates:
-        specifier: ~29.0.18
+        specifier: ~29.0.20
         version: 29.0.20(expo@54.0.35)(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)
+      expo-updates-interface:
+        specifier: ~2.0.0
+        version: 2.0.0(expo@54.0.35)
       expo-video:
         specifier: ^3.0.16
         version: 3.0.16(expo@54.0.35)(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)
@@ -942,10 +957,6 @@ packages:
 
   '@babel/helper-string-parser@7.29.7':
     resolution: {integrity: sha512-Pb5ijPrZ89GDH8223L4UP8i6QApWxs04RbPQJTeWDV0/keR2E36MeKnyr6LYmUUvqRRI+Iv87SuF1W6ErINzYw==}
-    engines: {node: '>=6.9.0'}
-
-  '@babel/helper-validator-identifier@7.28.5':
-    resolution: {integrity: sha512-qSs4ifwzKJSV39ucNjsvc6WVHs6b7S03sOh2OcHF9UHfVPqWWALUsNUVzhSBiItjRZoLHx7nIarVjqKVusUZ1Q==}
     engines: {node: '>=6.9.0'}
 
   '@babel/helper-validator-identifier@7.29.7':
@@ -9201,8 +9212,6 @@ snapshots:
 
   '@babel/helper-string-parser@7.29.7': {}
 
-  '@babel/helper-validator-identifier@7.28.5': {}
-
   '@babel/helper-validator-identifier@7.29.7': {}
 
   '@babel/helper-validator-option@7.29.7': {}
@@ -9687,7 +9696,7 @@ snapshots:
   '@babel/types@7.29.0':
     dependencies:
       '@babel/helper-string-parser': 7.27.1
-      '@babel/helper-validator-identifier': 7.28.5
+      '@babel/helper-validator-identifier': 7.29.7
 
   '@babel/types@7.29.7':
     dependencies:
