@@ -18,10 +18,10 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import {
   NOVA_FILM_CATALOG,
-  loadFavoriteIds,
+  loadFavoriteFilmIds,
   loadWatchedMap,
   makeEpisodeKey,
-  saveFavoriteIds,
+  saveFavoriteFilmIds,
   saveWatchedMap,
   type FilmTitle,
 } from "@/utils/filmCatalog";
@@ -47,7 +47,7 @@ export default function NovaFilmLibraryScreen() {
   const reloadData = useCallback(async () => {
     setRefreshing(true);
     try {
-      const [favs, watched] = await Promise.all([loadFavoriteIds(), loadWatchedMap()]);
+      const [favs, watched] = await Promise.all([loadFavoriteFilmIds(), loadWatchedMap()]);
       setFavoriteIds(favs);
       setWatchedMap(watched);
     } finally {
@@ -94,7 +94,7 @@ export default function NovaFilmLibraryScreen() {
   const removeFavorite = async (id: number) => {
     const next = favoriteIds.filter((x) => x !== id);
     setFavoriteIds(next);
-    await saveFavoriteIds(next);
+    await saveFavoriteFilmIds(next);
   };
 
   const clearWatchedForTitle = async (item: FilmTitle) => {
