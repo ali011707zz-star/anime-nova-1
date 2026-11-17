@@ -5,12 +5,11 @@ on:
     branches: [nova-film]
     paths:
       - 'artifacts/nova-film/**'
+      - '!artifacts/nova-film/android/**'
+      - '!artifacts/nova-film/ota-dist/**'
       - 'artifacts/api-server/src/routes/otaFilm.ts'
       - 'artifacts/api-server/src/app.ts'
       - '.github/workflows/ota-nova-film.yml'
-    paths-ignore:
-      - 'artifacts/nova-film/android/**'
-      - 'artifacts/nova-film/ota-dist/**'
   workflow_dispatch:
     inputs:
       backend_domain:
