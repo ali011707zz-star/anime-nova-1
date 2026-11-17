@@ -238,7 +238,7 @@ function ReportSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
                 placeholder={
                   type === "bug" ? "صف المشكلة التي واجهتها بالتفصيل…" :
                   type === "suggestion" ? "شاركنا اقتراحك أو فكرتك…" :
-                  type === "content" ? "اذكر اسم الأنمي أو الحلقة المفقودة…" :
+                  type === "content" ? "اذكر اسم الفيلم أو المسلسل المفقود…" :
                   "اكتب رسالتك هنا…"
                 }
                 placeholderTextColor="rgba(255,255,255,0.2)"
@@ -769,7 +769,7 @@ function AuthSheetInner({ open, onClose, onLogin, onLinkDevice }: {
               </View>
               <View style={{ alignItems: "flex-end" }}>
                 <Text style={{ fontSize: 17, fontFamily: "Cairo_800ExtraBold", color: isWhite ? "#0F172A" : "#FFFFFF" }}>
-                  Anime NOVA
+                  NOVA FILM
                 </Text>
                 <Text style={{ fontSize: 11, color: isWhite ? "#64748B" : "rgba(255,255,255,0.45)", fontFamily: "Cairo_600SemiBold" }}>
                   تسجيل الدخول ومزامنة الأجهزة
@@ -2105,7 +2105,7 @@ export default function SettingsScreen() {
   const handleClearFavorites = () => openConfirm({
     open: true,
     title: "مسح قائمة المحفوظات",
-    desc: `سيتم حذف ${savedCount} أنمي من مفضّلتك بشكل نهائي.`,
+    desc: `سيتم حذف ${savedCount} عمل من مفضّلتك بشكل نهائي.`,
     confirmLabel: "امسح المفضّلة",
     danger: true,
     onConfirm: async () => {
@@ -2479,7 +2479,7 @@ export default function SettingsScreen() {
             />
             <DangerRow
               label="مسح قائمة المحفوظات"
-              sub={`${savedCount} أنمي محفوظ · لا يمكن التراجع`}
+              sub={`${savedCount} عمل محفوظ · لا يمكن التراجع`}
               onPress={handleClearFavorites}
             />
             <DangerRow
@@ -2511,10 +2511,10 @@ export default function SettingsScreen() {
             />
             <NavRow
               icon="share-social" iconColor="#34d399" iconBg="rgba(16,185,129,0.10)"
-              label="مشاركة التطبيق" sub="شارك Anime NOVA مع أصدقائك"
+              label="مشاركة التطبيق" sub="شارك NOVA FILM مع أصدقائك"
               onPress={() => {
                 void Share.share({
-                  message: `Anime NOVA — شاهد الأنمي واكتشف أحدث الحلقات\n${OFFICIAL_SITE}`,
+                  message: `NOVA FILM — شاهد أحدث الأفلام والمسلسلات والأنميشن\n${OFFICIAL_SITE}`,
                   url: OFFICIAL_SITE,
                 }).catch(() => {});
               }}
@@ -2539,8 +2539,8 @@ export default function SettingsScreen() {
               icon="information-circle" iconColor="#a78bfa" iconBg="rgba(139,92,246,0.10)"
               label="عن التطبيق" sub={`NOVA FILM · إصدار v${CURRENT_APP_VERSION}`}
               onPress={() => Alert.alert(
-                "عن Anime NOVA",
-                "تطبيق لمتابعة الأنمي واكتشاف الحلقات الجديدة والمحتوى المترجم والمدبلج.",
+                "عن NOVA FILM",
+                "منصة لمشاهدة الأفلام الأجنبية والآسيوية والمسلسلات والأنميشن بأعلى جودة.",
               )}
             />
           </Card>
@@ -2549,7 +2549,7 @@ export default function SettingsScreen() {
         {/* ── Footer ── */}
         <View style={ts.footer}>
           <View style={ts.footerLogo}>
-            <Text style={[ts.footerLogoText, { color: colors.textPrimary }]}>ANIME </Text>
+            <Text style={[ts.footerLogoText, { color: colors.textPrimary }]}>NOVA </Text>
             <Text style={[ts.footerLogoText, { color: colors.accent }]}>NOVA</Text>
           </View>
           <Text style={[ts.footerSub, { color: colors.textMuted }]}>v{CURRENT_APP_VERSION} · مجاني للجميع · 2025</Text>
@@ -2759,7 +2759,7 @@ export default function SettingsScreen() {
                 focusable={tvMode}
                 onPress={() => {
                   void Share.share({
-                    message: `Anime NOVA — شاهد الأنمي واكتشف أحدث الحلقات مجاناً\n${OFFICIAL_SITE}`,
+                    message: `NOVA FILM — شاهد أحدث الأفلام والمسلسلات والأنميشن\n${OFFICIAL_SITE}`,
                     url: OFFICIAL_SITE,
                   }).catch(() => {});
                   showToast("تم نسخ رابط التطبيق للمشاركة ✓");

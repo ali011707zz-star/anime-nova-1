@@ -56,7 +56,7 @@ function DownloadCoverImage({
   const candidates = useMemo(() => {
     const vals = [
       uri ? String(uri).trim() : "",
-      animeId && animeId > 0 ? `https://img.anili.st/media/${animeId}` : "",
+      "",
     ];
     return [...new Set(vals.filter(Boolean))];
   }, [uri, animeId]);

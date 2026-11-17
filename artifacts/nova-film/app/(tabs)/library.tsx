@@ -1,36 +1,34 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Ionicons } from "@expo/vector-icons";
+import { useFocusEffect, useRouter } from "expo-router";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   FlatList,
-  Image,
-  RefreshControl,
-  ScrollView,
+  I18nManager,
+  Platform,
+  Pressable,
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
   useWindowDimensions,
 } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
-import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { DrawerMenu } from "@/components/DrawerMenu";
+import { FilmPosterCard, getFilmGridColumnCount } from "@/components/FilmPosterCard";
 import { useColors } from "@/hooks/useColors";
 import {
   NOVA_FILM_CATALOG,
+  loadAllPlaybackProgress,
   loadFavoriteFilmIds,
   loadWatchedMap,
   makeEpisodeKey,
+  removeFilmPlaybackProgress,
   saveFavoriteFilmIds,
-  saveWatchedMap,
-  type FilmTitle,
+  type FilmPlaybackRecord,
 } from "@/utils/filmCatalog";
 
-const TABS = [
-  { id: "favorites", label: "المحفوظة", icon: "bookmark" },
-  { id: "watched", label: "تمت المشاهدة", icon: "eye" },
-  { id: "continue", label: "متابعة المشاهدة", icon: "play-circle" },
-] as const;
+const ROW_HEADER = I18nManager.isRTL ? "row-reverse" : "row";
+const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
 
 export default function NovaFilmLibraryScreen() {
   const colors = useColors();
@@ -38,296 +36,338 @@ export default function NovaFilmLibraryScreen() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
 
-  const [activeTab, setActiveTab] = useState<"favorites" | "watched" | "continue">("favorites");
-  const [favoriteIds, setFavoriteIds] = useState<number[]>([]);
+  const [drawerVisible, setDrawerVisible] = useState(false);
+  const [tab, setTab] = useState<"favorites" | "history" | "watched">("favorites");
+  const [query, setQuery] = useState("");
+  const [favIds, setFavIds] = useState<number[]>([]);
   const [watchedMap, setWatchedMap] = useState<Record<string, boolean>>({});
-  const [search, setSearch] = useState("");
-  const [refreshing, setRefreshing] = useState(false);
+  const [playbackHistory, setPlaybackHistory] = useState<FilmPlaybackRecord[]>([]);
 
-  const reloadData = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      const [favs, watched] = await Promise.all([loadFavoriteFilmIds(), loadWatchedMap()]);
-      setFavoriteIds(favs);
-      setWatchedMap(watched);
-    } finally {
-      setRefreshing(false);
-    }
+  const loadData = useCallback(async () => {
+    const [f, w, hist] = await Promise.all([
+      loadFavoriteFilmIds(),
+      loadWatchedMap(),
+      loadAllPlaybackProgress(),
+    ]);
+    setFavIds(f);
+    setWatchedMap(w);
+    setPlaybackHistory(hist);
   }, []);
 
-  useEffect(() => {
-    reloadData();
-  }, [reloadData]);
+  useFocusEffect(
+    useCallback(() => {
+      void loadData();
+    }, [loadData]),
+  );
 
-  const cols = width >= 700 ? 4 : 2;
-  const cardWidth = Math.floor((width - 28 - (cols - 1) * 10) / cols);
-  const cardHeight = Math.round(cardWidth * 1.48);
+  const cols = getFilmGridColumnCount(width);
+  const gap = 10;
+  const cardWidth = Math.floor((width - 28 - (cols - 1) * gap) / cols);
 
-  const q = search.trim().toLowerCase();
+  const favTitles = useMemo(
+    () => NOVA_FILM_CATALOG.filter((t) => favIds.includes(t.id)),
+    [favIds],
+  );
 
-  const favoriteItems = useMemo(() => {
-    return NOVA_FILM_CATALOG.filter((item) => {
-      if (!favoriteIds.includes(item.id)) return false;
-      if (q && !`${item.titleAr} ${item.titleEn}`.toLowerCase().includes(q)) return false;
-      return true;
-    });
-  }, [favoriteIds, q]);
-
-  const watchedEntries = useMemo(() => {
-    const list: { title: FilmTitle; watchedCount: number; totalCount: number }[] = [];
-    for (const item of NOVA_FILM_CATALOG) {
-      if (q && !`${item.titleAr} ${item.titleEn}`.toLowerCase().includes(q)) continue;
-      const watchedCount = item.episodes.filter(
-        (ep) => watchedMap[makeEpisodeKey(item.id, ep.seasonNumber, ep.episodeNumber)]
-      ).length;
-      if (watchedCount > 0) {
-        list.push({ title: item, watchedCount, totalCount: item.episodes.length });
+  const historyTitles = useMemo(() => {
+    const seen = new Set<number>();
+    const list = [] as typeof NOVA_FILM_CATALOG;
+    for (const rec of playbackHistory) {
+      if (seen.has(rec.titleId)) continue;
+      const found = NOVA_FILM_CATALOG.find((t) => t.id === rec.titleId);
+      if (found) {
+        seen.add(rec.titleId);
+        list.push(found);
       }
     }
     return list;
-  }, [watchedMap, q]);
+  }, [playbackHistory]);
 
-  const continueEntries = useMemo(() => {
-    return watchedEntries.filter((e) => e.watchedCount > 0 && e.watchedCount < e.totalCount);
-  }, [watchedEntries]);
+  const watchedTitles = useMemo(() => {
+    return NOVA_FILM_CATALOG.filter((t) =>
+      t.episodes.some((ep) => watchedMap[makeEpisodeKey(t.id, ep.seasonNumber, ep.episodeNumber)]),
+    );
+  }, [watchedMap]);
 
-  const removeFavorite = async (id: number) => {
-    const next = favoriteIds.filter((x) => x !== id);
-    setFavoriteIds(next);
-    await saveFavoriteFilmIds(next);
-  };
+  const activeList = useMemo(() => {
+    const raw =
+      tab === "favorites" ? favTitles : tab === "history" ? historyTitles : watchedTitles;
+    const q = query.trim().toLowerCase();
+    if (!q) return raw;
+    return raw.filter((item) =>
+      `${item.titleAr} ${item.titleEn}`.toLowerCase().includes(q),
+    );
+  }, [tab, favTitles, historyTitles, watchedTitles, query]);
 
-  const clearWatchedForTitle = async (item: FilmTitle) => {
-    const next = { ...watchedMap };
-    for (const ep of item.episodes) {
-      delete next[makeEpisodeKey(item.id, ep.seasonNumber, ep.episodeNumber)];
+  const removeItem = async (id: number) => {
+    if (tab === "favorites") {
+      const next = favIds.filter((x) => x !== id);
+      setFavIds(next);
+      await saveFavoriteFilmIds(next);
+    } else if (tab === "history") {
+      await removeFilmPlaybackProgress(id);
+      setPlaybackHistory((prev) => prev.filter((r) => r.titleId !== id));
     }
-    setWatchedMap(next);
-    await saveWatchedMap(next);
   };
 
-  const currentList =
-    activeTab === "favorites"
-      ? favoriteItems.map((t) => ({
-          title: t,
-          watchedCount: t.episodes.filter(
-            (ep) => watchedMap[makeEpisodeKey(t.id, ep.seasonNumber, ep.episodeNumber)]
-          ).length,
-          totalCount: t.episodes.length,
-        }))
-      : activeTab === "watched"
-      ? watchedEntries
-      : continueEntries;
+  const topPad = Platform.OS === "web" ? 12 : Math.max(insets.top, Platform.OS === "android" ? 28 : 44);
 
   return (
-    <View style={[s.container, { backgroundColor: colors.background, paddingTop: insets.top + 8 }]}>
-      <View style={s.header}>
-        <View style={s.titleRow}>
-          <TouchableOpacity onPress={reloadData} style={[s.refreshBtn, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <Ionicons name="refresh" size={18} color="#F59E0B" />
-          </TouchableOpacity>
-          <Text style={[s.headerTitle, { color: colors.text }]}>
-            قائمتي في <Text style={{ color: "#F59E0B" }}>NOVA FILM</Text>
-          </Text>
+    <View style={[s.container, { backgroundColor: colors.background }]}>
+      <View
+        style={[
+          s.topHeader,
+          {
+            paddingTop: topPad + 4,
+            borderBottomColor: colors.border,
+          },
+        ]}
+      >
+        <Pressable
+          onPress={() => setDrawerVisible(true)}
+          style={[s.iconBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
+        >
+          <Ionicons name="menu" size={20} color={colors.textPrimary} />
+        </Pressable>
+
+        <View style={{ flex: 1, alignItems: "flex-end" }}>
+          <Text style={[s.headerTitle, { color: colors.textPrimary }]}>قائمتي</Text>
         </View>
 
+        <Pressable
+          onPress={() => void loadData()}
+          style={[s.iconBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
+        >
+          <Ionicons name="refresh" size={18} color={colors.textPrimary} />
+        </Pressable>
+      </View>
+
+      {/* CatalogTabs */}
+      <View style={[s.tabsBar, { borderBottomColor: colors.border }]}>
+        {[
+          { id: "favorites", label: `المفضلة (${favTitles.length})` },
+          { id: "history", label: `متابعة المشاهدة (${historyTitles.length})` },
+          { id: "watched", label: `شاهدته (${watchedTitles.length})` },
+        ].map((item) => {
+          const active = tab === item.id;
+          return (
+            <Pressable
+              key={item.id}
+              onPress={() => setTab(item.id as any)}
+              style={s.tabBtn}
+            >
+              <Text style={[s.tabText, { color: active ? "#0EA5E9" : colors.textMuted }]}>
+                {item.label}
+              </Text>
+              {active ? <View style={s.tabIndicator} /> : null}
+            </Pressable>
+          );
+        })}
+      </View>
+
+      <View style={s.searchWrap}>
         <View style={[s.searchBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Ionicons name="search" size={16} color={colors.textMuted} />
           <TextInput
-            value={search}
-            onChangeText={setSearch}
-            placeholder="ابحث في قائمتك وسجل المشاهدة..."
+            value={query}
+            onChangeText={setQuery}
+            placeholder="ابحث داخل قائمتك..."
             placeholderTextColor={colors.textMuted}
-            style={[s.searchInput, { color: colors.text }]}
+            style={[s.searchInput, { color: colors.textPrimary }]}
           />
         </View>
-
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.tabsRow}>
-          {TABS.map((tab) => {
-            const active = activeTab === tab.id;
-            return (
-              <TouchableOpacity
-                key={tab.id}
-                onPress={() => setActiveTab(tab.id)}
-                style={[
-                  s.tabPill,
-                  {
-                    backgroundColor: active ? "#F59E0B" : colors.card,
-                    borderColor: active ? "#F59E0B" : colors.border,
-                  },
-                ]}
-              >
-                <Ionicons name={tab.icon as any} size={15} color={active ? "#090A0C" : "#F59E0B"} />
-                <Text style={[s.tabPillText, { color: active ? "#090A0C" : colors.text }]}>
-                  {tab.label}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
       </View>
 
       <FlatList
-        data={currentList}
-        key={cols}
+        data={activeList}
+        key={`lib-${cols}-${tab}`}
         numColumns={cols}
-        keyExtractor={(item) => `${activeTab}-${item.title.id}`}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={reloadData} tintColor="#F59E0B" />}
-        contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 100, gap: 12 }}
-        columnWrapperStyle={{ gap: 10, justifyContent: "flex-end" }}
+        keyExtractor={(item) => `${tab}-${item.id}`}
+        contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 100, gap: 14 }}
+        columnWrapperStyle={{ gap, flexDirection: ROW_RTL }}
         ListEmptyComponent={
           <View style={s.emptyBox}>
-            <Ionicons
-              name={activeTab === "favorites" ? "bookmark-outline" : "eye-outline"}
-              size={48}
-              color={colors.textMuted}
-            />
-            <Text style={[s.emptyTitle, { color: colors.text }]}>
-              {activeTab === "favorites"
-                ? "لا توجد أفلام أو مسلسلات محفوظة بعد"
-                : activeTab === "watched"
-                ? "لم تقم بتحديد أي حلقة أو فيلم كمشاهد بعد"
-                : "لا توجد أعمال قيد المتابعة حالياً"}
+            <View style={[s.emptyIcon, { backgroundColor: colors.accentSurface, borderColor: colors.accentBorder }]}>
+              <Ionicons
+                name={tab === "favorites" ? "heart-outline" : "time-outline"}
+                size={34}
+                color="#0EA5E9"
+              />
+            </View>
+            <Text style={[s.emptyTitle, { color: colors.textPrimary }]}>
+              {tab === "favorites"
+                ? "قائمة المفضلة فارغة حالياً"
+                : tab === "history"
+                  ? "لا يوجد سجل مشاهدة بعد"
+                  : "لم تحدد حلقات كمشاهدة بعد"}
             </Text>
             <Text style={[s.emptySub, { color: colors.textMuted }]}>
-              اضغط على أيقونة الحفظ أو عين المشاهدة داخل صفحة أي فيلم أو مسلسل لتظهر هنا فوراً.
+              استكشف أحدث الأفلام والمسلسلات والأنميشن وأضف أعمالك المفضلة هنا.
             </Text>
-            <TouchableOpacity
+            <Pressable
               onPress={() => router.push("/(tabs)/browse" as any)}
               style={s.exploreBtn}
             >
-              <Text style={s.exploreBtnText}>استكشف مكتبة NOVA FILM</Text>
-            </TouchableOpacity>
+              <Text style={s.exploreBtnText}>تصفح المكتبة</Text>
+            </Pressable>
           </View>
         }
         renderItem={({ item }) => {
-          const t = item.title;
-          const pct = item.totalCount > 0 ? Math.round((item.watchedCount / item.totalCount) * 100) : 0;
+          const watchedCount = item.episodes.filter(
+            (ep) => watchedMap[makeEpisodeKey(item.id, ep.seasonNumber, ep.episodeNumber)],
+          ).length;
+          const progress = item.episodes.length > 0 ? watchedCount / item.episodes.length : 0;
           return (
-            <TouchableOpacity
-              onPress={() => router.push({ pathname: "/film/[id]" as any, params: { id: String(t.id) } })}
-              style={[
-                s.card,
-                {
-                  width: cardWidth,
-                  height: cardHeight,
-                  backgroundColor: colors.card,
-                  borderColor: colors.border,
-                },
-              ]}
-            >
-              <Image source={t.posterSource} style={s.cardImg} resizeMode="cover" />
-              <LinearGradient
-                colors={["rgba(0,0,0,0.2)", "transparent", "rgba(9,10,12,0.95)"]}
-                style={StyleSheet.absoluteFill}
+            <View style={{ position: "relative" }}>
+              <FilmPosterCard
+                item={item}
+                cardWidth={cardWidth}
+                watchedCount={watchedCount}
+                progress={progress}
               />
-              <View style={s.cardTop}>
-                <TouchableOpacity
-                  onPress={() =>
-                    activeTab === "favorites" ? removeFavorite(t.id) : clearWatchedForTitle(t)
-                  }
-                  style={s.removeBtn}
+              {tab !== "watched" ? (
+                <Pressable
+                  onPress={() => removeItem(item.id)}
+                  style={s.removeBadge}
+                  hitSlop={6}
                 >
-                  <Ionicons name="trash-outline" size={14} color="#F87171" />
-                </TouchableOpacity>
-                <View style={s.progressBadge}>
-                  <Ionicons name="eye" size={11} color="#34D399" />
-                  <Text style={s.progressBadgeText}>
-                    {item.watchedCount}/{item.totalCount} ({pct}%)
-                  </Text>
-                </View>
-              </View>
-              <View style={s.cardBottom}>
-                <Text style={s.cardTitle} numberOfLines={2}>
-                  {t.titleAr}
-                </Text>
-                <Text style={s.cardSub} numberOfLines={1}>
-                  {t.year} · {t.categoryLabel}
-                </Text>
-              </View>
-            </TouchableOpacity>
+                  <Ionicons name="close" size={13} color="#FFFFFF" />
+                </Pressable>
+              ) : null}
+            </View>
           );
         }}
       />
+
+      <DrawerMenu visible={drawerVisible} onClose={() => setDrawerVisible(false)} />
     </View>
   );
 }
 
 const s = StyleSheet.create({
   container: { flex: 1 },
-  header: { paddingHorizontal: 14, gap: 10, marginBottom: 10 },
-  titleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  headerTitle: { fontSize: 20, fontFamily: "Cairo_800ExtraBold", textAlign: "right" },
-  refreshBtn: {
-    width: 38,
-    height: 38,
+  topHeader: {
+    flexDirection: ROW_HEADER,
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 14,
+    paddingBottom: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: 10,
+  },
+  iconBtn: {
+    width: 39,
+    height: 39,
     borderRadius: 12,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
   },
-  searchBox: {
-    flexDirection: "row-reverse",
+  headerTitle: {
+    fontSize: 18,
+    lineHeight: 27,
+    fontFamily: "Cairo_800ExtraBold",
+    includeFontPadding: true,
+  },
+  tabsBar: {
+    flexDirection: ROW_RTL,
+    justifyContent: "space-around",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 8,
+  },
+  tabBtn: {
+    minHeight: 46,
+    justifyContent: "center",
     alignItems: "center",
+    paddingHorizontal: 8,
+    position: "relative",
+  },
+  tabText: {
+    fontSize: 12.5,
+    lineHeight: 19,
+    fontFamily: "Cairo_700Bold",
+    includeFontPadding: true,
+  },
+  tabIndicator: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 3,
+    backgroundColor: "#0EA5E9",
+    borderTopLeftRadius: 3,
+    borderTopRightRadius: 3,
+  },
+  searchWrap: { paddingHorizontal: 14, paddingVertical: 12 },
+  searchBox: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    gap: 8,
     borderWidth: 1,
     borderRadius: 13,
     paddingHorizontal: 12,
-    height: 42,
-    gap: 8,
+    height: 44,
   },
-  searchInput: { flex: 1, fontSize: 13, fontFamily: "Cairo_400Regular", textAlign: "right" },
-  tabsRow: { gap: 8, paddingVertical: 2 },
-  tabPill: {
-    flexDirection: "row-reverse",
+  searchInput: {
+    flex: 1,
+    textAlign: "right",
+    fontSize: 13,
+    fontFamily: "Cairo_400Regular",
+    includeFontPadding: true,
+  },
+  emptyBox: {
     alignItems: "center",
-    gap: 6,
+    justifyContent: "center",
+    paddingVertical: 64,
+    paddingHorizontal: 28,
+    gap: 12,
+  },
+  emptyIcon: {
+    width: 76,
+    height: 76,
+    borderRadius: 24,
     borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-  },
-  tabPillText: { fontSize: 12, fontFamily: "Cairo_700Bold" },
-  emptyBox: { alignItems: "center", justifyContent: "center", paddingVertical: 64, paddingHorizontal: 24, gap: 10 },
-  emptyTitle: { fontSize: 16, fontFamily: "Cairo_700Bold", textAlign: "center" },
-  emptySub: { fontSize: 12, fontFamily: "Cairo_400Regular", textAlign: "center", lineHeight: 20 },
-  exploreBtn: {
-    marginTop: 8,
-    backgroundColor: "#F59E0B",
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 12,
-  },
-  exploreBtnText: { color: "#090A0C", fontSize: 13, fontFamily: "Cairo_800ExtraBold" },
-  card: { borderRadius: 16, overflow: "hidden", borderWidth: 1, position: "relative" },
-  cardImg: { width: "100%", height: "100%" },
-  cardTop: {
-    position: "absolute",
-    top: 8,
-    left: 8,
-    right: 8,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  removeBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    backgroundColor: "rgba(0,0,0,0.75)",
     alignItems: "center",
     justifyContent: "center",
   },
-  progressBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    backgroundColor: "rgba(0,0,0,0.78)",
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: 7,
+  emptyTitle: {
+    fontSize: 16,
+    lineHeight: 24,
+    fontFamily: "Cairo_800ExtraBold",
+    textAlign: "center",
+    includeFontPadding: true,
   },
-  progressBadgeText: { color: "#34D399", fontSize: 10, fontFamily: "Cairo_700Bold" },
-  cardBottom: { position: "absolute", bottom: 8, left: 8, right: 8, alignItems: "flex-end", gap: 2 },
-  cardTitle: { color: "#fff", fontSize: 12, fontFamily: "Cairo_700Bold", textAlign: "right" },
-  cardSub: { color: "#D4D4D8", fontSize: 10, fontFamily: "Cairo_400Regular", textAlign: "right" },
+  emptySub: {
+    fontSize: 12.5,
+    lineHeight: 20,
+    fontFamily: "Cairo_400Regular",
+    textAlign: "center",
+    includeFontPadding: true,
+  },
+  exploreBtn: {
+    marginTop: 4,
+    backgroundColor: "#0EA5E9",
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+  exploreBtnText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontFamily: "Cairo_800ExtraBold",
+    includeFontPadding: true,
+  },
+  removeBadge: {
+    position: "absolute",
+    bottom: 66,
+    left: 6,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "rgba(9,10,12,0.82)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
 });

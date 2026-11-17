@@ -1,28 +1,42 @@
-import React, { useEffect, useMemo, useState } from "react";
+import { Ionicons } from "@expo/vector-icons";
+import { useFocusEffect, useRouter } from "expo-router";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   FlatList,
+  I18nManager,
   Image,
+  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
   useWindowDimensions,
 } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DrawerMenu } from "@/components/DrawerMenu";
+import { FilmHeroSection } from "@/components/FilmHeroSection";
+import { FilmPosterCard, getFilmRailCardWidth } from "@/components/FilmPosterCard";
+import { FilmSectionHeader } from "@/components/FilmSectionHeader";
 import { useColors } from "@/hooks/useColors";
-import { isTvDevice, useTvMetrics } from "@/utils/tv";
 import {
   NOVA_FILM_CATALOG,
+  loadAllPlaybackProgress,
   loadWatchedMap,
   makeEpisodeKey,
+  type FilmPlaybackRecord,
   type FilmTitle,
 } from "@/utils/filmCatalog";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
+
+const HEADER_ROW = I18nManager.isRTL ? "row-reverse" : "row";
+const SEARCH_ROW = I18nManager.isRTL ? "row" : "row-reverse";
+
+function formatRemaining(pos: number, dur: number): string {
+  const left = Math.max(1, Math.ceil((dur - pos) / 60));
+  return `متبقي ${left} د`;
+}
 
 export default function NovaFilmHomeScreen() {
   const colors = useColors();
@@ -33,137 +47,98 @@ export default function NovaFilmHomeScreen() {
   const isTv = isTvDevice(width, height);
 
   const [drawerVisible, setDrawerVisible] = useState(false);
-  const [heroIndex, setHeroIndex] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [watchedMap, setWatchedMap] = useState<Record<string, boolean>>({});
+  const [playbackHistory, setPlaybackHistory] = useState<FilmPlaybackRecord[]>([]);
 
-  const heroItems = useMemo(
-    () => NOVA_FILM_CATALOG.filter((t) => t.featuredHero),
-    []
-  );
-  const activeHero = heroItems[heroIndex % heroItems.length] || NOVA_FILM_CATALOG[0];
-
-  const loadWatchedProgress = async () => {
-    setRefreshing(true);
+  const reloadProgress = useCallback(async () => {
     try {
-      const w = await loadWatchedMap();
+      const [w, hist] = await Promise.all([loadWatchedMap(), loadAllPlaybackProgress()]);
       setWatchedMap(w);
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
-  useEffect(() => {
-    loadWatchedProgress();
+      setPlaybackHistory(hist);
+    } catch {}
   }, []);
 
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setHeroIndex((i) => (i + 1) % heroItems.length);
-    }, 6000);
-    return () => clearInterval(timer);
-  }, [heroItems.length]);
+  useFocusEffect(
+    useCallback(() => {
+      void reloadProgress();
+    }, [reloadProgress]),
+  );
 
-  const cardWidth = isTv ? 185 : Math.max(126, Math.floor((width - 44) / 2.75));
-  const cardHeight = Math.round(cardWidth * 1.48);
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await reloadProgress();
+    setRefreshing(false);
+  }, [reloadProgress]);
 
-  const openFilm = (item: FilmTitle) => {
-    router.push({
-      pathname: "/film/[id]" as any,
-      params: { id: String(item.id) },
-    });
-  };
+  const topPad = Platform.OS === "web" ? 12 : Math.max(insets.top, Platform.OS === "android" ? 28 : 44);
+  const railCardWidth = getFilmRailCardWidth(width, 3, 10);
+  const historyCardWidth = Math.max(152, Math.min(205, Math.floor((width - 40) / 2.15)));
 
-  const quickPlayHero = () => {
-    const ep = activeHero.episodes[0];
-    if (ep) {
-      router.push({
-        pathname: "/film/watch" as any,
-        params: {
-          titleId: String(activeHero.id),
-          season: String(ep.seasonNumber),
-          episode: String(ep.episodeNumber),
-        },
-      });
-    } else {
-      openFilm(activeHero);
-    }
-  };
+  const heroItems = useMemo(() => NOVA_FILM_CATALOG.filter((t) => t.featuredHero), []);
+  const topRatedItems = useMemo(
+    () => [...NOVA_FILM_CATALOG].sort((a, b) => b.imdbRating - a.imdbRating).slice(0, 8),
+    [],
+  );
+  const moviesList = useMemo(
+    () => NOVA_FILM_CATALOG.filter((t) => t.mediaType === "movie"),
+    [],
+  );
+  const seriesList = useMemo(
+    () => NOVA_FILM_CATALOG.filter((t) => t.mediaType === "series"),
+    [],
+  );
+  const animationList = useMemo(
+    () => NOVA_FILM_CATALOG.filter((t) => t.mediaType === "animation"),
+    [],
+  );
+
+  const continueItems = useMemo(() => {
+    return playbackHistory
+      .map((rec) => {
+        const title = NOVA_FILM_CATALOG.find((t) => t.id === rec.titleId);
+        if (!title) return null;
+        return { rec, title };
+      })
+      .filter(Boolean) as { rec: FilmPlaybackRecord; title: FilmTitle }[];
+  }, [playbackHistory]);
 
   const renderPosterRail = (
-    sectionTitle: string,
-    accent: string,
+    title: string,
+    subtitle: string,
+    accentColor: string,
     items: FilmTitle[],
-    browseType: string
+    browseType: string,
   ) => (
     <View style={s.sectionWrap}>
-      <View style={s.sectionHeader}>
-        <TouchableOpacity
-          onPress={() =>
-            router.push({ pathname: "/(tabs)/browse" as any, params: { type: browseType } })
-          }
-          style={s.seeAllBtn}
-        >
-          <Ionicons name="chevron-back" size={14} color="#F59E0B" />
-          <Text style={s.seeAllText}>عرض الكل</Text>
-        </TouchableOpacity>
-        <View style={s.sectionTitleRow}>
-          <Text style={[s.sectionTitle, { color: colors.text }]}>{sectionTitle}</Text>
-          <View style={[s.sectionDot, { backgroundColor: accent }]} />
-        </View>
-      </View>
+      <FilmSectionHeader
+        title={title}
+        subtitle={subtitle}
+        accentColor={accentColor}
+        onSeeAll={() =>
+          router.push({ pathname: "/(tabs)/browse" as any, params: { type: browseType } })
+        }
+        focusable={isTv}
+      />
       <FlatList
         data={items}
         horizontal
         keyExtractor={(item) => `${browseType}-${item.id}`}
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: 14, gap: 10 }}
+        contentContainerStyle={{ paddingHorizontal: 14, gap: 11 }}
         renderItem={({ item }) => {
           const watchedCount = item.episodes.filter(
-            (ep) => watchedMap[makeEpisodeKey(item.id, ep.seasonNumber, ep.episodeNumber)]
+            (ep) => watchedMap[makeEpisodeKey(item.id, ep.seasonNumber, ep.episodeNumber)],
           ).length;
+          const progress = item.episodes.length > 0 ? watchedCount / item.episodes.length : 0;
           return (
-            <TouchableOpacity
-              onPress={() => openFilm(item)}
-              style={[
-                s.card,
-                {
-                  width: cardWidth,
-                  height: cardHeight,
-                  backgroundColor: colors.card,
-                  borderColor: colors.border,
-                },
-              ]}
-            >
-              <Image source={item.posterSource} style={s.cardImg} resizeMode="cover" />
-              <LinearGradient
-                colors={["rgba(0,0,0,0.25)", "transparent", "rgba(9,10,12,0.95)"]}
-                style={StyleSheet.absoluteFill}
-              />
-              <View style={s.cardTopRow}>
-                <View style={s.ratingBadge}>
-                  <Ionicons name="star" size={10} color="#FBBF24" />
-                  <Text style={s.ratingText}>{item.imdbRating.toFixed(1)}</Text>
-                </View>
-                <View style={s.qualityTag}>
-                  <Text style={s.qualityTagText}>{item.qualityBadge}</Text>
-                </View>
-              </View>
-              <View style={s.cardBottom}>
-                <View style={[s.audioPill, { backgroundColor: "rgba(6,182,212,0.88)" }]}>
-                  <Text style={s.audioPillText}>
-                    مترجم
-                    {watchedCount > 0 ? ` · ${watchedCount}/${item.episodes.length}` : ""}
-                  </Text>
-                </View>
-                <Text style={s.cardTitle} numberOfLines={2}>
-                  {item.titleAr}
-                </Text>
-                <Text style={s.cardSub} numberOfLines={1}>
-                  {item.year} · {item.categoryLabel}
-                </Text>
-              </View>
-            </TouchableOpacity>
+            <FilmPosterCard
+              item={item}
+              cardWidth={railCardWidth}
+              watchedCount={watchedCount}
+              progress={progress}
+              tvFocusable={isTv}
+            />
           );
         }}
       />
@@ -174,141 +149,214 @@ export default function NovaFilmHomeScreen() {
     <View style={[s.container, { backgroundColor: colors.background }]}>
       <ScrollView
         showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 98 }}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={loadWatchedProgress} tintColor="#F59E0B" />
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.homeAccent} />
         }
-        contentContainerStyle={{ paddingBottom: 96 }}
       >
-        {/* Top App Bar: Menu on Left, Search + | NOVA FILM Logo on Right (Exact Anime NOVA Geometry) */}
-        <View
-          style={[
-            s.header,
-            { paddingTop: Math.max(insets.top + 8, 16), backgroundColor: colors.background },
-          ]}
-        >
-          <TouchableOpacity
+        {/* Top App Bar: Menu on TOP-LEFT, Search + | NOVA FILM Logo on TOP-RIGHT (matches Anime NOVA) */}
+        <View style={[s.header, { paddingTop: topPad + 4 }]}>
+          <Pressable
+            accessibilityLabel="فتح القائمة"
             onPress={() => setDrawerVisible(true)}
-            style={[s.iconBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
-            accessibilityLabel="القائمة"
+            focusable={isTv}
+            style={({ focused, pressed }) => [
+              s.menuBtn,
+              {
+                width: scaleSize(42, 52),
+                height: scaleSize(42, 52),
+                borderRadius: scaleSize(13, 16),
+                backgroundColor: colors.surface,
+                borderColor: colors.border,
+                opacity: pressed ? 0.8 : 1,
+              },
+              isTv && tvFocusStyle(focused),
+            ]}
           >
-            <Ionicons name="menu" size={22} color={colors.text} />
-          </TouchableOpacity>
+            <Ionicons name="menu" size={scaleSize(22, 28)} color={colors.textPrimary} />
+          </Pressable>
 
           <View style={s.headerSpacer} />
 
           <View style={s.headerBrandGroup}>
-            <TouchableOpacity
+            <Pressable
+              accessibilityLabel="بحث"
               onPress={() => router.push("/(tabs)/browse" as any)}
-              style={[s.searchBtn, { backgroundColor: colors.input, borderColor: colors.border }]}
+              focusable={isTv}
+              style={({ focused, pressed }) => [
+                s.searchPill,
+                {
+                  height: scaleSize(40, 48),
+                  width: Math.min(156, Math.max(118, Math.round(width * 0.34))),
+                  borderRadius: scaleSize(13, 16),
+                  backgroundColor: colors.input,
+                  borderColor: colors.border,
+                  opacity: pressed ? 0.85 : 1,
+                },
+                isTv && tvFocusStyle(focused),
+              ]}
             >
-              <Ionicons name="search" size={15} color={colors.textMuted} />
-              <Text style={[s.searchText, { color: colors.textMuted }]} numberOfLines={1}>
-                ابحث عن فيلم أو مسلسل...
-              </Text>
-            </TouchableOpacity>
+              <Ionicons name="search" size={scaleSize(15, 18)} color={colors.textMuted} />
+              <Text style={[s.searchPillText, { color: colors.textMuted }]}>بحث...</Text>
+            </Pressable>
 
             <View style={s.logoRow}>
-              <View style={s.logoAccent} />
-              <Text style={[s.logoText, { fontSize: scaleSize(16, 22), color: colors.text }]}>
-                NOVA <Text style={{ color: "#F59E0B" }}>FILM</Text>
+              <View style={[s.logoAccent, { height: scaleSize(22, 28), backgroundColor: "#0EA5E9" }]} />
+              <Text style={[s.logoText, { fontSize: scaleSize(16, 22), color: colors.textPrimary }]}>
+                NOVA <Text style={{ color: "#0EA5E9" }}>FILM</Text>
               </Text>
             </View>
           </View>
         </View>
 
-        {/* Hero Slider Section */}
-        <View style={s.heroWrap}>
-          <Image source={activeHero.backdropSource} style={s.heroImg} resizeMode="cover" />
-          <LinearGradient
-            colors={["rgba(9,10,12,0.18)", "rgba(9,10,12,0.72)", colors.background]}
-            style={StyleSheet.absoluteFill}
-          />
-          <View style={s.heroContent}>
-            <View style={s.heroBadges}>
-              <View style={s.heroHotBadge}>
-                <Text style={s.heroHotText}>حصري في نوفا فيلم</Text>
-              </View>
-              <View style={s.ratingBadge}>
-                <Ionicons name="star" size={11} color="#FBBF24" />
-                <Text style={s.ratingText}>{activeHero.imdbRating.toFixed(1)}</Text>
-              </View>
-              <View style={s.heroMetaChip}>
-                <Text style={s.heroMetaChipText}>{activeHero.categoryLabel}</Text>
-              </View>
-            </View>
-            <Text style={s.heroTitle} numberOfLines={2}>
-              {activeHero.titleAr}
-            </Text>
-            <Text style={s.heroSub} numberOfLines={1}>
-              {activeHero.titleEn} · {activeHero.year} · {activeHero.qualityBadge}
-            </Text>
-            <View style={s.heroActions}>
-              <TouchableOpacity onPress={quickPlayHero} style={s.heroPlayBtn}>
-                <Ionicons name="play" size={16} color="#090A0C" />
-                <Text style={s.heroPlayText}>مشاهدة الآن</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => openFilm(activeHero)} style={s.heroDetailBtn}>
-                <Text style={s.heroDetailText}>التفاصيل والحلقات</Text>
-              </TouchableOpacity>
-            </View>
-            <View style={s.heroDots}>
-              {heroItems.map((h, i) => (
-                <TouchableOpacity
-                  key={h.id}
-                  onPress={() => setHeroIndex(i)}
-                  style={[
-                    s.dot,
-                    i === heroIndex % heroItems.length ? s.dotActive : s.dotInactive,
-                  ]}
-                />
-              ))}
-            </View>
-          </View>
-        </View>
+        {/* Hero Carousel matching Anime NOVA */}
+        <FilmHeroSection items={heroItems} tvFocusable={isTv} />
 
-        {/* Quick Category Chips (Movies, Series, Animation only — no dubbed) */}
+        {/* Quick Filter Strip — generous padding & natural width so ZERO Arabic text ever clips */}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={s.quickPills}
         >
           {[
-            { label: "الكل", type: "all", icon: "grid" },
-            { label: "أفلام أجنبية", type: "movie", icon: "film" },
-            { label: "مسلسلات", type: "series", icon: "albums" },
-            { label: "أنميشن", type: "animation", icon: "sparkles" },
-          ].map((c) => (
-            <TouchableOpacity
-              key={c.type}
+            { label: "الكل", type: "all", icon: "grid", color: "#0EA5E9" },
+            { label: "أفلام أجنبية", type: "movie", icon: "film", color: "#F59E0B" },
+            { label: "مسلسلات عالمية", type: "series", icon: "albums", color: "#10B981" },
+            { label: "أعمال أنميشن", type: "animation", icon: "sparkles", color: "#8B5CF6" },
+          ].map((cat) => (
+            <Pressable
+              key={cat.type}
               onPress={() =>
-                router.push({ pathname: "/(tabs)/browse" as any, params: { type: c.type } })
+                router.push({ pathname: "/(tabs)/browse" as any, params: { type: cat.type } })
               }
-              style={[s.quickPill, { backgroundColor: colors.card, borderColor: colors.border }]}
+              focusable={isTv}
+              style={({ focused, pressed }) => [
+                s.quickPill,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                  opacity: pressed ? 0.85 : 1,
+                },
+                isTv && tvFocusStyle(focused),
+              ]}
             >
-              <Ionicons name={c.icon as any} size={14} color="#F59E0B" />
-              <Text style={[s.quickPillText, { color: colors.text }]}>{c.label}</Text>
-            </TouchableOpacity>
+              <Ionicons name={cat.icon as any} size={15} color={cat.color} />
+              <Text style={[s.quickPillText, { color: colors.textPrimary }]}>{cat.label}</Text>
+            </Pressable>
           ))}
         </ScrollView>
 
-        {/* Movies, Series & Animation Carousels */}
+        {/* Continue Watching Rail (identical polish to Anime NOVA) */}
+        {continueItems.length > 0 ? (
+          <View style={s.sectionWrap}>
+            <FilmSectionHeader
+              title="متابعة المشاهدة"
+              subtitle="أكمل الأفلام والحلقات من حيث توقفت"
+              accentColor="#0EA5E9"
+              onSeeAll={() => router.push("/(tabs)/library" as any)}
+              focusable={isTv}
+            />
+            <FlatList
+              data={continueItems}
+              horizontal
+              keyExtractor={({ rec }) => `hist-${rec.titleId}-${rec.seasonNumber}-${rec.episodeNumber}`}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: 14, gap: 11 }}
+              renderItem={({ item: { rec, title } }) => {
+                const pct =
+                  rec.duration > 0 ? Math.min(100, Math.round((rec.position / rec.duration) * 100)) : 20;
+                return (
+                  <Pressable
+                    onPress={() =>
+                      router.push({
+                        pathname: "/film/watch" as any,
+                        params: {
+                          titleId: String(title.id),
+                          season: String(rec.seasonNumber),
+                          episode: String(rec.episodeNumber),
+                        },
+                      })
+                    }
+                    style={({ pressed }) => [
+                      s.historyCard,
+                      {
+                        width: historyCardWidth,
+                        height: Math.round(historyCardWidth * 0.72),
+                        backgroundColor: colors.card,
+                        borderColor: colors.border,
+                        opacity: pressed ? 0.86 : 1,
+                      },
+                    ]}
+                  >
+                    <Image
+                      source={title.backdropSource || title.posterSource}
+                      style={StyleSheet.absoluteFill}
+                      resizeMode="cover"
+                    />
+                    <LinearGradient
+                      colors={["rgba(0,0,0,0.22)", "transparent", "rgba(9,10,12,0.95)"]}
+                      style={StyleSheet.absoluteFill}
+                    />
+                    <View style={s.histEpBadge}>
+                      <Text style={s.histEpBadgeText}>
+                        {title.episodes.length > 1
+                          ? `م${rec.seasonNumber} · ح ${rec.episodeNumber}`
+                          : "فيلم"}
+                      </Text>
+                    </View>
+                    {rec.duration > 0 ? (
+                      <View style={s.histRemBadge}>
+                        <Text style={s.histEpBadgeText}>{formatRemaining(rec.position, rec.duration)}</Text>
+                      </View>
+                    ) : null}
+
+                    <View style={s.histBottom}>
+                      <Text style={s.histTitle} numberOfLines={1}>
+                        {title.titleAr}
+                      </Text>
+                      <View style={s.histResumeRow}>
+                        <Text style={s.histPctText}>{pct}%</Text>
+                        <Text style={s.histResumeLabel}>استئناف المشاهدة الآن</Text>
+                      </View>
+                      <View style={s.histTrack}>
+                        <View style={[s.histFill, { width: `${pct}%` }]} />
+                      </View>
+                    </View>
+                  </Pressable>
+                );
+              }}
+            />
+          </View>
+        ) : null}
+
+        {/* Primary Carousels */}
         {renderPosterRail(
-          "🎬 الأفلام الأجنبية والآسيوية",
+          "الأكثر تقييماً ومشاهدة",
+          "أعمال مختارة بأعلى التقييمات العالمية",
+          "#0EA5E9",
+          topRatedItems,
+          "all",
+        )}
+        {renderPosterRail(
+          "الأفلام الأجنبية والآسيوية",
+          "إصدارات سينمائية مترجمة بدقة 4K",
           "#F59E0B",
-          NOVA_FILM_CATALOG.filter((t) => t.mediaType === "movie"),
-          "movie"
+          moviesList,
+          "movie",
         )}
         {renderPosterRail(
-          "📺 المسلسلات الأجنبية المميزة",
+          "المسلسلات العالمية",
+          "مواسم كاملة وحلقات متجددة",
           "#10B981",
-          NOVA_FILM_CATALOG.filter((t) => t.mediaType === "series"),
-          "series"
+          seriesList,
+          "series",
         )}
         {renderPosterRail(
-          "✨ أفلام ومسلسلات الأنميشن",
+          "أفلام ومسلسلات الأنميشن",
+          "عالم الرسوم المتحركة السينمائية",
           "#8B5CF6",
-          NOVA_FILM_CATALOG.filter((t) => t.mediaType === "animation"),
-          "animation"
+          animationList,
+          "animation",
         )}
       </ScrollView>
 
@@ -320,194 +368,151 @@ export default function NovaFilmHomeScreen() {
 const s = StyleSheet.create({
   container: { flex: 1 },
   header: {
-    direction: "ltr",
-    flexDirection: "row",
+    flexDirection: HEADER_ROW,
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 14,
     paddingBottom: 10,
     gap: 10,
   },
-  headerSpacer: {
-    flex: 1,
-    minWidth: 0,
-  },
-  iconBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
+  headerSpacer: { flex: 1, minWidth: 0 },
+  menuBtn: {
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
     flexShrink: 0,
   },
   headerBrandGroup: {
-    direction: "ltr",
-    flexDirection: "row",
+    flexDirection: HEADER_ROW,
     alignItems: "center",
-    justifyContent: "flex-end",
     gap: 10,
     flexShrink: 1,
+    minWidth: 0,
   },
-  searchBtn: {
-    width: 170,
-    height: 40,
-    borderRadius: 13,
+  searchPill: {
     borderWidth: 1,
-    paddingHorizontal: 10,
-    direction: "rtl",
-    flexDirection: "row",
+    paddingHorizontal: 12,
+    flexDirection: SEARCH_ROW,
     alignItems: "center",
-    gap: 6,
+    gap: 7,
     flexShrink: 1,
   },
-  searchText: { flex: 1, fontSize: 12, fontFamily: "Cairo_400Regular", textAlign: "right" },
+  searchPillText: {
+    flex: 1,
+    fontSize: 12.5,
+    lineHeight: 19,
+    fontFamily: "Cairo_600SemiBold",
+    textAlign: "right",
+    includeFontPadding: true,
+  },
   logoRow: {
-    direction: "ltr",
-    flexDirection: "row",
+    flexDirection: HEADER_ROW,
     alignItems: "center",
     gap: 7,
     flexShrink: 0,
   },
-  logoText: { fontFamily: "Cairo_800ExtraBold", letterSpacing: 0.6 },
-  logoAccent: { width: 3.5, height: 22, borderRadius: 2, backgroundColor: "#F59E0B" },
-  heroWrap: {
-    marginHorizontal: 12,
-    height: 360,
-    borderRadius: 24,
-    overflow: "hidden",
-    backgroundColor: "#111317",
-    position: "relative",
+  logoAccent: { width: 3.5, borderRadius: 2 },
+  logoText: {
+    fontFamily: "Cairo_800ExtraBold",
+    letterSpacing: 0.7,
+    includeFontPadding: true,
   },
-  heroImg: { width: "100%", height: "100%" },
-  heroContent: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    padding: 16,
-    alignItems: "flex-end",
-    gap: 8,
+  quickPills: {
+    paddingHorizontal: 14,
+    paddingTop: 8,
+    paddingBottom: 16,
+    gap: 9,
   },
-  heroBadges: { flexDirection: "row-reverse", flexWrap: "wrap", gap: 6 },
-  heroHotBadge: {
-    backgroundColor: "#F59E0B",
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-  },
-  heroHotText: { color: "#090A0C", fontSize: 10, fontFamily: "Cairo_800ExtraBold" },
-  heroMetaChip: {
-    backgroundColor: "rgba(0,0,0,0.65)",
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-  },
-  heroMetaChipText: { color: "#fff", fontSize: 10, fontFamily: "Cairo_600SemiBold" },
-  heroTitle: { color: "#fff", fontSize: 24, fontFamily: "Cairo_800ExtraBold", textAlign: "right" },
-  heroSub: { color: "#D4D4D8", fontSize: 12, fontFamily: "Cairo_600SemiBold", textAlign: "right" },
-  heroActions: { flexDirection: "row-reverse", alignItems: "center", gap: 10, marginTop: 4 },
-  heroPlayBtn: {
-    backgroundColor: "#F59E0B",
+  quickPill: {
+    flexDirection: SEARCH_ROW,
+    alignItems: "center",
+    gap: 7,
+    borderWidth: 1,
+    borderRadius: 13,
     paddingHorizontal: 16,
     paddingVertical: 9,
-    borderRadius: 12,
-    flexDirection: "row-reverse",
-    alignItems: "center",
-    gap: 6,
+    flexShrink: 0,
   },
-  heroPlayText: { color: "#090A0C", fontSize: 13, fontFamily: "Cairo_800ExtraBold" },
-  heroDetailBtn: {
-    backgroundColor: "rgba(255,255,255,0.14)",
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.22)",
+  quickPillText: {
+    fontSize: 12.5,
+    lineHeight: 19,
+    fontFamily: "Cairo_700Bold",
+    includeFontPadding: true,
   },
-  heroDetailText: { color: "#fff", fontSize: 12, fontFamily: "Cairo_700Bold" },
-  heroDots: { flexDirection: "row", gap: 6, alignSelf: "center", marginTop: 4 },
-  dot: { height: 6, borderRadius: 3 },
-  dotActive: { width: 20, backgroundColor: "#F59E0B" },
-  dotInactive: { width: 6, backgroundColor: "rgba(255,255,255,0.35)" },
-  quickPills: { paddingHorizontal: 14, paddingVertical: 14, gap: 8 },
-  quickPill: {
-    flexDirection: "row-reverse",
-    alignItems: "center",
-    gap: 6,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  quickPillText: { fontSize: 12, fontFamily: "Cairo_700Bold" },
   sectionWrap: { marginBottom: 22 },
-  sectionHeader: {
-    direction: "ltr",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 14,
-    marginBottom: 10,
-  },
-  sectionTitleRow: {
-    direction: "ltr",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  sectionDot: { width: 4, height: 18, borderRadius: 2 },
-  sectionTitle: { fontSize: 16, fontFamily: "Cairo_800ExtraBold" },
-  seeAllBtn: {
-    direction: "ltr",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 2,
-  },
-  seeAllText: { color: "#F59E0B", fontSize: 12, fontFamily: "Cairo_700Bold" },
-  card: {
-    borderRadius: 16,
+  historyCard: {
+    borderRadius: 15,
     overflow: "hidden",
     borderWidth: 1,
     position: "relative",
   },
-  cardImg: { width: "100%", height: "100%" },
-  cardTopRow: {
+  histEpBadge: {
+    position: "absolute",
+    top: 7,
+    right: 7,
+    backgroundColor: "rgba(14,165,233,0.90)",
+    paddingHorizontal: 8,
+    paddingVertical: 2.5,
+    borderRadius: 8,
+  },
+  histRemBadge: {
     position: "absolute",
     top: 7,
     left: 7,
-    right: 7,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
+    backgroundColor: "rgba(9,10,12,0.80)",
+    paddingHorizontal: 8,
+    paddingVertical: 2.5,
+    borderRadius: 8,
   },
-  ratingBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
-    backgroundColor: "rgba(0,0,0,0.78)",
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
+  histEpBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 9.5,
+    lineHeight: 14,
+    fontFamily: "Cairo_700Bold",
+    includeFontPadding: true,
   },
-  ratingText: { color: "#FBBF24", fontSize: 10, fontFamily: "Cairo_700Bold" },
-  qualityTag: {
-    backgroundColor: "rgba(0,0,0,0.78)",
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  qualityTagText: { color: "#FDE68A", fontSize: 9, fontFamily: "Cairo_700Bold" },
-  cardBottom: {
+  histBottom: {
     position: "absolute",
-    bottom: 8,
-    left: 8,
-    right: 8,
-    alignItems: "flex-end",
+    left: 10,
+    right: 10,
+    bottom: 9,
     gap: 3,
   },
-  audioPill: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
-  audioPillText: { color: "#fff", fontSize: 9, fontFamily: "Cairo_700Bold" },
-  cardTitle: { color: "#fff", fontSize: 12, fontFamily: "Cairo_700Bold", textAlign: "right" },
-  cardSub: { color: "#A1A1AA", fontSize: 10, fontFamily: "Cairo_400Regular", textAlign: "right" },
+  histTitle: {
+    color: "#FFFFFF",
+    fontSize: 12.5,
+    lineHeight: 19,
+    fontFamily: "Cairo_800ExtraBold",
+    textAlign: "right",
+    includeFontPadding: true,
+  },
+  histResumeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  histPctText: {
+    color: "#38BDF8",
+    fontSize: 10,
+    fontFamily: "Cairo_700Bold",
+  },
+  histResumeLabel: {
+    color: "#E2E8F0",
+    fontSize: 10,
+    lineHeight: 15,
+    fontFamily: "Cairo_600SemiBold",
+    includeFontPadding: true,
+  },
+  histTrack: {
+    height: 3.5,
+    borderRadius: 2,
+    backgroundColor: "rgba(255,255,255,0.22)",
+    overflow: "hidden",
+    marginTop: 2,
+  },
+  histFill: {
+    height: "100%",
+    backgroundColor: "#0EA5E9",
+    borderRadius: 2,
+  },
 });

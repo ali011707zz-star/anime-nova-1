@@ -166,6 +166,7 @@ function RootLayoutNav() {
       >
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="film/[id]" options={{ headerShown: false, animation: "slide_from_bottom" }} />
+        <Stack.Screen name="film/episodes/[id]" options={{ headerShown: false, animation: "slide_from_right" }} />
         <Stack.Screen name="film/watch" options={watchScreenOptions} />
         <Stack.Screen name="stardima-title" options={{ headerShown: false, animation: "slide_from_bottom" }} />
         <Stack.Screen name="stardima-servers" options={{ headerShown: false, animation: "slide_from_right" }} />

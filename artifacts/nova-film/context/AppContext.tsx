@@ -817,7 +817,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         <View style={blockedStyles.container}>
           <Text style={blockedStyles.title}>النسخة الرسمية مطلوبة</Text>
           <Text style={blockedStyles.message}>
-            هذه النسخة غير رسمية أو معدلة. حمّل التطبيق الرسمي من موقع Anime NOVA.
+            هذه النسخة غير رسمية أو معدلة. حمّل التطبيق الرسمي من موقع NOVA FILM.
           </Text>
         </View>
       ) : remoteConfig.maintenanceMode ? (
