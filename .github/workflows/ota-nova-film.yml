@@ -88,9 +88,7 @@ jobs:
         run: |
           tar -czf nova-film-ota-stage.tar.gz \
             artifacts/nova-film/ota-dist \
-            artifacts/api-server/src/routes/otaFilm.ts \
-            artifacts/api-server/src/routes/ota.ts \
-            artifacts/api-server/src/app.ts
+            artifacts/api-server/src/routes/otaFilm.ts
           ls -lh nova-film-ota-stage.tar.gz
 
       - name: 🌐 Upload OTA payload to VPS
@@ -120,6 +118,7 @@ jobs:
             set -eu
             export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$HOME/.local/share/pnpm:$HOME/.npm-global/bin:$PATH"
             [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" || true
+
             STAGE="/tmp/nova-film-ota-${RUN_ID}"
             TARBALL="$(find "${STAGE}" -type f -name 'nova-film-ota-stage.tar.gz' | head -1)"
             test -n "${TARBALL}" && test -s "${TARBALL}"
@@ -134,11 +133,18 @@ jobs:
             rm -rf "${OTA_TARGET}"
             mv "${OTA_TARGET}.next" "${OTA_TARGET}"
 
+            # Ensure VPS app.ts is clean (restore from git if a previous copy patched extra imports)
+            if [ -d "${APP_DIR}/.git" ]; then
+              git -C "${APP_DIR}" checkout -- artifacts/api-server/src/app.ts artifacts/api-server/src/routes/ota.ts 2>/dev/null || true
+            fi
+
             NEED_REBUILD=0
             if [ ! -f "${APP_DIR}/artifacts/api-server/src/routes/otaFilm.ts" ] || \
-               ! cmp -s "${STAGE}/artifacts/api-server/src/routes/otaFilm.ts" "${APP_DIR}/artifacts/api-server/src/routes/otaFilm.ts" || \
-               ! cmp -s "${STAGE}/artifacts/api-server/src/routes/ota.ts" "${APP_DIR}/artifacts/api-server/src/routes/ota.ts" || \
-               ! cmp -s "${STAGE}/artifacts/api-server/src/app.ts" "${APP_DIR}/artifacts/api-server/src/app.ts"; then
+               ! cmp -s "${STAGE}/artifacts/api-server/src/routes/otaFilm.ts" "${APP_DIR}/artifacts/api-server/src/routes/otaFilm.ts"; then
+              NEED_REBUILD=1
+            fi
+
+            if ! grep -q "otaFilmRouter" "${APP_DIR}/artifacts/api-server/src/app.ts"; then
               NEED_REBUILD=1
             fi
 
@@ -147,10 +153,28 @@ jobs:
             fi
 
             if [ "$NEED_REBUILD" -eq 1 ]; then
-              echo "🔄 Updating api-server OTA routes..."
+              echo "🔄 Patching /api/ota-film route into VPS api-server..."
               cp "${STAGE}/artifacts/api-server/src/routes/otaFilm.ts" "${APP_DIR}/artifacts/api-server/src/routes/otaFilm.ts"
-              cp "${STAGE}/artifacts/api-server/src/routes/ota.ts" "${APP_DIR}/artifacts/api-server/src/routes/ota.ts"
-              cp "${STAGE}/artifacts/api-server/src/app.ts" "${APP_DIR}/artifacts/api-server/src/app.ts"
+              python3 - "${APP_DIR}/artifacts/api-server/src/app.ts" <<'PY'
+            import pathlib, sys
+            p = pathlib.Path(sys.argv[1])
+            s = p.read_text()
+            if "otaFilmRouter" not in s:
+                imp = 'import otaFilmRouter from "./routes/otaFilm.js";\n'
+                if 'import authTokenRouter' in s:
+                    s = s.replace('import authTokenRouter', imp + 'import authTokenRouter', 1)
+                else:
+                    s = imp + s
+                mount = '  app.use("/api/ota-film", otaFilmRouter);\n'
+                if 'app.use(authTokenRouter);' in s:
+                    s = s.replace('app.use(authTokenRouter);', 'app.use(authTokenRouter);\n' + mount.rstrip(), 1)
+                elif '// ── Mobile release gate' in s:
+                    s = s.replace('// ── Mobile release gate', mount + '  // ── Mobile release gate', 1)
+                else:
+                    raise SystemExit("Could not find authTokenRouter or Mobile release gate in app.ts")
+                p.write_text(s)
+                print("Patched app.ts with /api/ota-film")
+            PY
               cd "${APP_DIR}"
               pnpm --filter @workspace/api-server run build
               pm2 delete anime-nova-api 2>/dev/null || true
