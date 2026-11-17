@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "NOVA FILM",
-    "slug": "nova-film",
+    "name": "ANIME NOVA",
+    "slug": "anime-nova-",
     "owner": "ali011707s-team",
     "version": "1.0.9",
     "orientation": "default",
@@ -17,7 +17,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.nova.film",
+      "bundleIdentifier": "com.nova.anime",
       "backgroundColor": "#09090B",
       "infoPlist": {
         "UISupportedInterfaceOrientations": [
@@ -33,7 +33,7 @@
         "foregroundImage": "./assets/images/icon.png",
         "backgroundColor": "#09090B"
       },
-      "package": "com.nova.film",
+      "package": "com.nova.anime",
       "versionCode": 10,
       "backgroundColor": "#09090B",
       "usesCleartextTraffic": false,
@@ -93,7 +93,8 @@
           "organization": "anime-nova",
           "project": "react-native"
         }
-      ]
+      ],
+      "expo-updates"
     ],
     "experiments": {
       "typedRoutes": true,
@@ -104,10 +105,10 @@
         "projectId": "07296477-c5e8-4a47-a804-95f28b46ef7b"
       }
     },
-    "runtimeVersion": "1.0.0",
+    "runtimeVersion": "1.0.9",
     "updates": {
       "enabled": true,
-      "url": "https://animenovaa.duckdns.org/api/ota-film/manifest",
+      "url": "https://animenovaa.duckdns.org/api/ota/manifest",
       "checkAutomatically": "ON_LOAD",
       "fallbackToCacheTimeout": 0
     }

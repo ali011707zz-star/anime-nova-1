@@ -45,9 +45,9 @@ type NavItem = {
 
 const NAV_MAIN: NavItem[] = [
   { icon: "home",            label: "الرئيسية",              route: "/(tabs)",             color: "#8B5CF6" },
-  { icon: "flame",           label: "أحدث الأفلام والحلقات",          route: "/latest",             color: "#f97316" },
+  { icon: "flame",           label: "أحدث الحلقات",          route: "/latest",             color: "#f97316" },
   { icon: "search",          label: "البحث",                 route: "/(tabs)/search",      color: "#6366f1" },
-  { icon: "film",            label: "تصفح الأفلام والمسلسلات",           route: "/(tabs)/browse",      color: "#3b82f6" },
+  { icon: "grid",            label: "تصفح الأنمي",           route: "/(tabs)/browse",      color: "#3b82f6" },
   { icon: "layers",          label: "المواسم",                route: "/seasons",            color: "#f59e0b" },
   { icon: "book",            label: "المانجا",                route: "/manga",              color: "#10b981" },
   { icon: "stats-chart",     label: "الإحصائيات العالمية",   route: "/stats",              color: "#0ea5e9" },
@@ -219,7 +219,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
       <Animated.View style={[s.drawer, tvMode && s.tvDrawer, { width: drawerWidth, transform: [{ translateX: slideX }], paddingTop: topPad, backgroundColor: colors.surface, borderLeftColor: colors.border }]}>
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
 
-          {/* ── Logo header (matches Home screen | NOVA FILM logo) ── */}
+          {/* ── Logo header (matches Home screen | ANIME NOVA logo) ── */}
           <View style={[s.logoRow, tvMode && s.tvLogoRow, { borderBottomColor: colors.border, flexDirection: ROW_RTL, justifyContent: "space-between" }]}>
             <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 9 }}>
               <View style={[s.logoAccent, { backgroundColor: colors.homeAccent }]} />

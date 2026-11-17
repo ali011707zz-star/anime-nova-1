@@ -1,0 +1,115 @@
+{
+  "expo": {
+    "name": "NOVA FILM",
+    "slug": "nova-film",
+    "owner": "ali011707s-team",
+    "version": "1.0.9",
+    "orientation": "default",
+    "icon": "./assets/images/icon.png",
+    "scheme": "com.googleusercontent.apps.413058110781-cbielvl5jhrf2bje392f8l9fnulvegp7",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#090A0C",
+    "newArchEnabled": false,
+    "splash": {
+      "image": "./assets/images/icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#090A0C"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.nova.film",
+      "backgroundColor": "#090A0C",
+      "infoPlist": {
+        "UISupportedInterfaceOrientations": [
+          "UIInterfaceOrientationPortrait",
+          "UIInterfaceOrientationLandscapeLeft",
+          "UIInterfaceOrientationLandscapeRight"
+        ]
+      }
+    },
+    "android": {
+      "googleServicesFile": "./google-services.json",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#090A0C"
+      },
+      "package": "com.nova.film",
+      "versionCode": 10,
+      "backgroundColor": "#090A0C",
+      "usesCleartextTraffic": false,
+      "permissions": [
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
+        "android.permission.WAKE_LOCK",
+        "android.permission.DOWNLOAD_WITHOUT_NOTIFICATION",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.REQUEST_INSTALL_PACKAGES"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/images/icon.png"
+    },
+    "plugins": [
+      "./plugins/withAndroidTv",
+      "./plugins/withAndroidImmersiveBars",
+      "./plugins/withAndroidBroadcastGuard",
+      "./plugins/withAndroidAnrGuard",
+      [
+        "expo-router",
+        {
+          "origin": "https://animenovaa.duckdns.org"
+        }
+      ],
+      "expo-font",
+      "expo-web-browser",
+      "expo-notifications",
+      "expo-video",
+      "expo-screen-orientation",
+      "expo-brightness",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "يسمح هذا الإذن بحفظ لقطات المشاهدة في معرض الصور.",
+          "savePhotosPermission": "يسمح هذا الإذن بحفظ لقطات المشاهدة في معرض الصور."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "تسمح هذه الأذونات للتطبيق بالوصول إلى صورك.",
+          "cameraPermission": "تسمح هذه الأذونات للتطبيق باستخدام الكاميرا."
+        }
+      ],
+      [
+        "@sentry/react-native/expo",
+        {
+          "organization": "anime-nova",
+          "project": "react-native"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "baseUrl": "/nova-film"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "07296477-c5e8-4a47-a804-95f28b46ef7b"
+      }
+    },
+    "runtimeVersion": "1.0.0",
+    "updates": {
+      "enabled": false,
+      "url": "https://animenovaa.duckdns.org/api/ota-film/manifest",
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0
+    }
+  }
+}

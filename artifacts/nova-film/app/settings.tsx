@@ -1,0 +1,3263 @@
+import { CURRENT_APP_VERSION, openAppUpdateModal } from "@/components/AppUpdateModal";
+import { Ionicons } from "@expo/vector-icons";
+import * as Google from "expo-auth-session/providers/google";
+import { makeRedirectUri } from "expo-auth-session";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import * as WebBrowser from "expo-web-browser";
+import { LinearGradient } from "expo-linear-gradient";
+import * as ImagePicker from "expo-image-picker";
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import {
+  Alert, KeyboardAvoidingView, Linking, Modal as RNModal, BackHandler, Platform, Pressable as NativePressable, ScrollView,
+  Image, Share, StyleSheet, Switch, Text, TextInput, View, ActivityIndicator, I18nManager,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { isTvDevice, TvPressable, tvFocusStyle, useTvModeOverride, type TvModeOverride } from "@/utils/tv";
+
+const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useColors } from "@/hooks/useColors";
+import paletteColors from "@/constants/colors";
+import { useApp } from "@/context/AppContext";
+import type { MobileUser } from "@/context/AppContext";
+import { getBaseUrl } from "@/utils/baseUrl";
+import { secureFetch, setUserAuthToken } from "@/utils/secureApi";
+import { CrashEntry, getCrashLog } from "@/utils/crashLogger";
+import {
+  getPushNotificationsStatus,
+  setPushNotificationsEnabled,
+  registerPushNotifications,
+} from "@/utils/pushNotifications";
+
+const THEMES: { label: string; value: string; dot: string; desc: string }[] = [
+  { label: "أبيض", value: "white", dot: paletteColors.white.background, desc: "خلفيات عاجية مريحة ونصوص واضحة" },
+  { label: "أسود", value: "black", dot: paletteColors.black.background, desc: "خلفيات داكنة وأزرار بنفسجية هادئة" },
+];
+
+type SettingsPressableProps = React.ComponentProps<typeof TvPressable>;
+
+function Pressable(props: SettingsPressableProps) {
+  if (isTvDevice()) {
+    return <TvPressable {...props} />;
+  }
+  return <NativePressable {...(props as React.ComponentProps<typeof NativePressable>)} />;
+}
+
+function Modal({
+  visible = true,
+  onRequestClose,
+  children,
+  ...rest
+}: React.ComponentProps<typeof RNModal>) {
+  const tvMode = isTvDevice();
+  useEffect(() => {
+    if (!tvMode || !visible || !onRequestClose) return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      onRequestClose({} as any);
+      return true;
+    });
+    return () => sub.remove();
+  }, [tvMode, visible, onRequestClose]);
+
+  if (!visible) return null;
+  if (tvMode) {
+    return (
+      <View
+        testID="nova-tv-modal-root"
+        style={[
+          StyleSheet.absoluteFill,
+          { zIndex: 9999, elevation: 9999 },
+        ]}
+      >
+        {children}
+      </View>
+    );
+  }
+  return (
+    <RNModal visible={visible} onRequestClose={onRequestClose} {...rest}>
+      {children}
+    </RNModal>
+  );
+}
+
+const REPORT_TYPES = [
+  { id: "bug",        label: "خلل تقني",     icon: "bug" as const,        color: "#f87171",   bg: "rgba(239,68,68,0.12)",    border: "rgba(239,68,68,0.25)" },
+  { id: "suggestion", label: "اقتراح",        icon: "bulb" as const,        color: "#fbbf24",   bg: "rgba(251,191,36,0.10)",   border: "rgba(251,191,36,0.22)" },
+  { id: "content",    label: "محتوى مفقود",   icon: "film" as const,        color: "#a78bfa",   bg: "rgba(139,92,246,0.12)",   border: "rgba(139,92,246,0.25)" },
+  { id: "other",      label: "أخرى",          icon: "chatbubble" as const,  color: "#38bdf8",   bg: "rgba(56,189,248,0.10)",   border: "rgba(56,189,248,0.22)" },
+];
+const OFFICIAL_SITE = "https://animenovaa.duckdns.org/";
+
+/* ── Toast ── */
+function useToast() {
+  const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
+  const show = (msg: string, ok = true) => {
+    setToast({ msg, ok });
+    setTimeout(() => setToast(null), 2400);
+  };
+  return { toast, show };
+}
+
+function ToastBanner({ toast }: { toast: { msg: string; ok: boolean } | null }) {
+  const colors = useColors();
+  if (!toast) return null;
+  return (
+    <View style={[ts.toast, { backgroundColor: toast.ok ? "rgba(16,185,129,0.18)" : "rgba(239,68,68,0.18)", borderColor: toast.ok ? "rgba(16,185,129,0.38)" : "rgba(239,68,68,0.38)" }]}>
+      <Ionicons name={toast.ok ? "checkmark-circle" : "close-circle"} size={15} color={toast.ok ? colors.success : colors.destructive} />
+      <Text style={[ts.toastText, { color: colors.textPrimary }]}>{toast.msg}</Text>
+    </View>
+  );
+}
+
+/* ── Confirm Sheet ── */
+function ConfirmSheet({ open, title, desc, confirmLabel = "تأكيد", danger = false, onConfirm, onCancel }: {
+  open: boolean; title: string; desc?: string; confirmLabel?: string;
+  danger?: boolean; onConfirm: () => void; onCancel: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <Modal transparent animationType="slide" onRequestClose={onCancel}>
+      <Pressable style={ts.overlay} onPress={onCancel} focusable={false} />
+      <View style={ts.bottomSheet}>
+        <LinearGradient
+          colors={["transparent", danger ? "rgba(239,68,68,0.0)" : "rgba(124,58,237,0.0)"]}
+          style={ts.sheetAccentLine}
+        />
+        <View style={[ts.sheetAccentBar, { backgroundColor: danger ? "#ef4444" : "#7C3AED" }]} />
+        <View style={ts.sheetHandle} />
+        <Text style={ts.sheetTitle}>{title}</Text>
+        {desc ? <Text style={ts.sheetDesc}>{desc}</Text> : null}
+        <View style={ts.sheetBtns}>
+          <Pressable onPress={onCancel} style={ts.sheetCancelBtn}>
+            <Text style={ts.sheetCancelText}>إلغاء</Text>
+          </Pressable>
+          <Pressable
+            testID="nova-tv-preferred-focus"
+            hasTVPreferredFocus={isTvDevice() && open}
+            onPress={() => { onConfirm(); onCancel(); }}
+            style={[ts.sheetConfirmBtn, danger && ts.sheetConfirmDanger]}
+          >
+            <Text style={[ts.sheetConfirmText, danger && { color: "#fca5a5" }]}>{confirmLabel}</Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+/* ── Report Sheet ── */
+function ReportSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const colors = useColors();
+  const [type, setType] = useState("bug");
+  const [msg, setMsg] = useState("");
+  const [status, setStatus] = useState<"idle" | "sending" | "ok" | "err">("idle");
+  const [errMsg, setErrMsg] = useState("");
+
+  useEffect(() => {
+    if (open) { setType("bug"); setMsg(""); setStatus("idle"); setErrMsg(""); }
+  }, [open]);
+
+  const send = async () => {
+    if (!msg.trim()) return;
+    setStatus("sending");
+    try {
+      const r = await fetch(`${getBaseUrl()}/api/report`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type, message: msg.trim(), page: "mobile/settings" }),
+      });
+      const d = await r.json();
+      if (d.ok) setStatus("ok");
+      else { setErrMsg(d.error || "فشل الإرسال"); setStatus("err"); }
+    } catch {
+      setErrMsg("تعذّر الاتصال بالخادم"); setStatus("err");
+    }
+  };
+
+  if (!open) return null;
+
+  return (
+    <Modal transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={ts.overlay} onPress={onClose} focusable={false} />
+      <View style={[ts.bottomSheet, { maxHeight: "92%" }]}>
+        <View style={[ts.sheetAccentBar, { backgroundColor: "#7C3AED" }]} />
+        <View style={ts.sheetHandle} />
+        {/* Header */}
+        <View style={ts.reportHeader}>
+          <Pressable onPress={onClose} style={ts.reportCloseBtn}>
+            <Ionicons name="close" size={16} color="rgba(255,255,255,0.5)" />
+          </Pressable>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <View style={[ts.reportIconWrap, { backgroundColor: colors.accentSurface }]}>
+              <Ionicons name="alert-circle" size={16} color="#c4b5fd" />
+            </View>
+            <Text style={ts.reportTitle}>التواصل معنا</Text>
+          </View>
+          <View style={{ width: 36 }} />
+        </View>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 20 }} showsVerticalScrollIndicator={false}>
+          {status === "ok" ? (
+            <View style={{ alignItems: "center", gap: 16, paddingVertical: 32 }}>
+              <View style={ts.successIcon}>
+                <Ionicons name="checkmark-circle" size={40} color="#34d399" />
+              </View>
+              <Text style={ts.successTitle}>تم الإرسال! 🎉</Text>
+              <Text style={ts.successSub}>وصلت رسالتك بنجاح · سنرد عليك في أقرب وقت</Text>
+              <Pressable onPress={onClose} style={ts.successBtn}>
+                <Text style={ts.successBtnText}>حسناً</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <>
+              {/* Type selector */}
+              <Text style={ts.reportFieldLabel}>نوع الرسالة</Text>
+              <View style={ts.reportTypeGrid}>
+                {REPORT_TYPES.map(t => (
+                  <Pressable
+                    key={t.id}
+                    onPress={() => setType(t.id)}
+                    style={[ts.reportTypeBtn,
+                      { backgroundColor: t.bg, borderColor: type === t.id ? "rgba(139,92,246,0.55)" : t.border }
+                    ]}
+                  >
+                    <Ionicons name={t.icon} size={14} color={type === t.id ? "#c4b5fd" : t.color} />
+                    <Text style={[ts.reportTypeBtnText, { color: type === t.id ? "#c4b5fd" : "rgba(255,255,255,0.7)" }]}>{t.label}</Text>
+                    {type === t.id && <View style={ts.reportTypeDot} />}
+                  </Pressable>
+                ))}
+              </View>
+
+              {/* Textarea */}
+              <Text style={[ts.reportFieldLabel, { marginTop: 16 }]}>رسالتك</Text>
+              <TextInput
+                value={msg}
+                onChangeText={setMsg}
+                multiline
+                numberOfLines={5}
+                textAlignVertical="top"
+                placeholder={
+                  type === "bug" ? "صف المشكلة التي واجهتها بالتفصيل…" :
+                  type === "suggestion" ? "شاركنا اقتراحك أو فكرتك…" :
+                  type === "content" ? "اذكر اسم الأنمي أو الحلقة المفقودة…" :
+                  "اكتب رسالتك هنا…"
+                }
+                placeholderTextColor="rgba(255,255,255,0.2)"
+                style={[ts.reportTextarea, { borderColor: msg.trim() ? "rgba(139,92,246,0.4)" : "rgba(255,255,255,0.08)" }]}
+              />
+              <Text style={[ts.reportCharCount, { color: msg.length > 900 ? "#f87171" : "rgba(255,255,255,0.2)" }]}>{msg.length}/1000</Text>
+
+              {status === "err" && (
+                <View style={ts.reportError}>
+                  <Ionicons name="close-circle" size={14} color="#f87171" />
+                  <Text style={ts.reportErrorText}>{errMsg}</Text>
+                </View>
+              )}
+
+              <Pressable
+                onPress={send}
+                disabled={status === "sending" || !msg.trim()}
+                style={[ts.reportSendBtn,
+                  !msg.trim() && { backgroundColor: "rgba(255,255,255,0.05)", borderColor: "rgba(255,255,255,0.06)" }
+                ]}
+              >
+                {status === "sending" ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <>
+                    <Ionicons name="send" size={16} color={msg.trim() ? "#fff" : "rgba(255,255,255,0.25)"} />
+                    <Text style={[ts.reportSendText, !msg.trim() && { color: "rgba(255,255,255,0.25)" }]}>إرسال الرسالة</Text>
+                  </>
+                )}
+              </Pressable>
+              <Text style={ts.reportNote}>سيتم إرسال رسالتك مباشرة عبر تيليجرام</Text>
+            </>
+          )}
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
+/* ── Section Header ── */
+function SectionHeader({ title, icon }: { title: string; icon: string }) {
+  const colors = useColors();
+  return (
+    <View style={ts.sectionHeader}>
+      <View style={[ts.sectionLine, { backgroundColor: colors.border }]} />
+      <Text style={[ts.sectionTitle, { color: colors.textSecondary }]}>{icon} {title}</Text>
+      <View style={[ts.sectionLine, { backgroundColor: colors.border }]} />
+    </View>
+  );
+}
+/* ── Card ── */
+function Card({ children }: { children: React.ReactNode }) {
+  const colors = useColors();
+  return (
+    <View style={[ts.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+      {children}
+    </View>
+  );
+}
+
+/* ── Nav Row ── */
+function NavRow({ icon, iconColor, iconBg, label, sub, badge, onPress, external }: {
+  icon: keyof typeof Ionicons.glyphMap;
+  iconColor: string; iconBg: string;
+  label: string; sub?: string; badge?: string;
+  onPress?: () => void; external?: boolean;
+}) {
+  const colors = useColors();
+  return (
+    <TvPressable onPress={onPress} style={[ts.navRow, { borderBottomColor: colors.border }]}>
+      <View style={[ts.navIcon, { backgroundColor: iconBg, borderColor: colors.border }]}>
+        <Ionicons name={icon} size={16} color={iconColor} />
+      </View>
+      <View style={ts.navText}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <Text style={[ts.navLabel, { color: colors.textPrimary }]}>{label}</Text>
+          {badge && <View style={ts.navBadge}><Text style={[ts.navBadgeText, { color: colors.accent }]}>{badge}</Text></View>}
+        </View>
+        {sub && <Text style={[ts.navSub, { color: colors.textSecondary }]}>{sub}</Text>}
+      </View>
+      <Ionicons name={external ? "open" : "chevron-back"} size={14} color={colors.textMuted} />
+    </TvPressable>
+  );
+}
+
+/* ── Danger Row ── */
+function DangerRow({ label, sub, onPress }: { label: string; sub?: string; onPress: () => void }) {
+  const colors = useColors();
+  return (
+    <TvPressable onPress={onPress} style={[ts.dangerRow, { borderBottomColor: colors.border }]}>
+      <View style={ts.dangerIcon}>
+        <Ionicons name="trash" size={16} color={colors.destructive} />
+      </View>
+      <View style={ts.navText}>
+        <Text style={[ts.dangerLabel, { color: colors.destructive }]}>{label}</Text>
+        {sub && <Text style={[ts.dangerSub, { color: colors.textSecondary }]}>{sub}</Text>}
+      </View>
+      <Ionicons name="chevron-back" size={14} color={colors.destructive} />
+    </TvPressable>
+  );
+}
+
+/* ══════════════════════ AUTH TYPES ══════════════════════ */
+type AuthFlow = "login" | "signup" | "verify";
+const AUTH_KEY = "nova-mobile-user";
+// Android OAuth clients use Google's reserved native redirect scheme. A
+// generic app scheme (for example nova-mobile://) is not a registered
+// redirect for the Android client and Google rejects it with invalid_request
+// before the app receives any token.
+// Hardcoded known valid client IDs so missing env vars can NEVER crash Android runtime
+const HARDCODED_GOOGLE_ANDROID_CLIENT_ID = "413058110781-cbielvl5jhrf2bje392f8l9fnulvegp7.apps.googleusercontent.com";
+const HARDCODED_GOOGLE_WEB_CLIENT_ID = "413058110781-r8otf4jg4v1e7akp4ujii01brj3hv8kg.apps.googleusercontent.com";
+
+const GOOGLE_NATIVE_CLIENT_ID =
+  (process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || "").trim() ||
+  HARDCODED_GOOGLE_ANDROID_CLIENT_ID;
+const GOOGLE_NATIVE_SCHEME = `com.googleusercontent.apps.${GOOGLE_NATIVE_CLIENT_ID.replace(
+  /\.apps\.googleusercontent\.com$/,
+  "",
+)}`;
+const GOOGLE_REDIRECT_URI = makeRedirectUri({
+  // Google Android OAuth clients use this exact native callback path.
+  // Using /oauthredirect causes a redirect mismatch even when the scheme
+  // itself is correct.
+  native: `${GOOGLE_NATIVE_SCHEME}:/oauth2redirect/google`,
+});
+WebBrowser.maybeCompleteAuthSession();
+
+function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+  timeoutMs = 20_000,
+): Promise<Response> {
+  // AbortSignal.timeout is not available in every Hermes/Android runtime.
+  // Using an explicit controller keeps OAuth from failing before fetch is
+  // even called, which previously surfaced as "تعذّر الوصول للخادم".
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(input, { ...init, signal: init.signal || controller.signal }).finally(() => {
+    clearTimeout(timer);
+  });
+}
+
+class AuthErrorBoundary extends React.Component<
+  { onClose: () => void; children: React.ReactNode },
+  { hasError: boolean; errorMsg: string }
+> {
+  state = { hasError: false, errorMsg: "" };
+  static getDerivedStateFromError(error: any) {
+    return { hasError: true, errorMsg: String(error?.message || error) };
+  }
+  componentDidCatch(error: any, info: any) {
+    console.warn("[AuthErrorBoundary] caught:", error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <Modal visible transparent animationType="fade" onRequestClose={this.props.onClose}>
+          <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.7)", justifyContent: "center", alignItems: "center", padding: 20 }}>
+            <View style={{ backgroundColor: "#1e1e2d", padding: 24, borderRadius: 16, maxWidth: 360, width: "100%", alignItems: "center", gap: 12 }}>
+              <Text style={{ color: "#fff", fontSize: 16, fontFamily: "Cairo_700Bold", textAlign: "center" }}>تعذر فتح تسجيل الدخول</Text>
+              <Text style={{ color: "#a1a1aa", fontSize: 12, fontFamily: "Cairo_400Regular", textAlign: "center" }}>{this.state.errorMsg}</Text>
+              <Pressable onPress={this.props.onClose} style={{ marginTop: 8, paddingHorizontal: 20, paddingVertical: 10, backgroundColor: "#7c3aed", borderRadius: 10 }}>
+                <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold" }}>إغلاق</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+/* ── Auth Sheet ── */
+function AuthSheet(props: {
+  open: boolean; onClose: () => void; onLogin: (u: MobileUser) => void; onLinkDevice: () => void;
+}) {
+  if (!props.open) return null;
+  return (
+    <AuthErrorBoundary onClose={props.onClose}>
+      <AuthSheetInner {...props} />
+    </AuthErrorBoundary>
+  );
+}
+
+function AuthSheetInner({ open, onClose, onLogin, onLinkDevice }: {
+  open: boolean; onClose: () => void; onLogin: (u: MobileUser) => void; onLinkDevice: () => void;
+}) {
+  const GOOGLE_ONLY = true;
+  const [flow, setFlow] = useState<AuthFlow>("login");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
+  const [code, setCode] = useState("");
+  const [showPass, setShowPass] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const handledGoogleResponse = useRef<string | null>(null);
+  useEffect(() => {
+    if (open) { setFlow("login"); setEmail(""); setPassword(""); setName(""); setCode(""); setError(""); setShowPass(false); setResendCooldown(0); }
+  }, [open]);
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const t = setInterval(() => setResendCooldown(c => Math.max(0, c - 1)), 1000);
+    return () => clearInterval(t);
+  }, [resendCooldown]);
+
+  const base = getBaseUrl();
+  const googleWebClientId = (process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || "").trim() || HARDCODED_GOOGLE_WEB_CLIENT_ID;
+  const googleAndroidClientId = (process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || "").trim() || GOOGLE_NATIVE_CLIENT_ID || HARDCODED_GOOGLE_ANDROID_CLIENT_ID;
+  const googleIosClientId = (process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || "").trim() || HARDCODED_GOOGLE_WEB_CLIENT_ID;
+  const [googleRequest, googleResponse, promptGoogleAsync] = Google.useAuthRequest({
+    androidClientId: googleAndroidClientId,
+    iosClientId: googleIosClientId,
+    webClientId: googleWebClientId,
+    redirectUri: GOOGLE_REDIRECT_URI,
+    usePKCE: true,
+    scopes: ["openid", "profile", "email"],
+    selectAccount: true,
+  });
+
+  const exchangeGoogleCode = useCallback(async (code: string): Promise<string> => {
+    const codeVerifier = (googleRequest as any)?.codeVerifier;
+    if (!codeVerifier) throw new Error("Google OAuth code verifier missing");
+    const clientId = Platform.OS === "android"
+      ? googleAndroidClientId
+      : Platform.OS === "ios"
+        ? googleIosClientId
+        : googleWebClientId;
+    if (!clientId) throw new Error("Google OAuth client ID missing");
+
+    const tokenResponse = await fetchWithTimeout("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: clientId,
+        code,
+        code_verifier: codeVerifier,
+        redirect_uri: GOOGLE_REDIRECT_URI,
+        grant_type: "authorization_code",
+      }).toString(),
+    });
+    const tokenData = await tokenResponse.json().catch(() => ({}));
+    if (!tokenResponse.ok || !tokenData.access_token) {
+      console.warn("[google-auth] code exchange failed", {
+        status: tokenResponse.status,
+        error: tokenData.error,
+        description: tokenData.error_description,
+      });
+      throw new Error(tokenData.error_description || tokenData.error || "Google code exchange failed");
+    }
+    return String(tokenData.access_token);
+  }, [googleAndroidClientId, googleIosClientId, googleRequest, googleWebClientId]);
+
+  const saveGoogleUser = useCallback(async (accessToken: string) => {
+    setLoading(true);
+    setError("");
+    try {
+      const r = await fetchWithTimeout(`${base}/api/auth/google/token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accessToken }),
+        credentials: "include",
+      });
+      const d = await r.json();
+      if (!r.ok || !d.id) {
+        setError(d.error || "فشل تسجيل الدخول بحساب Google");
+        return;
+      }
+      const u: MobileUser = {
+        email: d.email || "",
+        displayName: d.displayName || d.username || d.email?.split("@")[0] || "مستخدم",
+        id: String(d.id),
+        username: d.username,
+        avatarColor: d.avatarColor ?? 0,
+        profileImageUrl: d.profileImageUrl || null,
+      };
+      await setUserAuthToken(d.authToken);
+      await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(u));
+      void registerPushNotifications();
+      onLogin(u);
+      onClose();
+    } catch {
+      setError("تعذّر الوصول للخادم");
+    } finally {
+      setLoading(false);
+    }
+  }, [base, onClose, onLogin]);
+
+  useEffect(() => {
+    if (!googleResponse) return;
+    const responseKey = JSON.stringify(googleResponse);
+    if (handledGoogleResponse.current === responseKey) return;
+    handledGoogleResponse.current = responseKey;
+    if (googleResponse.type !== "success") {
+      if (googleResponse.type === "error") {
+        console.warn("[google-auth] OAuth response error", {
+          error: googleResponse.error?.code,
+          description: googleResponse.error?.description,
+          paramKeys: Object.keys(googleResponse.params || {}),
+        });
+        setError(googleResponse.error?.description || "تعذّر تسجيل الدخول عبر Google. حاول مرة أخرى.");
+      } else if (googleResponse.type === "cancel" || googleResponse.type === "dismiss") {
+        console.info("[google-auth] OAuth flow cancelled", { type: googleResponse.type });
+        setError("تم إلغاء تسجيل الدخول عبر Google.");
+      }
+      return;
+    }
+    const accessToken = googleResponse.authentication?.accessToken;
+    if (accessToken) {
+      void saveGoogleUser(accessToken).catch((error) => {
+        console.warn("[google-auth] native token handling error", {
+          message: error instanceof Error ? error.message : String(error),
+        });
+        setError("تعذّر إكمال تسجيل الدخول عبر Google. حاول مرة أخرى.");
+      });
+      return;
+    }
+
+    const code = (googleResponse.params as Record<string, string> | undefined)?.code;
+    if (!code) {
+      console.warn("[google-auth] OAuth success without authorization code", {
+        responseType: googleResponse.type,
+        params: Object.keys(googleResponse.params || {}),
+        hasAuthentication: !!googleResponse.authentication,
+      });
+      setError("لم يصل رمز الدخول من Google، حاول مرة أخرى");
+      return;
+    }
+    exchangeGoogleCode(code)
+      .then(saveGoogleUser)
+      .catch((error) => {
+        console.warn("[google-auth] OAuth exchange error", {
+          message: error instanceof Error ? error.message : String(error),
+        });
+        setError("تعذّر إكمال تسجيل الدخول عبر Google. تحقق من إعدادات OAuth ثم حاول مرة أخرى.");
+      });
+  }, [exchangeGoogleCode, googleResponse, saveGoogleUser]);
+
+  const tvMode = isTvDevice();
+
+  const handleGoogleLogin = async () => {
+    if (tvMode) {
+      onLinkDevice();
+      return;
+    }
+    if (!googleRequest) {
+      setError("تسجيل الدخول بـ Google غير مهيأ لهذه النسخة");
+      return;
+    }
+    setError("");
+    try {
+      await promptGoogleAsync();
+    } catch {
+      setError("تعذّر فتح تسجيل الدخول عبر Google. حاول مرة أخرى.");
+    }
+  };
+
+  const handleLogin = async () => {
+    if (!email.trim() || !password.trim()) { setError("يرجى تعبئة جميع الحقول"); return; }
+    setLoading(true); setError("");
+    try {
+      const r = await fetch(`${base}/api/auth/signin`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
+        credentials: "include",
+      });
+      const d = await r.json();
+      if (!r.ok) { setError(d.error || "بيانات غير صحيحة"); }
+      else {
+        const u: MobileUser = { email: d.email || email, displayName: d.displayName || d.username || email.split("@")[0], id: d.id || "" };
+        await setUserAuthToken(d.authToken || null);
+        await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(u));
+        void registerPushNotifications();
+        onLogin(u); onClose();
+      }
+    } catch { setError("تعذّر الوصول للخادم"); }
+    setLoading(false);
+  };
+
+  const handleSendCode = async () => {
+    if (!email.trim()) { setError("أدخل بريدك الإلكتروني أولاً"); return; }
+    if (password.length < 6) { setError("كلمة المرور 6 أحرف على الأقل"); return; }
+    setLoading(true); setError("");
+    try {
+      const r = await fetch(`${base}/api/auth/send-verify-code`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim().toLowerCase(), type: "signup" }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setError(d.error || "حدث خطأ"); }
+      else { setFlow("verify"); setResendCooldown(60); }
+    } catch { setError("تعذّر الوصول للخادم"); }
+    setLoading(false);
+  };
+
+  const handleResendCode = async () => {
+    if (resendCooldown > 0 || loading) return;
+    setLoading(true); setError("");
+    try {
+      const r = await fetch(`${base}/api/auth/send-verify-code`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim().toLowerCase(), type: "signup" }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setError(d.error || "حدث خطأ"); }
+      else { setResendCooldown(60); }
+    } catch { setError("تعذّر الوصول للخادم"); }
+    setLoading(false);
+  };
+
+  const handleSignup = async () => {
+    if (code.length < 6) { setError("أدخل كود التحقق المكوّن من 6 أرقام"); return; }
+    setLoading(true); setError("");
+    try {
+      const r = await fetch(`${base}/api/auth/signup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim().toLowerCase(), password, displayName: name.trim() || undefined, verifyCode: code }),
+        credentials: "include",
+      });
+      const d = await r.json();
+      if (!r.ok) { setError(d.error || "حدث خطأ في إنشاء الحساب"); }
+      else {
+        const u: MobileUser = { email: d.email || email, displayName: d.displayName || d.username || name || email.split("@")[0], id: d.id || "" };
+        await setUserAuthToken(d.authToken || null);
+        await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(u));
+        void registerPushNotifications();
+        onLogin(u); onClose();
+      }
+    } catch { setError("تعذّر الوصول للخادم"); }
+    setLoading(false);
+  };
+
+  const isLogin = flow === "login";
+  const isVerify = flow === "verify";
+
+  const colors = useColors();
+  const { theme } = useApp();
+  const isWhite = theme === "white";
+
+  const modalContent = (
+    <View
+      testID={tvMode ? "nova-tv-modal-root" : undefined}
+        style={[
+          ts.bottomSheet,
+          tvMode && {
+            position: "absolute",
+            top: 20,
+            bottom: 20,
+            left: "4%",
+            right: "4%",
+            maxWidth: 680,
+            alignSelf: "center",
+            borderRadius: 24,
+            borderWidth: 2,
+            elevation: 20,
+            zIndex: 999999,
+          },
+          {
+            paddingBottom: 0,
+            backgroundColor: isWhite ? "#FFFFFF" : "#0E0C1A",
+            borderColor: isWhite ? "#E2E8F0" : "rgba(255,255,255,0.08)",
+          },
+          tvMode && {
+            maxWidth: 580,
+            alignSelf: "center",
+            width: "92%",
+            marginBottom: 24,
+            borderRadius: 26,
+            borderWidth: 2,
+            shadowColor: "#000",
+            shadowOpacity: 0.35,
+            shadowRadius: 20,
+            elevation: 12,
+          },
+        ]}
+      >
+        <LinearGradient
+          colors={["#7C3AED", "#06B6D4"]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={[ts.sheetAccentBar, { height: 3 }]}
+        />
+        <View style={[ts.sheetHandle, isWhite && { backgroundColor: "rgba(0,0,0,0.14)" }]} />
+
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingHorizontal: 22, paddingTop: 6, paddingBottom: 40 }}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Header */}
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
+            <Pressable
+              onPress={onClose}
+              focusable={tvMode}
+              style={[
+                ts.reportCloseBtn,
+                isWhite && { backgroundColor: "#F1F5F9", borderColor: "#CBD5E1" },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="إغلاق"
+            >
+              <Ionicons name="close" size={17} color={isWhite ? "#0F172A" : "rgba(255,255,255,0.75)"} />
+            </Pressable>
+
+            <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 10 }}>
+              <View
+                style={{
+                  width: 42,
+                  height: 42,
+                  borderRadius: 14,
+                  backgroundColor: isWhite ? "rgba(124,58,237,0.12)" : "rgba(124,58,237,0.25)",
+                  borderWidth: 1.5,
+                  borderColor: isWhite ? "rgba(124,58,237,0.30)" : "rgba(139,92,246,0.45)",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Ionicons name="sparkles" size={20} color={isWhite ? "#7C3AED" : "#c4b5fd"} />
+              </View>
+              <View style={{ alignItems: "flex-end" }}>
+                <Text style={{ fontSize: 17, fontFamily: "Cairo_800ExtraBold", color: isWhite ? "#0F172A" : "#FFFFFF" }}>
+                  Anime NOVA
+                </Text>
+                <Text style={{ fontSize: 11, color: isWhite ? "#64748B" : "rgba(255,255,255,0.45)", fontFamily: "Cairo_600SemiBold" }}>
+                  تسجيل الدخول ومزامنة الأجهزة
+                </Text>
+              </View>
+            </View>
+            <View style={{ width: 36 }} />
+          </View>
+
+          {/* Benefits pills */}
+          <View
+            style={{
+              flexDirection: ROW_RTL,
+              flexWrap: "wrap",
+              gap: 8,
+              marginBottom: 18,
+              justifyContent: "center",
+            }}
+          >
+            {[
+              { icon: "tv-outline", text: "مزامنة بين الهاتف والتلفاز" },
+              { icon: "heart-outline", text: "حفظ المفضلة والسجل" },
+              { icon: "flash-outline", text: "دخول سريع وآمن" },
+            ].map((b, idx) => (
+              <View
+                key={idx}
+                style={{
+                  flexDirection: ROW_RTL,
+                  alignItems: "center",
+                  gap: 5,
+                  paddingHorizontal: 10,
+                  paddingVertical: 5,
+                  borderRadius: 20,
+                  backgroundColor: isWhite ? "#F8FAFC" : "rgba(255,255,255,0.05)",
+                  borderWidth: 1,
+                  borderColor: isWhite ? "#E2E8F0" : "rgba(255,255,255,0.08)",
+                }}
+              >
+                <Ionicons name={b.icon as any} size={13} color={isWhite ? "#7C3AED" : "#38BDF8"} />
+                <Text style={{ fontSize: 11, fontFamily: "Cairo_700Bold", color: isWhite ? "#334155" : "rgba(255,255,255,0.8)" }}>
+                  {b.text}
+                </Text>
+              </View>
+            ))}
+          </View>
+
+          {GOOGLE_ONLY && (
+            <View style={{ gap: 14 }}>
+              {/* On TV: Put the TV Link button FIRST as the primary recommended login method */}
+              {tvMode && (
+                <View style={{ gap: 10, marginBottom: 4 }}>
+                  <View style={{
+                    padding: 12,
+                    borderRadius: 14,
+                    backgroundColor: isWhite ? "rgba(2,132,199,0.12)" : "rgba(6,182,212,0.14)",
+                    borderWidth: 1.5,
+                    borderColor: isWhite ? "#0284C7" : "rgba(6,182,212,0.50)",
+                  }}>
+                    <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 7, marginBottom: 4 }}>
+                      <Ionicons name="flash" size={16} color={isWhite ? "#0284C7" : "#22d3ee"} />
+                      <Text style={{ fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: isWhite ? "#0369A1" : "#22d3ee" }}>
+                        الطريقة الموصى بها للتلفاز: ربط الحساب بالرمز
+                      </Text>
+                    </View>
+                    <Text style={{ fontSize: 11, fontFamily: "Cairo_600SemiBold", color: isWhite ? "#334155" : "rgba(255,255,255,0.72)", lineHeight: 18, textAlign: "right" }}>
+                      افتح التطبيق بهاتفك المسجّل بحساب Google ← الإعدادات ← الملف الشخصي ← «ربط جهاز جديد» ← أدخل الرمز هنا لمزامنة مفضلاتك وسجلك فوراً!
+                    </Text>
+                  </View>
+
+                  <Pressable
+                    testID="nova-tv-preferred-focus"
+                    hasTVPreferredFocus={tvMode && open}
+                    onPress={onLinkDevice}
+                    disabled={loading}
+                    focusable={tvMode}
+                    accessibilityRole="button"
+                    accessibilityLabel="ربط التلفاز بالرمز المكوّن من 6 أرقام"
+                    style={({ focused, pressed }) => [
+                      {
+                        flexDirection: ROW_RTL,
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        paddingHorizontal: 16,
+                        paddingVertical: 14,
+                        borderRadius: 16,
+                        borderWidth: 2,
+                        borderColor: isWhite ? "#0284C7" : "#06B6D4",
+                        backgroundColor: isWhite ? "#0284C7" : "#0891B2",
+                        elevation: 6,
+                      },
+                      tvFocusStyle(focused),
+                      pressed && { opacity: 0.85 },
+                    ]}
+                  >
+                    <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 10 }}>
+                      <Ionicons name="keypad" size={20} color="#FFFFFF" />
+                      <Text style={{ fontSize: 14.5, fontFamily: "Cairo_800ExtraBold", color: "#FFFFFF" }}>
+                        إدخال رمز الربط (6 أرقام) الآن
+                      </Text>
+                    </View>
+                    <Ionicons name="arrow-back" size={18} color="#FFFFFF" style={{ transform: [{ scaleX: -1 }] }} />
+                  </Pressable>
+
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginVertical: 6 }}>
+                    <View style={{ flex: 1, height: 1, backgroundColor: isWhite ? "#E2E8F0" : "rgba(255,255,255,0.10)" }} />
+                    <Text style={{ fontSize: 11, fontFamily: "Cairo_700Bold", color: isWhite ? "#94A3B8" : "rgba(255,255,255,0.40)" }}>
+                      أو الدخول المباشر بحساب Google
+                    </Text>
+                    <View style={{ flex: 1, height: 1, backgroundColor: isWhite ? "#E2E8F0" : "rgba(255,255,255,0.10)" }} />
+                  </View>
+                </View>
+              )}
+
+              {/* Google Button */}
+              <Pressable
+                onPress={handleGoogleLogin}
+                disabled={loading}
+                focusable={tvMode}
+                hasTVPreferredFocus={!tvMode && open}
+                accessibilityRole="button"
+                accessibilityLabel="المتابعة باستخدام Google"
+                style={({ focused, pressed }) => [
+                  ts.authSubmitBtn,
+                  {
+                    backgroundColor: "#FFFFFF",
+                    borderColor: isWhite ? "#CBD5E1" : "rgba(255,255,255,0.3)",
+                    borderWidth: 1.5,
+                    minHeight: 56,
+                    borderRadius: 18,
+                    shadowColor: "#000",
+                    shadowOpacity: 0.12,
+                    shadowRadius: 10,
+                    shadowOffset: { width: 0, height: 4 },
+                    elevation: 4,
+                  },
+                  tvMode && tvFocusStyle(focused),
+                  pressed && { opacity: 0.88 },
+                ]}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#111827" size="small" />
+                ) : (
+                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10 }}>
+                    <Ionicons name="logo-google" size={20} color="#EA4335" />
+                    <Text style={[ts.authSubmitText, { color: "#111827", fontSize: 15, fontFamily: "Cairo_800ExtraBold" }]}>
+                      المتابعة باستخدام Google
+                    </Text>
+                  </View>
+                )}
+              </Pressable>
+
+              {/* Error box */}
+              {!!error && (
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 8,
+                    backgroundColor: "rgba(239,68,68,0.12)",
+                    borderWidth: 1,
+                    borderColor: "rgba(239,68,68,0.30)",
+                    borderRadius: 14,
+                    paddingHorizontal: 14,
+                    paddingVertical: 10,
+                  }}
+                >
+                  <Ionicons name="alert-circle" size={17} color="#ef4444" />
+                  <Text style={{ flex: 1, fontSize: 11.5, color: "#ef4444", fontFamily: "Cairo_600SemiBold", textAlign: "right", lineHeight: 20 }}>
+                    {error}
+                  </Text>
+                </View>
+              )}
+
+              {/* Divider */}
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginVertical: 4 }}>
+                <View style={{ flex: 1, height: 1, backgroundColor: isWhite ? "#E2E8F0" : "rgba(255,255,255,0.10)" }} />
+                <Text style={{ fontSize: 11, fontFamily: "Cairo_700Bold", color: isWhite ? "#94A3B8" : "rgba(255,255,255,0.40)" }}>
+                  أو للشاشات وأجهزة التلفاز
+                </Text>
+                <View style={{ flex: 1, height: 1, backgroundColor: isWhite ? "#E2E8F0" : "rgba(255,255,255,0.10)" }} />
+              </View>
+
+              {/* TV Quick Link Card */}
+              <Pressable
+                testID={tvMode ? "nova-tv-preferred-focus" : "open-device-link-from-auth"}
+                hasTVPreferredFocus={tvMode && open}
+                onPress={onLinkDevice}
+                disabled={loading}
+                focusable={tvMode}
+                style={({ focused, pressed }) => [
+                  {
+                    flexDirection: ROW_RTL,
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    paddingHorizontal: 16,
+                    paddingVertical: 14,
+                    borderRadius: 18,
+                    borderWidth: 1.5,
+                    borderColor: isWhite ? "#0284C7" : "rgba(6,182,212,0.50)",
+                    backgroundColor: isWhite ? "rgba(2,132,199,0.08)" : "rgba(6,182,212,0.12)",
+                    opacity: loading ? 0.5 : 1,
+                  },
+                  tvMode && tvFocusStyle(focused),
+                  pressed && { opacity: 0.84 },
+                ]}
+              >
+                <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 12, flex: 1 }}>
+                  <View
+                    style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: 12,
+                      backgroundColor: isWhite ? "rgba(2,132,199,0.15)" : "rgba(6,182,212,0.22)",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Ionicons name="tv-outline" size={20} color={isWhite ? "#0284C7" : "#22d3ee"} />
+                  </View>
+                  <View style={{ flex: 1, alignItems: "flex-end" }}>
+                    <Text style={{ fontSize: 13.5, fontFamily: "Cairo_800ExtraBold", color: isWhite ? "#0369A1" : "#22d3ee" }}>
+                      لدي رمز ربط · ربط التلفاز أو الجهاز فوراً
+                    </Text>
+                    <Text style={{ fontSize: 10.5, fontFamily: "Cairo_600SemiBold", color: isWhite ? "#64748B" : "rgba(255,255,255,0.50)" }}>
+                      أدخل الرمز المكوّن من 6 أرقام لمزامنة شاشتك بنقرة واحدة
+                    </Text>
+                  </View>
+                </View>
+                <Ionicons name="chevron-back" size={17} color={isWhite ? "#0284C7" : "#22d3ee"} />
+              </Pressable>
+            </View>
+          )}
+
+           {/* Legacy email UI is intentionally hidden. The API remains compatible
+               with existing sessions and records while new access uses Google. */}
+           {!GOOGLE_ONLY && (
+           <>
+           {/* Tabs */}
+           {!isVerify && (
+            <View style={{ flexDirection: "row", gap: 4, padding: 4, borderRadius: 16, backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: "rgba(255,255,255,0.06)", marginBottom: 22 }}>
+              {(["login", "signup"] as const).map(t => (
+                <Pressable
+                  key={t}
+                  onPress={() => { setFlow(t); setError(""); }}
+                  style={[
+                    { flex: 1, paddingVertical: 10, borderRadius: 12, alignItems: "center" },
+                    flow === t && { backgroundColor: "rgba(124,58,237,0.5)", borderWidth: 1, borderColor: "rgba(139,92,246,0.30)" },
+                  ]}
+                >
+                  <Text style={{ fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: flow === t ? "#fff" : "rgba(255,255,255,0.35)" }}>
+                    {t === "login" ? "تسجيل الدخول" : "حساب جديد"}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          )}
+
+          {/* Error */}
+          {!!error && (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(239,68,68,0.10)", borderWidth: 1, borderColor: "rgba(239,68,68,0.25)", borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 16 }}>
+              <Ionicons name="alert-circle" size={14} color="#f87171" />
+              <Text style={{ fontSize: 12, fontFamily: "Cairo_400Regular", color: "#fca5a5", flex: 1, textAlign: "right" }}>{error}</Text>
+            </View>
+          )}
+
+          {/* ── Verify ── */}
+          {isVerify ? (
+            <>
+              <Text style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", fontFamily: "Cairo_400Regular", textAlign: "right", marginBottom: 12, lineHeight: 22 }}>
+                أُرسل كود تحقق إلى {email}،{"\n"}أدخل الكود المكوّن من <Text style={{ color: "#c4b5fd", fontFamily: "Cairo_700Bold" }}>6 أرقام</Text>.
+              </Text>
+              <Text style={ts.authFieldLabel}>كود التحقق</Text>
+              <TextInput
+                value={code}
+                onChangeText={v => { setCode(v.replace(/\D/g, "").slice(0, 6)); setError(""); }}
+                placeholder="• • • • • •"
+                placeholderTextColor="rgba(255,255,255,0.2)"
+                keyboardType="numeric"
+                maxLength={6}
+                style={[ts.authCodeInput, code.length === 6 && { borderColor: "rgba(139,92,246,0.50)" }]}
+              />
+              <Pressable
+                onPress={handleSignup}
+                disabled={loading || code.length < 6}
+                style={[ts.authSubmitBtn, code.length < 6 && { backgroundColor: "rgba(255,255,255,0.05)", borderColor: "rgba(255,255,255,0.06)" }]}
+              >
+                {loading ? <ActivityIndicator color="#fff" size="small" /> : (
+                  <>
+                    <Ionicons name="shield-checkmark" size={16} color="#fff" />
+                    <Text style={ts.authSubmitText}>تأكيد وإنشاء الحساب</Text>
+                  </>
+                )}
+              </Pressable>
+              <Pressable
+                onPress={handleResendCode}
+                disabled={resendCooldown > 0 || loading}
+                style={{ alignItems: "center", paddingVertical: 10 }}
+              >
+                <Text style={{ fontSize: 12, fontFamily: "Cairo_400Regular", color: resendCooldown > 0 ? "rgba(255,255,255,0.20)" : "rgba(167,139,250,0.80)" }}>
+                  {resendCooldown > 0 ? `إعادة الإرسال بعد ${resendCooldown}ث` : "لم يصلك الكود؟ إعادة الإرسال"}
+                </Text>
+              </Pressable>
+              <Pressable onPress={() => { setFlow("signup"); setError(""); }} style={{ alignItems: "center", paddingVertical: 8 }}>
+                <Text style={{ fontSize: 11, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.25)" }}>رجوع</Text>
+              </Pressable>
+            </>
+          ) : (
+            <>
+              {/* Name — signup only, FIRST (same order as web) */}
+              {!isLogin && (
+                <>
+                  <Text style={ts.authFieldLabel}>الاسم (اختياري)</Text>
+                  <View style={ts.authFieldWrap}>
+                    <Ionicons name="person" size={16} color="rgba(255,255,255,0.25)" />
+                    <TextInput
+                      value={name}
+                      onChangeText={v => { setName(v); setError(""); }}
+                      placeholder="ما اسمك؟ (اختياري)"
+                      placeholderTextColor="rgba(255,255,255,0.2)"
+                      style={ts.authFieldInput}
+                    />
+                  </View>
+                </>
+              )}
+
+              {/* Email */}
+              <Text style={ts.authFieldLabel}>البريد الإلكتروني</Text>
+              <View style={ts.authFieldWrap}>
+                <Ionicons name="mail" size={16} color="rgba(255,255,255,0.25)" />
+                <TextInput
+                  value={email}
+                  onChangeText={v => { setEmail(v); setError(""); }}
+                  placeholder="أدخل بريدك الإلكتروني"
+                  placeholderTextColor="rgba(255,255,255,0.2)"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  style={ts.authFieldInput}
+                />
+              </View>
+
+              {/* Password */}
+              <Text style={ts.authFieldLabel}>كلمة المرور</Text>
+              <View style={ts.authFieldWrap}>
+                <Pressable onPress={() => setShowPass(p => !p)}>
+                  <Ionicons name={showPass ? "eye" : "eye-off"} size={16} color="rgba(255,255,255,0.25)" />
+                </Pressable>
+                <TextInput
+                  value={password}
+                  onChangeText={v => { setPassword(v); setError(""); }}
+                  placeholder={isLogin ? "أدخل كلمة المرور" : "كلمة المرور (6 أحرف على الأقل)"}
+                  placeholderTextColor="rgba(255,255,255,0.2)"
+                  secureTextEntry={!showPass}
+                  style={ts.authFieldInput}
+                />
+              </View>
+
+              <Pressable onPress={isLogin ? handleLogin : handleSendCode} disabled={loading} style={ts.authSubmitBtn}>
+                {loading ? <ActivityIndicator color="#fff" size="small" /> : (
+                  <>
+                    <Ionicons name={isLogin ? "log-in" : "mail"} size={16} color="#fff" />
+                    <Text style={ts.authSubmitText}>{isLogin ? "تسجيل الدخول" : "إرسال كود التحقق"}</Text>
+                  </>
+                )}
+              </Pressable>
+            </>
+           )}
+           </>
+           )}
+        </ScrollView>
+      </View>
+  );
+  if (tvMode) {
+    if (!open) return null;
+    return (
+      <View style={[StyleSheet.absoluteFillObject, { backgroundColor: "rgba(0,0,0,0.85)", zIndex: 999999, elevation: 999999, justifyContent: "center", alignItems: "center" }]}>
+        <Pressable style={StyleSheet.absoluteFillObject} onPress={onClose} focusable={false} />
+        {modalContent}
+      </View>
+    );
+  }
+  return (
+    <Modal transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={ts.overlay} onPress={onClose} focusable={false} />
+      {modalContent}
+    </Modal>
+  );
+}
+
+/* ══════════════════════ PREMIUM ══════════════════════ */
+const TG_OWNER_ID = "5477879129";
+const FEATURES = [
+  { icon: "🚫", label: "مشاهدة بدون إعلانات",         desc: "استمتع بالمشاهدة دون أي انقطاع" },
+  { icon: "🎬", label: "جودة أعلى للمشاهدة",            desc: "1080p وأفضل الجودات المتاحة" },
+  { icon: "⚡", label: "سرعة تحميل أفضل",               desc: "أولوية في تحميل السيرفرات" },
+  { icon: "⏭️", label: "تخطي المقدمة والنهاية",          desc: "وفّر وقتك مع كل حلقة" },
+  { icon: "🌟", label: "تشغيل السيرفرات المميزة",        desc: "وصول حصري لأفضل مصادر البث" },
+  { icon: "🔤", label: "تحسين تجربة الترجمة",            desc: "ترجمة احترافية ومتعددة اللغات" },
+  { icon: "❤️", label: "دعم التطبيق وتحديثات أسرع",     desc: "ساعد في استمرار التطبيق مجاناً للجميع" },
+];
+
+function PremiumSheet({ open, onClose, user }: {
+  open: boolean; onClose: () => void; user: MobileUser | null;
+}) {
+  const [sent, setSent] = useState(false);
+
+  const handleSubscribe = async () => {
+    // Use the owner's Telegram user id. A username/deep-link from an old
+    // build could open Telegram Wallet or a channel instead of the account.
+    const telegramUser = `tg://user?id=${TG_OWNER_ID}`;
+    Linking.openURL(telegramUser).catch(() => {
+      // Android's tg:// scheme is the reliable account link. Keep a neutral
+      // fallback instead of sending the user to a wallet or channel.
+      Linking.openURL(`https://t.me/${TG_OWNER_ID}`).catch(() => {});
+    });
+    setSent(true);
+    setTimeout(() => setSent(false), 4000);
+  };
+
+  if (!open) return null;
+
+  return (
+    <Modal transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={ts.overlay} onPress={onClose} focusable={false} />
+      <View style={[ts.bottomSheet, { maxHeight: "92%", paddingBottom: 0 }]}>
+        <View style={[ts.sheetAccentBar, { backgroundColor: "#f59e0b" }]} />
+        <View style={ts.sheetHandle} />
+        {/* Header */}
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingBottom: 12 }}>
+          <Pressable onPress={onClose} style={ts.reportCloseBtn}>
+            <Ionicons name="close" size={16} color="rgba(255,255,255,0.5)" />
+          </Pressable>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <View style={{ width: 32, height: 32, borderRadius: 12, backgroundColor: "rgba(251,191,36,0.18)", borderWidth: 1, borderColor: "rgba(251,191,36,0.30)", alignItems: "center", justifyContent: "center" }}>
+              <Ionicons name="ribbon" size={16} color="#fbbf24" />
+            </View>
+            <Text style={{ fontSize: 17, fontFamily: "Cairo_800ExtraBold", color: "#fcd34d" }}>Nova Premium</Text>
+          </View>
+          <View style={{ backgroundColor: "rgba(251,191,36,0.15)", borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4, borderWidth: 1, borderColor: "rgba(251,191,36,0.28)" }}>
+            <Text style={{ fontSize: 9, fontFamily: "Cairo_800ExtraBold", color: "#fbbf24" }}>⭐ حصري</Text>
+          </View>
+        </View>
+
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 44 }}>
+          {/* Hero */}
+          <View style={ts.premiumHeroCard}>
+            <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 12 }}>
+              <View style={{ backgroundColor: "rgba(251,191,36,0.15)", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: "rgba(251,191,36,0.30)" }}>
+                <Text style={{ fontSize: 10, fontFamily: "Cairo_800ExtraBold", color: "#fde68a" }}>Premium Subscription ⭐</Text>
+              </View>
+              <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: "rgba(251,191,36,0.20)", borderWidth: 1, borderColor: "rgba(251,191,36,0.35)", alignItems: "center", justifyContent: "center" }}>
+                <Ionicons name="ribbon" size={22} color="#fbbf24" />
+              </View>
+            </View>
+            <Text style={{ fontSize: 20, fontFamily: "Cairo_800ExtraBold", color: "#fcd34d", marginBottom: 6 }}>Nova Premium</Text>
+            <Text style={{ fontSize: 12, color: "rgba(253,224,71,0.60)", fontFamily: "Cairo_400Regular", lineHeight: 20, marginBottom: 14 }}>
+              احصل على تجربة مشاهدة أفضل بدون قيود مع مزايا حصرية للمشتركين.
+            </Text>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+              {["بدون إعلانات", "دعم التطبيق", "مميزات حصرية", "جودة أعلى"].map(tag => (
+                <View key={tag} style={{ backgroundColor: "rgba(251,191,36,0.12)", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: "rgba(251,191,36,0.20)" }}>
+                  <Text style={{ fontSize: 9.5, fontFamily: "Cairo_800ExtraBold", color: "rgba(253,224,71,0.70)" }}>{tag}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+
+          {/* One simple monthly plan */}
+          <View style={{ borderRadius: 18, padding: 16, marginBottom: 16, backgroundColor: "rgba(251,191,36,0.10)", borderWidth: 1, borderColor: "rgba(251,191,36,0.32)", flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+            <View>
+              <Text style={{ fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "right" }}>الاشتراك الشهري</Text>
+              <Text style={{ fontSize: 10, color: "rgba(255,255,255,0.48)", fontFamily: "Cairo_400Regular", textAlign: "right", marginTop: 3 }}>باقة Premium الوحيدة</Text>
+            </View>
+            <View style={{ alignItems: "center" }}>
+              <Text style={{ fontSize: 25, fontFamily: "Cairo_800ExtraBold", color: "#fcd34d" }}>1.99$</Text>
+              <Text style={{ fontSize: 9, color: "rgba(253,224,71,0.65)", fontFamily: "Cairo_700Bold" }}>شهرياً</Text>
+            </View>
+          </View>
+
+          {/* Features */}
+          <View style={ts.premiumFeaturesCard}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 14 }}>
+              <Ionicons name="sparkles" size={14} color="#fbbf24" />
+              <Text style={{ fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.85)" }}>المميزات الحصرية</Text>
+            </View>
+            {FEATURES.map((f, i) => (
+              <View key={f.label} style={{ flexDirection: "row", alignItems: "center", gap: 14, paddingVertical: 12, borderTopWidth: i === 0 ? 0 : StyleSheet.hairlineWidth, borderTopColor: "rgba(255,255,255,0.04)" }}>
+                <View style={{ width: 36, height: 36, borderRadius: 12, backgroundColor: "rgba(251,191,36,0.10)", borderWidth: 1, borderColor: "rgba(251,191,36,0.16)", alignItems: "center", justifyContent: "center" }}>
+                  <Text style={{ fontSize: 17 }}>{f.icon}</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.85)", textAlign: "right" }}>{f.label}</Text>
+                  <Text style={{ fontSize: 10, color: "rgba(255,255,255,0.30)", textAlign: "right", marginTop: 2, fontFamily: "Cairo_400Regular" }}>{f.desc}</Text>
+                </View>
+                <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: "rgba(251,191,36,0.18)", borderWidth: 1, borderColor: "rgba(251,191,36,0.30)", alignItems: "center", justifyContent: "center" }}>
+                  <Ionicons name="checkmark" size={11} color="#fbbf24" />
+                </View>
+              </View>
+            ))}
+          </View>
+
+          {/* How it works */}
+          <View style={{ borderRadius: 20, padding: 16, backgroundColor: "rgba(255,255,255,0.03)", borderWidth: 1, borderColor: "rgba(255,255,255,0.06)", marginBottom: 20 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 14 }}>
+              <Ionicons name="flash" size={14} color="#a78bfa" />
+              <Text style={{ fontSize: 11, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.45)", letterSpacing: 1.2 }}>كيف يعمل الاشتراك</Text>
+            </View>
+            {[
+              { step: "١", text: "اضغط زر «اشترك الآن» أدناه" },
+              { step: "٢", text: "يفتح حسابي على تيليجرام" },
+              { step: "٣", text: "أرسل رسالة طلب الاشتراك" },
+              { step: "٤", text: "سيُفعَّل اشتراكك خلال ٢٤ ساعة" },
+            ].map(s => (
+              <View key={s.step} style={{ flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 10 }}>
+                <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: "rgba(139,92,246,0.18)", borderWidth: 1, borderColor: "rgba(139,92,246,0.30)", alignItems: "center", justifyContent: "center" }}>
+                  <Text style={{ fontSize: 11, fontFamily: "Cairo_800ExtraBold", color: "#c4b5fd" }}>{s.step}</Text>
+                </View>
+                <Text style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", fontFamily: "Cairo_400Regular" }}>{s.text}</Text>
+              </View>
+            ))}
+          </View>
+
+          {/* Subscribe Button */}
+          <Pressable onPress={handleSubscribe} style={ts.subscribeBtn}>
+            <Ionicons name="paper-plane" size={18} color={sent ? "#34d399" : "#fbbf24"} />
+            <Text style={[ts.subscribeBtnText, sent && { color: "#34d399" }]}>
+              {sent ? "✅ تم · افتح تيليجرام وأرسل الطلب" : "اشترك الآن عبر تيليجرام"}
+            </Text>
+          </Pressable>
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
+/* ══════════════════════ PROFILE SHEET ══════════════════════ */
+const AVATAR_COLORS = ["#7c3aed","#2563eb","#db2777","#ea580c","#16a34a","#ca8a04","#0891b2","#dc2626"];
+
+function ProfileSheet({ open, onClose, user, onUpdate, onLogout, onLinkTv }: {
+  open: boolean; onClose: () => void;
+  user: MobileUser | null;
+  onUpdate: (u: MobileUser) => void;
+  onLogout: () => void;
+  onLinkTv: () => void;
+}) {
+  const colors = useColors();
+  const base = getBaseUrl();
+  const [displayName, setDisplayName] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [uploadingImg, setUploadingImg] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
+  useEffect(() => {
+    if (open && user) {
+      setDisplayName(user.displayName || "");
+      setError(""); setSuccess("");
+    }
+  }, [open]);
+
+  const handleSave = async () => {
+    if (!displayName.trim()) { setError("الاسم الظاهر مطلوب"); return; }
+    setLoading(true); setError(""); setSuccess("");
+    try {
+      const r = await secureFetch(`${base}/api/auth/profile`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ displayName: displayName.trim() }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setError(d.error || "حدث خطأ"); }
+      else {
+        const updated: MobileUser = {
+          ...user!,
+          displayName: d.displayName || displayName.trim(),
+        };
+        await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(updated));
+        onUpdate(updated);
+        setSuccess("تم حفظ التغييرات ✓");
+        setTimeout(() => setSuccess(""), 2500);
+      }
+    } catch { setError("تعذّر الوصول للخادم"); }
+    setLoading(false);
+  };
+
+  const handlePickImage = async () => {
+    if (uploadingImg) return;
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        setError("الرجاء السماح بالوصول إلى الصور");
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.6,
+        base64: true,
+      });
+      if (result.canceled || !result.assets?.length) return;
+
+      const base64 = result.assets[0].base64;
+      if (!base64) {
+        setError("تعذّر قراءة الصورة");
+        return;
+      }
+
+      setUploadingImg(true);
+      setError("");
+      const response = await secureFetch(`${base}/api/auth/profile`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ profileImageCustom: `data:image/jpeg;base64,${base64}` }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setError(data.error || "فشل رفع الصورة");
+        return;
+      }
+
+      const updated: MobileUser = {
+        ...user!,
+        profileImageUrl: data.profileImageUrl || data.profile_image_custom || `data:image/jpeg;base64,${base64}`,
+      };
+      await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(updated));
+      onUpdate(updated);
+      setSuccess("تم تحديث صورة الملف الشخصي ✓");
+      setTimeout(() => setSuccess(""), 2500);
+    } catch {
+      setError("تعذّر رفع الصورة، حاول مرة أخرى");
+    } finally {
+      setUploadingImg(false);
+    }
+  };
+
+  const handleRemoveImage = async () => {
+    if (uploadingImg || !user?.profileImageUrl) return;
+    setUploadingImg(true);
+    setError("");
+    try {
+      const response = await secureFetch(`${base}/api/auth/profile`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ profileImageCustom: null }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        setError(data.error || "فشل إزالة الصورة");
+        return;
+      }
+      const updated: MobileUser = { ...user, profileImageUrl: null };
+      await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(updated));
+      onUpdate(updated);
+      setSuccess("تمت إزالة الصورة ✓");
+      setTimeout(() => setSuccess(""), 2500);
+    } catch {
+      setError("تعذّر إزالة الصورة");
+    } finally {
+      setUploadingImg(false);
+    }
+  };
+
+  if (!open || !user) return null;
+
+  const avatarColor = AVATAR_COLORS[(user.avatarColor ?? 0) % AVATAR_COLORS.length];
+  const letter = (user.displayName || user.email || "?").charAt(0).toUpperCase();
+  const changed = displayName.trim() !== user.displayName;
+
+  return (
+    <Modal transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
+      <Pressable style={[ts.overlay, { backgroundColor: colors.overlay }]} onPress={onClose} focusable={false} />
+      <View style={[ts.bottomSheet, { maxHeight: "94%", paddingBottom: 0, backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <View style={[ts.sheetAccentBar, { backgroundColor: colors.accent }]} />
+          <View style={[ts.sheetHandle, { backgroundColor: colors.border }]} />
+
+          {/* Header */}
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingTop: 4, paddingBottom: 8 }}>
+            <Pressable onPress={onClose} style={[ts.reportCloseBtn, { backgroundColor: colors.input, borderColor: colors.border }]}>
+              <Ionicons name="close" size={16} color={colors.textSecondary} />
+            </Pressable>
+            <Text style={{ fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary }}>الملف الشخصي</Text>
+            <View style={ts.reportIconWrap}>
+              <Ionicons name="person" size={15} color={colors.accent} />
+            </View>
+          </View>
+
+          {/* Avatar */}
+          <View style={{ alignItems: "center", paddingVertical: 16 }}>
+            <Pressable
+              onPress={handlePickImage}
+              disabled={uploadingImg}
+              accessibilityRole="button"
+              accessibilityLabel="تغيير صورة الملف الشخصي"
+              style={{ width: 78, height: 78, borderRadius: 24, backgroundColor: avatarColor + "28", borderWidth: 2, borderColor: avatarColor + "80", alignItems: "center", justifyContent: "center", marginBottom: 8, opacity: uploadingImg ? 0.65 : 1 }}
+            >
+              {user.profileImageUrl ? (
+                <Image source={{ uri: user.profileImageUrl }} style={{ width: "100%", height: "100%", borderRadius: 21 }} />
+              ) : (
+                <Text style={{ fontSize: 32, fontFamily: "Cairo_800ExtraBold", color: avatarColor }}>{letter}</Text>
+              )}
+              <View style={{ position: "absolute", right: -5, bottom: -5, width: 26, height: 26, borderRadius: 13, backgroundColor: colors.accent, borderWidth: 2, borderColor: colors.surface, alignItems: "center", justifyContent: "center" }}>
+                {uploadingImg ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="camera" size={13} color="#fff" />}
+              </View>
+            </Pressable>
+            <View style={{ flexDirection: "row", gap: 8, marginBottom: 8 }}>
+              <Pressable onPress={handlePickImage} disabled={uploadingImg} style={{ flexDirection: "row", alignItems: "center", gap: 6, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder, opacity: uploadingImg ? 0.55 : 1 }}>
+                <Ionicons name="image-outline" size={14} color={colors.accent} />
+                <Text style={{ fontSize: 11, fontFamily: "Cairo_700Bold", color: colors.accent }}>تغيير الصورة</Text>
+              </Pressable>
+              {user.profileImageUrl ? (
+                <Pressable onPress={handleRemoveImage} disabled={uploadingImg} style={{ flexDirection: "row", alignItems: "center", gap: 6, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: colors.destructiveSurface, borderWidth: 1, borderColor: colors.destructiveBorder, opacity: uploadingImg ? 0.55 : 1 }}>
+                  <Ionicons name="trash-outline" size={14} color={colors.destructive} />
+                  <Text style={{ fontSize: 11, fontFamily: "Cairo_700Bold", color: colors.destructive }}>إزالة</Text>
+                </Pressable>
+              ) : null}
+            </View>
+            <Text style={{ fontSize: 14, fontFamily: "Cairo_700Bold", color: colors.textPrimary }}>{user.displayName}</Text>
+            <Text style={{ fontSize: 11, fontFamily: "Cairo_400Regular", color: colors.textMuted }}>{user.email}</Text>
+          </View>
+
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 20, paddingBottom: 48 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+
+            {/* Error / Success */}
+            {!!error && (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.destructiveSurface, borderWidth: 1, borderColor: colors.destructiveBorder, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 14 }}>
+                <Ionicons name="alert-circle" size={14} color={colors.destructive} />
+                <Text style={{ fontSize: 12, fontFamily: "Cairo_400Regular", color: colors.destructive, flex: 1, textAlign: "right" }}>{error}</Text>
+              </View>
+            )}
+            {!!success && (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.success + "18", borderWidth: 1, borderColor: colors.success + "40", borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 14 }}>
+                <Ionicons name="checkmark-circle" size={14} color={colors.success} />
+                <Text style={{ fontSize: 12, fontFamily: "Cairo_400Regular", color: colors.success, flex: 1, textAlign: "right" }}>{success}</Text>
+              </View>
+            )}
+
+            <>
+                {/* Display Name */}
+                <Text style={[ts.authFieldLabel, { color: colors.textMuted }]}>الاسم الظاهر</Text>
+                <View style={[ts.authFieldWrap, { backgroundColor: colors.input, borderColor: colors.border }]}>
+                  <TextInput value={displayName} onChangeText={v => { setDisplayName(v); setError(""); }}
+                    placeholder="اسمك الظاهر للآخرين"
+                    placeholderTextColor={colors.textMuted}
+                    style={[ts.authFieldInput, { color: colors.textPrimary }]}
+                    textAlign="right"
+                  />
+                  <Ionicons name="person-outline" size={16} color={colors.textMuted} />
+                </View>
+
+                {/* Email (readonly) */}
+                <Text style={[ts.authFieldLabel, { color: colors.textMuted }]}>البريد الإلكتروني</Text>
+                <View style={[ts.authFieldWrap, { opacity: 0.6, backgroundColor: colors.input, borderColor: colors.border }]}>
+                  <Text style={[ts.authFieldInput, { paddingVertical: 12, color: colors.textSecondary }]}>{user.email}</Text>
+                  <Ionicons name="mail-outline" size={16} color={colors.textMuted} />
+                </View>
+
+                {/* Save */}
+                <Pressable onPress={handleSave} disabled={loading || !changed}
+                  style={[ts.authSubmitBtn, { marginTop: 6, opacity: !changed ? 0.45 : 1 }]}>
+                  {loading ? <ActivityIndicator color="#fff" size="small" /> : (
+                    <>
+                      <Ionicons name="checkmark-circle" size={16} color="#fff" />
+                      <Text style={ts.authSubmitText}>حفظ التغييرات</Text>
+                    </>
+                  )}
+                </Pressable>
+
+                {/* Link another phone or TV without exposing the Google session to it */}
+                <Pressable onPress={onLinkTv}
+                  style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 14, borderRadius: 16, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder, marginTop: 18 }}>
+                  <Ionicons name="chevron-back" size={16} color={colors.accent} />
+                  <View style={{ flex: 1, alignItems: "flex-end" }}>
+                    <Text style={{ fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: colors.accent }}>ربط جهاز جديد</Text>
+                    <Text style={{ fontSize: 10, fontFamily: "Cairo_400Regular", color: colors.textSecondary, marginTop: 2 }}>هاتف آخر أو تلفاز · رمز مؤقت وآمن</Text>
+                  </View>
+                  <Ionicons name="link-outline" size={19} color={colors.accent} />
+                </Pressable>
+
+                {/* Divider */}
+                <View style={{ height: 1, backgroundColor: colors.border, marginVertical: 22 }} />
+
+                {/* Logout */}
+                <Pressable onPress={() => { onLogout(); onClose(); }}
+                  style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 14, borderRadius: 18, backgroundColor: colors.destructiveSurface, borderWidth: 1, borderColor: colors.destructiveBorder, marginBottom: 12 }}>
+                  <Ionicons name="log-out" size={16} color={colors.destructive} />
+                  <Text style={{ fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: colors.destructive }}>تسجيل الخروج</Text>
+                </Pressable>
+
+            </>
+          </ScrollView>
+        </View>
+    </Modal>
+  );
+}
+
+/* ══════════════════════ TV LINK SHEET ══════════════════════ */
+function TvLinkSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const colors = useColors();
+  const base = getBaseUrl();
+  const tvMode = isTvDevice();
+  const [code, setCode] = useState("");
+  const [expiresAt, setExpiresAt] = useState("");
+  const [devices, setDevices] = useState<Array<{ id: string; name: string; platform: string; lastSeenAt?: string }>>([]);
+  const [loading, setLoading] = useState(false);
+  const [loadingDevices, setLoadingDevices] = useState(false);
+  const [error, setError] = useState("");
+  const [tvInputCode, setTvInputCode] = useState("");
+  const [approvingTv, setApprovingTv] = useState(false);
+  const [approveSuccess, setApproveSuccess] = useState("");
+
+  const loadDevices = useCallback(async () => {
+    setLoadingDevices(true);
+    try {
+      const response = await secureFetch(`${base}/api/device-link/devices`);
+      const data = await response.json().catch(() => ({}));
+      if (response.ok) setDevices(Array.isArray(data.devices) ? data.devices : []);
+    } catch {} finally {
+      setLoadingDevices(false);
+    }
+  }, [base]);
+
+  useEffect(() => {
+    if (!open) return;
+    setCode("");
+    setExpiresAt("");
+    setError("");
+    setTvInputCode("");
+    setApproveSuccess("");
+    void loadDevices();
+  }, [open, loadDevices]);
+
+  const approveTvCodeFromPhone = async () => {
+    const cleaned = tvInputCode.replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x0660)).replace(/\D/g, "").slice(0, 6);
+    if (cleaned.length !== 6 || approvingTv) {
+      setError("أدخل رمز التلفاز المكوّن من 6 أرقام");
+      return;
+    }
+    setApprovingTv(true);
+    setError("");
+    setApproveSuccess("");
+    try {
+      const response = await secureFetch(`${base}/api/device-link/tv-session/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: cleaned }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setError(data.error || "رمز التلفاز غير صحيح أو منتهي الصلاحية");
+        return;
+      }
+      setTvInputCode("");
+      setApproveSuccess("تم تسجيل الدخول على التلفاز بنجاح!");
+      void loadDevices();
+    } catch {
+      setError("تعذّر الاتصال بالخادم");
+    } finally {
+      setApprovingTv(false);
+    }
+  };
+
+  const createCode = async () => {
+    if (loading) return;
+    setLoading(true);
+    setError("");
+    try {
+      const response = await secureFetch(`${base}/api/device-link/request`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.code) {
+        setError(data.error || "تعذّر إنشاء الرمز");
+        return;
+      }
+      setCode(String(data.code));
+      setExpiresAt(String(data.expiresAt || ""));
+      void loadDevices();
+    } catch {
+      setError("تعذّر الاتصال بالخادم");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const revoke = async (id: string) => {
+    try {
+      const response = await secureFetch(`${base}/api/device-link/devices/${encodeURIComponent(id)}`, { method: "DELETE" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) { setError(data.error || "تعذّر إلغاء الربط"); return; }
+      await loadDevices();
+    } catch {
+      setError("تعذّر الاتصال بالخادم");
+    }
+  };
+
+  const sheetBody = (
+      <View testID={tvMode ? "nova-tv-modal-root" : undefined} style={{ flex: 1, backgroundColor: colors.overlay, justifyContent: tvMode ? "center" : "flex-end", alignItems: tvMode ? "center" : "stretch" }}>
+        <View style={{ maxHeight: "92%", backgroundColor: colors.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, borderWidth: 1, borderColor: colors.border }}>
+          <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingTop: 18, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+            <Pressable onPress={onClose} style={{ width: 36, height: 36, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.input }}>
+              <Ionicons name="close" size={20} color={colors.textSecondary} />
+            </Pressable>
+            <View style={{ flex: 1, alignItems: "flex-end", marginRight: 12 }}>
+              <Text style={{ fontSize: 17, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary }}>ربط جهاز جديد</Text>
+              <Text style={{ fontSize: 10, fontFamily: "Cairo_400Regular", color: colors.textMuted, marginTop: 2 }}>هاتف آخر أو تلفاز · تسجيل آمن بدون مشاركة جلسة Google</Text>
+            </View>
+            <View style={{ width: 38, height: 38, borderRadius: 13, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSurface }}>
+              <Ionicons name="link-outline" size={20} color={colors.accent} />
+            </View>
+          </View>
+
+          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 38 }} showsVerticalScrollIndicator={false}>
+            {!tvMode && (
+              <View style={{ borderRadius: 20, padding: 18, marginBottom: 16, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border }}>
+                <Text style={{ fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, textAlign: "right" }}>
+                  إدخال الرمز الظاهر على التلفاز
+                </Text>
+                <Text style={{ fontSize: 11, fontFamily: "Cairo_400Regular", color: colors.textSecondary, lineHeight: 20, textAlign: "right", marginTop: 4 }}>
+                  إذا ضغطت على «المتابعة باستخدام Google» في التلفاز، اكتب الرمز المكوّن من 6 أرقام الظاهر على شاشة التلفاز هنا لتسجيل دخوله فوراً:
+                </Text>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginTop: 12 }}>
+                  <Pressable
+                    onPress={() => void approveTvCodeFromPhone()}
+                    disabled={approvingTv || tvInputCode.length < 6}
+                    style={{
+                      height: 48,
+                      paddingHorizontal: 18,
+                      borderRadius: 14,
+                      backgroundColor: colors.accent,
+                      opacity: approvingTv || tvInputCode.length < 6 ? 0.55 : 1,
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    {approvingTv ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <Text style={{ color: "#fff", fontSize: 12.5, fontFamily: "Cairo_800ExtraBold" }}>تأكيد التلفاز</Text>
+                    )}
+                  </Pressable>
+                  <TextInput
+                    value={tvInputCode}
+                    onChangeText={val => {
+                      setTvInputCode(val.replace(/\D/g, "").slice(0, 6));
+                      setError("");
+                      setApproveSuccess("");
+                    }}
+                    placeholder="000000"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="number-pad"
+                    maxLength={6}
+                    textAlign="center"
+                    style={{
+                      flex: 1,
+                      height: 48,
+                      borderRadius: 14,
+                      borderWidth: 1,
+                      borderColor: colors.border,
+                      backgroundColor: colors.input,
+                      color: colors.textPrimary,
+                      fontSize: 20,
+                      letterSpacing: 6,
+                      fontFamily: "Cairo_800ExtraBold",
+                    }}
+                  />
+                </View>
+                {!!approveSuccess && (
+                  <Text style={{ fontSize: 11.5, fontFamily: "Cairo_700Bold", color: colors.success, textAlign: "right", marginTop: 8 }}>
+                    {approveSuccess}
+                  </Text>
+                )}
+              </View>
+            )}
+
+            <View style={{ borderRadius: 20, padding: 18, backgroundColor: colors.accentSurface, borderWidth: 1, borderColor: colors.accentBorder }}>
+               <Text style={{ fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: colors.accent, textAlign: "right" }}>رمز ربط الجهاز</Text>
+              <Text style={{ fontSize: 11, fontFamily: "Cairo_400Regular", color: colors.textSecondary, lineHeight: 20, textAlign: "right", marginTop: 5 }}>
+                 هذا الرمز يظهر على الهاتف المسجّل فقط. افتح شاشة «ربط الحساب» في الهاتف أو التلفاز الآخر، ثم اكتب الرمز الظاهر هنا في الخانة الموجودة هناك. صالح لمدة 10 دقائق ويُستخدم مرة واحدة.
+              </Text>
+              {code ? (
+                <>
+                  <View style={[ts.linkCodeDisplay, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+                    <View style={ts.linkCodeSuccess}>
+                      <Ionicons name="checkmark-circle" size={15} color={colors.success} />
+                      <Text style={[ts.linkCodeSuccessText, { color: colors.success }]}>تم إنشاء الرمز بنجاح</Text>
+                    </View>
+                    <Text selectable style={[ts.linkCodeText, { color: colors.textPrimary }]}>{code}</Text>
+                    <Text style={[ts.linkCodeExpiry, { color: colors.accent }]}>
+                      {expiresAt ? `ينتهي في ${new Date(expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "صالح لمدة 10 دقائق"}
+                    </Text>
+                  </View>
+                  <Pressable
+                    testID="regenerate-tv-link-code"
+                    onPress={createCode}
+                    disabled={loading}
+                    focusable={tvMode}
+                    hasTVPreferredFocus={tvMode}
+                    accessibilityRole="button"
+                    accessibilityLabel="إعادة إنشاء رمز الربط"
+                    android_ripple={{ color: "rgba(196,181,253,0.14)" }}
+                    style={({ pressed }) => [
+                      ts.linkRegenerateButton,
+                      { backgroundColor: colors.accentSurface, borderColor: colors.accentBorder },
+                      pressed && ts.linkActionPressed,
+                      loading && ts.linkActionLoading,
+                    ]}
+                  >
+                      <View style={[ts.linkRegenerateIcon, { backgroundColor: colors.accentSurface }]}>
+                      {loading
+                        ? <ActivityIndicator color={colors.accent} size="small" />
+                        : <Ionicons name="refresh-outline" size={18} color={colors.accent} />}
+                    </View>
+                    <View style={ts.linkActionCopy}>
+                      <Text style={[ts.linkRegenerateTitle, { color: colors.accent }]}>{loading ? "جارٍ إنشاء رمز جديد…" : "إعادة إنشاء الرمز"}</Text>
+                      <Text style={[ts.linkRegenerateHint, { color: colors.textSecondary }]}>
+                        {loading ? "سيظهر الرمز الجديد بعد لحظات" : "سيتم إلغاء الرمز الحالي"}
+                      </Text>
+                    </View>
+                    {!loading && <Ionicons name="chevron-back" size={17} color={colors.accent} />}
+                  </Pressable>
+                </>
+              ) : (
+                <Pressable
+                  testID="create-tv-link-code"
+                  onPress={createCode}
+                  disabled={loading}
+                  focusable={tvMode}
+                  hasTVPreferredFocus={tvMode}
+                  accessibilityRole="button"
+                  accessibilityLabel="إنشاء رمز ربط مؤقت"
+                  android_ripple={{ color: "rgba(255,255,255,0.18)" }}
+                  style={({ pressed }) => [
+                    ts.linkCreateButton,
+                    pressed && ts.linkActionPressed,
+                    loading && ts.linkActionLoading,
+                  ]}
+                >
+                  <View style={ts.linkCreateIcon}>
+                    {loading
+                      ? <ActivityIndicator color="#fff" size="small" />
+                      : <Ionicons name="key-outline" size={19} color="#fff" />}
+                  </View>
+                  <View style={ts.linkActionCopy}>
+                    <Text style={ts.linkCreateTitle}>{loading ? "جارٍ إنشاء الرمز…" : "إنشاء رمز مؤقت"}</Text>
+                    <Text style={ts.linkCreateHint}>{loading ? "نتحقق من الحساب الآن" : "اضغط هنا لإظهاره الآن"}</Text>
+                  </View>
+                  {!loading && <Ionicons name="chevron-back" size={18} color="rgba(255,255,255,0.76)" />}
+                </Pressable>
+              )}
+            </View>
+
+            {!!error && <Text style={{ fontSize: 11, fontFamily: "Cairo_600SemiBold", color: colors.destructive, textAlign: "right", marginTop: 12 }}>{error}</Text>}
+
+            <View style={{ flexDirection: "row", alignItems: "center", marginTop: 24, marginBottom: 10 }}>
+              <Text style={{ flex: 1, fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, textAlign: "right" }}>الأجهزة المرتبطة</Text>
+              {loadingDevices ? <ActivityIndicator size="small" color={colors.accent} /> : null}
+            </View>
+            {devices.length ? devices.map(device => (
+              <View key={device.id} style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 13, borderRadius: 15, marginBottom: 8, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border }}>
+                <Pressable testID={`revoke-tv-${device.id}`} onPress={() => revoke(device.id)} style={{ width: 34, height: 34, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: colors.destructiveSurface }}>
+                  <Ionicons name="unlink-outline" size={16} color={colors.destructive} />
+                </Pressable>
+                <View style={{ flex: 1, alignItems: "flex-end" }}>
+                  <Text style={{ fontSize: 12, fontFamily: "Cairo_700Bold", color: colors.textPrimary }}>{device.name}</Text>
+                  <Text style={{ fontSize: 10, fontFamily: "Cairo_400Regular", color: colors.textMuted, marginTop: 2 }}>مرتبط · يمكن إلغاء الوصول فوراً</Text>
+                </View>
+                <Ionicons name={device.platform === "android-tv" ? "tv-outline" : "phone-portrait-outline"} size={18} color={colors.accent} />
+              </View>
+            )) : (
+              <Text style={{ fontSize: 11, fontFamily: "Cairo_400Regular", color: colors.textMuted, textAlign: "right", paddingVertical: 10 }}>لا توجد أجهزة مرتبطة حالياً</Text>
+            )}
+          </ScrollView>
+        </View>
+      </View>
+  );
+
+  if (tvMode) {
+    if (!open) return null;
+    return (
+      <View style={[StyleSheet.absoluteFillObject, { zIndex: 999999, elevation: 999999 }]}>
+        {sheetBody}
+      </View>
+    );
+  }
+
+  return (
+    <Modal visible={open} animationType="slide" transparent onRequestClose={onClose}>
+      {sheetBody}
+    </Modal>
+  );
+}
+
+/* ══════════════════════ MAIN ══════════════════════ */
+export default function SettingsScreen() {
+  const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const { openPremium } = useLocalSearchParams<{ openPremium?: string }>();
+  const {
+    theme,
+    setTheme,
+    watchHistory,
+    favorites,
+    clearHistory,
+    clearFavorites,
+    refreshConfig,
+    currentUser: globalUser,
+    setCurrentUser: setGlobalUser,
+  } = useApp();
+  const colors = useColors();
+  const topPad = Platform.OS === "web" ? 0 : insets.top;
+  const [tvOverride, updateTvOverride] = useTvModeOverride();
+  const tvMode = isTvDevice();
+
+  const { toast, show: showToast } = useToast();
+  const [notifs, setNotifs] = useState(true);
+  const [pushRegistered, setPushRegistered] = useState(false);
+  const [notifsReady, setNotifsReady] = useState(false);
+  const [notifsBusy, setNotifsBusy] = useState(false);
+  const [showReport, setShowReport] = useState(false);
+  const [showAuth, setShowAuth] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
+  const [showTvLink, setShowTvLink] = useState(false);
+  const [showPremium, setShowPremium] = useState(false);
+  const [showDonation, setShowDonation] = useState(false);
+  const [selectedDonationTier, setSelectedDonationTier] = useState<"1" | "3" | "5">("1");
+  const [showCrashLog, setShowCrashLog] = useState(false);
+  const [crashEntries, setCrashEntries] = useState<CrashEntry[]>([]);
+  const [currentUser, setCurrentUser] = useState<MobileUser | null>(globalUser || null);
+
+  useEffect(() => {
+    if (globalUser) {
+      setCurrentUser(globalUser);
+    }
+  }, [globalUser]);
+
+  const refreshCurrentUser = useCallback(async () => {
+    let storedUser: MobileUser | null = null;
+    let overrideData: Partial<MobileUser> = {};
+    try {
+      const [stored, rawOverride] = await Promise.all([
+        AsyncStorage.getItem(AUTH_KEY),
+        AsyncStorage.getItem("nova-profile-override"),
+      ]);
+      if (stored) storedUser = JSON.parse(stored) as MobileUser;
+      if (rawOverride) overrideData = JSON.parse(rawOverride);
+    } catch {}
+
+    if (storedUser) {
+      const mergedLocal: MobileUser = {
+        ...storedUser,
+        ...overrideData,
+        displayName: overrideData.displayName || storedUser.displayName,
+        username: overrideData.username || storedUser.username,
+        profileImageUrl:
+          overrideData.profileImageUrl !== undefined
+            ? overrideData.profileImageUrl
+            : storedUser.profileImageUrl,
+      };
+      setCurrentUser(mergedLocal);
+      setGlobalUser(mergedLocal);
+    }
+
+    try {
+      const response = await secureFetch(`${getBaseUrl()}/api/auth/me`);
+      if (!response.ok) return;
+      const data = await response.json() as any;
+      if (!data?.id) return;
+
+      const nextUser: MobileUser = {
+        ...(storedUser || {}),
+        id: String(data.id),
+        email: data.email || storedUser?.email || "",
+        displayName:
+          overrideData.displayName ||
+          storedUser?.displayName ||
+          data.displayName ||
+          data.display_name ||
+          data.username ||
+          data.email?.split("@")[0] ||
+          "مستخدم",
+        username: overrideData.username || storedUser?.username || data.username,
+        avatarColor: overrideData.avatarColor ?? storedUser?.avatarColor ?? data.avatarColor ?? data.avatar_color ?? 0,
+        profileImageUrl:
+          overrideData.profileImageUrl !== undefined
+            ? overrideData.profileImageUrl
+            : (storedUser?.profileImageUrl ||
+               data.profileImageUrl ||
+               data.profile_image_custom ||
+               data.profile_image_url ||
+               null),
+      };
+      await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(nextUser));
+      setCurrentUser(nextUser);
+      setGlobalUser(nextUser);
+    } catch {}
+  }, [setGlobalUser]);
+
+  const refreshPushStatus = useCallback(async () => {
+    try {
+      const status = await getPushNotificationsStatus();
+      setNotifs(status.enabled);
+      setPushRegistered(status.registered);
+    } catch {
+      setPushRegistered(false);
+    } finally {
+      setNotifsReady(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (openPremium === "1") setShowPremium(true);
+  }, [openPremium]);
+
+  // Re-check when returning from Google OAuth or the profile screen. This
+  // keeps the already-mounted settings page authoritative and avoids making
+  // the user press Back through duplicate settings routes.
+  useFocusEffect(useCallback(() => {
+    void refreshCurrentUser();
+  }, [refreshCurrentUser]));
+
+  useFocusEffect(useCallback(() => {
+    void refreshPushStatus();
+  }, [refreshPushStatus]));
+
+  useEffect(() => {
+    getCrashLog().then(setCrashEntries).catch(() => {});
+  }, []);
+
+  const handleLogout = async () => {
+    try {
+      await secureFetch(`${getBaseUrl()}/api/auth/signout`, { method: "POST" });
+    } catch {}
+    await setUserAuthToken(null);
+    await AsyncStorage.removeItem(AUTH_KEY);
+    setCurrentUser(null);
+    setGlobalUser(null);
+    showToast("تم تسجيل الخروج");
+  };
+  const [confirm, setConfirm] = useState<{
+    open: boolean; title: string; desc?: string; confirmLabel?: string;
+    danger?: boolean; onConfirm: () => void;
+  }>({ open: false, title: "", onConfirm: () => {} });
+
+  const [cacheKb, setCacheKb] = useState(0);
+  const [histCount, setHistCount] = useState(0);
+  const [savedCount, setSavedCount] = useState(0);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const keys = await AsyncStorage.getAllKeys();
+        let total = 0;
+        for (const k of keys) {
+          const v = await AsyncStorage.getItem(k);
+          total += k.length + (v?.length || 0);
+        }
+        setCacheKb(Math.round(total / 1024));
+        setHistCount(watchHistory.length);
+        setSavedCount(favorites.length);
+      } catch {}
+    };
+    load();
+  }, [watchHistory, favorites]);
+
+  const openConfirm = useCallback((opts: typeof confirm) => setConfirm(opts), []);
+  const closeConfirm = () => setConfirm(p => ({ ...p, open: false }));
+
+  const currentTheme = THEMES.find(t => t.value === theme) || THEMES[0];
+
+  const handleSetTheme = async (t: string) => {
+    await setTheme(t as any);
+    showToast(`تم تغيير الثيم إلى ${THEMES.find(th => th.value === t)?.label}`);
+  };
+
+  const handleToggleNotifications = async (enabled: boolean) => {
+    if (notifsBusy) return;
+    setNotifsBusy(true);
+    try {
+      const success = await setPushNotificationsEnabled(enabled);
+      const status = await getPushNotificationsStatus();
+      setNotifs(status.enabled);
+      setPushRegistered(status.registered);
+
+      if (!success && enabled) {
+        Alert.alert(
+          "تعذر تفعيل الإشعارات",
+          "لم يكتمل تسجيل هذا الجهاز لاستقبال التنبيهات خارج التطبيق. تحقق من إذن الإشعارات والاتصال بالإنترنت ثم أعد المحاولة.",
+          [
+            { text: "لاحقاً", style: "cancel" },
+            {
+              text: "إعدادات التطبيق",
+              onPress: () => {
+                if (Platform.OS !== "web") void Linking.openSettings().catch(() => {});
+              },
+            },
+          ],
+        );
+      } else if (!success) {
+        Alert.alert(
+          "الإيقاف قيد الانتظار",
+          "أوقفت الإشعارات على هذا الجهاز، لكن تعذر تأكيد إلغاء التسجيل على الخادم. قد تصل تنبيهات حتى يعود الاتصال ويُعاد طلب الإلغاء.",
+        );
+      } else {
+        showToast(enabled ? "تم تفعيل إشعارات الحلقات خارج التطبيق" : "تم إيقاف إشعارات الحلقات");
+      }
+    } catch {
+      await refreshPushStatus();
+      Alert.alert("تعذر تحديث الإشعارات", "تحقق من الاتصال بالإنترنت ثم أعد المحاولة.");
+    } finally {
+      setNotifsBusy(false);
+    }
+  };
+
+  const handleClearHistory = () => openConfirm({
+    open: true,
+    title: "مسح سجل المشاهدة",
+    desc: `سيتم حذف ${histCount} حلقة من سجل مشاهدتك بشكل نهائي.`,
+    confirmLabel: "امسح السجل",
+    danger: true,
+    onConfirm: async () => {
+      await clearHistory();
+      setHistCount(0);
+      showToast("تم مسح سجل المشاهدة");
+    },
+  });
+
+  const handleClearFavorites = () => openConfirm({
+    open: true,
+    title: "مسح قائمة المحفوظات",
+    desc: `سيتم حذف ${savedCount} أنمي من مفضّلتك بشكل نهائي.`,
+    confirmLabel: "امسح المفضّلة",
+    danger: true,
+    onConfirm: async () => {
+      await clearFavorites();
+      setSavedCount(0);
+      showToast("تم مسح قائمة المحفوظات");
+    },
+  });
+
+  const handleClearCache = () => openConfirm({
+    open: true,
+    title: "إعادة تعيين التطبيق",
+    desc: "سيتم مسح جميع الإعدادات والبيانات المحفوظة. ستحتاج لإعادة الضبط.",
+    confirmLabel: "إعادة التعيين",
+    danger: true,
+    onConfirm: async () => {
+      await AsyncStorage.clear();
+      showToast("تم مسح الكاش والإعدادات");
+    },
+  });
+
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      {/* Toast */}
+      {toast && (
+        <View style={[ts.toastWrap, { top: topPad + 8 }]}>
+          <ToastBanner toast={toast} />
+        </View>
+      )}
+
+      {/* Sticky Header: Back Button + Title on Physical Right, Version Badge on Physical Left */}
+      <View style={[ts.header, { paddingTop: topPad, backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+        <Pressable
+          onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)}
+          accessibilityRole="button"
+          accessibilityLabel="رجوع"
+          style={[ts.headerBackBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
+        >
+          <Ionicons name="chevron-forward" size={18} color={colors.textPrimary} />
+        </Pressable>
+        <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 10, flex: 1 }}>
+          <View style={[ts.headerIconWrap, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+            <Ionicons name="settings" size={16} color={colors.primary} />
+          </View>
+          <Text style={[ts.headerTitle, { color: colors.textPrimary }]}>الإعدادات</Text>
+        </View>
+        <View style={[ts.headerBadge, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+          <View style={ts.headerDot} />
+          <Text style={[ts.headerBadgeText, { color: colors.textMuted }]}>NOVA FILM · v2.4</Text>
+        </View>
+      </View>
+
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 60 }}>
+
+        {/* ── Profile / Login card ── */}
+        <View style={{ paddingHorizontal: 16, marginTop: 20 }}>
+          {currentUser ? (
+            <Pressable onPress={() => router.push("/profile" as any)} style={[ts.profileCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              {/* Avatar */}
+              <View style={[ts.profileAvatar, { backgroundColor: (AVATAR_COLORS[(currentUser.avatarColor ?? 0) % AVATAR_COLORS.length]) + "28", borderColor: (AVATAR_COLORS[(currentUser.avatarColor ?? 0) % AVATAR_COLORS.length]) + "80" }]}>
+                {currentUser.profileImageUrl ? (
+                  <Image source={{ uri: currentUser.profileImageUrl }} style={ts.profileAvatarImage} />
+                ) : (
+                  <Text style={{ fontSize: 20, fontFamily: "Cairo_800ExtraBold", color: AVATAR_COLORS[(currentUser.avatarColor ?? 0) % AVATAR_COLORS.length] }}>
+                    {currentUser.displayName.charAt(0).toUpperCase()}
+                  </Text>
+                )}
+              </View>
+              {/* Info */}
+              <View style={{ flex: 1, minWidth: 0, alignItems: "flex-end" }}>
+                <Text style={[ts.profileLoginTitle, { color: colors.textPrimary }]} numberOfLines={1}>
+                  {currentUser.displayName}
+                </Text>
+                {currentUser.username ? (
+                  <Text
+                    style={[ts.profileLoginSub, { color: colors.accent }]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.78}
+                  >
+                    @{currentUser.username}
+                  </Text>
+                ) : null}
+                <Text
+                  style={[ts.profileLoginSub, { color: colors.textSecondary, width: "100%" }]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.72}
+                >
+                  {currentUser.email}
+                </Text>
+              </View>
+              {/* Edit chevron */}
+              <View style={[ts.profileLoginBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+                <Ionicons name="create-outline" size={13} color={colors.accent} />
+                <Text style={[ts.profileLoginBtnText, { color: colors.accent }]}>تعديل</Text>
+              </View>
+            </Pressable>
+          ) : (
+            <View style={{ gap: 10 }}>
+              <Pressable onPress={() => tvMode ? router.push("/tv-link" as any) : setShowAuth(true)} style={[ts.profileCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <View style={ts.profileAvatar}>
+                  <Ionicons name="person" size={24} color={colors.textMuted} />
+                </View>
+                <View style={{ flex: 1, alignItems: "flex-end" }}>
+                  <Text style={[ts.profileLoginTitle, { color: colors.textPrimary }]}>تسجيل الدخول</Text>
+                  <Text style={[ts.profileLoginSub, { color: colors.textSecondary }]}>احفظ قائمتك ومتابعتك عبر الأجهزة</Text>
+                </View>
+                <View style={[ts.profileLoginBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+                  <Ionicons name="sparkles" size={14} color={colors.accent} />
+                  <Text style={[ts.profileLoginBtnText, { color: colors.accent }]}>دخول</Text>
+                </View>
+              </Pressable>
+              <Pressable
+                testID="open-device-link"
+                onPress={() => router.push("/tv-link" as any)}
+                style={[ts.deviceLinkGuestBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
+              >
+                <Ionicons name="link-outline" size={17} color={colors.accent} />
+                <Text style={[ts.deviceLinkGuestText, { color: colors.accent }]}>لدي رمز ربط · ربط هاتف أو تلفاز</Text>
+              </Pressable>
+            </View>
+          )}
+        </View>
+
+        <View style={ts.statsGrid}>
+          {[
+            { label: "مشاهَدة", val: histCount,      color: theme === "white" ? "#5B469A" : "#a78bfa", bg: "rgba(139,92,246,0.10)" },
+            { label: "محفوظة",  val: savedCount,     color: theme === "white" ? "#A12D5B" : "#f472b6", bg: "rgba(236,72,153,0.10)" },
+            { label: "الكاش",   val: `${cacheKb}KB`, color: theme === "white" ? "#08758A" : "#22d3ee", bg: "rgba(6,182,212,0.10)" },
+            { label: "مجاني",   val: "∞",            color: theme === "white" ? "#14764F" : "#34d399", bg: "rgba(16,185,129,0.10)" },
+          ].map(s => (
+            <Pressable
+              key={s.label}
+              style={[ts.statCard, { backgroundColor: s.bg, borderColor: colors.border }]}
+            >
+              <Text style={[ts.statVal, { color: s.color }]}>{s.val}</Text>
+              <Text style={[ts.statLabel, { color: colors.textSecondary }]}>{s.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+
+        {/* ── زر التبرع ودعم التطبيق ── */}
+        <View style={{ paddingHorizontal: 16, marginTop: 14 }}>
+          <Pressable
+            testID="open-donation-modal"
+            focusable={tvMode}
+            style={({ focused }) => [ts.donationCard, tvMode && tvFocusStyle(focused)]}
+            onPress={() => setShowDonation(true)}
+          >
+            <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 11 }}>
+              <View style={ts.donationIconBox}>
+                <Ionicons name="heart" size={18} color="#10b981" />
+              </View>
+              <View style={{ flex: 1, minWidth: 0, alignItems: "flex-end" }}>
+                <Text
+                  style={[ts.donationTitle, theme === "white" && { color: "#065f46" }]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.8}
+                >
+                  ادعمني ليستمر التطبيق بالعمل مجاناً ❤️
+                </Text>
+                <Text
+                  style={[ts.donationSub, theme === "white" && { color: "#047857" }]}
+                  numberOfLines={2}
+                >
+                  ادعم خوادم المشاهدة والتحميل بنجوم أو هدايا تلجرام
+                </Text>
+              </View>
+              <View style={ts.donationPillBtn}>
+                <Text style={ts.donationPillBtnText}>ادعم الآن</Text>
+                <Ionicons name="chevron-back" size={12} color="#10b981" style={{ transform: [{ scaleX: -1 }] }} />
+              </View>
+            </View>
+          </Pressable>
+        </View>
+
+        {/* ══════ المظهر ══════ */}
+        <SectionHeader title="المظهر" icon="المظهر" />
+        <View style={{ paddingHorizontal: 16, gap: 12 }}>
+            <Card>
+            <View style={{ padding: 16 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 16 }}>
+                <View style={[ts.themePreviewDot, { backgroundColor: currentTheme.dot + "22" }]}>
+                  <View style={[ts.themePreviewInner, { backgroundColor: currentTheme.dot }]} />
+                </View>
+                <View style={{ flex: 1, alignItems: "flex-end" }}>
+                  <Text style={[ts.navLabel, { color: colors.textPrimary }]}>ثيم التطبيق</Text>
+                  <Text style={[ts.navSub, { color: colors.textMuted }]}>الثيم الحالي: {currentTheme.label} · {currentTheme.desc}</Text>
+                </View>
+              </View>
+              <View style={ts.themesRow}>
+                {THEMES.map(t => {
+                  const active = theme === t.value;
+                  return (
+                    <Pressable
+                      key={t.value}
+                      onPress={() => handleSetTheme(t.value)}
+                      android_ripple={{ color: colors.pressFeedback }}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}
+                      style={[ts.themeBtn, {
+                          backgroundColor: active ? colors.surfaceElevated : colors.surface,
+                          borderColor: active ? colors.accent : colors.border,
+                      }]}
+                    >
+                      <View style={[ts.themeDot, {
+                        backgroundColor: t.dot,
+                        shadowColor: active ? t.dot : "transparent",
+                        shadowOpacity: active ? 0.9 : 0,
+                        shadowRadius: active ? 8 : 0,
+                        shadowOffset: { width: 0, height: 0 },
+                        elevation: active ? 6 : 0,
+                      }]}>
+                        {active && (
+                          <View style={ts.themeCheck}>
+                            <Ionicons name="checkmark" size={10} color="#fff" />
+                          </View>
+                        )}
+                      </View>
+                      <Text style={[ts.themeLabel, { color: active ? colors.textPrimary : colors.textMuted }]}>{t.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          </Card>
+
+          <Card>
+            <View style={{ padding: 16 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 14 }}>
+                <View style={[ts.navIcon, { backgroundColor: tvMode ? "rgba(6,182,212,0.14)" : colors.surfaceElevated, borderColor: tvMode ? "rgba(6,182,212,0.4)" : colors.border }]}>
+                  <Ionicons name="tv-outline" size={18} color={tvMode ? "#06b6d4" : colors.textMuted} />
+                </View>
+                <View style={{ flex: 1, alignItems: "flex-end" }}>
+                  <Text style={[ts.navLabel, { color: colors.textPrimary }]}>وضع التلفاز (TV Mode)</Text>
+                  <Text style={[ts.navSub, { color: colors.textSecondary }]}>
+                    {tvMode
+                      ? "مفعّل حالياً · تحكم كامل بالريموت مع إخفاء المانجا والمانهوا"
+                      : "متوقف حالياً · واجهة اللمس العادية للهاتف والأجهزة اللوحية"}
+                  </Text>
+                </View>
+              </View>
+              <View style={ts.themesRow}>
+                {([
+                  { label: "تلقائي", value: "auto" as TvModeOverride },
+                  { label: "مفعّل (TV)", value: "on" as TvModeOverride },
+                  { label: "متوقف", value: "off" as TvModeOverride },
+                ]).map((opt) => {
+                  const active = tvOverride === opt.value;
+                  return (
+                    <Pressable
+                      key={opt.value}
+                      onPress={async () => {
+                        await updateTvOverride(opt.value);
+                        showToast(
+                          opt.value === "on"
+                            ? "تم تفعيل وضع التلفاز 📺"
+                            : opt.value === "off"
+                              ? "تم إيقاف وضع التلفاز 📱"
+                              : "تم ضبط وضع التلفاز على التلقائي",
+                        );
+                      }}
+                      style={[
+                        ts.themeBtn,
+                        {
+                          paddingVertical: 10,
+                          backgroundColor: active ? "rgba(6,182,212,0.15)" : colors.surface,
+                          borderColor: active ? "#06b6d4" : colors.border,
+                        },
+                      ]}
+                    >
+                      <Ionicons
+                        name={opt.value === "on" ? "tv" : opt.value === "off" ? "phone-portrait-outline" : "sparkles-outline"}
+                        size={16}
+                        color={active ? "#06b6d4" : colors.textMuted}
+                      />
+                      <Text style={[ts.themeLabel, { color: active ? "#06b6d4" : colors.textMuted }]}>{opt.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          </Card>
+        </View>
+
+        {/* ══════ الإشعارات ══════ */}
+        <SectionHeader title="الإشعارات" icon="الإشعارات" />
+        <View style={{ paddingHorizontal: 16 }}>
+          <Card>
+            <View style={[ts.navRow, { borderBottomColor: colors.border }]}>
+              <View style={[ts.navIcon, {
+                backgroundColor: pushRegistered ? "rgba(16,185,129,0.10)" : colors.surfaceElevated,
+                borderColor: colors.border,
+              }]}>
+                <Ionicons
+                  name={pushRegistered ? "notifications" : "notifications-off"}
+                  size={16}
+                  color={pushRegistered ? colors.success : colors.textMuted}
+                />
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                disabled={!notifsReady || notifsBusy}
+                onPress={() => void handleToggleNotifications(notifs && !pushRegistered ? true : !notifs)}
+                style={[ts.navText, { alignItems: "flex-end" }]}
+              >
+                <Text style={[ts.navLabel, { color: colors.textPrimary }]}>إشعارات الحلقات الجديدة</Text>
+                <Text style={[ts.navSub, { color: colors.textSecondary }]}>
+                  {notifsBusy
+                    ? "جارٍ تحديث الإشعارات…"
+                    : !notifs
+                      ? "موقفة على هذا الجهاز"
+                      : !notifsReady
+                        ? "جارٍ التحقق من التسجيل…"
+                        : pushRegistered
+                          ? "مفعّلة · تصلك حتى عند إغلاق التطبيق"
+                          : "لم يكتمل التسجيل · اضغط هنا لإعادة المحاولة"}
+                </Text>
+              </Pressable>
+              <Switch
+                testID="settings-notifications-switch"
+                value={notifs}
+                onValueChange={(value) => void handleToggleNotifications(value)}
+                disabled={!notifsReady || notifsBusy}
+                trackColor={{ false: colors.border, true: colors.accent }}
+                thumbColor={notifs ? colors.accent : colors.surfaceElevated}
+                ios_backgroundColor={colors.border}
+              />
+            </View>
+          </Card>
+        </View>
+
+        {/* ══════ عن التطبيق ══════ */}
+        <SectionHeader title="عن التطبيق" icon="حول" />
+        <View style={{ paddingHorizontal: 16 }}>
+          <Card>
+            {/* Version & In-App Update */}
+            <NavRow
+              icon="cloud-download" iconColor="#0EA5E9" iconBg="rgba(14,165,233,0.12)"
+              label={`تحديث التطبيق (الإصدار v${CURRENT_APP_VERSION})`}
+              sub="اضغط للتحقق من التحديثات وتثبيتها مباشرة داخل التطبيق"
+              onPress={() => openAppUpdateModal()}
+            />
+            {/* Report issue */}
+            <NavRow
+              icon="alert-circle" iconColor="#38bdf8" iconBg="rgba(56,189,248,0.10)"
+              label="الإبلاغ عن مشكلة" sub="أخبرنا إذا واجهت أي خلل · يصلنا مباشرة"
+              onPress={() => setShowReport(true)}
+            />
+            {/* Telegram */}
+            <NavRow
+              icon="paper-plane" iconColor="#34d399" iconBg="rgba(20,184,166,0.10)"
+              label="مجموعتنا الرسمية" sub="انضم لقروب تيليجرام الرسمي"
+              onPress={() => Linking.openURL("https://t.me/Nova_Film_Official")}
+              external
+            />
+
+          </Card>
+        </View>
+
+        {/* ══════ البيانات والكاش ══════ */}
+        <SectionHeader title="البيانات والكاش" icon="البيانات" />
+        <View style={{ paddingHorizontal: 16 }}>
+          <Card>
+            <DangerRow
+              label="مسح سجل المشاهدة"
+              sub={`${histCount} حلقة مشاهَدة · لا يمكن التراجع`}
+              onPress={handleClearHistory}
+            />
+            <DangerRow
+              label="مسح قائمة المحفوظات"
+              sub={`${savedCount} أنمي محفوظ · لا يمكن التراجع`}
+              onPress={handleClearFavorites}
+            />
+            <DangerRow
+              label="مسح الكاش والإعدادات"
+              sub={`${cacheKb}KB مُخزَّن · يعيد التطبيق للحالة الأولية`}
+              onPress={handleClearCache}
+            />
+          </Card>
+        </View>
+
+        {/* ══════ أخرى — الروابط والمعلومات في نهاية الإعدادات ══════ */}
+        <SectionHeader title="أخرى" icon="المزيد" />
+        <View style={{ paddingHorizontal: 16 }}>
+          <Card>
+            <NavRow
+              icon="globe-outline" iconColor="#38bdf8" iconBg="rgba(56,189,248,0.10)"
+              label="الموقع الرسمي" sub={OFFICIAL_SITE}
+              external
+              onPress={() => {
+                void Linking.openURL(OFFICIAL_SITE).catch(() =>
+                  Alert.alert("تعذّر فتح الموقع", "تحقق من اتصال الإنترنت ثم حاول مرة أخرى."),
+                );
+              }}
+            />
+            <NavRow
+              icon="mail" iconColor="#f472b6" iconBg="rgba(236,72,153,0.10)"
+              label="تواصل معنا" sub="اقتراحات · شراكات · مساعدة"
+              onPress={() => setShowReport(true)}
+            />
+            <NavRow
+              icon="share-social" iconColor="#34d399" iconBg="rgba(16,185,129,0.10)"
+              label="مشاركة التطبيق" sub="شارك Anime NOVA مع أصدقائك"
+              onPress={() => {
+                void Share.share({
+                  message: `Anime NOVA — شاهد الأنمي واكتشف أحدث الحلقات\n${OFFICIAL_SITE}`,
+                  url: OFFICIAL_SITE,
+                }).catch(() => {});
+              }}
+            />
+            <NavRow
+              icon="shield-checkmark" iconColor="#f59e0b" iconBg="rgba(245,158,11,0.10)"
+              label="إخلاء المسؤولية" sub="مصادر المحتوى وحقوق النشر"
+              onPress={() => Alert.alert(
+                "إخلاء المسؤولية",
+                "هذا التطبيق لا يستضيف أو يرفع محتوى مرئياً. المحتويات المعروضة توفرها مصادر خارجية متاحة على الإنترنت. لا نمتلك حقوق المواد المعروضة؛ الحقوق محفوظة لأصحابها.",
+              )}
+            />
+            <NavRow
+              icon="lock-closed" iconColor="#2dd4bf" iconBg="rgba(20,184,166,0.10)"
+              label="سياسة الخصوصية" sub="معلومات الحساب والمزامنة"
+              onPress={() => Alert.alert(
+                "سياسة الخصوصية",
+                "يُستخدم تسجيل الدخول لتشغيل مزايا الحساب ومزامنة المفضلة وسجل المشاهدة والتعليقات بين أجهزتك. لا تشارك بيانات الدخول مع أي شخص.",
+              )}
+            />
+            <NavRow
+              icon="information-circle" iconColor="#a78bfa" iconBg="rgba(139,92,246,0.10)"
+              label="عن التطبيق" sub={`NOVA FILM · إصدار v${CURRENT_APP_VERSION}`}
+              onPress={() => Alert.alert(
+                "عن Anime NOVA",
+                "تطبيق لمتابعة الأنمي واكتشاف الحلقات الجديدة والمحتوى المترجم والمدبلج.",
+              )}
+            />
+          </Card>
+        </View>
+
+        {/* ── Footer ── */}
+        <View style={ts.footer}>
+          <View style={ts.footerLogo}>
+            <Text style={[ts.footerLogoText, { color: colors.textPrimary }]}>ANIME </Text>
+            <Text style={[ts.footerLogoText, { color: colors.accent }]}>NOVA</Text>
+          </View>
+          <Text style={[ts.footerSub, { color: colors.textMuted }]}>v{CURRENT_APP_VERSION} · مجاني للجميع · 2025</Text>
+        </View>
+      </ScrollView>
+
+      {/* Confirm Sheet */}
+      <ConfirmSheet
+        open={confirm.open}
+        title={confirm.title}
+        desc={confirm.desc}
+        confirmLabel={confirm.confirmLabel}
+        danger={confirm.danger}
+        onConfirm={confirm.onConfirm}
+        onCancel={closeConfirm}
+      />
+
+      {/* Report Sheet */}
+      <ReportSheet open={showReport} onClose={() => setShowReport(false)} />
+
+      {/* Crash Log Modal */}
+      {showCrashLog && (
+        <Modal transparent animationType="slide" onRequestClose={() => setShowCrashLog(false)}>
+          <Pressable style={ts.overlay} onPress={() => setShowCrashLog(false)} focusable={false} />
+          <View style={[ts.bottomSheet, { maxHeight: "88%" }]}>
+            <View style={[ts.sheetAccentBar, { backgroundColor: "#ef4444" }]} />
+            <View style={ts.sheetHandle} />
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingBottom: 12 }}>
+              <Pressable onPress={() => setShowCrashLog(false)} style={ts.reportCloseBtn}>
+                <Ionicons name="close" size={16} color="rgba(255,255,255,0.5)" />
+              </Pressable>
+              <Text style={{ fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: "#fff" }}>
+                🛠️ سجل الأعطال ({crashEntries.length})
+              </Text>
+              <View style={{ width: 36 }} />
+            </View>
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 10 }}>
+              {crashEntries.length === 0 ? (
+                <View style={{ alignItems: "center", paddingVertical: 40, gap: 12 }}>
+                  <Ionicons name="checkmark-circle" size={40} color="#34d399" />
+                  <Text style={{ fontSize: 14, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.5)" }}>لا توجد أعطال مسجّلة 🎉</Text>
+                </View>
+              ) : crashEntries.map((e, i) => (
+                <View key={i} style={{ borderRadius: 14, padding: 12, backgroundColor: e.isFatal ? "rgba(239,68,68,0.10)" : "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: e.isFatal ? "rgba(239,68,68,0.25)" : "rgba(255,255,255,0.07)", gap: 4 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                    <Text style={{ fontSize: 9, fontFamily: "Cairo_700Bold", color: e.isFatal ? "#f87171" : "#fbbf24" }}>
+                      {e.isFatal ? "🔴 FATAL" : "🟡"} [{e.type?.toUpperCase()}] [{e.platform ?? "?"}]
+                    </Text>
+                    <Text style={{ fontSize: 9, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.25)" }}>
+                      {e.ts ? new Date(e.ts).toLocaleString("ar-SA") : ""}
+                    </Text>
+                  </View>
+                  <Text style={{ fontSize: 11, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.75)", lineHeight: 18 }} selectable>
+                    {e.message?.slice(0, 200)}
+                  </Text>
+                  {e.context ? (
+                    <Text style={{ fontSize: 9, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.30)" }} selectable>
+                      {e.context}
+                    </Text>
+                  ) : null}
+                  {e.stack ? (
+                    <Text style={{ fontSize: 8, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.20)", marginTop: 4 }} selectable numberOfLines={3}>
+                      {e.stack}
+                    </Text>
+                  ) : null}
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+        </Modal>
+      )}
+
+      {/* Auth Sheet */}
+      <AuthSheet
+        open={showAuth}
+        onClose={() => setShowAuth(false)}
+        onLinkDevice={() => {
+          setShowAuth(false);
+          router.push("/tv-link" as any);
+        }}
+        onLogin={u => {
+          // Update the already-mounted settings screen instead of navigating
+          // to another settings instance after authentication.
+          setCurrentUser(u);
+          setGlobalUser(u);
+          setShowAuth(false);
+          showToast(`مرحباً ${u.displayName}! 🎉`);
+        }}
+      />
+
+      {/* Profile Sheet — stays on the mounted settings screen so navigation
+          does not create a second settings route. */}
+      <ProfileSheet
+        open={showProfile}
+        onClose={() => setShowProfile(false)}
+        user={currentUser}
+        onUpdate={u => { setCurrentUser(u); setGlobalUser(u); }}
+        onLogout={handleLogout}
+        onLinkTv={() => { setShowProfile(false); setShowTvLink(true); }}
+      />
+
+      <TvLinkSheet open={showTvLink} onClose={() => setShowTvLink(false)} />
+
+      {/* Premium Sheet */}
+      <PremiumSheet
+        open={showPremium}
+        onClose={() => setShowPremium(false)}
+        user={currentUser}
+      />
+
+      {/* Donation Modal */}
+      {showDonation && (
+        <Modal transparent animationType="fade" onRequestClose={() => setShowDonation(false)}>
+          <View style={ts.donationOverlay}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowDonation(false)} focusable={false} />
+            <View style={ts.donationDialog}>
+              {/* Header */}
+              <View style={ts.donationModalHeader}>
+                <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 12, flex: 1 }}>
+                  <View style={ts.donationHeartBadge}>
+                    <Ionicons name="heart" size={20} color="#10b981" />
+                  </View>
+                  <View style={{ flex: 1, alignItems: "flex-end" }}>
+                    <Text style={ts.donationModalTitle}>ادعمني ليستمر التطبيق بالعمل مجاناً</Text>
+                    <Text style={ts.donationModalSub}>
+                      دعمك يحافظ على خوادم الحلقات السريعة بدون رسوم إجبارية
+                    </Text>
+                  </View>
+                </View>
+                <Pressable
+                  onPress={() => setShowDonation(false)}
+                  focusable={tvMode}
+                  style={({ focused }) => [ts.donationCloseBtn, tvMode && tvFocusStyle(focused)]}
+                >
+                  <Ionicons name="close" size={18} color="#cbd5e1" />
+                </Pressable>
+              </View>
+
+              {/* Telegram Stars Banner */}
+              <View style={ts.donationTelegramBanner}>
+                <View style={{ flex: 1, alignItems: "flex-end" }}>
+                  <Text style={ts.donationBannerTitle}>ادعمني بنجوم أو هدايا تلجرام ⭐🎁</Text>
+                  <Text style={ts.donationBannerDesc}>
+                    يمكنك إرسال نجوم تلجرام (Telegram Stars) أو هدايا رمزية لدعم استمرار سيرفرات المشاهدة والتحميل
+                  </Text>
+                </View>
+                <View style={ts.telegramTagPill}>
+                  <Text style={ts.telegramTagText}>Telegram ★</Text>
+                </View>
+              </View>
+
+              <Text style={ts.donationSelectLabel}>اختر مبلغ الدعم أو الهدية عبر تلجرام:</Text>
+
+              {/* 3 Tier Options */}
+              <View style={ts.donationTiersRow}>
+                {[
+                  { id: "1" as const, price: "1$", stars: "⭐ 50 نجمة", desc: "قهوة للمطور" },
+                  { id: "3" as const, price: "3$", stars: "⭐ 150 نجمة", desc: "دعم السيرفر" },
+                  { id: "5" as const, price: "5$", stars: "🎁 هدية تلجرام", desc: "الراعي الذهبي" },
+                ].map(tier => {
+                  const active = selectedDonationTier === tier.id;
+                  return (
+                    <Pressable
+                      key={tier.id}
+                      focusable={tvMode}
+                      hasTVPreferredFocus={tvMode && tier.id === "1"}
+                      onPress={() => setSelectedDonationTier(tier.id)}
+                      style={({ focused }) => [
+                        ts.donationTierCard,
+                        active && ts.donationTierCardActive,
+                        tvMode && tvFocusStyle(focused),
+                      ]}
+                    >
+                      <Text style={[ts.donationTierPrice, active && { color: "#0ea5e9" }]}>{tier.price}</Text>
+                      <Text style={ts.donationTierStars}>{tier.stars}</Text>
+                      <Text style={ts.donationTierDesc}>{tier.desc}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              {/* Selected Tier Action Box */}
+              <View style={ts.donationActionBox}>
+                <View style={ts.donationActionTopRow}>
+                  <Text style={ts.donationChosenText}>
+                    {selectedDonationTier === "1"
+                      ? "تم اختيار باقة الدعم ($1 · 50 نجمة)"
+                      : selectedDonationTier === "3"
+                        ? "تم اختيار باقة الدعم ($3 · 150 نجمة)"
+                        : "تم اختيار باقة الدعم ($5 · هدية تلجرام)"}
+                  </Text>
+                  <Text style={ts.donationTelegramHandle}>@Nova_Film_Official</Text>
+                </View>
+
+                <Pressable
+                  focusable={tvMode}
+                  onPress={() => void Linking.openURL("https://t.me/Nova_Film_Official").catch(() => {})}
+                  style={({ focused }) => [ts.donationGoTelegramBtn, tvMode && tvFocusStyle(focused)]}
+                >
+                  <Ionicons name="open-outline" size={16} color="#ffffff" />
+                  <Text style={ts.donationGoTelegramText}>اذهب إلى تلجرام</Text>
+                </Pressable>
+              </View>
+
+              {/* Share App Button */}
+              <Pressable
+                focusable={tvMode}
+                onPress={() => {
+                  void Share.share({
+                    message: `Anime NOVA — شاهد الأنمي واكتشف أحدث الحلقات مجاناً\n${OFFICIAL_SITE}`,
+                    url: OFFICIAL_SITE,
+                  }).catch(() => {});
+                  showToast("تم نسخ رابط التطبيق للمشاركة ✓");
+                }}
+                style={({ focused }) => [ts.donationShareBtn, tvMode && tvFocusStyle(focused)]}
+              >
+                <Text style={ts.donationShareBtnText}>نسخ رابط التطبيق ومشاركته مع أصدقائك</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
+      )}
+    </View>
+  );
+}
+
+/* ═══════════════ STYLES ═══════════════ */
+const ts = StyleSheet.create({
+  /* Toast */
+  toastWrap: { position: "absolute", left: 16, right: 16, zIndex: 9999, alignItems: "center" },
+  toast: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 18, borderWidth: 1 },
+  toastText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.9)" },
+
+  /* Header */
+  header: {
+    flexDirection: ROW_RTL, alignItems: "center", gap: 10,
+    paddingHorizontal: 16, paddingBottom: 14,
+    backgroundColor: "rgba(9,9,11,0.92)",
+    borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)",
+  },
+  headerBackBtn: { width: 36, height: 36, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.05)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", alignItems: "center", justifyContent: "center" },
+  headerIconWrap: { width: 32, height: 32, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.18)", borderWidth: 1, borderColor: "rgba(139,92,246,0.30)", alignItems: "center", justifyContent: "center" },
+  headerTitle: { fontSize: 17, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+  headerBadge: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)" },
+  headerDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#34d399" },
+  headerBadgeText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.3)" },
+
+  /* Profile */
+  profileCard: { flexDirection: "row", alignItems: "center", gap: 11, borderRadius: 18, paddingHorizontal: 13, paddingVertical: 13, backgroundColor: "rgba(17,17,22,0.95)", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)" },
+  profileAvatar: { width: 48, height: 48, borderRadius: 14, backgroundColor: "rgba(255,255,255,0.05)", borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  profileAvatarImage: { width: "100%", height: "100%", borderRadius: 13 },
+  profileLoginTitle: { fontSize: 13.5, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.85)", textAlign: "right" },
+  profileLoginSub: { fontSize: 10.5, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.42)", marginTop: 1, textAlign: "right" },
+  profileLoginBtn: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 11, backgroundColor: "rgba(139,92,246,0.18)", borderWidth: 1, borderColor: "rgba(139,92,246,0.30)", flexShrink: 0 },
+  profileLoginBtnText: { fontSize: 10.5, fontFamily: "Cairo_800ExtraBold", color: "#c4b5fd" },
+  deviceLinkGuestBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 12, borderRadius: 16, backgroundColor: "rgba(139,92,246,0.08)", borderWidth: 1, borderColor: "rgba(167,139,250,0.28)" },
+  deviceLinkGuestText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
+  linkCodeDisplay: {
+    alignItems: "center",
+    marginTop: 16,
+    paddingVertical: 15,
+    borderRadius: 18,
+    backgroundColor: "rgba(7,5,18,0.34)",
+    borderWidth: 1,
+    borderColor: "rgba(196,181,253,0.22)",
+  },
+  linkCodeSuccess: { flexDirection: "row", alignItems: "center", gap: 6 },
+  linkCodeSuccessText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#6ee7b7" },
+  linkCodeText: {
+    fontSize: 36,
+    letterSpacing: 9,
+    fontFamily: "Cairo_800ExtraBold",
+    color: "#fff",
+    textAlign: "center",
+    marginTop: 7,
+  },
+  linkCodeExpiry: { fontSize: 10, fontFamily: "Cairo_400Regular", color: "#a78bfa", textAlign: "center", marginTop: 1 },
+  linkCreateButton: {
+    minHeight: 68,
+    borderRadius: 17,
+    paddingHorizontal: 13,
+    paddingVertical: 10,
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 16,
+    backgroundColor: "#8b5cf6",
+    borderWidth: 1,
+    borderColor: "rgba(221,214,254,0.28)",
+    elevation: 5,
+    shadowColor: "#7c3aed",
+    shadowOpacity: 0.28,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+  },
+  linkCreateIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 13,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.16)",
+  },
+  linkCreateTitle: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "right" },
+  linkCreateHint: { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.72)", marginTop: 1, textAlign: "right" },
+  linkActionCopy: { flex: 1, alignItems: "flex-end" },
+  linkActionPressed: { transform: [{ scale: 0.975 }], opacity: 0.88 },
+  linkActionLoading: { opacity: 0.68 },
+  linkRegenerateButton: {
+    minHeight: 62,
+    borderRadius: 17,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 12,
+    backgroundColor: "rgba(196,181,253,0.09)",
+    borderWidth: 1,
+    borderColor: "rgba(196,181,253,0.25)",
+  },
+  linkRegenerateIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(139,92,246,0.20)",
+  },
+  linkRegenerateTitle: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#ddd6fe", textAlign: "right" },
+  linkRegenerateHint: { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(221,214,254,0.52)", marginTop: 1, textAlign: "right" },
+
+  /* Stats Grid */
+  statsGrid: { flexDirection: "row", gap: 8, paddingHorizontal: 16, marginTop: 12 },
+  statCard: { flex: 1, alignItems: "center", gap: 4, borderRadius: 14, paddingVertical: 10, borderWidth: 1, borderColor: "rgba(255,255,255,0.05)" },
+  statVal: { fontSize: 16, fontFamily: "Cairo_800ExtraBold" },
+  statLabel: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.30)" },
+
+  /* Premium */
+  premiumCard: { borderRadius: 20, padding: 16, overflow: "hidden", borderWidth: 1.5, borderColor: "rgba(251,191,36,0.32)", backgroundColor: "rgba(251,191,36,0.08)" },
+  premiumGlow: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: "transparent" },
+  premiumIcon: { width: 44, height: 44, borderRadius: 14, backgroundColor: "rgba(251,191,36,0.20)", borderWidth: 1, borderColor: "rgba(251,191,36,0.38)", alignItems: "center", justifyContent: "center" },
+  premiumTitle: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "#fcd34d" },
+  premiumSub: { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(251,191,36,0.60)", marginTop: 2 },
+  premiumBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, backgroundColor: "rgba(251,191,36,0.18)", borderWidth: 1, borderColor: "rgba(251,191,36,0.30)" },
+  premiumBtnText: { fontSize: 11, fontFamily: "Cairo_800ExtraBold", color: "#fbbf24" },
+  premiumFeatures: { flexDirection: "row", gap: 8, marginTop: 12 },
+  premiumFeatureItem: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, paddingVertical: 6, borderRadius: 12, backgroundColor: "rgba(251,191,36,0.10)", borderWidth: 1, borderColor: "rgba(251,191,36,0.16)" },
+  premiumFeatureText: { fontSize: 8, fontFamily: "Cairo_800ExtraBold", color: "rgba(253,211,77,0.70)" },
+
+  /* Section Header */
+  sectionHeader: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 16, paddingTop: 28, paddingBottom: 12 },
+  sectionLine: { flex: 1, height: 1, backgroundColor: "rgba(255,255,255,0.06)" },
+  sectionTitle: { fontSize: 10, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.30)", letterSpacing: 1.2 },
+
+  /* Card */
+  card: { borderRadius: 20, overflow: "hidden", backgroundColor: "rgba(17,17,22,0.95)", borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
+
+  /* Nav Row */
+  navRow: { flexDirection: "row", alignItems: "center", gap: 14, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.045)" },
+  navIcon: { width: 36, height: 36, borderRadius: 12, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
+  navText: { flex: 1 },
+  navLabel: { fontSize: 13.5, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.85)", textAlign: "right" },
+  navSub: { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.30)", marginTop: 2, textAlign: "right" },
+  navBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: "rgba(139,92,246,0.18)", borderWidth: 1, borderColor: "rgba(139,92,246,0.25)" },
+  navBadgeText: { fontSize: 8, fontFamily: "Cairo_800ExtraBold", color: "#a78bfa" },
+
+  /* Danger Row */
+  dangerRow: { flexDirection: "row", alignItems: "center", gap: 14, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.045)" },
+  dangerIcon: { width: 36, height: 36, borderRadius: 12, backgroundColor: "rgba(239,68,68,0.10)", borderWidth: 1, borderColor: "rgba(239,68,68,0.20)", alignItems: "center", justifyContent: "center" },
+  dangerLabel: { fontSize: 13.5, fontFamily: "Cairo_700Bold", color: "rgba(248,113,113,0.85)", textAlign: "right" },
+  dangerSub: { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(248,113,113,0.30)", marginTop: 2, textAlign: "right" },
+
+  /* Theme */
+  themePreviewDot: { width: 36, height: 36, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  themePreviewInner: { width: 20, height: 20, borderRadius: 10 },
+  themesRow: { flexDirection: "row", gap: 8 },
+  themeBtn: { flex: 1, alignItems: "center", gap: 6, paddingVertical: 12, borderRadius: 16, borderWidth: 1 },
+  themeDot: { width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center" },
+  themeCheck: { position: "absolute", inset: 0, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.35)", borderRadius: 14 },
+  themeLabel: { fontSize: 9, fontFamily: "Cairo_800ExtraBold" },
+
+  /* Confirm Sheet */
+  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.76)" },
+  bottomSheet: {
+    position: "absolute", bottom: 0, left: 0, right: 0,
+    backgroundColor: "#0E0C1A",
+    borderTopLeftRadius: 32, borderTopRightRadius: 32,
+    borderWidth: 1.5, borderBottomWidth: 0,
+    borderColor: "rgba(255,255,255,0.07)",
+    paddingBottom: 32,
+  },
+  sheetAccentLine: { height: 2, borderTopLeftRadius: 32, borderTopRightRadius: 32 },
+  sheetAccentBar: { height: 2, borderTopLeftRadius: 32, borderTopRightRadius: 32, marginBottom: 0 },
+  sheetHandle: { width: 40, height: 3.5, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.12)", alignSelf: "center", marginTop: 12, marginBottom: 16 },
+  sheetTitle: { fontSize: 17, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.9)", textAlign: "center", paddingHorizontal: 20, marginBottom: 8 },
+  sheetDesc: { fontSize: 12, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.40)", textAlign: "center", paddingHorizontal: 24, lineHeight: 20, marginBottom: 20 },
+  sheetBtns: { flexDirection: "row", gap: 12, paddingHorizontal: 20 },
+  sheetCancelBtn: { flex: 1, paddingVertical: 14, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", alignItems: "center" },
+  sheetCancelText: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.55)" },
+  sheetConfirmBtn: { flex: 1, paddingVertical: 14, borderRadius: 18, backgroundColor: "#7C3AED", alignItems: "center", borderWidth: 1, borderColor: "rgba(139,92,246,0.30)" },
+  sheetConfirmDanger: { backgroundColor: "rgba(239,68,68,0.18)", borderColor: "rgba(239,68,68,0.30)" },
+  sheetConfirmText: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+
+  /* Report Sheet */
+  reportHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingVertical: 12 },
+  reportCloseBtn: { width: 36, height: 36, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.09)", alignItems: "center", justifyContent: "center" },
+  reportIconWrap: { width: 32, height: 32, borderRadius: 12, backgroundColor: "rgba(139,92,246,0.18)", borderWidth: 1, borderColor: "rgba(139,92,246,0.30)", alignItems: "center", justifyContent: "center" },
+  reportTitle: { fontSize: 16, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+  reportFieldLabel: { fontSize: 11, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.35)", marginBottom: 10, letterSpacing: 0.8 },
+  reportTypeGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  reportTypeBtn: { flexDirection: "row", alignItems: "center", gap: 8, width: "48%", paddingHorizontal: 12, paddingVertical: 10, borderRadius: 14, borderWidth: 1 },
+  reportTypeBtnText: { fontSize: 12, fontFamily: "Cairo_700Bold" },
+  reportTypeDot: { marginRight: "auto", width: 6, height: 6, borderRadius: 3, backgroundColor: "#a78bfa" },
+  reportTextarea: { backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1.5, borderRadius: 18, paddingHorizontal: 16, paddingVertical: 14, fontSize: 13, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.85)", minHeight: 120, textAlign: "right", lineHeight: 24 },
+  reportCharCount: { fontSize: 10, fontFamily: "Cairo_400Regular", textAlign: "left", marginTop: 6 },
+  reportError: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 14, backgroundColor: "rgba(239,68,68,0.10)", borderWidth: 1, borderColor: "rgba(239,68,68,0.25)", marginTop: 12 },
+  reportErrorText: { fontSize: 12, fontFamily: "Cairo_400Regular", color: "rgba(252,165,165,0.80)" },
+  reportSendBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 16, borderRadius: 20, backgroundColor: "#7C3AED", borderWidth: 1, borderColor: "rgba(139,92,246,0.35)", marginTop: 16 },
+  reportSendText: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+  reportNote: { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.18)", textAlign: "center", marginTop: 12 },
+  successIcon: { width: 80, height: 80, borderRadius: 40, backgroundColor: "rgba(16,185,129,0.14)", borderWidth: 2, borderColor: "rgba(16,185,129,0.35)", alignItems: "center", justifyContent: "center" },
+  successTitle: { fontSize: 18, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.9)" },
+  successSub: { fontSize: 12, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.40)", textAlign: "center", lineHeight: 20 },
+  successBtn: { paddingHorizontal: 32, paddingVertical: 12, borderRadius: 20, backgroundColor: "#7C3AED", marginTop: 8 },
+  successBtnText: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+
+  /* Disclaimer */
+  disclaimer: { marginHorizontal: 16, marginTop: 28, borderRadius: 20, padding: 20, borderWidth: 1 },
+  disclaimerIcon: { width: 32, height: 32, borderRadius: 12, backgroundColor: "rgba(139,92,246,0.15)", borderWidth: 1, borderColor: "rgba(139,92,246,0.25)", alignItems: "center", justifyContent: "center" },
+  disclaimerTitle: { fontSize: 12, fontFamily: "Cairo_800ExtraBold", letterSpacing: 0.5, paddingTop: 6 },
+  disclaimerText: { fontSize: 11, fontFamily: "Cairo_400Regular", lineHeight: 24, textAlign: "right" },
+
+  /* Footer */
+  footer: { alignItems: "center", gap: 8, paddingTop: 28, paddingBottom: 24 },
+  footerLogo: { flexDirection: "row", alignItems: "center" },
+  footerLogoText: { fontSize: 18, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.80)", letterSpacing: 2 },
+  footerSub: { fontSize: 9, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.20)" },
+
+  /* Auth Sheet */
+  authFieldLabel: { fontSize: 11, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.35)", marginBottom: 8, textAlign: "right", letterSpacing: 0.8 },
+  authFieldWrap: { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255,255,255,0.05)", borderWidth: 1.5, borderColor: "rgba(255,255,255,0.08)", borderRadius: 18, paddingHorizontal: 16, paddingVertical: 4, marginBottom: 14, gap: 10 },
+  authFieldInput: { flex: 1, paddingVertical: 12, fontSize: 13.5, fontFamily: "Cairo_400Regular", color: "#fff", textAlign: "right" },
+  authCodeInput: { backgroundColor: "rgba(255,255,255,0.05)", borderWidth: 1.5, borderColor: "rgba(255,255,255,0.08)", borderRadius: 18, paddingHorizontal: 20, paddingVertical: 12, fontSize: 18, fontFamily: "Cairo_800ExtraBold", color: "#c4b5fd", textAlign: "center", letterSpacing: 8, marginBottom: 20 },
+  authSubmitBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 16, borderRadius: 20, backgroundColor: "#7C3AED", borderWidth: 1, borderColor: "rgba(139,92,246,0.35)", marginTop: 4, marginBottom: 12 },
+  authSubmitText: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+
+  /* Premium Sheet */
+  premiumHeroCard: { borderRadius: 24, padding: 20, backgroundColor: "rgba(251,191,36,0.08)", borderWidth: 1.5, borderColor: "rgba(251,191,36,0.28)", marginBottom: 16 },
+  premiumFeaturesCard: { borderRadius: 20, overflow: "hidden", backgroundColor: "rgba(17,17,22,0.95)", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", marginBottom: 16, padding: 16 },
+  subscribeBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 18, borderRadius: 22, backgroundColor: "rgba(251,191,36,0.18)", borderWidth: 1.5, borderColor: "rgba(251,191,36,0.40)" },
+  subscribeBtnText: { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: "#fcd34d" },
+
+  /* Donation Card & Modal */
+  donationCard: {
+    marginTop: 8,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    backgroundColor: "rgba(16,185,129,0.08)",
+    borderWidth: 1.5,
+    borderColor: "rgba(16,185,129,0.32)",
+    gap: 10,
+  },
+  donationIconBox: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: "rgba(16,185,129,0.18)",
+    borderWidth: 1,
+    borderColor: "rgba(16,185,129,0.38)",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  donationTitle: {
+    fontSize: 13,
+    fontFamily: "Cairo_800ExtraBold",
+    color: "#34d399",
+    textAlign: "right",
+    width: "100%",
+  },
+  donationSub: {
+    fontSize: 10.5,
+    lineHeight: 16,
+    fontFamily: "Cairo_600SemiBold",
+    color: "rgba(167,243,208,0.82)",
+    marginTop: 2,
+    textAlign: "right",
+    width: "100%",
+  },
+  donationBottomRow: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingTop: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "rgba(16,185,129,0.22)",
+  },
+  donationLinkHint: {
+    fontSize: 10.5,
+    fontFamily: "Cairo_700Bold",
+    color: "rgba(167,243,208,0.65)",
+  },
+  donationPillBtn: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 10,
+    backgroundColor: "rgba(16,185,129,0.18)",
+    borderWidth: 1,
+    borderColor: "rgba(16,185,129,0.38)",
+  },
+  donationPillBtnText: {
+    fontSize: 10.5,
+    fontFamily: "Cairo_800ExtraBold",
+    color: "#34d399",
+  },
+  donationOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.78)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+  },
+  donationDialog: {
+    width: "100%",
+    maxWidth: 420,
+    borderRadius: 26,
+    padding: 18,
+    backgroundColor: "#0d131a",
+    borderWidth: 1.5,
+    borderColor: "rgba(20,184,166,0.3)",
+  },
+  donationModalHeader: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    marginBottom: 14,
+  },
+  donationHeartBadge: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: "rgba(16,185,129,0.16)",
+    borderWidth: 1,
+    borderColor: "rgba(16,185,129,0.4)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  donationModalTitle: {
+    fontSize: 15,
+    fontFamily: "Cairo_800ExtraBold",
+    color: "#ffffff",
+    textAlign: "right",
+  },
+  donationModalSub: {
+    fontSize: 10.5,
+    fontFamily: "Cairo_600SemiBold",
+    color: "#94a3b8",
+    textAlign: "right",
+    marginTop: 2,
+  },
+  donationCloseBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 11,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  donationTelegramBanner: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    padding: 14,
+    borderRadius: 18,
+    backgroundColor: "rgba(14,165,233,0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(14,165,233,0.28)",
+    marginBottom: 14,
+  },
+  donationBannerTitle: {
+    fontSize: 13.5,
+    fontFamily: "Cairo_800ExtraBold",
+    color: "#ffffff",
+    textAlign: "right",
+  },
+  donationBannerDesc: {
+    fontSize: 10.5,
+    fontFamily: "Cairo_600SemiBold",
+    color: "#cbd5e1",
+    textAlign: "right",
+    marginTop: 4,
+    lineHeight: 17,
+  },
+  telegramTagPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: "rgba(14,165,233,0.18)",
+    borderWidth: 1,
+    borderColor: "rgba(14,165,233,0.42)",
+  },
+  telegramTagText: {
+    fontSize: 11,
+    fontFamily: "Cairo_800ExtraBold",
+    color: "#38bdf8",
+  },
+  donationSelectLabel: {
+    fontSize: 11.5,
+    fontFamily: "Cairo_700Bold",
+    color: "#e2e8f0",
+    textAlign: "right",
+    marginBottom: 10,
+  },
+  donationTiersRow: {
+    flexDirection: ROW_RTL,
+    gap: 10,
+    marginBottom: 14,
+  },
+  donationTierCard: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 6,
+    borderRadius: 18,
+    backgroundColor: "#141a24",
+    borderWidth: 1.5,
+    borderColor: "rgba(255,255,255,0.08)",
+    gap: 4,
+  },
+  donationTierCardActive: {
+    backgroundColor: "rgba(14,165,233,0.15)",
+    borderColor: "#0ea5e9",
+  },
+  donationTierPrice: {
+    fontSize: 20,
+    fontFamily: "Cairo_800ExtraBold",
+    color: "#ffffff",
+  },
+  donationTierStars: {
+    fontSize: 11,
+    fontFamily: "Cairo_700Bold",
+    color: "#38bdf8",
+  },
+  donationTierDesc: {
+    fontSize: 10,
+    fontFamily: "Cairo_600SemiBold",
+    color: "#94a3b8",
+  },
+  donationActionBox: {
+    padding: 14,
+    borderRadius: 18,
+    backgroundColor: "rgba(14,165,233,0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(14,165,233,0.35)",
+    marginBottom: 12,
+    gap: 10,
+  },
+  donationActionTopRow: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  donationChosenText: {
+    fontSize: 11.5,
+    fontFamily: "Cairo_800ExtraBold",
+    color: "#ffffff",
+  },
+  donationTelegramHandle: {
+    fontSize: 11.5,
+    fontFamily: "Cairo_800ExtraBold",
+    color: "#38bdf8",
+  },
+  donationGoTelegramBtn: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: 14,
+    backgroundColor: "#2563eb",
+  },
+  donationGoTelegramText: {
+    fontSize: 13,
+    fontFamily: "Cairo_800ExtraBold",
+    color: "#ffffff",
+  },
+  donationShareBtn: {
+    paddingVertical: 13,
+    borderRadius: 16,
+    backgroundColor: "#141923",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  donationShareBtnText: {
+    fontSize: 12,
+    fontFamily: "Cairo_700Bold",
+    color: "#e2e8f0",
+  },
+});

@@ -72,12 +72,12 @@ jobs:
           # v2: bumped to invalidate a corrupted pnpm store cache that was
           # silently dropping extracted package files ("Failed to create bin"
           # for tsx/jiti/prettier/etc.), which broke workspace bin symlinks
-          # like artifacts/nova-mobile/node_modules/.bin/expo.
+          # like artifacts/nova-film/node_modules/.bin/expo.
           key: pnpm-v2-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
           restore-keys: pnpm-v2-${{ runner.os }}-
 
       - name: 📥 Install dependencies
-        working-directory: artifacts/nova-mobile
+        working-directory: artifacts/nova-film
         # Root cause (found 2026-08-05): the workflow-wide NODE_ENV=production
         # makes pnpm skip devDependencies entirely. expo-router, expo-font,
         # expo-web-browser, expo-screen-orientation and expo-image-picker are
@@ -96,7 +96,7 @@ jobs:
           missing=$(node -e '
             const fs = require("fs");
             const path = require("path");
-            const appJsonPath = "artifacts/nova-mobile/app.json";
+            const appJsonPath = "artifacts/nova-film/app.json";
             const { expo } = JSON.parse(fs.readFileSync(appJsonPath, "utf8"));
             const plugins = (expo.plugins || [])
               .map((p) => (Array.isArray(p) ? p[0] : p))
@@ -110,7 +110,7 @@ jobs:
               return p.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0];
             };
             const missing = plugins.filter(
-              (p) => !fs.existsSync(path.join("artifacts/nova-mobile/node_modules", packageNameOf(p), "package.json"))
+              (p) => !fs.existsSync(path.join("artifacts/nova-film/node_modules", packageNameOf(p), "package.json"))
             );
             console.log(missing.join(" "));
           ')
@@ -118,18 +118,18 @@ jobs:
             echo "❌ still missing after install (with devDependencies enabled): $missing"
             exit 1
           fi
-          if [ ! -e artifacts/nova-mobile/node_modules/.bin/expo ]; then
+          if [ ! -e artifacts/nova-film/node_modules/.bin/expo ]; then
             echo "❌ node_modules/.bin/expo missing after install"
             exit 1
           fi
           echo "✅ install verified (expo bin + all config-plugin packages present)"
 
       - name: 🧪 TypeScript typecheck
-        working-directory: artifacts/nova-mobile
+        working-directory: artifacts/nova-film
         run: pnpm run typecheck
 
       - name: 🩹 Fix react-native-video Android compatibility
-        working-directory: artifacts/nova-mobile
+        working-directory: artifacts/nova-film
         run: |
           set -eu
 
@@ -184,7 +184,7 @@ jobs:
           PY
 
       - name: 🔥 Configure Firebase Android client for FCM
-        working-directory: artifacts/nova-mobile
+        working-directory: artifacts/nova-film
         env:
           FIREBASE_GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.FIREBASE_GOOGLE_SERVICES_JSON_BASE64 }}
         run: |
@@ -227,12 +227,12 @@ jobs:
           chmod 600 google-services.json
 
       - name: 🏗️ Expo Prebuild
-        working-directory: artifacts/nova-mobile
+        working-directory: artifacts/nova-film
         # Never let npx download a different Expo CLI during the build.
         run: ./node_modules/.bin/expo prebuild --platform android --clean --no-install
 
       - name: 🔐 Configure stable release signing
-        working-directory: artifacts/nova-mobile/android
+        working-directory: artifacts/nova-film/android
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -293,7 +293,7 @@ jobs:
       # react-native-video يقرأ rootProject.ext.kotlinVersion ويحتاج أيضاً
       # target JVM صريحاً مع AGP 8.
       - name: 🔧 Fix Gradle compatibility
-        working-directory: artifacts/nova-mobile/android
+        working-directory: artifacts/nova-film/android
         run: |
           # LevelPlay requires these Google Play Services artifacts in the app
           # module in addition to the mediation SDK dependency.
@@ -383,11 +383,11 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-8.13-${{ hashFiles('artifacts/nova-mobile/android/app/build.gradle') }}
+          key: gradle-${{ runner.os }}-8.13-${{ hashFiles('artifacts/nova-film/android/app/build.gradle') }}
           restore-keys: gradle-${{ runner.os }}-8.13-
 
       - name: 🔨 Build APK
-        working-directory: artifacts/nova-mobile/android
+        working-directory: artifacts/nova-film/android
         env:
           GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx4096m -Dorg.gradle.warning.mode=none"
         run: |
@@ -407,7 +407,7 @@ jobs:
             }
 
       - name: 🔎 Verify signed installable APK
-        working-directory: artifacts/nova-mobile/android
+        working-directory: artifacts/nova-film/android
         shell: bash
         run: |
           set -euo pipefail
@@ -436,7 +436,7 @@ jobs:
           echo "✅ Signed APK verified for package $PACKAGE"
 
       - name: 🔑 Show release signing fingerprint
-        working-directory: artifacts/nova-mobile/android
+        working-directory: artifacts/nova-film/android
         run: |
           ./gradlew signingReport --no-daemon --warning-mode=none
 
@@ -444,7 +444,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: NovaFilm-v${{ github.run_number }}
-          path: artifacts/nova-mobile/android/app/build/outputs/apk/release/*.apk
+          path: artifacts/nova-film/android/app/build/outputs/apk/release/*.apk
           retention-days: 30
 
       - name: 📤 Upload build log (on failure)
@@ -452,12 +452,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: build-log-v${{ github.run_number }}
-          path: artifacts/nova-mobile/android/build.log
+          path: artifacts/nova-film/android/build.log
           retention-days: 7
 
       - name: ✅ APK Info
         run: |
-          APK=$(find artifacts/nova-mobile/android/app/build/outputs/apk/release -name "*.apk" | head -1)
+          APK=$(find artifacts/nova-film/android/app/build/outputs/apk/release -name "*.apk" | head -1)
           if [ -f "$APK" ]; then
             echo "✅ تم البناء بنجاح — الحجم: $(du -h "$APK" | cut -f1)"
           else

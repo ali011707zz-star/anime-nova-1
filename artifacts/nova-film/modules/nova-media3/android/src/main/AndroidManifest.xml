@@ -1,0 +1,24 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <uses-feature
+    android:name="android.software.picture_in_picture"
+    android:required="false" />
+  <application>
+    <!--
+      android:process=":player" is the actual isolation line: this Activity
+      runs in a separate Android process from the main app. If ExoPlayer/
+      media3 crashes natively anywhere inside it, only the `:player` process
+      dies — the caller (main app process) is unaffected. See
+      IsolatedPlayerActivity.kt and
+      artifacts/nova-mobile/docs/NOVA_PLAYER_FULL_ISOLATION_PLAN.md.
+    -->
+    <activity
+      android:name=".IsolatedPlayerActivity"
+      android:process=":player"
+      android:exported="false"
+      android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
+      android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize|uiMode"
+      android:screenOrientation="sensorLandscape"
+      android:hardwareAccelerated="true"
+      android:launchMode="singleTask" />
+  </application>
+</manifest>

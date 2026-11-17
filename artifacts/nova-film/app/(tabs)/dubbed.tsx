@@ -1,0 +1,300 @@
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import {
+  View, Text, TextInput, FlatList, Image,
+  ActivityIndicator, StyleSheet, Platform, ScrollView,
+  useWindowDimensions, RefreshControl,
+} from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
+import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useFocusEffect, useRouter } from "expo-router";
+import { getBaseUrl } from "@/utils/api";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
+import { useColors } from "@/hooks/useColors";
+import { isLegacyCartoonEntry } from "@/hooks/useDubbedCatalogFeed";
+
+interface Season { label: string; arabicToonsId: string; }
+interface Series {
+  key: string;
+  title: string;
+  image?: string;
+  poster?: string;
+  seasons: Season[];
+  tmdbId?: number;
+  slug?: string;
+}
+
+function apiBase(): string {
+  return getBaseUrl().replace(/\/$/, "");
+}
+
+function getImg(s: Series): string | null {
+  const img = s.poster || s.image;
+  if (!img) return null;
+  if (img.startsWith("http")) return img;
+  const base = apiBase();
+  if (img.startsWith("/api/dubbed/img")) return `${base}${img}`;
+  const f = img.split("?f=")[1] || img.split("/").pop();
+  return f ? `${base}/api/dubbed/img?f=${encodeURIComponent(f)}` : null;
+}
+
+function SeriesCard({ s, onPress }: { s: Series; onPress: () => void }) {
+  const colors = useColors();
+  const imgUri = getImg(s);
+  const { width, height } = useWindowDimensions();
+  const tvMode = isTvDevice(width, height);
+  return (
+    <Pressable
+      onPress={onPress}
+      focusable={tvMode}
+      style={({ pressed, focused }) => [styles.card, { opacity: pressed ? 0.7 : 1 }, tvMode && tvFocusStyle(focused)]}
+    >
+      <View style={[styles.cardPoster, { backgroundColor: colors.surface }]}>
+        {imgUri ? (
+          <Image source={{ uri: imgUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+        ) : (
+          <View style={[styles.cardPlaceholder, { backgroundColor: colors.surfaceElevated }]}>
+            <Text style={{ fontSize: 24 }}>📺</Text>
+          </View>
+        )}
+        <View style={styles.badge}>
+          <Text style={styles.badgeText}>مدبلج</Text>
+        </View>
+        <LinearGradient
+          colors={["transparent", "rgba(0,0,0,0.85)"]}
+          style={StyleSheet.absoluteFill}
+          pointerEvents="none"
+        />
+        <View style={styles.cardLabel}>
+          <Text style={styles.cardTitle} numberOfLines={2}>{s.title}</Text>
+          {s.seasons.length > 1 && (
+            <Text style={styles.cardSeasons}>{s.seasons.length} مواسم</Text>
+          )}
+        </View>
+      </View>
+    </Pressable>
+  );
+}
+
+export default function DubbedScreen() {
+  const colors = useColors();
+  const insets = useSafeAreaInsets();
+  const { width, height } = useWindowDimensions();
+  const tvMode = isTvDevice(width, height);
+  const router = useRouter();
+  const topPad = Platform.OS === "web" ? 0 : insets.top;
+  const numColumns = 3;
+  const gridWidth = Math.min(Math.max(width - 24, 0), 900);
+
+  const [series, setSeries] = useState<Series[]>([]);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [searchQ, setSearchQ] = useState("");
+  const [searchResults, setSearchResults] = useState<Series[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const loadPage = useCallback(async (p: number, reset = false, forceRefresh = false) => {
+    if (reset) setLoading(true); else setLoadingMore(true);
+    try {
+      const refresh = forceRefresh ? "&refresh=1" : "";
+      const r = await fetch(`${apiBase()}/api/dubbed/catalog?page=${p}${refresh}`, {
+        cache: forceRefresh ? "no-store" : "default",
+      });
+      if (!r.ok) throw new Error(`catalog_${r.status}`);
+      const d = await r.json();
+      const results: Series[] = Array.isArray(d.results)
+        ? d.results.filter(isLegacyCartoonEntry)
+        : [];
+      setTotalPages(d.totalPages || 1);
+      setSeries(prev => reset ? results : [...prev, ...results]);
+      setPage(p);
+    } catch {}
+    setLoading(false);
+    setLoadingMore(false);
+  }, []);
+
+  useFocusEffect(useCallback(() => {
+    const task = loadPage(1, true);
+    return () => { void task; };
+  }, [loadPage]));
+
+  const refreshCatalog = useCallback(async () => {
+    setRefreshing(true);
+    try { await loadPage(1, true, true); }
+    finally { setRefreshing(false); }
+  }, [loadPage]);
+
+  useEffect(() => {
+    const q = searchQ.trim();
+    if (q.length < 2) { setSearchResults([]); return; }
+    setSearchLoading(true);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(async () => {
+      try {
+        const r = await fetch(`${apiBase()}/api/dubbed/search?q=${encodeURIComponent(q)}`);
+        if (!r.ok) throw new Error(`search_${r.status}`);
+        const d = await r.json();
+        setSearchResults(
+          Array.isArray(d.results)
+            ? d.results.filter(isLegacyCartoonEntry)
+            : [],
+        );
+      } catch { setSearchResults([]); }
+      setSearchLoading(false);
+    }, 400);
+    return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
+  }, [searchQ]);
+
+  const openDetail = (s: Series) => {
+    router.push({
+      pathname: "/dubbed/[id]",
+      params: {
+        id: encodeURIComponent(s.key || s.title),
+        title: s.title,
+        seasons: JSON.stringify(s.seasons),
+        img: s.poster || s.image || "",
+      },
+    });
+  };
+
+  const displayList = searchQ.trim().length >= 2 ? searchResults : series;
+
+  return (
+    <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
+      {/* Header */}
+      <View style={[styles.header, { borderBottomColor: colors.border }]}>
+        <Pressable
+          onPress={() => setSearchOpen(o => !o)}
+          focusable={tvMode}
+          style={({ focused }) => [styles.iconBtn, { backgroundColor: colors.input, borderColor: colors.border }, tvMode && tvFocusStyle(focused)]}
+        >
+          <Ionicons name={searchOpen ? "close" : "search"} size={18} color={colors.textSecondary} />
+        </Pressable>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>كرتون مدبلج</Text>
+          <Text style={[styles.headerSub, { color: colors.textSecondary }]}>كرتون مدبلج للعربية</Text>
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="رجوع"
+          onPress={() => (router.canGoBack() ? router.back() : router.push("/"))}
+          focusable={tvMode}
+          style={({ focused }) => [styles.iconBtn, { backgroundColor: colors.input, borderColor: colors.border }, tvMode && tvFocusStyle(focused)]}
+        >
+          <Ionicons name="arrow-back" size={20} color={colors.textSecondary} style={{ transform: [{ scaleX: -1 }] }} />
+        </Pressable>
+      </View>
+
+      {searchOpen && (
+        <View style={[styles.searchBox, { backgroundColor: colors.input, borderColor: colors.border }]}>
+          <Ionicons name="search" size={16} color={colors.textMuted} style={{ marginLeft: 8 }} />
+          <TextInput
+            value={searchQ}
+            onChangeText={setSearchQ}
+            placeholder="ابحث في الكرتون المدبلج..."
+            placeholderTextColor={colors.textMuted}
+            style={[styles.searchInput, { color: colors.textPrimary }]}
+            autoFocus
+          />
+        </View>
+      )}
+
+      {loading ? (
+        <View style={styles.center}>
+          <ActivityIndicator color={colors.accent} size="large" />
+        </View>
+      ) : (
+        <FlatList
+          data={displayList}
+          removeClippedSubviews={false}
+          style={{ width: gridWidth, alignSelf: "center" }}
+          key={`dubbed-grid-${numColumns}`}
+          keyExtractor={item => item.key || item.title}
+          numColumns={numColumns}
+          contentContainerStyle={styles.grid}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={refreshCatalog}
+              tintColor={colors.accent}
+            />
+          }
+          columnWrapperStyle={{ gap: 10 }}
+          renderItem={({ item }) => (
+            <View style={{ flex: 1 / numColumns }}>
+              <SeriesCard s={item} onPress={() => openDetail(item)} />
+            </View>
+          )}
+          onEndReached={() => {
+            if (!searchQ && !loadingMore && page < totalPages) loadPage(page + 1);
+          }}
+          onEndReachedThreshold={0.3}
+          ListFooterComponent={
+            loadingMore ? <ActivityIndicator color={colors.accent} style={{ marginVertical: 16 }} /> : null
+          }
+          ListEmptyComponent={
+            !loading ? (
+              <View style={styles.center}>
+                <Text style={[styles.emptyText, { color: colors.textMuted }]}>
+                  {searchQ.length >= 2 ? "لا توجد نتائج كرتونية" : "لا توجد أعمال كرتونية"}
+                </Text>
+              </View>
+            ) : null
+          }
+        />
+      )}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#09090B" },
+  header: {
+    flexDirection: "row", direction: "ltr", alignItems: "center", paddingHorizontal: 16,
+    paddingTop: 12, paddingBottom: 12, borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.05)",
+  },
+  headerTitle: { color: "#fff", fontSize: 18, fontWeight: "900", fontFamily: "Cairo_700Bold" },
+  headerSub: { color: "rgba(255,255,255,0.35)", fontSize: 11, fontFamily: "Cairo_400Regular" },
+  iconBtn: {
+    width: 36, height: 36, borderRadius: 10,
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.08)",
+    alignItems: "center", justifyContent: "center",
+  },
+  searchBox: {
+    flexDirection: "row", alignItems: "center",
+    marginHorizontal: 16, marginBottom: 8,
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderRadius: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.10)",
+    paddingVertical: 10,
+  },
+  searchInput: {
+    flex: 1, color: "#fff", fontSize: 14,
+    fontFamily: "Cairo_400Regular", textAlign: "right", paddingRight: 8,
+  },
+  grid: { padding: 12, paddingBottom: 100 },
+  card: { borderRadius: 12, overflow: "hidden" },
+  cardPoster: { aspectRatio: 2 / 3, backgroundColor: "rgba(255,255,255,0.05)", borderRadius: 12, overflow: "hidden" },
+  cardPlaceholder: { flex: 1, alignItems: "center", justifyContent: "center" },
+  badge: {
+    position: "absolute", top: 8, right: 8, zIndex: 2,
+    paddingHorizontal: 8, paddingVertical: 3, borderRadius: 7,
+    backgroundColor: "#35B955",
+  },
+  badgeText: { color: "#fff", fontSize: 9, fontFamily: "Cairo_700Bold" },
+  cardLabel: { position: "absolute", bottom: 0, left: 0, right: 0, padding: 6 },
+  cardTitle: {
+    color: "#fff", fontSize: 10, fontWeight: "700",
+    fontFamily: "Cairo_700Bold", lineHeight: 14,
+  },
+  cardSeasons: { color: "rgba(255,255,255,0.5)", fontSize: 9, fontFamily: "Cairo_400Regular" },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 60 },
+  emptyText: { color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular" },
+});

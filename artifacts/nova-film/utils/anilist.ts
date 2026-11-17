@@ -1,0 +1,330 @@
+import { getBaseUrl } from "./baseUrl";
+// يستخدم proxy الـ VPS بدلاً من AniList مباشرة — يدعم Jikan + Kitsu fallback تلقائياً
+const getAnilistApi = () => `${getBaseUrl()}/api/anilist`;
+
+export type AnilistMedia = {
+  id: number;
+  title: { romaji: string; english: string | null; native: string };
+  title_ar?: string;
+  coverImage: { large: string; extraLarge?: string };
+  bannerImage: string | null;
+  description: string | null;
+  averageScore: number | null;
+  popularity: number;
+  episodes: number | null;
+  status: string;
+  format: string;
+  genres: string[];
+  nextAiringEpisode: { episode: number; airingAt: number } | null;
+  studios?: { nodes: { name: string }[] };
+  characters?: { edges: { role: string; node: { name: { full: string }; image: { large: string } } }[] };
+  relations?: { edges: { relationType: string; node: { id: number; title: { romaji: string }; coverImage: { large: string }; type: string } }[] };
+};
+
+export type AnilistRequestOptions = {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+};
+
+export async function anilistQuery<T = unknown>(
+  query: string,
+  variables?: Record<string, unknown>,
+  options: AnilistRequestOptions = {},
+): Promise<T> {
+  const controller = new AbortController();
+  const relayAbort = () => controller.abort();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+
+  if (options.signal) {
+    if (options.signal.aborted) controller.abort();
+    else options.signal.addEventListener("abort", relayAbort, { once: true });
+  }
+  if (options.timeoutMs && options.timeoutMs > 0) {
+    timeout = setTimeout(relayAbort, options.timeoutMs);
+  }
+
+  try {
+    const response = await fetch(getAnilistApi(), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ query, variables }),
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`AniList proxy returned ${response.status}`);
+    const json = await response.json();
+    if (json.errors) throw new Error(json.errors[0]?.message || "AniList query failed");
+    return json.data as T;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+    options.signal?.removeEventListener("abort", relayAbort);
+  }
+}
+
+// Home's three first-screen sections are sent as one GraphQL request. Keeping
+// poster fields at `large` avoids downloading extraLarge assets for small rails.
+export const HOME_PRIMARY_QUERY = `
+query NovaHomePrimary {
+  trending: Page(page: 1, perPage: 20) {
+    media(sort: TRENDING_DESC, type: ANIME, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Hentai"]) {
+      id title { romaji english } coverImage { large } averageScore episodes status format nextAiringEpisode { episode airingAt }
+    }
+  }
+  popular: Page(page: 1, perPage: 20) {
+    media(sort: POPULARITY_DESC, type: ANIME, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Hentai"]) {
+      id title { romaji english } coverImage { large } bannerImage averageScore episodes status format genres
+    }
+  }
+  airing: Page(page: 1, perPage: 20) {
+    media(status: RELEASING, sort: POPULARITY_DESC, type: ANIME, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Hentai"]) {
+      id title { romaji english } coverImage { large } averageScore episodes nextAiringEpisode { episode airingAt }
+    }
+  }
+}`;
+
+// Secondary rails share a second request that Home schedules after first paint.
+export const HOME_SECONDARY_QUERY = `
+query NovaHomeSecondary {
+  topRated: Page(page: 1, perPage: 14) {
+    media(sort: SCORE_DESC, type: ANIME, countryOfOrigin: "JP", format_in: [TV, MOVIE], isAdult: false, genre_not_in: ["Hentai"], averageScore_greater: 75) {
+      id title { romaji english } coverImage { large } averageScore episodes status format
+    }
+  }
+  movies: Page(page: 1, perPage: 20) {
+    media(format: MOVIE, type: ANIME, sort: POPULARITY_DESC) {
+      id title { romaji english } coverImage { large } averageScore episodes status format
+    }
+  }
+  isekai: Page(page: 1, perPage: 14) {
+    media(type: ANIME, genre_in: ["Isekai"], countryOfOrigin: "JP", format_in: [TV, ONA, MOVIE], isAdult: false) {
+      id title { romaji english } coverImage { large } averageScore episodes status format
+    }
+  }
+}`;
+
+export const TRENDING_QUERY = `
+query TrendingAnime($page: Int) {
+  Page(page: $page, perPage: 20) {
+    media(sort: TRENDING_DESC, type: ANIME, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Hentai"]) {
+      id title { romaji english } coverImage { large extraLarge } averageScore episodes status format nextAiringEpisode { episode airingAt }
+    }
+  }
+}`;
+
+export const POPULAR_QUERY = `
+query PopularAnime($page: Int) {
+  Page(page: $page, perPage: 20) {
+    media(sort: POPULARITY_DESC, type: ANIME, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Hentai"]) {
+      id title { romaji english } coverImage { large extraLarge } bannerImage
+      averageScore episodes status format genres
+    }
+  }
+}`;
+
+export const AIRING_QUERY = `
+query AiringAnime {
+  Page(page: 1, perPage: 20) {
+    media(status: RELEASING, sort: POPULARITY_DESC, type: ANIME, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Hentai"]) {
+      id title { romaji english } coverImage { large extraLarge } averageScore episodes nextAiringEpisode { episode airingAt }
+    }
+  }
+}`;
+
+export const SEARCH_QUERY = `
+query SearchAnime($search: String!, $page: Int, $genre: String, $format: MediaFormat) {
+  Page(page: $page, perPage: 30) {
+    media(search: $search, type: ANIME, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Hentai"], genre: $genre, format: $format) {
+      id title { romaji english } coverImage { large } averageScore episodes format status genres
+    }
+  }
+}`;
+
+export const BROWSE_QUERY = `
+query BrowseAnime($page: Int, $genre: String, $format: MediaFormat, $sort: [MediaSort]) {
+  Page(page: $page, perPage: 30) {
+    media(type: ANIME, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Hentai"], genre: $genre, format: $format, sort: $sort) {
+      id title { romaji english } coverImage { large } averageScore episodes format status genres
+    }
+  }
+}`;
+
+export const DETAIL_QUERY = `
+query AnimeDetail($id: Int!) {
+  Media(id: $id, type: ANIME) {
+    id title { romaji english native } coverImage { large extraLarge } bannerImage
+    description averageScore popularity episodes status format genres
+    studios(isMain: true) { nodes { name } }
+    nextAiringEpisode { episode airingAt }
+    relations { edges { relationType node { id title { romaji } coverImage { large } type } } }
+    characters(sort: ROLE, role: MAIN) { edges { role node { name { full } image { large } } } }
+    tags { name rank isMediaSpoiler }
+    startDate { year month day }
+  }
+}`;
+
+export const EPISODE_COUNT_QUERY = `
+query EpisodeCount($id: Int!) {
+  Media(id: $id, type: ANIME) {
+    episodes
+    nextAiringEpisode { episode }
+  }
+}`;
+
+export const TOP_RATED_QUERY = `
+query TopRatedAnime {
+  Page(perPage: 14) {
+    media(
+      sort: SCORE_DESC,
+      type: ANIME,
+      countryOfOrigin: "JP",
+      format_in: [TV, MOVIE],
+      isAdult: false,
+      genre_not_in: ["Hentai"],
+      averageScore_greater: 75
+    ) {
+      id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
+    }
+  }
+}`;
+
+export const MOVIES_QUERY = `
+query AnimeMovies {
+  Page(page: 1, perPage: 20) {
+    media(format: MOVIE, type: ANIME, sort: POPULARITY_DESC) {
+      id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
+    }
+  }
+}`;
+
+export const UPCOMING_QUERY = `
+query UpcomingAnime {
+  Page(page: 1, perPage: 20) {
+    media(status: NOT_YET_RELEASED, type: ANIME, sort: POPULARITY_DESC) {
+      id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
+    }
+  }
+}`;
+
+export const SEASONAL_QUERY = `
+query SeasonalAnime($season: MediaSeason, $year: Int) {
+  Page(page: 1, perPage: 20) {
+    media(season: $season, seasonYear: $year, type: ANIME, sort: POPULARITY_DESC) {
+      id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
+    }
+  }
+}`;
+
+export function getCurrentSeason() {
+  const month = new Date().getMonth();
+  const year = new Date().getFullYear();
+  let season: "WINTER" | "SPRING" | "SUMMER" | "FALL" = "WINTER";
+  if (month >= 2 && month <= 4) season = "SPRING";
+  else if (month >= 5 && month <= 7) season = "SUMMER";
+  else if (month >= 8 && month <= 10) season = "FALL";
+  return { season, year };
+}
+
+export const TODAY_EPISODES_QUERY = `
+query TodayEpisodes($gt: Int!, $lt: Int!) {
+  Page(page: 1, perPage: 20) {
+    airingSchedules(airingAt_greater: $gt, airingAt_lesser: $lt, sort: TIME_DESC) {
+      episode airingAt
+      media {
+        id title { romaji english } coverImage { large } averageScore popularity
+        format isAdult genres
+      }
+    }
+  }
+}`;
+
+export const TODAY_EPISODES_QUERY_PAGED = `
+query TodayEpisodesPaged($gt: Int!, $lt: Int!, $page: Int!) {
+  Page(page: $page, perPage: 50) {
+    pageInfo { hasNextPage }
+    airingSchedules(airingAt_greater: $gt, airingAt_lesser: $lt, sort: TIME) {
+      episode airingAt
+      media {
+        id title { romaji english } coverImage { large } averageScore popularity
+        format isAdult genres
+      }
+    }
+  }
+}`;
+
+export async function fetchAllTodayEpisodes(gt: number, lt: number): Promise<any[]> {
+  const all: any[] = [];
+  let page = 1;
+  let hasNext = true;
+  while (hasNext && page <= 5) {
+    try {
+      const data = await anilistQuery<{
+        Page: { pageInfo: { hasNextPage: boolean }; airingSchedules: any[] };
+      }>(TODAY_EPISODES_QUERY_PAGED, { gt, lt, page });
+      all.push(...(data?.Page?.airingSchedules || []));
+      hasNext = data?.Page?.pageInfo?.hasNextPage ?? false;
+      page++;
+    } catch { break; }
+  }
+  return all;
+}
+
+export const ACTION_QUERY = `
+query ActionAnime {
+  Page(page: 1, perPage: 20) {
+    media(genre: "Action", type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Hentai"]) {
+      id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
+    }
+  }
+}`;
+
+export const ROMANCE_QUERY = `
+query RomanceAnime {
+  Page(page: 1, perPage: 20) {
+    media(genre: "Romance", type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Hentai"]) {
+      id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
+    }
+  }
+}`;
+
+export const ISEKAI_QUERY = `
+query IsekaiAnime {
+  Page(perPage: 14) {
+    media(
+      type: ANIME,
+      genre_in: ["Isekai"],
+      countryOfOrigin: "JP",
+      format_in: [TV, ONA, MOVIE],
+      isAdult: false
+    ) {
+      id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
+    }
+  }
+}`;
+
+export const FANTASY_QUERY = `
+query FantasyAnime {
+  Page(page: 1, perPage: 20) {
+    media(genre: "Fantasy", type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Hentai"]) {
+      id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
+    }
+  }
+}`;
+
+export const SCHEDULE_QUERY = `
+query Schedule($airingAt_greater: Int!, $airingAt_lesser: Int!) {
+  Page(page: 1, perPage: 50) {
+    airingSchedules(airingAt_greater: $airingAt_greater, airingAt_lesser: $airingAt_lesser, sort: TIME) {
+      id airingAt episode
+      media { id title { romaji english } coverImage { large } averageScore }
+    }
+  }
+}`;
+
+export function stripHtml(html: string | null): string {
+  if (!html) return "";
+  return html.replace(/<[^>]*>/g, "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#039;/g, "'").replace(/&quot;/g, '"').trim();
+}
+
+export function formatAiringTime(airingAt: number): string {
+  const date = new Date(airingAt * 1000);
+  return date.toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" });
+}

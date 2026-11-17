@@ -1,0 +1,564 @@
+import {
+  Cairo_400Regular,
+  Cairo_600SemiBold,
+  Cairo_700Bold,
+  Cairo_800ExtraBold,
+  useFonts,
+} from "@expo-google-fonts/cairo";
+import { Ionicons } from "@expo/vector-icons";
+import { focusManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { Stack, usePathname, useRouter } from "expo-router";
+import { LinearGradient } from "expo-linear-gradient";
+import * as SplashScreen from "expo-splash-screen";
+import React, { useEffect, useRef, useState } from "react";
+import { Animated, AppState, BackHandler, Dimensions, I18nManager, Image, Platform, StatusBar, StyleSheet, Text, TextInput, View } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { SafeAreaProvider } from "react-native-safe-area-context";
+import * as ScreenOrientation from "expo-screen-orientation";
+import * as Sentry from "@sentry/react-native";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { AppUpdateModal } from "@/components/AppUpdateModal";
+import { AppProvider, useApp } from "@/context/AppContext";
+import { useColors } from "@/hooks/useColors";
+import { loadRuntimeApiUrl } from "@/utils/baseUrl";
+import { installGlobalCrashHandlers } from "@/utils/crashLogger";
+import { getRuntimeIntegrity, runtimeIntegrityMessage } from "@/utils/runtimeIntegrity";
+import { isTvDevice, useTvMetrics } from "@/utils/tv";
+import { pingMobileAppPresence } from "@/utils/analytics";
+import { registerPushNotifications, subscribeToPushTokenChanges } from "@/utils/pushNotifications";
+
+if (Platform.OS !== "web") {
+  AppState.addEventListener("change", (status) => {
+    focusManager.setFocused(status === "active");
+  });
+}
+
+// توحيد مقياس الخطوط والأيقونات بين الهواتف والأجهزة اللوحية (iPad) ومنع تضخم النصوص بسبب إعدادات تكبير خط النظام
+try {
+  const TextAny = Text as any;
+  TextAny.defaultProps = TextAny.defaultProps || {};
+  TextAny.defaultProps.allowFontScaling = false;
+  TextAny.defaultProps.maxFontSizeMultiplier = 1;
+
+  const TextInputAny = TextInput as any;
+  TextInputAny.defaultProps = TextInputAny.defaultProps || {};
+  TextInputAny.defaultProps.allowFontScaling = false;
+  TextInputAny.defaultProps.maxFontSizeMultiplier = 1;
+} catch (_) {}
+
+/* Sentry: يلتقط أعطال JS *و* الأعطال الأصلية (native) — مثل كراش مشغّل الفيديو
+   الذي كان يُغلق التطبيق فوراً دون أن يترك أي أثر في نظام تسجيل الأعطال القديم
+   (كان يمسك JS فقط). يجب استدعاء init() قبل أي كود آخر قدر الإمكان. */
+const SENTRY_DSN = process.env.EXPO_PUBLIC_SENTRY_DSN;
+const RUNTIME_INTEGRITY = getRuntimeIntegrity();
+if (SENTRY_DSN && RUNTIME_INTEGRITY.trusted) {
+  Sentry.init({
+    dsn: SENTRY_DSN,
+    enableNative: true,
+    enableNativeCrashHandling: true,
+    attachStacktrace: true,
+    tracesSampleRate: 0.1,
+    debug: false,
+    beforeSend(event) {
+      const firstEx = event?.exception?.values?.[0];
+      const isAnr = firstEx?.type === "ApplicationNotResponding";
+      const isBgAnr =
+        isAnr &&
+        ((typeof firstEx?.value === "string" && firstEx.value.includes("Background ANR")) ||
+          event?.contexts?.app?.in_foreground === false);
+      if (isBgAnr) {
+        return null;
+      }
+      return event;
+    },
+  });
+}
+
+// تحميل عنوان API المخصص من AsyncStorage قبل أي طلب شبكي
+if (RUNTIME_INTEGRITY.trusted) {
+  loadRuntimeApiUrl().catch(() => {});
+}
+
+// تثبيت معالجات الأعطال العالمية — فوراً عند بدء التشغيل
+if (RUNTIME_INTEGRITY.trusted) {
+  installGlobalCrashHandlers();
+}
+
+// restoreInterruptedDownloads is deferred to RootLayout after initial frame & active state.
+
+SplashScreen.preventAutoHideAsync().catch(() => {});
+
+// RTL: نُفعّل مرة واحدة فقط عند أول تشغيل
+try {
+  I18nManager.allowRTL(true);
+  if (!I18nManager.isRTL) {
+    I18nManager.forceRTL(true);
+  }
+} catch (_) {}
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: { staleTime: 1000 * 60 * 5, retry: 2 },
+  },
+});
+
+function RootLayoutNav() {
+  const colors = useColors();
+  const { theme } = useApp();
+  const router = useRouter();
+  const pathname = usePathname();
+  const [tvExitHintVisible, setTvExitHintVisible] = useState(false);
+  const tvExitHintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastTvBackAt = useRef(0);
+  const tvMode = isTvDevice(Dimensions.get("window").width, Dimensions.get("window").height);
+  const watchScreenOptions = {
+    headerShown: false,
+    ...(tvMode ? { orientation: "landscape" as const } : {}),
+  };
+
+  useEffect(() => {
+    if (Platform.OS !== "android" || !tvMode) return;
+
+    const isAppRoot = pathname === "/" || pathname === "/(tabs)" || pathname === "/(tabs)/index";
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (!isAppRoot) {
+        lastTvBackAt.current = 0;
+        setTvExitHintVisible(false);
+        if (router.canGoBack()) {
+          router.back();
+        } else {
+          router.replace("/(tabs)" as any);
+        }
+        return true;
+      }
+
+      // At root screen on TV: exit immediately without requiring double press
+      if (tvExitHintTimer.current) clearTimeout(tvExitHintTimer.current);
+      tvExitHintTimer.current = null;
+      setTvExitHintVisible(false);
+      BackHandler.exitApp();
+      return true;
+    });
+
+    return () => {
+      subscription.remove();
+      if (tvExitHintTimer.current) clearTimeout(tvExitHintTimer.current);
+      tvExitHintTimer.current = null;
+      lastTvBackAt.current = 0;
+    };
+  }, [pathname, router, tvMode]);
+
+  return (
+    <>
+      <StatusBar
+        hidden={Platform.OS === "android" && !tvMode}
+        backgroundColor={colors.background}
+        barStyle={theme === "white" ? "dark-content" : "light-content"}
+      />
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: colors.background },
+          animation: Platform.OS === "android" ? "fade_from_bottom" : "fade",
+          animationDuration: Platform.OS === "android" ? 120 : 180,
+        }}
+      >
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="film/[id]" options={{ headerShown: false, animation: "slide_from_bottom" }} />
+        <Stack.Screen name="film/watch" options={watchScreenOptions} />
+        <Stack.Screen name="stardima-title" options={{ headerShown: false, animation: "slide_from_bottom" }} />
+        <Stack.Screen name="stardima-servers" options={{ headerShown: false, animation: "slide_from_right" }} />
+        <Stack.Screen name="stardima-player" options={watchScreenOptions} />
+        <Stack.Screen name="anime/[id]" options={{ headerShown: false, animation: "slide_from_bottom" }} />
+        <Stack.Screen name="manga" options={{ headerShown: false }} />
+        <Stack.Screen name="manga/[id]" options={{ headerShown: false, animation: "slide_from_bottom" }} />
+        <Stack.Screen name="seasons" options={{ headerShown: false }} />
+        <Stack.Screen name="stats" options={{ headerShown: false }} />
+        <Stack.Screen name="upcoming" options={{ headerShown: false }} />
+        <Stack.Screen name="watch" options={watchScreenOptions} />
+        <Stack.Screen name="animation/[type]/[id]" options={{ headerShown: false, animation: "slide_from_bottom" }} />
+        <Stack.Screen name="animation/watch" options={watchScreenOptions} />
+        <Stack.Screen name="settings" options={{ headerShown: false }} />
+        <Stack.Screen name="schedule" options={{ headerShown: false }} />
+        <Stack.Screen name="latest" options={{ headerShown: false, animation: "slide_from_right" }} />
+        <Stack.Screen name="profile" options={{ headerShown: false, animation: "slide_from_right" }} />
+        <Stack.Screen name="tv-link" options={{ headerShown: false }} />
+        <Stack.Screen name="oauth2redirect/google" options={{ headerShown: false }} />
+        <Stack.Screen name="aw-dubbed/[key]" options={{ headerShown: false, animation: "slide_from_bottom" }} />
+        <Stack.Screen name="aw-dubbed/watch" options={watchScreenOptions} />
+        {/* The cartoon tab intentionally opens the legacy Arabic-Toons
+            screens, not the anime-dubbed Supabase screens. Register them in
+            the root stack so native builds resolve the detail and watch routes
+            reliably. */}
+        <Stack.Screen name="dubbed" options={{ headerShown: false }} />
+        <Stack.Screen
+          name="dubbed/[id]"
+          options={{
+            headerShown: false,
+            animation: Platform.OS === "android" ? "none" : "fade",
+            animationDuration: 140,
+          }}
+        />
+        <Stack.Screen
+          name="dubbed/watch"
+          options={{
+            ...watchScreenOptions,
+            ...(Platform.OS === "android" ? { animation: "none" as const } : {}),
+          }}
+        />
+        <Stack.Screen name="+not-found" />
+      </Stack>
+      {tvMode && tvExitHintVisible && (
+        <View pointerEvents="none" style={styles.tvExitHint}>
+          <Ionicons name="information-circle-outline" size={24} color="#F59E0B" />
+          <Text style={styles.tvExitHintText}>اضغط مرة أخرى للخروج</Text>
+        </View>
+      )}
+    </>
+  );
+}
+
+function RootLayout() {
+  const [fontsLoaded, fontError] = useFonts({
+    Cairo_400Regular,
+    Cairo_600SemiBold,
+    Cairo_700Bold,
+    Cairo_800ExtraBold,
+    ...Ionicons.font,
+  });
+
+  // إجبار إخفاء الـ splash بعد 3.5 ثانية حتى لو فشل تحميل الخطوط
+  const [brandSplashVisible, setBrandSplashVisible] = useState(true);
+  const telegramAnnouncementVisible = false;
+  const setTelegramAnnouncementVisible = (_v: boolean) => {};
+  const { tv: tvMode } = useTvMetrics();
+
+  // TV uses the same app bundle as phones. Only the detected TV runtime is
+  // locked to landscape; phone orientation behavior remains unchanged.
+  useEffect(() => {
+    if (!tvMode) return;
+    setTelegramAnnouncementVisible(false);
+    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
+  }, [tvMode]);
+
+  // أظهر شاشة Anime NOVA المخصصة فوراً بدلاً من إبقاء native splash (الأيقونة فقط)
+  // فوقها أثناء انتظار الخطوط.
+  useEffect(() => {
+    SplashScreen.hideAsync().catch(() => {});
+    if (!RUNTIME_INTEGRITY.trusted) return;
+    const t = setTimeout(() => {
+      if (AppState.currentState !== "background") {
+        pingMobileAppPresence();
+        import("@/utils/downloadManager")
+          .then((m) => m.restoreInterruptedDownloads())
+          .catch(() => {});
+      }
+    }, 1000);
+    const interval = setInterval(() => {
+      if (AppState.currentState === "active") {
+        pingMobileAppPresence();
+      }
+    }, 120_000);
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") pingMobileAppPresence();
+    });
+    return () => {
+      clearTimeout(t);
+      clearInterval(interval);
+      sub.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setBrandSplashVisible(false);
+      SplashScreen.hideAsync().catch(() => {});
+    }, 3500);
+    return () => clearTimeout(t);
+  }, []);
+
+  useEffect(() => {
+    if (fontsLoaded || fontError) {
+      const t = setTimeout(() => {
+        setBrandSplashVisible(false);
+        SplashScreen.hideAsync().catch(() => {});
+      }, tvMode ? 350 : 900);
+      return () => clearTimeout(t);
+    }
+  }, [fontsLoaded, fontError, tvMode]);
+
+  useEffect(() => {
+    if (!brandSplashVisible && RUNTIME_INTEGRITY.trusted && !tvMode) {
+      // Let the first screen settle before presenting the announcement. The
+      // native Modal already fades, but opening it on the same frame as the
+      // splash disappears feels like a layout jump on slower devices.
+      const t = setTimeout(() => {
+        if (!isTvDevice()) {
+          setTelegramAnnouncementVisible(true);
+        }
+      }, 450);
+      return () => clearTimeout(t);
+    }
+  }, [brandSplashVisible, tvMode]);
+
+  return (
+    <SafeAreaProvider>
+      <ErrorBoundary>
+        <QueryClientProvider client={queryClient}>
+          <AppProvider>
+            <RootContent
+              brandSplashVisible={brandSplashVisible}
+              telegramAnnouncementVisible={telegramAnnouncementVisible && !tvMode}
+              onCloseAnnouncement={() => setTelegramAnnouncementVisible(false)}
+            />
+          </AppProvider>
+        </QueryClientProvider>
+      </ErrorBoundary>
+    </SafeAreaProvider>
+  );
+}
+
+function RootContent({
+  brandSplashVisible,
+  telegramAnnouncementVisible,
+  onCloseAnnouncement,
+}: {
+  brandSplashVisible: boolean;
+  telegramAnnouncementVisible: boolean;
+  onCloseAnnouncement: () => void;
+}) {
+  const colors = useColors();
+  const { themeHydrated } = useApp();
+  const { tv: tvMode } = useTvMetrics();
+
+  if (!themeHydrated) {
+    return <BrandSplash />;
+  }
+
+  if (!RUNTIME_INTEGRITY.trusted) {
+    return (
+      <View style={styles.blockedScreen}>
+        <Text style={styles.blockedTitle}>تم إيقاف التشغيل</Text>
+        <Text style={styles.blockedMessage}>
+          {runtimeIntegrityMessage(RUNTIME_INTEGRITY.reason)}
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: colors.background }}>
+      <PushRegistrationBridge disabled={tvMode || !RUNTIME_INTEGRITY.trusted} />
+      <RootLayoutNav />
+      {brandSplashVisible && (
+        <View style={[StyleSheet.absoluteFill, { zIndex: 99999, elevation: 99999 }]}>
+          <BrandSplash />
+        </View>
+      )}
+      
+      {!brandSplashVisible && <AppUpdateModal />}
+    </GestureHandlerRootView>
+  );
+}
+
+function PushRegistrationBridge({ disabled }: { disabled: boolean }) {
+  const { authReady, currentUser } = useApp();
+  useEffect(() => {
+    if (disabled || Platform.OS === "web" || !authReady) return;
+    let disposed = false;
+    let stopEpisodeSync: (() => void) | undefined;
+    const stopTokenListener = subscribeToPushTokenChanges();
+    const timer = setTimeout(() => {
+      if (disposed || AppState.currentState === "background") return;
+      void registerPushNotifications()
+        .catch((error) => {
+          console.warn("[push] startup registration failed:", error instanceof Error ? error.message : String(error));
+          return false;
+        })
+        .then(async () => {
+          if (disposed || AppState.currentState === "background") return;
+          const { startEpisodeNotificationSync } = await import("@/utils/episodeNotifications");
+          if (!disposed) stopEpisodeSync = startEpisodeNotificationSync();
+        })
+        .catch((error) => {
+          console.warn("[push] local notification fallback startup failed:", error instanceof Error ? error.message : String(error));
+        });
+    }, 1500);
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+      stopTokenListener();
+      stopEpisodeSync?.();
+    };
+  }, [authReady, currentUser?.id, disabled]);
+  return null;
+}
+
+function BrandSplash() {
+  return (
+    <LinearGradient
+      colors={["#05030D", "#11051F", "#09090B"]}
+      start={{ x: 0.15, y: 0 }}
+      end={{ x: 0.9, y: 1 }}
+      style={styles.brandSplash}
+    >
+      <View style={styles.brandGlow} />
+      <Animated.View style={styles.brandContent}>
+        <Image
+          source={require("../assets/images/icon.png")}
+          style={styles.brandLogo}
+          resizeMode="contain"
+          accessibilityLabel="شعار NOVA FILM"
+        />
+        <Text style={styles.brandName}>NOVA <Text style={{ color: "#F59E0B" }}>FILM</Text></Text>
+        <Text style={styles.brandTagline}>منصة الأفلام والمسلسلات والأنميشن</Text>
+        <View style={styles.brandFeatures}>
+          <View style={styles.brandFeature}>
+            <Ionicons name="play" size={11} color="#F59E0B" />
+            <Text style={styles.brandFeatureText}>شاهد</Text>
+          </View>
+          <View style={styles.brandFeatureDivider} />
+          <View style={styles.brandFeature}>
+            <Ionicons name="bookmark" size={11} color="#F59E0B" />
+            <Text style={styles.brandFeatureText}>احفظ</Text>
+          </View>
+          <View style={styles.brandFeatureDivider} />
+          <View style={styles.brandFeature}>
+            <Ionicons name="download" size={11} color="#F59E0B" />
+            <Text style={styles.brandFeatureText}>حمّل</Text>
+          </View>
+        </View>
+        <View style={styles.brandLoader}>
+          <View style={styles.brandLoaderFill} />
+        </View>
+      </Animated.View>
+    </LinearGradient>
+  );
+}
+
+const styles = StyleSheet.create({
+  brandSplash: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#09090B",
+  },
+  brandContent: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 28,
+  },
+  brandLogo: {
+    width: 238,
+    height: 238,
+    borderRadius: 44,
+    marginBottom: 22,
+  },
+  brandName: {
+    color: "#FFFFFF",
+    fontSize: 27,
+    letterSpacing: 4,
+    fontWeight: "800",
+    textAlign: "center",
+  },
+  brandTagline: {
+    color: "#FDE68A",
+    fontSize: 13,
+    fontFamily: "Cairo_600SemiBold",
+    marginTop: 7,
+    textAlign: "center",
+  },
+  brandFeatures: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 11,
+    marginTop: 18,
+    paddingHorizontal: 13,
+    paddingVertical: 7,
+    borderRadius: 20,
+    backgroundColor: "rgba(245,158,11,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(245,158,11,0.28)",
+  },
+  brandFeature: { flexDirection: "row", alignItems: "center", gap: 4 },
+  brandFeatureText: {
+    color: "rgba(255,255,255,0.68)",
+    fontSize: 11,
+    fontFamily: "Cairo_600SemiBold",
+  },
+  brandFeatureDivider: {
+    width: 1,
+    height: 13,
+    backgroundColor: "rgba(245,158,11,0.28)",
+  },
+  brandGlow: {
+    position: "absolute",
+    width: 330,
+    height: 330,
+    borderRadius: 165,
+    backgroundColor: "rgba(245, 158, 11, 0.14)",
+    shadowColor: "#F59E0B",
+    shadowOpacity: 0.9,
+    shadowRadius: 80,
+  },
+  brandLoader: {
+    width: 118,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    overflow: "hidden",
+    marginTop: 28,
+  },
+  brandLoaderFill: {
+    width: "62%",
+    height: "100%",
+    borderRadius: 2,
+    backgroundColor: "#F59E0B",
+  },
+  blockedScreen: {
+    flex: 1,
+    backgroundColor: "#09090B",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 28,
+  },
+  blockedTitle: {
+    color: "#F4F4F5",
+    fontSize: 22,
+    fontWeight: "800",
+    marginBottom: 12,
+  },
+  blockedMessage: {
+    color: "#A1A1AA",
+    fontSize: 15,
+    lineHeight: 24,
+    textAlign: "center",
+  },
+  tvExitHint: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 34,
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 9,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 18,
+    backgroundColor: "rgba(11, 8, 24, 0.94)",
+    borderWidth: 1,
+    borderColor: "rgba(216, 180, 254, 0.42)",
+    zIndex: 200,
+  },
+  tvExitHintText: {
+    color: "#FFFFFF",
+    fontSize: 18,
+    fontFamily: "Cairo_700Bold",
+  },
+});
+
+/* Sentry.wrap: يضيف مراقبة تلقائية للتنقّل بين الشاشات وأداء الإقلاع،
+   ولا يعمل شيء إضافياً إذا لم يُستدعَ Sentry.init() أعلاه (بلا DSN). */
+export default Sentry.wrap(RootLayout);
