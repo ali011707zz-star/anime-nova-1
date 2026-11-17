@@ -48,7 +48,6 @@ const NAV_MAIN: NavItem[] = [
   { icon: "film",            label: "الأفلام الأجنبية والآسيوية", route: "/(tabs)/browse?type=movie",      color: "#F97316" },
   { icon: "albums",          label: "المسلسلات الأجنبية",         route: "/(tabs)/browse?type=series",     color: "#10B981" },
   { icon: "sparkles",        label: "أفلام ومسلسلات الأنميشن",    route: "/(tabs)/browse?type=animation",  color: "#8B5CF6" },
-  { icon: "tv",              label: "كرتون مدبلج وسبيستون",      route: "/(tabs)/browse?type=dubbed",     color: "#06B6D4" },
   { icon: "grid",            label: "التصفح والفلترة المتقدمة",  route: "/(tabs)/browse",                 color: "#3B82F6" },
   { icon: "download",        label: "تنزيلاتي",                   route: "/(tabs)/downloads",              color: "#8B5CF6" },
   { icon: "calendar",        label: "جدول البث الأسبوعي",        route: "/schedule",                      color: "#10B981" },
@@ -359,7 +358,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
 
           {/* ── Footer ── */}
           <View style={s.footer}>
-            <Text style={[s.footerText, { color: colors.textMuted }]}>Anime NOVA © 2025</Text>
+            <Text style={[s.footerText, { color: colors.textMuted }]}>NOVA FILM © 2026</Text>
             <View style={s.footerDot}>
               <View style={s.onlineDot} />
               <Text style={[s.footerStatus, { color: colors.success }]}>متصل</Text>

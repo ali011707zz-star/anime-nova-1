@@ -22,7 +22,6 @@ const TYPE_FILTERS = [
   { id: "movie", label: "أفلام" },
   { id: "series", label: "مسلسلات" },
   { id: "animation", label: "أنميشن" },
-  { id: "dubbed", label: "مدبلج وسبيستون" },
 ] as const;
 
 export default function NovaFilmBrowseScreen() {
@@ -32,8 +31,11 @@ export default function NovaFilmBrowseScreen() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
 
-  const [selectedType, setSelectedType] = useState<string>(params.type || "all");
-  const [audioFilter, setAudioFilter] = useState<"all" | "sub" | "dub">("all");
+  const initialType =
+    params.type && ["all", "movie", "series", "animation"].includes(params.type)
+      ? params.type
+      : "all";
+  const [selectedType, setSelectedType] = useState<string>(initialType);
   const [query, setQuery] = useState<string>("");
 
   const cols = width >= 700 ? 4 : 2;
@@ -44,15 +46,13 @@ export default function NovaFilmBrowseScreen() {
     const q = query.trim().toLowerCase();
     return NOVA_FILM_CATALOG.filter((item) => {
       if (selectedType !== "all" && item.mediaType !== selectedType) return false;
-      if (audioFilter === "sub" && !item.audioLabel.includes("مترجم")) return false;
-      if (audioFilter === "dub" && !item.audioLabel.includes("مدبلج")) return false;
       if (q) {
         const hay = `${item.titleAr} ${item.titleEn} ${item.genres.join(" ")}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
     });
-  }, [selectedType, audioFilter, query]);
+  }, [selectedType, query]);
 
   const openFilm = (item: FilmTitle) => {
     router.push({ pathname: "/film/[id]" as any, params: { id: String(item.id) } });
@@ -69,12 +69,11 @@ export default function NovaFilmBrowseScreen() {
           <TextInput
             value={query}
             onChangeText={setQuery}
-            placeholder="ابحث عن فيلم، مسلسل، أنميشن أو مدبلج..."
+            placeholder="ابحث عن فيلم، مسلسل أو أنميشن..."
             placeholderTextColor={colors.textMuted}
             style={[s.searchInput, { color: colors.text }]}
           />
         </View>
-
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chipsRow}>
           {TYPE_FILTERS.map((f) => {
             const active = selectedType === f.id;
@@ -97,35 +96,6 @@ export default function NovaFilmBrowseScreen() {
             );
           })}
         </ScrollView>
-
-        <View style={s.audioRow}>
-          {(
-            [
-              { id: "all", label: "الكل" },
-              { id: "sub", label: "مترجم" },
-              { id: "dub", label: "مدبلج" },
-            ] as const
-          ).map((aud) => {
-            const active = audioFilter === aud.id;
-            return (
-              <TouchableOpacity
-                key={aud.id}
-                onPress={() => setAudioFilter(aud.id)}
-                style={[
-                  s.smallChip,
-                  {
-                    backgroundColor: active ? "rgba(245,158,11,0.2)" : colors.card,
-                    borderColor: active ? "#F59E0B" : colors.border,
-                  },
-                ]}
-              >
-                <Text style={[s.smallChipText, { color: active ? "#FBBF24" : colors.textMuted }]}>
-                  {aud.label}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
       </View>
 
       <FlatList
@@ -177,7 +147,8 @@ const s = StyleSheet.create({
   header: { paddingHorizontal: 14, gap: 10, paddingBottom: 12 },
   title: { fontSize: 20, fontFamily: "Cairo_800ExtraBold", textAlign: "right" },
   searchBox: {
-    flexDirection: "row-reverse",
+    direction: "rtl",
+    flexDirection: "row",
     alignItems: "center",
     gap: 8,
     borderWidth: 1,
@@ -189,9 +160,6 @@ const s = StyleSheet.create({
   chipsRow: { gap: 8 },
   chip: { borderWidth: 1, borderRadius: 11, paddingHorizontal: 14, paddingVertical: 7 },
   chipText: { fontSize: 12, fontFamily: "Cairo_700Bold" },
-  audioRow: { flexDirection: "row-reverse", gap: 8 },
-  smallChip: { borderWidth: 1, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 5 },
-  smallChipText: { fontSize: 11, fontFamily: "Cairo_700Bold" },
   card: { borderRadius: 16, overflow: "hidden", borderWidth: 1, position: "relative" },
   cardImg: { width: "100%", height: "100%" },
   topBadge: {

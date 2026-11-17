@@ -16,7 +16,6 @@ import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DrawerMenu } from "@/components/DrawerMenu";
 import { useColors } from "@/hooks/useColors";
-import { getBaseUrl } from "@/utils/api";
 import { isTvDevice, useTvMetrics } from "@/utils/tv";
 import {
   NOVA_FILM_CATALOG,
@@ -37,7 +36,6 @@ export default function NovaFilmHomeScreen() {
   const [heroIndex, setHeroIndex] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [watchedMap, setWatchedMap] = useState<Record<string, boolean>>({});
-  const [liveDubbed, setLiveDubbed] = useState<any[]>([]);
 
   const heroItems = useMemo(
     () => NOVA_FILM_CATALOG.filter((t) => t.featuredHero),
@@ -45,28 +43,18 @@ export default function NovaFilmHomeScreen() {
   );
   const activeHero = heroItems[heroIndex % heroItems.length] || NOVA_FILM_CATALOG[0];
 
-  const loadLiveFeeds = async () => {
+  const loadWatchedProgress = async () => {
     setRefreshing(true);
     try {
       const w = await loadWatchedMap();
       setWatchedMap(w);
-      const base = getBaseUrl();
-      const res = await fetch(`${base}/api/aw-dubbed/catalog?tab=cartoon&page=1`);
-      if (res.ok && res.headers.get("content-type")?.includes("json")) {
-        const json = await res.json();
-        if (Array.isArray(json?.results)) {
-          setLiveDubbed(json.results.slice(0, 12));
-        }
-      }
-    } catch {
-      // Fallback gracefully to bundled catalog
     } finally {
       setRefreshing(false);
     }
   };
 
   useEffect(() => {
-    loadLiveFeeds();
+    loadWatchedProgress();
   }, []);
 
   useEffect(() => {
@@ -124,7 +112,6 @@ export default function NovaFilmHomeScreen() {
           <View style={[s.sectionDot, { backgroundColor: accent }]} />
         </View>
       </View>
-
       <FlatList
         data={items}
         horizontal
@@ -135,8 +122,6 @@ export default function NovaFilmHomeScreen() {
           const watchedCount = item.episodes.filter(
             (ep) => watchedMap[makeEpisodeKey(item.id, ep.seasonNumber, ep.episodeNumber)]
           ).length;
-          const isDub = item.audioLabel.includes("مدبلج");
-
           return (
             <TouchableOpacity
               onPress={() => openFilm(item)}
@@ -155,8 +140,6 @@ export default function NovaFilmHomeScreen() {
                 colors={["rgba(0,0,0,0.25)", "transparent", "rgba(9,10,12,0.95)"]}
                 style={StyleSheet.absoluteFill}
               />
-
-              {/* Top Badges */}
               <View style={s.cardTopRow}>
                 <View style={s.ratingBadge}>
                   <Ionicons name="star" size={10} color="#FBBF24" />
@@ -166,17 +149,10 @@ export default function NovaFilmHomeScreen() {
                   <Text style={s.qualityTagText}>{item.qualityBadge}</Text>
                 </View>
               </View>
-
-              {/* Bottom Title & Audio Badge */}
               <View style={s.cardBottom}>
-                <View
-                  style={[
-                    s.audioPill,
-                    { backgroundColor: isDub ? "rgba(16,185,129,0.88)" : "rgba(6,182,212,0.88)" },
-                  ]}
-                >
+                <View style={[s.audioPill, { backgroundColor: "rgba(6,182,212,0.88)" }]}>
                   <Text style={s.audioPillText}>
-                    {isDub ? "مدبلج" : "مترجم"}
+                    مترجم
                     {watchedCount > 0 ? ` · ${watchedCount}/${item.episodes.length}` : ""}
                   </Text>
                 </View>
@@ -199,11 +175,11 @@ export default function NovaFilmHomeScreen() {
       <ScrollView
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={loadLiveFeeds} tintColor="#F59E0B" />
+          <RefreshControl refreshing={refreshing} onRefresh={loadWatchedProgress} tintColor="#F59E0B" />
         }
         contentContainerStyle={{ paddingBottom: 96 }}
       >
-        {/* Top App Bar matching Anime Nova Header Geometry */}
+        {/* Top App Bar: Menu on Left, Search + | NOVA FILM Logo on Right (Exact Anime NOVA Geometry) */}
         <View
           style={[
             s.header,
@@ -218,6 +194,8 @@ export default function NovaFilmHomeScreen() {
             <Ionicons name="menu" size={22} color={colors.text} />
           </TouchableOpacity>
 
+          <View style={s.headerSpacer} />
+
           <View style={s.headerBrandGroup}>
             <TouchableOpacity
               onPress={() => router.push("/(tabs)/browse" as any)}
@@ -230,10 +208,10 @@ export default function NovaFilmHomeScreen() {
             </TouchableOpacity>
 
             <View style={s.logoRow}>
+              <View style={s.logoAccent} />
               <Text style={[s.logoText, { fontSize: scaleSize(16, 22), color: colors.text }]}>
                 NOVA <Text style={{ color: "#F59E0B" }}>FILM</Text>
               </Text>
-              <View style={s.logoAccent} />
             </View>
           </View>
         </View>
@@ -245,7 +223,6 @@ export default function NovaFilmHomeScreen() {
             colors={["rgba(9,10,12,0.18)", "rgba(9,10,12,0.72)", colors.background]}
             style={StyleSheet.absoluteFill}
           />
-
           <View style={s.heroContent}>
             <View style={s.heroBadges}>
               <View style={s.heroHotBadge}>
@@ -259,14 +236,12 @@ export default function NovaFilmHomeScreen() {
                 <Text style={s.heroMetaChipText}>{activeHero.categoryLabel}</Text>
               </View>
             </View>
-
             <Text style={s.heroTitle} numberOfLines={2}>
               {activeHero.titleAr}
             </Text>
             <Text style={s.heroSub} numberOfLines={1}>
               {activeHero.titleEn} · {activeHero.year} · {activeHero.qualityBadge}
             </Text>
-
             <View style={s.heroActions}>
               <TouchableOpacity onPress={quickPlayHero} style={s.heroPlayBtn}>
                 <Ionicons name="play" size={16} color="#090A0C" />
@@ -276,8 +251,6 @@ export default function NovaFilmHomeScreen() {
                 <Text style={s.heroDetailText}>التفاصيل والحلقات</Text>
               </TouchableOpacity>
             </View>
-
-            {/* Dots */}
             <View style={s.heroDots}>
               {heroItems.map((h, i) => (
                 <TouchableOpacity
@@ -293,8 +266,9 @@ export default function NovaFilmHomeScreen() {
           </View>
         </View>
 
-        {/* Quick Category Chips */}
-        <ScrollView horizontal
+        {/* Quick Category Chips (Movies, Series, Animation only — no dubbed) */}
+        <ScrollView
+          horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={s.quickPills}
         >
@@ -303,7 +277,6 @@ export default function NovaFilmHomeScreen() {
             { label: "أفلام أجنبية", type: "movie", icon: "film" },
             { label: "مسلسلات", type: "series", icon: "albums" },
             { label: "أنميشن", type: "animation", icon: "sparkles" },
-            { label: "مدبلج وسبيستون", type: "dubbed", icon: "tv" },
           ].map((c) => (
             <TouchableOpacity
               key={c.type}
@@ -318,106 +291,24 @@ export default function NovaFilmHomeScreen() {
           ))}
         </ScrollView>
 
-        {/* Movies, Series, Animation & Dubbed Carousels */}
+        {/* Movies, Series & Animation Carousels */}
         {renderPosterRail(
           "🎬 الأفلام الأجنبية والآسيوية",
           "#F59E0B",
           NOVA_FILM_CATALOG.filter((t) => t.mediaType === "movie"),
           "movie"
         )}
-
         {renderPosterRail(
           "📺 المسلسلات الأجنبية المميزة",
           "#10B981",
           NOVA_FILM_CATALOG.filter((t) => t.mediaType === "series"),
           "series"
         )}
-
         {renderPosterRail(
           "✨ أفلام ومسلسلات الأنميشن",
           "#8B5CF6",
           NOVA_FILM_CATALOG.filter((t) => t.mediaType === "animation"),
           "animation"
-        )}
-
-        {renderPosterRail(
-          "🎙️ كرتون مدبلج وسبيستون",
-          "#06B6D4",
-          NOVA_FILM_CATALOG.filter((t) => t.mediaType === "dubbed" || t.audioLabel.includes("مدبلج")),
-          "dubbed"
-        )}
-
-        {/* Live Server Dubbed Catalog Strip (when online) */}
-        {liveDubbed.length > 0 && (
-          <View style={s.sectionWrap}>
-            <View style={s.sectionHeader}>
-              <TouchableOpacity
-                onPress={() => router.push({ pathname: "/aw-dubbed" as any, params: { tab: "cartoon" } })}
-                style={s.seeAllBtn}
-              >
-                <Ionicons name="chevron-back" size={14} color="#06B6D4" />
-                <Text style={[s.seeAllText, { color: "#06B6D4" }]}>عرض الكل</Text>
-              </TouchableOpacity>
-              <View style={s.sectionTitleRow}>
-                <Text style={[s.sectionTitle, { color: colors.text }]}>
-                  🌐 مكتبة الكرتون والأنميشن المباشرة من الخادم
-                </Text>
-                <View style={[s.sectionDot, { backgroundColor: "#06B6D4" }]} />
-              </View>
-            </View>
-
-            <FlatList
-              data={liveDubbed}
-              horizontal
-              keyExtractor={(item, i) => `live-${item.key || i}`}
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingHorizontal: 14, gap: 10 }}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  onPress={() =>
-                    router.push({
-                      pathname: "/dubbed/[id]" as any,
-                      params: {
-                        id: item.key || item.title,
-                        title: item.titleAr || item.title,
-                        seasons: JSON.stringify(item.seasons || []),
-                        img: item.poster || "",
-                      },
-                    })
-                  }
-                  style={[
-                    s.card,
-                    {
-                      width: cardWidth,
-                      height: cardHeight,
-                      backgroundColor: colors.card,
-                      borderColor: colors.border,
-                    },
-                  ]}
-                >
-                  {item.poster ? (
-                    <Image source={{ uri: item.poster }} style={s.cardImg} resizeMode="cover" />
-                  ) : (
-                    <View style={[s.cardImg, { alignItems: "center", justifyContent: "center" }]}>
-                      <Ionicons name="film" size={28} color="#666" />
-                    </View>
-                  )}
-                  <LinearGradient
-                    colors={["transparent", "rgba(9,10,12,0.95)"]}
-                    style={StyleSheet.absoluteFill}
-                  />
-                  <View style={s.cardBottom}>
-                    <View style={[s.audioPill, { backgroundColor: "rgba(16,185,129,0.88)" }]}>
-                      <Text style={s.audioPillText}>مدبلج</Text>
-                    </View>
-                    <Text style={s.cardTitle} numberOfLines={2}>
-                      {item.titleAr || item.title}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              )}
-            />
-          </View>
         )}
       </ScrollView>
 
@@ -429,12 +320,17 @@ export default function NovaFilmHomeScreen() {
 const s = StyleSheet.create({
   container: { flex: 1 },
   header: {
+    direction: "ltr",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 14,
     paddingBottom: 10,
     gap: 10,
+  },
+  headerSpacer: {
+    flex: 1,
+    minWidth: 0,
   },
   iconBtn: {
     width: 44,
@@ -443,27 +339,36 @@ const s = StyleSheet.create({
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
+    flexShrink: 0,
   },
   headerBrandGroup: {
-    flex: 1,
+    direction: "ltr",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "flex-end",
     gap: 10,
+    flexShrink: 1,
   },
   searchBtn: {
-    flex: 1,
-    maxWidth: 195,
+    width: 170,
     height: 40,
     borderRadius: 13,
     borderWidth: 1,
     paddingHorizontal: 10,
-    flexDirection: "row-reverse",
+    direction: "rtl",
+    flexDirection: "row",
     alignItems: "center",
     gap: 6,
+    flexShrink: 1,
   },
   searchText: { flex: 1, fontSize: 12, fontFamily: "Cairo_400Regular", textAlign: "right" },
-  logoRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  logoRow: {
+    direction: "ltr",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    flexShrink: 0,
+  },
   logoText: { fontFamily: "Cairo_800ExtraBold", letterSpacing: 0.6 },
   logoAccent: { width: 3.5, height: 22, borderRadius: 2, backgroundColor: "#F59E0B" },
   heroWrap: {
@@ -538,16 +443,27 @@ const s = StyleSheet.create({
   quickPillText: { fontSize: 12, fontFamily: "Cairo_700Bold" },
   sectionWrap: { marginBottom: 22 },
   sectionHeader: {
+    direction: "ltr",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 14,
     marginBottom: 10,
   },
-  sectionTitleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  sectionTitleRow: {
+    direction: "ltr",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
   sectionDot: { width: 4, height: 18, borderRadius: 2 },
   sectionTitle: { fontSize: 16, fontFamily: "Cairo_800ExtraBold" },
-  seeAllBtn: { flexDirection: "row", alignItems: "center", gap: 2 },
+  seeAllBtn: {
+    direction: "ltr",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+  },
   seeAllText: { color: "#F59E0B", fontSize: 12, fontFamily: "Cairo_700Bold" },
   card: {
     borderRadius: 16,

@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-export type FilmMediaType = "movie" | "series" | "animation" | "dubbed";
+export type FilmMediaType = "movie" | "series" | "animation";
 
 export interface FilmServerLink {
   id: string;
@@ -17,7 +17,7 @@ export interface FilmEpisode {
   titleAr: string;
   titleEn: string;
   durationMinutes: number;
-  audioType: "مترجم عربي" | "مدبلج عربي";
+  audioType: "مترجم عربي";
   servers: FilmServerLink[];
 }
 
@@ -31,7 +31,7 @@ export interface FilmTitle {
   year: number;
   imdbRating: number;
   durationOrSeasons: string;
-  audioLabel: "مترجم عربي" | "مدبلج عربي";
+  audioLabel: "مترجم عربي";
   qualityBadge: string;
   ageRating: string;
   country: string;
@@ -185,12 +185,12 @@ export const NOVA_FILM_CATALOG: FilmTitle[] = [
     posterSource: POSTER_CLOCKWORK,
     backdropSource: POSTER_CLOCKWORK,
     synopsis:
-      "مخترع شاب يصنع أجنحة شراعية وبومة ميكانيكية ذكية للتحليق بين الجزر العائمة فوق السحاب واستعادة بوصلة الرياح المفقودة بالنسخة العربية المدبلجة الكاملة.",
+      "مخترع شاب يصنع أجنحة شراعية وبومة ميكانيكية ذكية للتحليق بين الجزر العائمة فوق السحاب واستعادة بوصلة الرياح المفقودة.",
     genres: ["أنميشن", "عائلي", "مغامرات"],
     seasonCount: 1,
     featuredHero: true,
     episodes: [
-      { id: "ep-103-1", seasonNumber: 1, episodeNumber: 1, titleAr: "الفيلم الكامل — مدبلج للعربية الفصحى", titleEn: "Full Feature (Arabic Dub)", durationMinutes: 112, audioType: "مدبلج عربي", servers: PERMANENT_SERVERS },
+      { id: "ep-103-1", seasonNumber: 1, episodeNumber: 1, titleAr: "الفيلم الكامل — نسخة 1080p مترجم", titleEn: "Full Feature (Arabic Sub)", durationMinutes: 112, audioType: "مترجم عربي", servers: PERMANENT_SERVERS },
     ],
   },
   {
@@ -217,36 +217,6 @@ export const NOVA_FILM_CATALOG: FilmTitle[] = [
     seasonCount: 1,
     episodes: [
       { id: "ep-104-1", seasonNumber: 1, episodeNumber: 1, titleAr: "الفيلم الكامل — BluRay 1080p", titleEn: "Full Movie BluRay", durationMinutes: 126, audioType: "مترجم عربي", servers: PERMANENT_SERVERS },
-    ],
-  },
-  {
-    id: 105,
-    slug: "chronicles-of-spacetoon-knights",
-    titleAr: "فرسان الجزيرة العائمة — مدبلج",
-    titleEn: "Guardians of Emerald Valley",
-    mediaType: "dubbed",
-    categoryLabel: "مدبلج عربي",
-    year: 2025,
-    imdbRating: 9.0,
-    durationOrSeasons: "موسم 1 · 6 حلقات",
-    audioLabel: "مدبلج عربي",
-    qualityBadge: "1080p FHD",
-    ageRating: "G - عائلي",
-    country: "دبلجة مركز الزهرة",
-    studio: "Spacetoon Originals",
-    statusLabel: "مكتمل",
-    posterSource: POSTER_MECHA,
-    backdropSource: POSTER_HERO,
-    synopsis:
-      "مسلسل مغامرات وآليين مدبلج للعربية الفصحى يروي قصة الفارس القرمزي وأصدقائه الذين يحمون وادي الزمرد والجزر الكريستالية العائمة من قوى الظلام.",
-    genres: ["مدبلج عربي", "مغامرات", "أنميشن"],
-    seasonCount: 1,
-    featuredHero: true,
-    episodes: [
-      { id: "ep-105-s1e1", seasonNumber: 1, episodeNumber: 1, titleAr: "الحلقة 1: يقظة الحارس القرمزي", titleEn: "Crimson Guardian", durationMinutes: 24, audioType: "مدبلج عربي", servers: PERMANENT_SERVERS },
-      { id: "ep-105-s1e2", seasonNumber: 1, episodeNumber: 2, titleAr: "الحلقة 2: سر القلعة العائمة", titleEn: "Floating Keep", durationMinutes: 24, audioType: "مدبلج عربي", servers: PERMANENT_SERVERS },
-      { id: "ep-105-s1e3", seasonNumber: 1, episodeNumber: 3, titleAr: "الحلقة 3: عاصفة المرايا", titleEn: "Storm of Mirrors", durationMinutes: 24, audioType: "مدبلج عربي", servers: PERMANENT_SERVERS },
-      { id: "ep-105-s1e4", seasonNumber: 1, episodeNumber: 4, titleAr: "الحلقة 4: معركة الفجر الذهبي", titleEn: "Dawn Battle", durationMinutes: 25, audioType: "مدبلج عربي", servers: PERMANENT_SERVERS },
     ],
   },
   {
