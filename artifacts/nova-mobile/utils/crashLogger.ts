@@ -43,7 +43,7 @@ export async function logCrash(entry: Omit<CrashEntry, "ts">): Promise<void> {
 let _deviceInfo: { appVersion: string; deviceModel: string } | null = null;
 function getDeviceInfo() {
   if (!_deviceInfo) {
-    const nativeVer = Constants.expoConfig?.version ?? (Constants.manifest as any)?.version ?? "unknown";
+    const nativeVer = Constants.expoConfig?.version ?? Constants.manifest?.version ?? "unknown";
     // Platform.constants يحتوي على معلومات الجهاز في RN
     const pc = (Platform.constants as any);
     const model = pc?.Model ?? pc?.systemName ?? Platform.OS;
