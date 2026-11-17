@@ -319,7 +319,7 @@ export default function HomeScreen() {
         {
           kind: "anilist",
           key: "airing",
-          title: "يُعرض حالياً",
+          title: "🔥 أحدث الأفلام والمسلسلات",
           items: airingList,
           onSeeAll: () => router.push({ pathname: "/browse", params: { status: "RELEASING", sort: "POPULARITY_DESC" } } as any),
         },
@@ -333,7 +333,7 @@ export default function HomeScreen() {
         {
           kind: "anilist",
           key: "movies",
-          title: "🎬 أفلام الأنمي",
+          title: "🎬 الأفلام والأنميشن",
           items: moviesList,
           onSeeAll: () => router.push({ pathname: "/browse", params: { format: "MOVIE", sort: "POPULARITY_DESC" } } as any),
         },
@@ -1099,7 +1099,7 @@ export default function HomeScreen() {
                 <View style={styles.logoRow}>
                   <View style={[styles.logoAccent, { height: scaleSize(22, 30), backgroundColor: "#06b6d4" }]} />
                   <Text style={[styles.logoText, { fontSize: scaleSize(15, 22), color: colors.text }]}>
-                    ANIME <Text style={{ color: "#06b6d4" }}>NOVA</Text>
+                    NOVA <Text style={{ color: "#f59e0b" }}>FILM</Text>
                   </Text>
                 </View>
               </View>
