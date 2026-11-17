@@ -1,13 +1,14 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "./baseUrl";
 import { secureFetch, secureStreamFetch } from "./secureApi";
-import type {
-  FilmDetail,
-  FilmEpisode,
-  FilmServerLink,
-  FilmSubtitleTrack,
-  FilmSummary,
-  TmdbMediaType,
+import {
+  normalizeFilmSummary,
+  type FilmDetail,
+  type FilmEpisode,
+  type FilmServerLink,
+  type FilmSubtitleTrack,
+  type FilmSummary,
+  type TmdbMediaType,
 } from "./filmCatalog";
 
 export type FilmHomeFeed = {
@@ -22,9 +23,11 @@ export type FilmHomeFeed = {
 
 export type FilmBrowseResponse = {
   results: FilmSummary[];
+  items: FilmSummary[];
   page: number;
   totalPages: number;
   totalResults: number;
+  hasNextPage: boolean;
 };
 
 function resolveAbsUrl(url: string | undefined, base: string): string {
@@ -39,47 +42,97 @@ export async function fetchFilmHome(): Promise<FilmHomeFeed> {
     headers: { Accept: "application/json" },
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return (await res.json()) as FilmHomeFeed;
+  const raw = (await res.json()) as FilmHomeFeed;
+  return {
+    hero: (raw.hero || []).map(normalizeFilmSummary),
+    trendingMovies: (raw.trendingMovies || []).map(normalizeFilmSummary),
+    latestMovies: (raw.latestMovies || []).map(normalizeFilmSummary),
+    asianMovies: (raw.asianMovies || []).map(normalizeFilmSummary),
+    popularSeries: (raw.popularSeries || []).map(normalizeFilmSummary),
+    topRated: (raw.topRated || []).map(normalizeFilmSummary),
+    animations: (raw.animations || []).map(normalizeFilmSummary),
+  };
 }
 
 export async function fetchFilmBrowse(params: {
   category?: string;
   genre?: string;
   sort?: string;
+  year?: string | number;
   page?: number;
   q?: string;
+  query?: string;
 }): Promise<FilmBrowseResponse> {
   const base = getBaseUrl();
   const qs = new URLSearchParams();
   if (params.category) qs.set("category", params.category);
   if (params.genre) qs.set("genre", params.genre);
   if (params.sort) qs.set("sort", params.sort);
+  if (params.year) qs.set("year", String(params.year));
   if (params.page) qs.set("page", String(params.page));
-  if (params.q) qs.set("q", params.q);
+  const searchVal = params.q || params.query;
+  if (searchVal) qs.set("q", searchVal);
   const res = await secureFetch(`${base}/api/film/browse?${qs.toString()}`, {
     headers: { Accept: "application/json" },
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return (await res.json()) as FilmBrowseResponse;
+  const data = (await res.json()) as any;
+  const results = Array.isArray(data.results)
+    ? data.results.map(normalizeFilmSummary)
+    : Array.isArray(data.items)
+      ? data.items.map(normalizeFilmSummary)
+      : [];
+  const page = Number(data.page || params.page || 1);
+  const totalPages = Number(data.totalPages || 1);
+  return {
+    results,
+    items: results,
+    page,
+    totalPages,
+    totalResults: Number(data.totalResults || results.length),
+    hasNextPage: Boolean(data.hasNextPage ?? page < totalPages),
+  };
 }
 
 export async function fetchFilmDetail(
-  tmdbType: TmdbMediaType,
-  id: number | string,
+  typeOrId: TmdbMediaType | number | string,
+  maybeId?: number | string | TmdbMediaType,
 ): Promise<FilmDetail> {
   const base = getBaseUrl();
+  let tmdbType: TmdbMediaType = "movie";
+  let id: number | string;
+  if (typeOrId === "movie" || typeOrId === "tv") {
+    tmdbType = typeOrId;
+    id = maybeId ?? "";
+  } else {
+    id = typeOrId;
+    if (maybeId === "movie" || maybeId === "tv") {
+      tmdbType = maybeId;
+    }
+  }
   const res = await secureFetch(
     `${base}/api/film/detail?type=${encodeURIComponent(tmdbType)}&id=${encodeURIComponent(String(id))}`,
     { headers: { Accept: "application/json" } },
   );
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return (await res.json()) as FilmDetail;
+  const raw = await res.json();
+  const summary = normalizeFilmSummary(raw);
+  return {
+    ...raw,
+    ...summary,
+    relations: Array.isArray(raw?.relations) ? raw.relations.map(normalizeFilmSummary) : [],
+    recommendations: Array.isArray(raw?.recommendations)
+      ? raw.recommendations.map(normalizeFilmSummary)
+      : [],
+  } as FilmDetail;
 }
+
+export type FilmSeasonResult = FilmEpisode[] & { episodes: FilmEpisode[] };
 
 export async function fetchFilmSeason(
   tmdbId: number | string,
   season: number,
-): Promise<FilmEpisode[]> {
+): Promise<FilmSeasonResult> {
   const base = getBaseUrl();
   const res = await secureFetch(
     `${base}/api/film/season?id=${encodeURIComponent(String(tmdbId))}&season=${season}`,
@@ -87,7 +140,8 @@ export async function fetchFilmSeason(
   );
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = (await res.json()) as { episodes?: FilmEpisode[] };
-  return data.episodes || [];
+  const eps = data.episodes || [];
+  return Object.assign(eps, { episodes: eps });
 }
 
 export async function fetchFilmSchedule(): Promise<FilmSummary[]> {
@@ -97,21 +151,24 @@ export async function fetchFilmSchedule(): Promise<FilmSummary[]> {
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = (await res.json()) as { items?: FilmSummary[] };
-  return data.items || [];
+  return (data.items || []).map(normalizeFilmSummary);
 }
 
 export async function fetchFilmSubtitleTracks(params: {
   tmdbId: number | string;
-  tmdbType: TmdbMediaType;
+  tmdbType?: TmdbMediaType;
+  type?: TmdbMediaType;
   season: number;
   episode: number;
   title: string;
+  signal?: AbortSignal;
 }): Promise<FilmSubtitleTrack[]> {
   const base = getBaseUrl();
   try {
+    const mediaType = params.tmdbType || params.type || "movie";
     const qs = new URLSearchParams({
       tmdbId: String(params.tmdbId),
-      type: params.tmdbType,
+      type: mediaType,
       season: String(params.season),
       ep: String(params.episode),
       title: params.title,
@@ -142,8 +199,7 @@ function normalizeServerFromSSE(raw: any, index: number, base: string): FilmServ
   }
 
   const label = String(raw.label || raw.server || `سيرفر ${index + 1}`).trim();
-  const lower = `${label} ${raw.tier || ""} ${rawUrl}`.toLowerCase();
-
+  const lower = `${label} ${raw.tier || ""} ${raw.quality || ""}`.toLowerCase();
   let qualityTier: FilmServerLink["qualityTier"] = "HD";
   let quality = "720p HD";
   if (lower.includes("2160") || lower.includes("4k") || lower.includes("uhd")) {
@@ -171,17 +227,19 @@ function normalizeServerFromSSE(raw: any, index: number, base: string): FilmServ
     !isEmbed &&
     (rawUrl.includes(".m3u8") || rawUrl.includes("hls-proxy") || rawUrl.includes("/hls/"));
   const kind: FilmServerLink["kind"] = isEmbed ? "embed" : isHls ? "hls" : "direct";
-
   const subRaw = raw.subtitleUrl ? resolveAbsUrl(raw.subtitleUrl, base) : undefined;
 
   return {
     id: `${raw.site || "srv"}-${index}-${rawUrl.slice(-18)}`,
     name: label,
+    label,
+    url: !isEmbed ? proxyUrl || directUrl || rawUrl : rawUrl,
+    isEmbed,
     site: raw.site,
     quality,
     qualityTier,
     kind,
-    directUrl: !isEmbed ? (proxyUrl || directUrl || rawUrl) : undefined,
+    directUrl: !isEmbed ? proxyUrl || directUrl || rawUrl : undefined,
     proxyUrl: proxyUrl || undefined,
     embedUrl: isEmbed ? rawUrl : undefined,
     subtitleUrl: subRaw,
@@ -191,7 +249,11 @@ function normalizeServerFromSSE(raw: any, index: number, base: string): FilmServ
       : isHls
         ? "بث مباشر HLS فائق السرعة"
         : "رابط فيديو مباشر عالي الجودة",
-    isArabic: label.includes("عرب") || label.includes("مدبلج") || label.includes("مترجم") || Boolean(subRaw),
+    isArabic:
+      label.includes("عرب") ||
+      label.includes("مدبلج") ||
+      label.includes("مترجم") ||
+      Boolean(subRaw),
   };
 }
 
@@ -199,10 +261,12 @@ const SOURCES_CACHE_TTL = 40 * 60_000;
 
 export async function streamFilmSources(params: {
   tmdbId: number | string;
-  tmdbType: TmdbMediaType;
+  tmdbType?: TmdbMediaType;
+  type?: TmdbMediaType;
   season: number;
   episode: number;
   title: string;
+  year?: number | string;
   forceRefresh?: boolean;
   onStatus?: (msg: string) => void;
   onSource: (srv: FilmServerLink) => void;
@@ -210,7 +274,8 @@ export async function streamFilmSources(params: {
   signal?: AbortSignal;
 }): Promise<FilmServerLink[]> {
   const base = getBaseUrl();
-  const cacheKey = `film-srcs-v2-${params.tmdbType}-${params.tmdbId}-s${params.season}-e${params.episode}`;
+  const mediaType: TmdbMediaType = params.tmdbType || params.type || "movie";
+  const cacheKey = `film-srcs-v3-${mediaType}-${params.tmdbId}-s${params.season}-e${params.episode}`;
 
   if (!params.forceRefresh) {
     try {
@@ -228,7 +293,7 @@ export async function streamFilmSources(params: {
 
   const qs = new URLSearchParams({
     tmdbId: String(params.tmdbId),
-    type: params.tmdbType,
+    type: mediaType,
     season: String(params.season),
     ep: String(params.episode),
     title: params.title,
@@ -310,7 +375,8 @@ export async function streamFilmSources(params: {
 export async function resolveFilmSource(params: {
   sourceId: string;
   tmdbId: number | string;
-  tmdbType: TmdbMediaType;
+  tmdbType?: TmdbMediaType;
+  type?: TmdbMediaType;
   season: number;
   episode: number;
   title: string;
@@ -318,13 +384,14 @@ export async function resolveFilmSource(params: {
 }): Promise<FilmServerLink | null> {
   const base = getBaseUrl();
   try {
+    const mediaType = params.tmdbType || params.type || "movie";
     const res = await secureFetch(`${base}/api/film/source-resolve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         sourceId: params.sourceId,
         tmdbId: String(params.tmdbId),
-        type: params.tmdbType,
+        type: mediaType,
         season: params.season,
         ep: params.episode,
         title: params.title,
@@ -337,4 +404,11 @@ export async function resolveFilmSource(params: {
   } catch {
     return null;
   }
+}
+
+export function resolveFilmPlayableUrl(srv: Partial<FilmServerLink> | null | undefined): string {
+  if (!srv) return "";
+  const base = getBaseUrl();
+  const target = srv.proxyUrl || srv.directUrl || srv.url || srv.embedUrl || "";
+  return resolveAbsUrl(target, base);
 }

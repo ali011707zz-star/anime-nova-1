@@ -9,13 +9,12 @@ export default function UpcomingScreen() {
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
-      <CatalogPageHeader title="قادم قريباً" />
+      <CatalogPageHeader title="أحدث الإصدارات" />
       <MediaCatalogGrid
-        mediaType="ANIME"
+        mediaType="FILM"
         variant="upcoming"
-        status="NOT_YET_RELEASED"
         sort="START_DATE"
-        emptyText="لا توجد إصدارات قادمة حالياً"
+        emptyText="لا توجد إصدارات حديثة حالياً"
       />
     </View>
   );

@@ -8,7 +8,9 @@ on:
       - '!artifacts/nova-film/android/**'
       - '!artifacts/nova-film/ota-dist/**'
       - 'artifacts/api-server/src/routes/otaFilm.ts'
-      - 'artifacts/api-server/src/routes/film.ts'
+      - 'artifacts/api-server/src/routes/film.ts \
+            artifacts/api-server/src/lib/mediaVault.ts \
+            artifacts/api-server/src/routes/mediaVault.ts'
       - 'artifacts/api-server/src/app.ts'
       - '.github/workflows/ota-nova-film.yml'
   workflow_dispatch:
@@ -166,6 +168,9 @@ jobs:
             if [ "$NEED_REBUILD" -eq 1 ]; then
               echo "🔄 Patching /api/ota-film and /api/film routes into VPS api-server..."
               cp "${STAGE}/artifacts/api-server/src/routes/otaFilm.ts" "${APP_DIR}/artifacts/api-server/src/routes/otaFilm.ts"
+              mkdir -p "${APP_DIR}/artifacts/api-server/src/lib"
+              cp "${STAGE}/artifacts/api-server/src/lib/mediaVault.ts" "${APP_DIR}/artifacts/api-server/src/lib/mediaVault.ts"
+              cp "${STAGE}/artifacts/api-server/src/routes/mediaVault.ts" "${APP_DIR}/artifacts/api-server/src/routes/mediaVault.ts"
               cp "${STAGE}/artifacts/api-server/src/routes/film.ts" "${APP_DIR}/artifacts/api-server/src/routes/film.ts"
               python3 - "${APP_DIR}/artifacts/api-server/src/app.ts" <<'PY'
             import pathlib, sys

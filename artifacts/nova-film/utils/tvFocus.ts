@@ -104,3 +104,4 @@ export function useTvFocusMemory(scope: string) {
 
   return { preferredKey, ready, rememberFocus };
 }
+export { tvFocusStyle } from "./tv";

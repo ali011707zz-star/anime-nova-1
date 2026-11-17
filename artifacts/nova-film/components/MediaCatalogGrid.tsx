@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -10,167 +11,56 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
-import { useRouter } from "expo-router";
-import { anilistQuery } from "@/utils/anilist";
-import { getBaseUrl } from "@/utils/api";
-import { translateMangaGenre } from "@/utils/mangaLocalization";
-import { getKnownArabicAnimeTitle } from "@/utils/arabicAnimeTitles";
 import { useColors } from "@/hooks/useColors";
+import { fetchFilmBrowse } from "@/utils/filmApi";
+import { FilmSummary } from "@/utils/filmCatalog";
 import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 
-export type CatalogMedia = {
-  id: number | string;
-  slug?: string;
-  source?: "manga" | "manhwa";
-  arTitle?: string;
-  title_ar?: string;
-  title: {
-    romaji: string;
-    english?: string | null;
-    native?: string | null;
-  };
-  synonyms?: string[];
-  coverImage?: { large?: string; extraLarge?: string };
-  averageScore?: number | null;
-  popularity?: number | null;
-  episodes?: number | null;
-  chapters?: number | null;
-  volumes?: number | null;
-  status?: string;
-  format?: string;
-  startDate?: { year?: number | null; month?: number | null; day?: number | null } | null;
-  countryOfOrigin?: string;
-  genres?: string[];
-};
-
-function getArabicTitleForItem(item: CatalogMedia, mediaType: "ANIME" | "MANGA"): string | null {
-  if (item.arTitle && /[\u0600-\u06FF]/.test(item.arTitle)) return item.arTitle;
-  if (item.title_ar && /[\u0600-\u06FF]/.test(item.title_ar)) return item.title_ar;
-  if (item.title?.native && /[\u0600-\u06FF]/.test(item.title.native)) return item.title.native;
-  const arSyn = (item.synonyms || []).find((s) => /[\u0600-\u06FF]/.test(s));
-  if (arSyn) return arSyn;
-  if (mediaType !== "MANGA") {
-    const numId = typeof item.id === "number" ? item.id : (Number(item.id) || null);
-    return getKnownArabicAnimeTitle(numId, item.title?.english, item.title?.romaji);
-  }
-  return null;
-}
-
-type CatalogVariant = "standard" | "upcoming" | "stats" | "manga";
-
 type Props = {
-  mediaType: "ANIME" | "MANGA";
-  variant?: CatalogVariant;
+  mediaType?: "ANIME" | "MANGA" | "FILM";
+  variant?: "standard" | "stats" | "upcoming" | "manga";
   status?: string;
   format?: string;
+  category?: "all" | "movie" | "series" | "animation";
   season?: string;
   seasonYear?: number;
   countryOfOrigin?: string;
+  genre?: string;
   sort?: string;
   emptyText?: string;
   search?: string;
 };
 
-function buildMediaCatalogQuery(params: {
-  status?: string;
-  format?: string;
-  season?: string;
-  seasonYear?: number;
-  countryOfOrigin?: string;
-  search?: string;
-}) {
-  const varDefs: string[] = ["$page: Int!", "$type: MediaType!", "$sort: [MediaSort!]"];
-  const filterArgs: string[] = [
-    "type: $type",
-    "isAdult: false",
-    'genre_not_in: ["Hentai"]',
-    "sort: $sort",
-  ];
+const _catalogMemoryCache = new Map<string, { items: FilmSummary[]; hasMore: boolean }>();
 
-  if (params.search) {
-    varDefs.push("$search: String");
-    filterArgs.push("search: $search");
-  }
-  if (params.status) {
-    varDefs.push("$status: MediaStatus");
-    filterArgs.push("status: $status");
-  }
-  if (params.format) {
-    varDefs.push("$format: MediaFormat");
-    filterArgs.push("format: $format");
-  }
-  if (params.season) {
-    varDefs.push("$season: MediaSeason");
-    filterArgs.push("season: $season");
-  }
-  if (typeof params.seasonYear === "number") {
-    varDefs.push("$seasonYear: Int");
-    filterArgs.push("seasonYear: $seasonYear");
-  }
-  if (params.countryOfOrigin) {
-    varDefs.push("$countryOfOrigin: CountryCode");
-    filterArgs.push("countryOfOrigin: $countryOfOrigin");
-  }
-
-  return `
-query NovaMediaCatalog(${varDefs.join(", ")}) {
-  Page(page: $page, perPage: 30) {
-    pageInfo { hasNextPage }
-    media(${filterArgs.join(", ")}) {
-      id
-      title { romaji english native }
-      synonyms
-      coverImage { large extraLarge }
-      averageScore popularity episodes chapters volumes
-      status format startDate { year month day } countryOfOrigin genres
-    }
-  }
-}`;
+function resolveCategory(
+  category?: "all" | "movie" | "series" | "animation",
+  format?: string,
+): "all" | "movie" | "series" | "animation" {
+  if (category) return category;
+  if (format === "MOVIE") return "movie";
+  if (format === "TV") return "series";
+  if (format === "ANIMATION" || format === "OVA" || format === "ONA") return "animation";
+  return "all";
 }
 
-const FORMAT_LABELS: Record<string, string> = {
-  TV: "مسلسل",
-  MOVIE: "فيلم",
-  OVA: "OVA",
-  ONA: "ONA",
-  SPECIAL: "خاص",
-  MUSIC: "موسيقى",
-  MANGA: "مانجا",
-  NOVEL: "رواية",
-  ONE_SHOT: "فصل مستقل",
-};
-
-function statusLabel(status?: string) {
-  if (status === "RELEASING") return "مستمرة";
-  if (status === "FINISHED") return "مكتملة";
-  if (status === "NOT_YET_RELEASED") return "قريباً";
-  if (status === "HIATUS") return "متوقفة";
-  if (status === "CANCELLED") return "ملغاة";
-  return "مانجا";
+function resolveSort(sort?: string): "popular" | "rating" | "year" | "title" {
+  if (sort === "SCORE_DESC" || sort === "rating") return "rating";
+  if (sort === "START_DATE" || sort === "year") return "year";
+  if (sort === "title") return "title";
+  return "popular";
 }
-
-function formatLabel(format?: string) {
-  return format ? FORMAT_LABELS[format] || format : "أنمي";
-}
-
-function mangaOriginLabel(country?: string, source?: string) {
-  if (source === "manhwa" || country === "KR") return "مانهوا ملونة";
-  if (country === "CN" || country === "TW") return "مانهوا صينية";
-  return "مانجا مترجمة";
-}
-
-const _catalogMemoryCache = new Map<string, { items: CatalogMedia[]; hasMore: boolean }>();
 
 export function MediaCatalogGrid({
-  mediaType,
   variant = "standard",
   status,
   format,
+  category,
   season,
   seasonYear,
-  countryOfOrigin,
+  genre,
   sort = "POPULARITY_DESC",
-  emptyText = "لا توجد عناوين في هذا القسم حالياً",
+  emptyText = "لا توجد أعمال في هذا القسم حالياً",
   search,
 }: Props) {
   const colors = useColors();
@@ -183,200 +73,103 @@ export function MediaCatalogGrid({
   const cardWidth = Math.floor((gridWidth - cardGap * (columns - 1)) / columns);
   const posterHeight = Math.round(cardWidth * 1.48);
 
-  const [items, setItems] = useState<CatalogMedia[]>([]);
+  const resolvedCategory = resolveCategory(category, format);
+  const resolvedSort = resolveSort(sort);
+  const cacheKey = `${variant}_${resolvedCategory}_${status || ""}_${season || ""}_${seasonYear || ""}_${genre || ""}_${search || ""}_${resolvedSort}`;
+
+  const [items, setItems] = useState<FilmSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const requestSequence = useRef(0);
-  const controllerRef = useRef<AbortController | null>(null);
 
-  const cacheKey = `${mediaType}_${variant}_${countryOfOrigin || ""}_${status || ""}_${format || ""}_${search || ""}_${sort}`;
-
-  const loadPage = useCallback(async (requestedPage: number, append: boolean) => {
-    controllerRef.current?.abort();
-    const controller = new AbortController();
-    controllerRef.current = controller;
-    const sequence = ++requestSequence.current;
-
-    if (append) {
-      setLoadingMore(true);
-    } else {
-      const memCached = _catalogMemoryCache.get(cacheKey);
-      if (memCached && memCached.items.length > 0) {
-        setItems(memCached.items);
-        setHasMore(memCached.hasMore);
-        setLoading(false);
-        setError(false);
+  const loadPage = useCallback(
+    async (requestedPage: number, append: boolean) => {
+      const sequence = ++requestSequence.current;
+      if (append) {
+        setLoadingMore(true);
       } else {
-        setLoading(true);
-        setError(false);
-      }
-    }
-
-    try {
-      if (mediaType === "MANGA") {
-        const source = countryOfOrigin === "KR" ? "manhwa" : "manga";
-        const qs = new URLSearchParams({
-          source,
-          page: String(requestedPage),
-        });
-        if (status) qs.set("status", status);
-        if (search) qs.set("search", search);
-
-        const res = await fetch(`${getBaseUrl()}/api/manga/catalog?${qs.toString()}`, {
-          signal: controller.signal,
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        if (sequence !== requestSequence.current || controller.signal.aborted) return;
-
-        const nextItems: CatalogMedia[] = (data?.items || []).map((item: any) => {
-          const strTitle = typeof item.title === "string" ? item.title : "";
-          const arT = item.arabicTitle || item.arTitle || (typeof item.title === "object" ? item.title?.native : "") || "";
-          const enT = item.englishTitle || item.enTitle || strTitle || (typeof item.title === "object" ? item.title?.english || item.title?.romaji : "") || "";
-          const posterUri = item.poster || item.cover || item.coverImage?.extraLarge || item.coverImage?.large || "";
-          return {
-            id: String(item.id),
-            slug: item.slug,
-            source: item.source || source,
-            arTitle: arT,
-            title: {
-              romaji: enT || arT,
-              english: enT || arT,
-              native: arT || enT,
-            },
-            coverImage: {
-              large: posterUri,
-              extraLarge: posterUri,
-            },
-            averageScore: item.averageScore ?? null,
-            chapters: item.chapters ?? null,
-            status: item.status || "RELEASING",
-            format: "MANGA",
-            countryOfOrigin: item.countryOfOrigin || (source === "manhwa" ? "KR" : "JP"),
-            genres: Array.isArray(item.genres) ? item.genres : [],
-          };
-        });
-
-        if (requestedPage === 1 && !append) {
-          _catalogMemoryCache.set(cacheKey, { items: nextItems, hasMore: Boolean(data?.hasNextPage) });
+        const memCached = _catalogMemoryCache.get(cacheKey);
+        if (memCached && memCached.items.length > 0) {
+          setItems(memCached.items);
+          setHasMore(memCached.hasMore);
+          setLoading(false);
+          setError(false);
+        } else {
+          setLoading(true);
+          setError(false);
         }
-        setItems((previous) => {
-          if (!append) return nextItems;
-          const existingIds = new Set(previous.map((item) => String(item.id)));
-          return [...previous, ...nextItems.filter((item) => !existingIds.has(String(item.id)))];
+      }
+
+      try {
+        const res = await fetchFilmBrowse({
+          category: resolvedCategory,
+          genre,
+          year: seasonYear ? String(seasonYear) : undefined,
+          sort: resolvedSort,
+          query: search,
+          page: requestedPage,
+        });
+        if (sequence !== requestSequence.current) return;
+        let fetched = res.items || [];
+        if (status === "RELEASING") {
+          fetched = fetched.filter((i) => i.kind === "series");
+        }
+        setItems((prev) => {
+          const merged = append ? [...prev, ...fetched] : fetched;
+          const seen = new Set<number>();
+          const deduped = merged.filter((m) => {
+            if (seen.has(m.id)) return false;
+            seen.add(m.id);
+            return true;
+          });
+          _catalogMemoryCache.set(cacheKey, {
+            items: deduped,
+            hasMore: Boolean(res.hasNextPage),
+          });
+          return deduped;
         });
         setPage(requestedPage);
-        setHasMore(Boolean(data?.hasNextPage));
+        setHasMore(Boolean(res.hasNextPage));
         setError(false);
-        return;
+      } catch {
+        if (sequence === requestSequence.current) {
+          setError(true);
+        }
+      } finally {
+        if (sequence === requestSequence.current) {
+          setLoading(false);
+          setLoadingMore(false);
+        }
       }
-
-      const query = buildMediaCatalogQuery({
-        status,
-        format,
-        season,
-        seasonYear,
-        countryOfOrigin,
-        search,
-      });
-
-      const variables: Record<string, unknown> = {
-        page: requestedPage,
-        type: mediaType,
-        sort: [sort],
-      };
-      if (search) variables.search = search;
-      if (status) variables.status = status;
-      if (format) variables.format = format;
-      if (season) variables.season = season;
-      if (typeof seasonYear === "number") variables.seasonYear = seasonYear;
-      if (countryOfOrigin) variables.countryOfOrigin = countryOfOrigin;
-
-      const data = await anilistQuery<{
-        Page?: { pageInfo?: { hasNextPage?: boolean }; media?: CatalogMedia[] };
-      }>(query, variables, { signal: controller.signal, timeoutMs: 25_000 });
-      if (sequence !== requestSequence.current || controller.signal.aborted) return;
-
-      const nextItems = data?.Page?.media || [];
-      if (requestedPage === 1 && !append) {
-        _catalogMemoryCache.set(cacheKey, { items: nextItems, hasMore: Boolean(data?.Page?.pageInfo?.hasNextPage) });
-      }
-      setItems((previous) => {
-        if (!append) return nextItems;
-        const existingIds = new Set(previous.map((item) => item.id));
-        return [...previous, ...nextItems.filter((item) => !existingIds.has(item.id))];
-      });
-      setPage(requestedPage);
-      setHasMore(Boolean(data?.Page?.pageInfo?.hasNextPage));
-      setError(false);
-    } catch (requestError: any) {
-      if (requestError?.name !== "AbortError" && sequence === requestSequence.current) {
-        setError(true);
-      }
-    } finally {
-      if (sequence === requestSequence.current) {
-        setLoading(false);
-        setLoadingMore(false);
-      }
-    }
-  }, [cacheKey, countryOfOrigin, format, mediaType, search, season, seasonYear, sort, status]);
+    },
+    [cacheKey, resolvedCategory, genre, seasonYear, resolvedSort, search, status],
+  );
 
   useEffect(() => {
-    const memCached = _catalogMemoryCache.get(cacheKey);
-    if (memCached && memCached.items.length > 0) {
-      setItems(memCached.items);
-      setHasMore(memCached.hasMore);
-      setLoading(false);
-    } else {
-      setItems([]);
-      setLoading(true);
-    }
-    setPage(1);
-    setError(false);
     void loadPage(1, false);
-    return () => controllerRef.current?.abort();
   }, [loadPage]);
 
-  const openMedia = (item: CatalogMedia) => {
-    if (mediaType === "MANGA") {
-      const arTitle = getArabicTitleForItem(item, mediaType) || "";
-      const enTitle = item.title?.english || item.title?.romaji || "";
-      const cover = item.coverImage?.extraLarge || item.coverImage?.large || "";
-      router.push({
-        pathname: "/manga/[id]" as any,
-        params: {
-          id: String(item.id),
-          ...(arTitle ? { title: arTitle } : {}),
-          ...(enTitle ? { english: enTitle } : {}),
-          ...(cover ? { cover } : {}),
-          ...(item.status ? { status: item.status } : {}),
-          ...(item.chapters ? { chapters: String(item.chapters) } : {}),
-          ...(item.averageScore ? { score: String(item.averageScore) } : {}),
-          ...(item.source ? { source: item.source } : {}),
-        },
-      });
-    } else {
-      router.push(`/anime/${item.id}` as any);
-    }
+  const openMedia = (item: FilmSummary) => {
+    router.push({
+      pathname: "/film/[id]",
+      params: { id: String(item.id), title: item.titleAr },
+    });
   };
 
-  const renderItem = ({ item, index }: { item: CatalogMedia; index: number }) => {
-    const arTitle = getArabicTitleForItem(item, mediaType);
-    const enTitle = item.title?.english || item.title?.romaji || item.title?.native || "";
-    const title = arTitle || enTitle || mangaOriginLabel(item.countryOfOrigin, item.source);
+  const renderItem = ({ item, index }: { item: FilmSummary; index: number }) => {
+    const title = item.titleAr || item.titleEn;
     const hasArabicTitle = /[\u0600-\u06FF]/.test(title);
-    const hasDualEnglish = Boolean(arTitle && enTitle && arTitle.trim() !== enTitle.trim());
-    const year = item.startDate?.year || null;
-    const cover = item.coverImage?.extraLarge || item.coverImage?.large;
+    const hasDualEnglish = Boolean(
+      item.titleAr && item.titleEn && item.titleAr.trim() !== item.titleEn.trim(),
+    );
     const cardSubtitle = hasDualEnglish
-      ? enTitle
-      : (variant === "manga" ? mangaOriginLabel(item.countryOfOrigin, item.source) : formatLabel(item.format));
-    const mangaGenres = mediaType === "MANGA"
-      ? (item.genres || []).slice(0, 2).map(translateMangaGenre)
-      : [];
+      ? item.titleEn
+      : item.kind === "series"
+        ? "مسلسل"
+        : "فيلم";
 
     return (
       <Pressable
@@ -390,45 +183,51 @@ export function MediaCatalogGrid({
           tvMode && tvFocusStyle(focused),
         ]}
       >
-        <View style={[styles.poster, { height: posterHeight, backgroundColor: colors.surface, borderColor: colors.border }]}>
-          {cover ? (
-            <Image source={{ uri: cover }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+        <View
+          style={[
+            styles.poster,
+            {
+              height: posterHeight,
+              backgroundColor: colors.surface,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          {item.poster ? (
+            <Image
+              source={{ uri: item.poster }}
+              style={StyleSheet.absoluteFill}
+              resizeMode="cover"
+            />
           ) : (
             <View style={styles.posterPlaceholder}>
-              <Ionicons name={mediaType === "MANGA" ? "book-outline" : "film-outline"} size={28} color={colors.textMuted} />
+              <Ionicons name="film-outline" size={28} color={colors.textMuted} />
             </View>
           )}
           <LinearGradient
-            colors={["transparent", "rgba(0,0,0,0.78)"]}
+            colors={["transparent", "rgba(0,0,0,0.82)"]}
             style={styles.posterGradient}
           >
-            {variant === "manga" ? (
-              <View style={styles.posterMetaRow}>
-                <Text style={styles.posterMetaText}>
-                  {typeof item.chapters === "number" && item.chapters > 0
-                    ? `${item.chapters} فصل`
-                    : mangaOriginLabel(item.countryOfOrigin, item.source)}
-                </Text>
-                {typeof item.averageScore === "number" && item.averageScore > 0 && (
-                  <Text style={styles.posterScore}>★ {(item.averageScore / 10).toFixed(1)}</Text>
-                )}
-              </View>
-            ) : variant === "stats" ? (
-              <View style={styles.posterMetaRow}>
-                <Text style={styles.posterMetaText}>{year || "—"}</Text>
-                {typeof item.averageScore === "number" && item.averageScore > 0 && (
-                  <Text style={styles.posterScore}>★ {(item.averageScore / 10).toFixed(1)}</Text>
-                )}
-              </View>
-            ) : variant === "upcoming" ? (
-              <Text style={[styles.posterMetaText, styles.posterYear]}>{year || "قريباً"}</Text>
-            ) : null}
-          </LinearGradient>
-          {variant === "manga" && (
-            <View style={[styles.statusBadge, { backgroundColor: item.status === "RELEASING" ? colors.success : colors.homeAccent }]}>
-              <Text style={styles.statusBadgeText}>{statusLabel(item.status)}</Text>
+            <View style={styles.posterMetaRow}>
+              <Text style={styles.posterMetaText}>{item.year || "—"}</Text>
+              {typeof item.rating === "number" && item.rating > 0 && (
+                <Text style={styles.posterScore}>★ {item.rating.toFixed(1)}</Text>
+              )}
             </View>
-          )}
+          </LinearGradient>
+          <View
+            style={[
+              styles.statusBadge,
+              {
+                backgroundColor:
+                  item.kind === "series" ? "#10b981" : colors.homeAccent || "#0ea5e9",
+              },
+            ]}
+          >
+            <Text style={styles.statusBadgeText}>
+              {item.kind === "series" ? "مسلسل" : "فيلم"}
+            </Text>
+          </View>
         </View>
         <Text
           style={[
@@ -456,9 +255,12 @@ export function MediaCatalogGrid({
         >
           {cardSubtitle}
         </Text>
-        {mangaGenres.length > 0 && (
-          <Text style={[styles.cardGenres, { color: colors.textMuted }]} numberOfLines={1}>
-            {mangaGenres.join(" · ")}
+        {item.genres && item.genres.length > 0 && (
+          <Text
+            style={[styles.cardGenres, { color: colors.textMuted }]}
+            numberOfLines={1}
+          >
+            {item.genres.slice(0, 2).join(" · ")}
           </Text>
         )}
       </Pressable>
@@ -467,28 +269,42 @@ export function MediaCatalogGrid({
 
   const renderEmpty = () => {
     if (loading) {
-      return <View style={styles.message}><ActivityIndicator color={colors.homeAccent} size="large" /></View>;
+      return (
+        <View style={styles.message}>
+          <ActivityIndicator color={colors.homeAccent} size="large" />
+        </View>
+      );
     }
     if (error) {
       return (
         <View style={styles.message}>
           <Ionicons name="cloud-offline-outline" size={28} color={colors.textMuted} />
-          <Text style={[styles.messageText, { color: colors.textSecondary }]}>تعذر تحميل العناوين</Text>
+          <Text style={[styles.messageText, { color: colors.textSecondary }]}>
+            تعذر تحميل العناوين
+          </Text>
           <Pressable
             onPress={() => void loadPage(1, false)}
             focusable={tvMode}
             hasTVPreferredFocus={tvMode}
-            style={({ focused }) => [styles.retryButton, { borderColor: colors.border }, tvMode && tvFocusStyle(focused)]}
+            style={({ focused }) => [
+              styles.retryButton,
+              { borderColor: colors.border },
+              tvMode && tvFocusStyle(focused),
+            ]}
           >
-            <Text style={[styles.retryText, { color: colors.textPrimary }]}>إعادة المحاولة</Text>
+            <Text style={[styles.retryText, { color: colors.textPrimary }]}>
+              إعادة المحاولة
+            </Text>
           </Pressable>
         </View>
       );
     }
     return (
       <View style={styles.message}>
-        <Ionicons name={mediaType === "MANGA" ? "book-outline" : "albums-outline"} size={28} color={colors.textMuted} />
-        <Text style={[styles.messageText, { color: colors.textSecondary }]}>{emptyText}</Text>
+        <Ionicons name="film-outline" size={28} color={colors.textMuted} />
+        <Text style={[styles.messageText, { color: colors.textSecondary }]}>
+          {emptyText}
+        </Text>
       </View>
     );
   };
@@ -504,11 +320,17 @@ export function MediaCatalogGrid({
       contentContainerStyle={[styles.grid, !items.length && styles.emptyGrid]}
       showsVerticalScrollIndicator={false}
       onEndReached={() => {
-        if (!loading && !loadingMore && hasMore && !error) void loadPage(page + 1, true);
+        if (!loading && !loadingMore && hasMore && !error) {
+          void loadPage(page + 1, true);
+        }
       }}
       onEndReachedThreshold={0.45}
       ListEmptyComponent={renderEmpty}
-      ListFooterComponent={loadingMore ? <ActivityIndicator style={styles.footerLoader} color={colors.homeAccent} /> : null}
+      ListFooterComponent={
+        loadingMore ? (
+          <ActivityIndicator style={styles.footerLoader} color={colors.homeAccent} />
+        ) : null
+      }
       initialNumToRender={12}
       maxToRenderPerBatch={12}
       windowSize={5}
@@ -522,21 +344,89 @@ const styles = StyleSheet.create({
   emptyGrid: { flexGrow: 1, justifyContent: "center" },
   row: { justifyContent: "space-between", marginBottom: 18 },
   card: { marginBottom: 18 },
-  poster: { width: "100%", overflow: "hidden", borderRadius: 13, borderWidth: 1, position: "relative" },
-  posterPlaceholder: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
-  posterGradient: { position: "absolute", left: 0, right: 0, bottom: 0, paddingHorizontal: 9, paddingBottom: 9, paddingTop: 38 },
-  posterMetaRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  posterMetaText: { color: "#fff", fontSize: 11, fontWeight: "800", textShadowColor: "rgba(0,0,0,0.8)", textShadowRadius: 4 },
+  poster: {
+    width: "100%",
+    overflow: "hidden",
+    borderRadius: 13,
+    borderWidth: 1,
+    position: "relative",
+  },
+  posterPlaceholder: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  posterGradient: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 9,
+    paddingBottom: 9,
+    paddingTop: 38,
+  },
+  posterMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  posterMetaText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "800",
+    textShadowColor: "rgba(0,0,0,0.8)",
+    textShadowRadius: 4,
+  },
   posterScore: { color: "#FACC15", fontSize: 11, fontWeight: "800" },
-  posterYear: { alignSelf: "flex-end" },
-  statusBadge: { position: "absolute", top: 8, right: 8, borderRadius: 12, paddingHorizontal: 8, paddingVertical: 3 },
+  statusBadge: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
   statusBadgeText: { color: "#fff", fontSize: 9, fontFamily: "Cairo_700Bold" },
-  cardTitle: { fontSize: 13, lineHeight: 19, marginTop: 6, fontFamily: "Cairo_700Bold", textAlign: "left" },
-  cardSubtitle: { fontSize: 11, lineHeight: 16, marginTop: 2, fontFamily: "Cairo_400Regular", textAlign: "right" },
-  cardGenres: { fontSize: 10, lineHeight: 15, marginTop: 1, fontFamily: "Cairo_400Regular", textAlign: "right" },
-  message: { minHeight: 220, alignItems: "center", justifyContent: "center", gap: 10, padding: 20 },
-  messageText: { fontSize: 13, fontFamily: "Cairo_600SemiBold", textAlign: "center" },
-  retryButton: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 8, marginTop: 4 },
+  cardTitle: {
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 6,
+    fontFamily: "Cairo_700Bold",
+    textAlign: "left",
+  },
+  cardSubtitle: {
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 2,
+    fontFamily: "Cairo_400Regular",
+    textAlign: "right",
+  },
+  cardGenres: {
+    fontSize: 10,
+    lineHeight: 15,
+    marginTop: 1,
+    fontFamily: "Cairo_400Regular",
+    textAlign: "right",
+  },
+  message: {
+    minHeight: 220,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    padding: 20,
+  },
+  messageText: {
+    fontSize: 13,
+    fontFamily: "Cairo_600SemiBold",
+    textAlign: "center",
+  },
+  retryButton: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    marginTop: 4,
+  },
   retryText: { fontSize: 12, fontFamily: "Cairo_700Bold" },
   footerLoader: { paddingVertical: 14 },
 });

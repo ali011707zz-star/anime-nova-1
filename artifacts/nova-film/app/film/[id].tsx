@@ -1,808 +1,1211 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useQuery } from "@tanstack/react-query";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
-import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import * as ScreenOrientation from "expo-screen-orientation";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  BackHandler,
+  Dimensions,
   I18nManager,
   Image,
   Modal,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
-  useWindowDimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { FilmPosterCard } from "@/components/FilmPosterCard";
-import { YoutubeTrailerModal } from "@/components/YoutubeTrailerModal";
+import { WebView } from "react-native-webview";
+
+import { SafePosterImage } from "@/components/SafePosterImage";
 import type { ThemePalette } from "@/constants/colors";
 import { useColors } from "@/hooks/useColors";
-import { fetchFilmDetail, fetchFilmSeason } from "@/utils/filmApi";
+import { fetchFilmDetail } from "@/utils/filmApi";
 import {
-  getImageSource,
-  loadFavoriteFilms,
-  loadUserRating,
-  loadWatchedMap,
-  makeEpisodeKey,
-  saveUserRating,
-  toggleEpisodeWatched,
-  toggleFavoriteFilm,
-  type FilmEpisode,
+  type FilmCastMember,
+  type FilmDetail,
   type FilmSummary,
-  type TmdbMediaType,
+  getImageSource,
+  loadFavoriteFilmIds,
+  loadSavedCast,
+  loadUserRating,
+  saveUserRating,
+  toggleFavoriteFilm,
+  toggleSavedCastMember,
 } from "@/utils/filmCatalog";
+import { TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
+import { tvFocusStyle } from "@/utils/tvFocus";
 
-const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
-const ALIGN_RIGHT = I18nManager.isRTL ? "flex-start" : "flex-end";
+const { width: W } = Dimensions.get("window");
+const ROW_RTL = I18nManager.isRTL ? ("row" as const) : ("row-reverse" as const);
 
-export default function FilmDetailScreen() {
-  const params = useLocalSearchParams<{ id: string; type?: string; title?: string }>();
+const _filmDetailMemoryCache = new Map<string, FilmDetail>();
+
+function fmtRuntime(mins?: number | null): string | null {
+  if (!mins || mins <= 0) return null;
+  if (mins >= 60) {
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return m > 0 ? `${h} س و ${m} د` : `${h} ساعة`;
+  }
+  return `${mins} دقيقة`;
+}
+
+function SectionHeader({ title, tvMode = false }: { title: string; tvMode?: boolean }) {
   const colors = useColors();
-  const router = useRouter();
-  const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
-
-  const tmdbType: TmdbMediaType = params.type === "tv" ? "tv" : "movie";
-  const tmdbId = String(params.id || "");
-  const initialTitle = params.title ? String(params.title) : "تفاصيل العمل";
-
   const d = useMemo(() => createDetailStyles(colors), [colors]);
+  return (
+    <View style={[d.secHeader, tvMode && d.tvSectionHeader]}>
+      <View style={[d.secBar, tvMode && d.tvSectionBar]} />
+      <Text style={[d.secTitle, tvMode && d.tvSectionTitle]}>{title}</Text>
+    </View>
+  );
+}
 
-  const {
-    data: detail,
-    isLoading,
-    error,
-    refetch,
-  } = useQuery({
-    queryKey: ["nova-film-detail", tmdbType, tmdbId],
-    queryFn: () => fetchFilmDetail(tmdbType, tmdbId),
-    enabled: Boolean(tmdbId),
-    staleTime: 10 * 60_000,
-    retry: 2,
-  });
+function MetaCard({
+  label,
+  value,
+  badge = false,
+  wide = false,
+}: {
+  label: string;
+  value: string;
+  badge?: boolean;
+  wide?: boolean;
+}) {
+  const colors = useColors();
+  const d = useMemo(() => createDetailStyles(colors), [colors]);
+  return (
+    <View style={[d.metaCard, wide && d.metaCardWide]}>
+      <Text style={d.metaLabel}>{label}</Text>
+      {badge ? (
+        <View style={d.metaBadge}>
+          <Text style={d.metaBadgeText} numberOfLines={1}>
+            {value}
+          </Text>
+        </View>
+      ) : (
+        <Text style={d.metaCardValue} numberOfLines={1}>
+          {value}
+        </Text>
+      )}
+    </View>
+  );
+}
 
-  const [tab, setTab] = useState<"overview" | "episodes" | "cast" | "related">("overview");
-  const [selectedSeason, setSelectedSeason] = useState<number>(1);
-  const [seasonEpisodes, setSeasonEpisodes] = useState<FilmEpisode[]>([]);
-  const [seasonLoading, setSeasonLoading] = useState(false);
-
-  const [isFav, setIsFav] = useState(false);
-  const [myRating, setMyRating] = useState(0);
-  const [watchedMap, setWatchedMap] = useState<Record<string, boolean>>({});
-  const [showFullSynopsis, setShowFullSynopsis] = useState(false);
-  const [showRatingModal, setShowRatingModal] = useState(false);
-  const [showTrailerModal, setShowTrailerModal] = useState(false);
-  const [showInfoModal, setShowInfoModal] = useState(false);
+function YoutubeTrailerModal({
+  visible,
+  videoId,
+  title,
+  onClose,
+  tvMode = false,
+}: {
+  visible: boolean;
+  videoId: string | null;
+  title?: string;
+  onClose: () => void;
+  tvMode?: boolean;
+}) {
+  const insets = useSafeAreaInsets();
+  const colors = useColors();
+  const d = useMemo(() => createDetailStyles(colors), [colors]);
+  const [webLoading, setWebLoading] = useState(true);
+  const topPad = Platform.OS === "web" ? 20 : insets.top;
 
   useEffect(() => {
-    if (!detail) return;
-    if (detail.seasons.length > 0) {
-      setSelectedSeason(detail.seasons[0].seasonNumber);
-    } else {
-      setSelectedSeason(1);
-    }
-    setSeasonEpisodes(detail.episodes || []);
-  }, [detail]);
+    if (!visible) return;
+    setWebLoading(true);
+  }, [visible, videoId]);
 
-  const handleSelectSeason = async (sNum: number) => {
-    setSelectedSeason(sNum);
-    if (!detail || detail.tmdbType !== "tv") return;
-    if (detail.seasons[0]?.seasonNumber === sNum && detail.episodes.length > 0) {
-      setSeasonEpisodes(detail.episodes);
-      return;
-    }
-    setSeasonLoading(true);
-    try {
-      const eps = await fetchFilmSeason(detail.id, sNum);
-      setSeasonEpisodes(eps);
-    } catch {
-      setSeasonEpisodes([]);
-    } finally {
-      setSeasonLoading(false);
-    }
-  };
+  if (!videoId || !visible) return null;
 
-  useFocusEffect(
-    useCallback(() => {
-      if (!tmdbId) return;
-      Promise.all([
-        loadFavoriteFilms(),
-        loadWatchedMap(),
-        loadUserRating(tmdbType, Number(tmdbId)),
-      ]).then(([favs, watched, rating]) => {
-        setIsFav(favs.some((f) => String(f.id) === tmdbId && f.tmdbType === tmdbType));
-        setWatchedMap(watched);
-        setMyRating(rating);
-      });
-    }, [tmdbId, tmdbType]),
+  const trailerHtml = `<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { width:100%; height:100%; background:#000; overflow:hidden; }
+  iframe { width:100%; height:100%; border:none; display:block; }
+</style>
+</head>
+<body>
+<iframe
+  src="https://www.youtube.com/embed/${videoId}?autoplay=1&playsinline=1&rel=0&modestbranding=1"
+  allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+  allowfullscreen
+></iframe>
+</body>
+</html>`;
+
+  const content = (
+    <View style={{ flex: 1, backgroundColor: "#000" }} testID="nova-tv-modal-root">
+      <View style={[d.trailerSheetHeader, { paddingTop: topPad + 8 }]}>
+        <Pressable
+          onPress={onClose}
+          focusable={tvMode}
+          hasTVPreferredFocus={tvMode}
+          testID={tvMode ? "nova-tv-preferred-focus" : undefined}
+          style={({ focused }) => [d.trailerCloseBtn, tvMode && tvFocusStyle(focused)]}
+        >
+          <Ionicons name="close" size={20} color={colors.textPrimary} />
+        </Pressable>
+        <View style={{ flex: 1, alignItems: "flex-end" }}>
+          <Text style={d.trailerModalTitle} numberOfLines={1}>
+            {title || "العرض الدعائي"}
+          </Text>
+          <Text style={{ fontSize: 10, color: colors.textMuted, fontFamily: "Cairo_400Regular" }}>
+            العرض الدعائي الرسمي
+          </Text>
+        </View>
+        <View style={{ width: 32, height: 32, backgroundColor: "#FF0000", borderRadius: 9, alignItems: "center", justifyContent: "center" }}>
+          <Ionicons name="logo-youtube" size={18} color="#fff" />
+        </View>
+      </View>
+
+      <View style={{ flex: 1, backgroundColor: "#000", position: "relative" }}>
+        {Platform.OS === "web" ? (
+          // @ts-ignore
+          <iframe
+            src={`https://www.youtube.com/embed/${videoId}?autoplay=1&playsinline=1&rel=0&modestbranding=1`}
+            style={{ width: "100%", height: "100%", border: "none" }}
+            allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+            allowFullScreen
+          />
+        ) : (
+          <WebView
+            source={{ html: trailerHtml, baseUrl: "https://www.youtube.com" }}
+            style={{ flex: 1, backgroundColor: "#000" }}
+            allowsFullscreenVideo
+            allowsInlineMediaPlayback
+            mediaPlaybackRequiresUserAction={false}
+            javaScriptEnabled
+            domStorageEnabled
+            originWhitelist={["*"]}
+            mixedContentMode="always"
+            userAgent="Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+            onLoadEnd={() => setWebLoading(false)}
+            onError={() => setWebLoading(false)}
+          />
+        )}
+        {webLoading && Platform.OS !== "web" && (
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: "#000", alignItems: "center", justifyContent: "center", gap: 12 }]}>
+            <ActivityIndicator size="large" color={colors.accent} />
+            <Text style={{ color: "rgba(255,255,255,0.5)", fontSize: 12, fontFamily: "Cairo_400Regular" }}>
+              جارٍ تحميل العرض الدعائي...
+            </Text>
+          </View>
+        )}
+      </View>
+    </View>
   );
 
-  const handleToggleFavorite = async () => {
-    if (!detail) return;
-    const summary: FilmSummary = {
-      id: detail.id,
-      tmdbType: detail.tmdbType,
-      mediaType: detail.mediaType,
-      titleAr: detail.titleAr,
-      titleEn: detail.titleEn,
-      overviewAr: detail.overviewAr,
-      posterUrl: detail.posterUrl,
-      backdropUrl: detail.backdropUrl,
-      year: detail.year,
-      imdbRating: detail.imdbRating,
-      qualityBadge: detail.qualityBadge,
-      audioLabel: detail.audioLabel,
-      categoryLabel: detail.categoryLabel,
-      genres: detail.genres,
-      durationOrSeasons: detail.durationOrSeasons,
-    };
-    const next = await toggleFavoriteFilm(summary);
-    setIsFav(next.some((x) => x.id === detail.id && x.tmdbType === detail.tmdbType));
-  };
-
-  const handlePickRating = async (val: number) => {
-    if (!detail) return;
-    setMyRating(val);
-    await saveUserRating(detail.tmdbType, detail.id, val);
-    setShowRatingModal(false);
-  };
-
-  const handleToggleEpWatched = async (ep: FilmEpisode) => {
-    if (!detail) return;
-    const next = await toggleEpisodeWatched(detail.id, ep.seasonNumber, ep.episodeNumber, detail.tmdbType);
-    setWatchedMap(next);
-  };
-
-  const watchedCount = useMemo(() => {
-    if (!detail) return 0;
-    return seasonEpisodes.filter(
-      (ep) => watchedMap[makeEpisodeKey(detail.id, ep.seasonNumber, ep.episodeNumber, detail.tmdbType)],
-    ).length;
-  }, [detail, seasonEpisodes, watchedMap]);
-
-  const nextUnwatchedEp = useMemo(() => {
-    if (!detail) return undefined;
+  if (tvMode || Platform.OS === "android") {
     return (
-      seasonEpisodes.find(
-        (ep) => !watchedMap[makeEpisodeKey(detail.id, ep.seasonNumber, ep.episodeNumber, detail.tmdbType)],
-      ) || seasonEpisodes[0]
-    );
-  }, [detail, seasonEpisodes, watchedMap]);
-
-  const openWatch = (ep?: FilmEpisode) => {
-    if (!detail) return;
-    const targetSeason = ep?.seasonNumber || selectedSeason || 1;
-    const targetEp = ep?.episodeNumber || 1;
-    router.push({
-      pathname: "/film/watch" as any,
-      params: {
-        id: String(detail.id),
-        type: detail.tmdbType,
-        season: String(targetSeason),
-        episode: String(targetEp),
-        title: detail.titleAr,
-        poster: detail.posterUrl || detail.backdropUrl || "",
-      },
-    });
-  };
-
-  const openEpisodesPage = () => {
-    if (!detail) return;
-    router.push({
-      pathname: "/film/episodes/[id]" as any,
-      params: {
-        id: String(detail.id),
-        type: detail.tmdbType,
-        title: detail.titleAr,
-      },
-    });
-  };
-
-  const topPad = Platform.OS === "web" ? 10 : Math.max(insets.top, Platform.OS === "android" ? 24 : 44);
-  const goBack = () => (router.canGoBack() ? router.back() : router.replace("/(tabs)" as any));
-
-  if (isLoading && !detail) {
-    return (
-      <View style={d.container}>
-        <View style={[d.topBar, { paddingTop: topPad, height: topPad + 54 }]}>
-          <Pressable onPress={goBack} style={d.topBarBack} accessibilityLabel="رجوع">
-            <Ionicons name="chevron-forward" size={20} color={colors.textPrimary} />
-          </Pressable>
-          <Text style={d.topBarTitle} numberOfLines={1}>
-            {initialTitle}
-          </Text>
-          <View style={{ width: 38 }} />
-        </View>
-        <View style={d.centerWrap}>
-          <ActivityIndicator size="large" color="#0EA5E9" />
-          <Text style={d.loadingText}>جارٍ تحميل تفاصيل العمل...</Text>
-        </View>
+      <View style={[StyleSheet.absoluteFillObject, { zIndex: 9999, elevation: 9999 }]}>
+        {content}
       </View>
     );
   }
-
-  if (error || !detail) {
-    return (
-      <View style={d.container}>
-        <View style={[d.topBar, { paddingTop: topPad, height: topPad + 54 }]}>
-          <Pressable onPress={goBack} style={d.topBarBack} accessibilityLabel="رجوع">
-            <Ionicons name="chevron-forward" size={20} color={colors.textPrimary} />
-          </Pressable>
-          <Text style={d.topBarTitle} numberOfLines={1}>
-            {initialTitle}
-          </Text>
-          <View style={{ width: 38 }} />
-        </View>
-        <View style={d.centerWrap}>
-          <Ionicons name="cloud-offline-outline" size={44} color="#F87171" />
-          <Text style={d.loadingText}>تعذّر تحميل تفاصيل هذا العمل من الخادم</Text>
-          <Pressable onPress={() => void refetch()} style={d.retryBtn}>
-            <Ionicons name="refresh" size={16} color="#FFFFFF" />
-            <Text style={d.retryBtnText}>إعادة المحاولة</Text>
-          </Pressable>
-        </View>
-      </View>
-    );
-  }
-
-  const backdropSrc = getImageSource(detail.backdropUrl || detail.posterUrl);
-  const posterSrc = getImageSource(detail.posterUrl || detail.backdropUrl);
 
   return (
-    <View style={d.container}>
-      {/* Sticky RTL Top Bar: Back Button on Physical RIGHT, Title, Status Badge on Physical LEFT */}
-      <View style={[d.topBar, { paddingTop: topPad, height: topPad + 54 }]}>
-        <Pressable onPress={goBack} style={d.topBarBack} accessibilityLabel="رجوع">
+    <Modal visible={visible} animationType="fade" statusBarTranslucent onRequestClose={onClose}>
+      {content}
+    </Modal>
+  );
+}
+
+export default function FilmDetailScreen() {
+  const params = useLocalSearchParams<{
+    id: string;
+    type?: string;
+    title?: string;
+    poster?: string;
+  }>();
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const colors = useColors();
+  const d = useMemo(() => createDetailStyles(colors), [colors]);
+  const { isTv: tvMode, width } = useTvMetrics();
+
+  const filmId = Number.parseInt(String(params.id || "0"), 10) || 0;
+  const reqType = params.type === "tv" ? "tv" : "movie";
+  const cacheKey = `${reqType}:${filmId}`;
+
+  const [detail, setDetail] = useState<FilmDetail | null>(() => _filmDetailMemoryCache.get(cacheKey) || null);
+  const [loading, setLoading] = useState<boolean>(!_filmDetailMemoryCache.has(cacheKey));
+  const [loadError, setLoadError] = useState<boolean>(false);
+  const [retryTick, setRetryTick] = useState<number>(0);
+
+  const [showFull, setShowFull] = useState(false);
+  const [tab, setTab] = useState<"chars" | "related" | "similar">("chars");
+  const [showRating, setShowRating] = useState(false);
+  const [showTrailer, setShowTrailer] = useState(false);
+
+  const [favIds, setFavIds] = useState<number[]>([]);
+  const [myRating, setMyRating] = useState<number>(0);
+  const [savedCastIds, setSavedCastIds] = useState<Set<number>>(new Set());
+  const [warnDismissed, setWarnDismissed] = useState(false);
+
+  const lastDetailFocusRef = useRef("watch");
+  const rememberDetailFocus = useCallback((key: string) => {
+    lastDetailFocusRef.current = key;
+  }, []);
+
+  const topPad = Platform.OS === "web" ? 67 : insets.top;
+
+  useEffect(() => {
+    if (!showRating && !showTrailer) return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (showTrailer) {
+        setShowTrailer(false);
+        return true;
+      }
+      if (showRating) {
+        setShowRating(false);
+        return true;
+      }
+      return false;
+    });
+    return () => sub.remove();
+  }, [showRating, showTrailer]);
+
+  useEffect(() => {
+    let active = true;
+    if (!filmId) {
+      setLoading(false);
+      setLoadError(true);
+      return;
+    }
+
+    const mem = _filmDetailMemoryCache.get(cacheKey);
+    if (mem) {
+      setDetail(mem);
+      setLoading(false);
+    } else {
+      setLoading(true);
+      AsyncStorage.getItem(`nova:film-detail:v2:${cacheKey}`)
+        .then((raw) => {
+          if (!raw || !active) return;
+          try {
+            const parsed = JSON.parse(raw) as FilmDetail;
+            if (parsed?.id) {
+              _filmDetailMemoryCache.set(cacheKey, parsed);
+              setDetail((prev) => prev || parsed);
+              setLoading(false);
+            }
+          } catch {}
+        })
+        .catch(() => {});
+    }
+
+    setLoadError(false);
+
+    (async () => {
+      try {
+        const [fIds, savedCast, warnRaw] = await Promise.all([
+          loadFavoriteFilmIds(),
+          loadSavedCast(),
+          AsyncStorage.getItem(`nova-film-adult-warn-${filmId}`),
+        ]);
+        if (!active) return;
+        setFavIds(fIds);
+        setSavedCastIds(new Set(savedCast.map((x) => x.id)));
+        if (warnRaw === "1") setWarnDismissed(true);
+
+        const data = await fetchFilmDetail(filmId, reqType);
+        if (!active) return;
+        setDetail(data);
+        _filmDetailMemoryCache.set(cacheKey, data);
+        AsyncStorage.setItem(`nova:film-detail:v2:${cacheKey}`, JSON.stringify(data)).catch(() => {});
+
+        const r = await loadUserRating(data.tmdbType, data.id);
+        if (active) setMyRating(r);
+      } catch {
+        if (active && !_filmDetailMemoryCache.has(cacheKey)) {
+          setLoadError(true);
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [filmId, reqType, cacheKey, retryTick]);
+
+  useEffect(() => {
+    if (tvMode) {
+      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
+      return;
+    }
+    if (showTrailer) {
+      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT).catch(() => {});
+    } else {
+      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+    }
+    return () => {
+      if (!tvMode) {
+        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+      }
+    };
+  }, [showTrailer, tvMode]);
+
+  const isFav = detail ? favIds.includes(detail.id) : false;
+
+  const handleFavorite = useCallback(async () => {
+    if (!detail) return;
+    const next = await toggleFavoriteFilm(detail);
+    setFavIds(next.map((x) => x.id));
+  }, [detail]);
+
+  const submitRating = useCallback(
+    async (n: number) => {
+      if (!detail) return;
+      setMyRating(n);
+      setShowRating(false);
+      await saveUserRating(detail.tmdbType, detail.id, n);
+    },
+    [detail],
+  );
+
+  const handleToggleCastSave = useCallback(
+    async (member: FilmCastMember) => {
+      if (!detail) return;
+      const next = await toggleSavedCastMember({
+        id: member.id,
+        name: member.name,
+        character: member.character || "ممثل",
+        image: member.profileUrl || detail.posterUrl || "",
+        filmId: detail.id,
+        filmTitle: detail.titleAr || detail.titleEn,
+        tmdbType: detail.tmdbType,
+      });
+      setSavedCastIds(new Set(next.map((x) => x.id)));
+    },
+    [detail],
+  );
+
+  const handlePrimaryWatch = useCallback(() => {
+    if (!detail) return;
+    if (detail.tmdbType === "tv") {
+      router.push({
+        pathname: "/film/episodes/[id]",
+        params: {
+          id: String(detail.id),
+          type: "tv",
+          title: detail.titleAr,
+          english: detail.titleEn,
+          poster: detail.posterUrl || "",
+        },
+      });
+    } else {
+      router.push({
+        pathname: "/film/watch",
+        params: {
+          id: String(detail.id),
+          type: "movie",
+          season: "1",
+          episode: "1",
+          title: detail.titleAr,
+          english: detail.titleEn,
+          poster: detail.posterUrl || "",
+        },
+      });
+    }
+  }, [detail, router]);
+
+  if (loading && !detail) {
+    return (
+      <View style={[d.container, { paddingTop: topPad }]}>
+        <View style={[d.topBar, tvMode && d.tvTopBar]}>
+          <Pressable
+            onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)"))}
+            focusable={tvMode}
+            hasTVPreferredFocus={tvMode}
+            onFocus={() => rememberDetailFocus("back")}
+            style={({ focused }) => [d.topBarBack, d.topBarBackRight, tvMode && d.tvTopBarBack, tvMode && tvFocusStyle(focused)]}
+          >
+            <Ionicons name="chevron-forward" size={20} color={colors.textPrimary} />
+          </Pressable>
+          <Text style={[d.topBarTitle, tvMode && d.tvTopBarTitle]} numberOfLines={1}>
+            {params.title || "تفاصيل العمل"}
+          </Text>
+          <View style={d.topBarSpacer} />
+        </View>
+        <View style={d.center}>
+          <ActivityIndicator color={colors.accent} size="large" />
+        </View>
+      </View>
+    );
+  }
+
+  if (!detail || loadError) {
+    return (
+      <View style={[d.container, { paddingTop: topPad }]}>
+        <View style={[d.topBar, tvMode && d.tvTopBar]}>
+          <Pressable
+            onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)"))}
+            focusable={tvMode}
+            hasTVPreferredFocus={tvMode}
+            style={({ focused }) => [d.topBarBack, d.topBarBackRight, tvMode && d.tvTopBarBack, tvMode && tvFocusStyle(focused)]}
+          >
+            <Ionicons name="chevron-forward" size={20} color={colors.textPrimary} />
+          </Pressable>
+          <Text style={[d.topBarTitle, tvMode && d.tvTopBarTitle]} numberOfLines={1}>
+            {params.title || "تفاصيل العمل"}
+          </Text>
+          <View style={d.topBarSpacer} />
+        </View>
+        <View style={[d.center, { gap: 14, paddingHorizontal: 32 }]}>
+          <Ionicons name="cloud-offline-outline" size={52} color={colors.textMuted} />
+          <Text style={{ color: colors.textSecondary, fontFamily: "Cairo_700Bold", fontSize: 16, textAlign: "center" }}>
+            تعذّر تحميل بيانات العمل
+          </Text>
+          <Text style={{ color: colors.textMuted, fontFamily: "Cairo_400Regular", fontSize: 13, textAlign: "center", lineHeight: 20 }}>
+            تحقق من اتصالك بالإنترنت ثم أعد المحاولة
+          </Text>
+          <Pressable
+            onPress={() => setRetryTick((t) => t + 1)}
+            focusable={tvMode}
+            style={({ focused }) => [
+              {
+                flexDirection: ROW_RTL,
+                alignItems: "center",
+                gap: 8,
+                backgroundColor: colors.accent,
+                paddingHorizontal: 22,
+                paddingVertical: 11,
+                borderRadius: 14,
+                marginTop: 4,
+              },
+              tvMode && tvFocusStyle(focused),
+            ]}
+          >
+            <Ionicons name="refresh" size={16} color={colors.primaryForeground} />
+            <Text style={{ color: colors.primaryForeground, fontFamily: "Cairo_700Bold", fontSize: 14 }}>
+              إعادة المحاولة
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
+  const isSeries = detail.tmdbType === "tv";
+  const totalEpisodesCount = isSeries
+    ? detail.seasons.reduce((acc, s) => acc + (s.episodeCount || 0), 0) || detail.episodes.length
+    : 1;
+  const scoreStr = detail.imdbRating ? Number(detail.imdbRating).toFixed(1) : "7.8";
+  const desc = detail.overviewAr || "لا يوجد ملخص متوفر حالياً.";
+  const trailerYT = detail.trailerYoutubeKey || null;
+  const charCardWidth = tvMode ? Math.floor((width - 88 - 60) / 6) : Math.floor((W - 32 - 36) / 4);
+  const relatedList: FilmSummary[] =
+    detail.relations && detail.relations.length > 0
+      ? detail.relations
+      : detail.recommendations.slice(0, 6);
+  const similarList: FilmSummary[] = detail.recommendations || [];
+  const isAdultRated = detail.ageRating === "R" || detail.ageRating === "TV-MA" || detail.ageRating === "+18";
+
+  return (
+    <View style={[d.container, { paddingTop: topPad }]}>
+      {/* ── Top Bar ── */}
+      <View style={[d.topBar, tvMode && d.tvTopBar]}>
+        <Pressable
+          onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)"))}
+          focusable={tvMode}
+          onFocus={() => rememberDetailFocus("back")}
+          style={({ focused }) => [d.topBarBack, d.topBarBackRight, tvMode && d.tvTopBarBack, tvMode && tvFocusStyle(focused)]}
+        >
           <Ionicons name="chevron-forward" size={20} color={colors.textPrimary} />
         </Pressable>
-        <Text style={d.topBarTitle} numberOfLines={1}>
-          {detail.titleAr}
+        <Text style={[d.topBarTitle, tvMode && d.tvTopBarTitle]} numberOfLines={1}>
+          {detail.titleAr || detail.titleEn}
         </Text>
-        <View style={d.topBarStatus}>
+        <View style={[d.topBarStatus, tvMode && d.tvTopBarStatus]}>
           <View
             style={[
               d.topBarStatusDot,
-              {
-                backgroundColor:
-                  detail.statusLabel === "مستمر"
-                    ? "#10B981"
-                    : detail.statusLabel === "مكتمل"
-                      ? "#8B5CF6"
-                      : "#0EA5E9",
-              },
+              isSeries ? { backgroundColor: "#38BDF8" } : { backgroundColor: "#34D399" },
             ]}
           />
-          <Text style={d.topBarStatusText}>{detail.statusLabel}</Text>
+          <Text style={[d.topBarStatusText, tvMode && d.tvTopBarStatusText]}>
+            {detail.statusLabel || (isSeries ? "مسلسل" : "فيلم كامل")}
+          </Text>
         </View>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 48 }}>
-        {/* Banner Hero */}
-        <View style={d.hero}>
-          {backdropSrc ? (
-            <Image source={backdropSrc} style={StyleSheet.absoluteFill} resizeMode="cover" />
-          ) : null}
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        focusable={false}
+        contentContainerStyle={[{ paddingBottom: 80 }, tvMode && d.tvContent]}
+      >
+        {/* ── Hero Banner ── */}
+        <View style={[d.hero, tvMode && d.tvHero]}>
+          <SafePosterImage
+            uri={detail.backdropUrl || detail.posterUrl}
+            style={[StyleSheet.absoluteFill, { opacity: 0.48 }]}
+            resizeMode="cover"
+          />
           <LinearGradient
-            colors={["rgba(9,10,12,0.20)", "rgba(9,10,12,0.60)", colors.background]}
+            colors={["rgba(11,11,20,0.1)", "rgba(11,11,20,0.45)", colors.background]}
             style={StyleSheet.absoluteFill}
           />
-          <Pressable onPress={() => void handleToggleFavorite()} style={d.favCircleBtn}>
+          <Pressable
+            onPress={handleFavorite}
+            focusable={tvMode}
+            onFocus={() => rememberDetailFocus("favoriteTop")}
+            style={({ focused }) => [d.favBtn, tvMode && d.tvBackBtn, tvMode && tvFocusStyle(focused)]}
+          >
             <Ionicons
               name={isFav ? "heart" : "heart-outline"}
-              size={20}
-              color={isFav ? "#EF4444" : "#FFFFFF"}
+              size={18}
+              color={isFav ? "#F43F5E" : "#fff"}
             />
           </Pressable>
         </View>
 
-        {/* Overlapping Poster & Primary Info */}
-        <View style={d.infoRow}>
-          {posterSrc ? (
-            <Image source={posterSrc} style={d.cover} resizeMode="cover" />
-          ) : (
-            <View style={[d.cover, { alignItems: "center", justifyContent: "center" }]}>
-              <Ionicons name="film-outline" size={32} color="#64748B" />
-            </View>
-          )}
+        {/* ── Cover + Main Info ── */}
+        <View style={[d.infoRow, tvMode && d.tvInfoRow]}>
+          <SafePosterImage
+            uri={detail.posterUrl}
+            style={[d.cover, tvMode && d.tvCover]}
+            resizeMode="cover"
+          />
           <View style={d.infoText}>
-            <Text style={d.titleMain}>{detail.titleAr}</Text>
-            <Text style={d.titleSubEn} numberOfLines={1}>
-              {detail.titleEn}
+            <Text style={[d.titleMain, d.titleArabicMain, tvMode && d.tvTitleMain]} numberOfLines={2}>
+              {detail.titleAr || detail.titleEn}
             </Text>
+            {detail.titleEn && detail.titleEn.trim() !== (detail.titleAr || "").trim() ? (
+              <Text style={[d.titleArabic, tvMode && d.tvTitleArabic]} numberOfLines={2}>
+                {detail.titleEn}
+              </Text>
+            ) : null}
 
+            {/* Format / Quality / Score badges */}
             <View style={d.badgeRow}>
-              <View style={[d.badge, d.badgeScore]}>
-                <Ionicons name="star" size={11} color="#FBBF24" />
-                <Text style={d.badgeScoreText}>{detail.imdbRating.toFixed(1)}</Text>
-              </View>
               <View style={[d.badge, d.badgePrimary]}>
-                <Text style={d.badgePrimaryText}>{detail.qualityBadge}</Text>
+                <Text style={d.badgePrimaryText}>
+                  {detail.mediaType === "animation"
+                    ? "أنميشن"
+                    : isSeries
+                      ? "مسلسل"
+                      : "فيلم سينمائي"}
+                </Text>
               </View>
               <View style={[d.badge, d.badgeDefault]}>
-                <Text style={d.badgeDefaultText}>{detail.audioLabel}</Text>
+                <Text style={d.badgeDefaultText}>{detail.qualityBadge || "1080p FHD"}</Text>
               </View>
+              <View style={[d.badge, d.badgeDefault]}>
+                <Text style={d.badgeDefaultText}>{detail.audioLabel || "مترجم"}</Text>
+              </View>
+              {detail.imdbRating ? (
+                <View style={[d.badge, d.badgeScore]}>
+                  <Ionicons name="star" size={10} color="#FBBF24" />
+                  <Text style={d.badgeScoreText}>{scoreStr}</Text>
+                </View>
+              ) : null}
             </View>
 
+            {/* Year + Duration/Seasons + Age Rating */}
             <View style={d.statsRow}>
-              <View style={d.statItem}>
-                <Ionicons name="calendar-outline" size={12} color={colors.textSecondary} />
-                <Text style={d.statText}>{detail.year}</Text>
-              </View>
-              <View style={d.statItem}>
-                <Ionicons name="time-outline" size={12} color={colors.textSecondary} />
-                <Text style={d.statText}>{detail.durationOrSeasons}</Text>
-              </View>
-              <View style={d.statItem}>
-                <Ionicons name="shield-checkmark-outline" size={12} color={colors.textSecondary} />
-                <Text style={d.statText}>{detail.ageRating}</Text>
-              </View>
+              {detail.year ? (
+                <View style={d.statItem}>
+                  <Ionicons name="calendar-outline" size={12} color={colors.textMuted} />
+                  <Text style={d.statText}>{detail.year}</Text>
+                </View>
+              ) : null}
+              {detail.durationOrSeasons ? (
+                <View style={d.statItem}>
+                  <Ionicons name="time-outline" size={12} color={colors.textMuted} />
+                  <Text style={d.statText}>{detail.durationOrSeasons}</Text>
+                </View>
+              ) : null}
+              {detail.ageRating ? (
+                <View style={d.statItem}>
+                  <Ionicons name="shield-checkmark-outline" size={12} color={colors.textMuted} />
+                  <Text style={d.statText}>{detail.ageRating}</Text>
+                </View>
+              ) : null}
             </View>
           </View>
         </View>
 
-        {/* Watch CTA */}
-        <View style={d.watchRow}>
+        {/* ── Primary Watch CTA Button (matching Anime NOVA #0EA5E9 CTA) ── */}
+        <View style={{ paddingHorizontal: 16, marginTop: 18 }}>
           <Pressable
-            onPress={() =>
-              detail.tmdbType === "tv" && detail.seasons.length > 0
-                ? openEpisodesPage()
-                : openWatch(nextUnwatchedEp)
-            }
-            style={d.watchBtn}
+            onPress={handlePrimaryWatch}
+            focusable={tvMode}
+            hasTVPreferredFocus={tvMode && lastDetailFocusRef.current === "watch"}
+            onFocus={() => rememberDetailFocus("watch")}
+            testID={tvMode ? "nova-tv-preferred-focus" : undefined}
+            style={({ focused }) => [d.watchBtn, tvMode && d.tvWatchBtn, tvMode && tvFocusStyle(focused)]}
           >
-            <Ionicons name="play" size={18} color="#FFFFFF" />
-            <Text style={d.watchBtnText}>
-              {detail.tmdbType === "tv" ? "الحلقات والسيرفرات" : "مشاهدة الآن (اختر السيرفر)"}
-            </Text>
-            <View style={d.watchBtnPill}>
-              <Ionicons name="layers-outline" size={12} color="#FFFFFF" />
-              <Text style={d.watchBtnPillText}>
-                {detail.tmdbType === "tv"
-                  ? `${seasonEpisodes.length || detail.seasons[0]?.episodeCount || 1} حلقة`
-                  : "سيرفرات متعددة"}
+            <View style={d.watchBtnRight}>
+              <View style={[d.watchBtnIcon, tvMode && d.tvWatchBtnIcon]}>
+                <Ionicons name="play" size={18} color="#fff" style={{ marginLeft: 2 }} />
+              </View>
+              <View style={d.watchBtnTextWrap}>
+                <Text style={[d.watchBtnText, tvMode && d.tvButtonText]}>مشاهدة الآن</Text>
+                <Text style={d.watchBtnSub}>
+                  {isSeries
+                    ? "تصفح المواسم والحلقات وابدأ المشاهدة فوراً"
+                    : "اختر السيرفر والجودة وابدأ المشاهدة فوراً"}
+                </Text>
+              </View>
+            </View>
+            <View style={d.watchBtnEpPill}>
+              <Text style={d.watchBtnEpText}>
+                {isSeries ? `${totalEpisodesCount} حلقة` : "فيلم كامل"}
               </Text>
+              <Ionicons name="chevron-back" size={13} color="#fff" />
             </View>
           </Pressable>
         </View>
 
-        {/* 3-Column Action Grid */}
-        <View style={d.actionGrid}>
+        {/* ── Content Rating Warning (matching Anime NOVA warnBox) ── */}
+        {isAdultRated && !warnDismissed && (
+          <View style={d.warnBox}>
+            <View style={d.warnHeader}>
+              <Ionicons name="warning" size={16} color="#F59E0B" />
+              <Text style={d.warnTitle}>تنبيه التصنيف العمري ({detail.ageRating})</Text>
+            </View>
+            <Text style={d.warnText}>
+              قد يحتوي هذا العمل على مشاهد أكشن أو دراما مخصصة للمشاهدين البالغين حسب التصنيف العالمي.
+            </Text>
+            <Pressable
+              onPress={() => {
+                setWarnDismissed(true);
+                AsyncStorage.setItem(`nova-film-adult-warn-${filmId}`, "1").catch(() => {});
+              }}
+              focusable={tvMode}
+              style={({ focused }) => [d.warnBtn, tvMode && tvFocusStyle(focused)]}
+            >
+              <Text style={d.warnBtnText}>فهمتُ، لا تُظهر مجدداً</Text>
+            </Pressable>
+          </View>
+        )}
+
+        {/* ── 3-col Action Grid (التعليقات / المفضلة / تقييمي) ── */}
+        <View style={[d.actionGrid, tvMode && d.tvActionGrid]}>
           {[
             {
-              icon: "logo-youtube",
-              activeIcon: "logo-youtube",
-              label: detail.trailerYoutubeKey ? "الإعلان الدعائي" : "بطاقة العمل",
-              active: Boolean(detail.trailerYoutubeKey),
-              activeColor: "#EF4444",
-              onPress: () => {
-                if (detail.trailerYoutubeKey) setShowTrailerModal(true);
-                else setShowInfoModal(true);
-              },
+              icon: "chatbubble-outline",
+              activeIcon: "chatbubble",
+              label: "التعليقات",
+              active: false,
+              activeColor: "#38BDF8",
+              onPress: () =>
+                router.push(
+                  `/comments?animeId=${detail.id}&title=${encodeURIComponent(detail.titleAr || detail.titleEn)}` as any,
+                ),
             },
             {
               icon: "heart-outline",
               activeIcon: "heart",
-              label: isFav ? "في المفضلة" : "المفضلة",
+              label: "المفضلة",
               active: isFav,
               activeColor: "#EF4444",
-              onPress: () => void handleToggleFavorite(),
+              onPress: handleFavorite,
             },
             {
               icon: "star-outline",
               activeIcon: "star",
-              label: myRating > 0 ? `تقييمي (${myRating}/10)` : "تقييمي",
+              label: "تقييمي",
               active: myRating > 0,
               activeColor: "#FBBF24",
-              onPress: () => setShowRatingModal(true),
+              onPress: () => setShowRating(true),
             },
-          ].map((btn) => (
+          ].map(({ icon, activeIcon, label, active, activeColor, onPress }) => (
             <Pressable
-              key={btn.label}
-              onPress={btn.onPress}
-              style={[
+              key={label}
+              onPress={onPress}
+              focusable={tvMode}
+              onFocus={() => rememberDetailFocus(label)}
+              style={({ focused }) => [
                 d.actionBtn,
-                btn.active && {
-                  backgroundColor: btn.activeColor + "18",
-                  borderColor: btn.activeColor + "45",
-                },
+                tvMode && d.tvActionBtn,
+                active && { backgroundColor: activeColor + "18", borderColor: activeColor + "45" },
+                tvMode && tvFocusStyle(focused),
               ]}
             >
               <Ionicons
-                name={(btn.active ? btn.activeIcon : btn.icon) as any}
-                size={17}
-                color={btn.active ? btn.activeColor : colors.textPrimary}
+                name={(active ? activeIcon : icon) as any}
+                size={tvMode ? 18 : 16}
+                color={active ? activeColor : colors.textPrimary}
               />
               <Text
-                style={[d.actionBtnLabel, btn.active && { color: btn.activeColor }]}
-                numberOfLines={1}
+                style={[
+                  d.actionBtnLabel,
+                  tvMode && d.tvActionBtnLabel,
+                  active && { color: activeColor },
+                ]}
               >
-                {btn.label}
+                {label === "تقييمي" && myRating > 0 ? `تقييمي (${myRating}/10)` : label}
               </Text>
             </Pressable>
           ))}
         </View>
 
-        {/* Cinema Stats Box */}
-        <View style={d.statsBox}>
-          <View style={d.statsBoxHeader}>
-            <Text style={d.statsBoxTitle}>إحصائيات وتقييم العمل</Text>
-            <Text style={d.statsBoxBadge}>{detail.categoryLabel}</Text>
+        {/* ── Global Stats Box (matching Anime NOVA malBox) ── */}
+        <Pressable
+          focusable={tvMode}
+          onFocus={() => rememberDetailFocus("malStats")}
+          style={({ focused }) => [d.malBox, { marginHorizontal: 16 }, tvMode && tvFocusStyle(focused)]}
+        >
+          <View style={d.malHeader}>
+            <Text style={d.malTitle}>الإحصائيات والتقييم العالمي</Text>
+            <Text style={d.malId}>{detail.imdbId ? `IMDb ${detail.imdbId}` : "IMDb · TMDB"}</Text>
           </View>
-          <View style={d.statsGrid}>
-            <View style={d.statsCell}>
-              <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 4 }}>
-                <Text style={d.statsVal}>{detail.imdbRating.toFixed(1)}</Text>
+          <View style={d.malStats}>
+            <View style={d.malStat}>
+              <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 5 }}>
+                <Text style={d.malStatVal}>{scoreStr}</Text>
                 <Ionicons name="star" size={14} color="#38BDF8" />
               </View>
-              <Text style={d.statsSub}>التقييم العالمي</Text>
+              <Text style={d.malStatSub}>التقييم العالمي</Text>
             </View>
-            <View style={[d.statsCell, d.statsDivider]}>
-              <Text style={d.statsVal}>{(detail.voteCount || 0).toLocaleString()}</Text>
-              <Text style={d.statsSub}>عدد الأصوات</Text>
+            <View style={[d.malStat, d.malStatDivider]}>
+              <Text style={d.malStatVal}>{detail.year || "2025"}</Text>
+              <Text style={d.malStatSub}>سنة الإصدار</Text>
             </View>
-            <View style={[d.statsCell, d.statsDivider]}>
-              <Text style={d.statsVal}>{Math.round(detail.popularity || 100)}</Text>
-              <Text style={d.statsSub}>مؤشر الشعبية</Text>
+            <View style={[d.malStat, d.malStatDivider]}>
+              <Text style={d.malStatVal}>
+                {isSeries ? `${Math.max(1, detail.seasons.length)} مواسم` : detail.qualityBadge || "1080p"}
+              </Text>
+              <Text style={d.malStatSub}>{isSeries ? `${totalEpisodesCount} حلقة متاحة` : "نسخة مترجمة كاملة"}</Text>
             </View>
           </View>
+        </Pressable>
+
+        {/* ── Synopsis ── */}
+        {desc ? (
+          <View style={[d.section, tvMode && d.tvSection]}>
+            <SectionHeader title={isSeries ? "قصة المسلسل" : "قصة الفيلم"} tvMode={tvMode} />
+            <Pressable
+              onPress={() => setShowFull((f) => !f)}
+              focusable={tvMode}
+              onFocus={() => rememberDetailFocus("synopsis")}
+              style={({ focused }) => [d.descBox, tvMode && d.tvDescBox, tvMode && tvFocusStyle(focused)]}
+            >
+              <Text style={[d.descText, tvMode && d.tvBodyText]} numberOfLines={showFull ? undefined : 4}>
+                {desc}
+              </Text>
+              {desc.length > 140 && (
+                <View style={[d.readMoreBtn, tvMode && d.tvReadMoreBtn]}>
+                  <Text style={[d.readMoreText, tvMode && d.tvReadMoreText]}>
+                    {showFull ? "عرض أقل" : "قراءة القصة كاملة"}
+                  </Text>
+                  <Ionicons
+                    name={showFull ? "chevron-up" : "chevron-down"}
+                    size={tvMode ? 16 : 14}
+                    color={colors.textSecondary}
+                  />
+                </View>
+              )}
+            </Pressable>
+          </View>
+        ) : null}
+
+        {/* ── Genres ── */}
+        {(detail.genres?.length || 0) > 0 && (
+          <ScrollView
+            horizontal
+            focusable={false}
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}
+            style={{ marginTop: 14 }}
+          >
+            {detail.genres.slice(0, 10).map((g: string) => (
+              <Pressable
+                key={g}
+                onPress={() =>
+                  router.push({
+                    pathname: "/(tabs)/browse",
+                    params: { genre: g },
+                  })
+                }
+                focusable={tvMode}
+                style={({ focused }) => [d.genreChip, tvMode && d.tvGenreChip, tvMode && tvFocusStyle(focused)]}
+              >
+                <Text style={[d.genreChipText, tvMode && d.tvGenreChipText]}>{g}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        )}
+
+        {/* ── Production Metadata ── */}
+        <View style={[d.section, tvMode && d.tvSection]}>
+          <SectionHeader title="معلومات الإنتاج" tvMode={tvMode} />
+          <Pressable
+            focusable={tvMode}
+            onFocus={() => rememberDetailFocus("metadata")}
+            style={({ focused }) => [
+              d.metaGrid,
+              tvMode && { borderRadius: 16, padding: 4 },
+              tvMode && tvFocusStyle(focused),
+            ]}
+          >
+            {detail.productionCompany ? (
+              <MetaCard label="شركة الإنتاج" value={detail.productionCompany} badge />
+            ) : null}
+            {detail.director ? (
+              <MetaCard label={isSeries ? "الإخراج / التأليف" : "المخرج"} value={detail.director} />
+            ) : null}
+            {detail.runtimeMin ? (
+              <MetaCard
+                label={isSeries ? "مدة الحلقة" : "مدة الفيلم"}
+                value={fmtRuntime(detail.runtimeMin) || detail.durationOrSeasons}
+              />
+            ) : null}
+            {detail.categoryLabel ? (
+              <MetaCard label="القسم السينمائي" value={detail.categoryLabel} />
+            ) : null}
+            {detail.titleEn ? <MetaCard label="الاسم الإنجليزي" value={detail.titleEn} wide /> : null}
+            <MetaCard
+              label="حالة العرض والجودة"
+              value={`${detail.statusLabel || "متوفر"} · ${detail.qualityBadge || "1080p FHD"} · ${detail.audioLabel || "مترجم"}`}
+              wide
+            />
+          </Pressable>
         </View>
 
-        {/* Segmented Detail Tabs */}
-        <View style={d.tabsBar}>
-          {[
-            { id: "overview", label: "نظرة عامة" },
-            {
-              id: "episodes",
-              label:
-                detail.tmdbType === "tv"
-                  ? `الحلقات (${seasonEpisodes.length})`
-                  : "السيرفرات والمشاهدة",
-            },
-            { id: "cast", label: `طاقم العمل (${detail.cast.length})` },
-            { id: "related", label: `أعمال مشابهة (${detail.recommendations.length})` },
-          ].map((item) => {
-            const active = tab === item.id;
-            return (
+        {/* ── Trailer ── */}
+        {trailerYT ? (
+          <View style={[d.section, tvMode && d.tvSection]}>
+            <SectionHeader title="الإعلان الدعائي" tvMode={tvMode} />
+            <Pressable
+              onPress={() => setShowTrailer(true)}
+              focusable={tvMode}
+              onFocus={() => rememberDetailFocus("trailer")}
+              style={({ focused }) => [d.trailerBtn, tvMode && tvFocusStyle(focused)]}
+            >
+              <Image
+                source={{ uri: `https://img.youtube.com/vi/${trailerYT}/hqdefault.jpg` }}
+                style={d.trailerImg}
+              />
+              <LinearGradient colors={["transparent", "rgba(0,0,0,0.8)"]} style={StyleSheet.absoluteFill} />
+              <View style={d.trailerPlayBtn}>
+                <View style={d.trailerPlay}>
+                  <Ionicons name="play" size={24} color="#fff" style={{ marginLeft: 2 }} />
+                </View>
+              </View>
+              <View style={d.trailerBottom}>
+                <Text style={d.trailerLabel}>العرض الدعائي</Text>
+                <Text style={d.trailerSub}>انقر للمشاهدة</Text>
+              </View>
+            </Pressable>
+          </View>
+        ) : null}
+
+        {/* ── Tabs (طاقم العمل / ذات صلة / مشابهة) ── */}
+        <View style={[d.section, tvMode && d.tvSection]}>
+          <View style={[d.tabNav, tvMode && d.tvTabNav]}>
+            {(
+              [
+                { key: "chars", label: "طاقم العمل" },
+                { key: "related", label: "ذات صلة" },
+                { key: "similar", label: "مشابهة" },
+              ] as const
+            ).map(({ key, label }) => (
               <Pressable
-                key={item.id}
-                onPress={() => setTab(item.id as any)}
-                style={d.tabItem}
+                key={key}
+                onPress={() => setTab(key)}
+                focusable={tvMode}
+                onFocus={() => rememberDetailFocus(`tab-${key}`)}
+                style={({ focused }) => [
+                  d.tabBtn,
+                  tvMode && d.tvTabBtn,
+                  tab === key && d.tabBtnActive,
+                  tvMode && tvFocusStyle(focused),
+                ]}
               >
                 <Text
                   style={[
-                    d.tabItemText,
-                    { color: active ? "#0EA5E9" : colors.textMuted },
+                    d.tabBtnText,
+                    tvMode && d.tvTabBtnText,
+                    tab === key && d.tabBtnTextActive,
                   ]}
                 >
-                  {item.label}
+                  {label}
                 </Text>
-                {active ? <View style={d.tabUnderline} /> : null}
               </Pressable>
-            );
-          })}
-        </View>
-
-        {/* TAB 1: Overview */}
-        {tab === "overview" ? (
-          <View style={d.tabContent}>
-            <View style={d.cardPanel}>
-              <Text style={d.sectionLabel}>القصة والملخص</Text>
-              <Text
-                style={d.synopsis}
-                numberOfLines={showFullSynopsis ? undefined : 4}
-              >
-                {detail.overviewAr}
-              </Text>
-              {detail.overviewAr.length > 140 ? (
-                <Pressable
-                  onPress={() => setShowFullSynopsis((v) => !v)}
-                  style={d.readMoreRow}
-                >
-                  <Text style={d.readMoreText}>
-                    {showFullSynopsis ? "عرض أقل" : "قراءة القصة كاملة"}
-                  </Text>
-                  <Ionicons
-                    name={showFullSynopsis ? "chevron-up" : "chevron-down"}
-                    size={15}
-                    color="#0EA5E9"
-                  />
-                </Pressable>
-              ) : null}
-            </View>
-
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={d.genresStrip}
-            >
-              {detail.genres.map((g) => (
-                <Pressable
-                  key={g}
-                  onPress={() =>
-                    router.push({ pathname: "/(tabs)/browse" as any, params: { genre: g } })
-                  }
-                  style={d.genreChip}
-                >
-                  <Text style={d.genreChipText}>{g}</Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-
-            <View style={d.cardPanel}>
-              <Text style={d.sectionLabel}>بطاقة العمل</Text>
-              <InfoRow label="المخرج / المبدع" value={detail.director} d={d} />
-              <InfoRow label="إنتاج" value={detail.productionCompany} d={d} />
-              <InfoRow label="التصنيف" value={detail.categoryLabel} d={d} />
-              <InfoRow label="المدة / المواسم" value={detail.durationOrSeasons} d={d} />
-              <InfoRow label="التصنيف العمري" value={detail.ageRating} d={d} />
-            </View>
+            ))}
           </View>
-        ) : null}
 
-        {/* TAB 2: Episodes & Seasons */}
-        {tab === "episodes" ? (
-          <View style={d.tabContent}>
-            <View style={d.epHeaderRow}>
-              <View>
-                <Text style={d.sectionLabel}>
-                  {detail.tmdbType === "tv" ? "قائمة الحلقات" : "جاهز للمشاهدة المباشرة"}
-                </Text>
-                <Text style={d.epSubLabel}>
-                  تم مشاهدة {watchedCount} من {Math.max(1, seasonEpisodes.length)}
-                </Text>
-              </View>
-              {detail.tmdbType === "tv" ? (
-                <Pressable onPress={openEpisodesPage} style={d.openAllEpsBtn}>
-                  <Text style={d.openAllEpsText}>عرض صفحة الحلقات</Text>
-                  <Ionicons name="chevron-back" size={14} color="#0EA5E9" />
-                </Pressable>
-              ) : null}
-            </View>
-
-            {detail.seasons.length > 1 ? (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={d.seasonsRow}
-              >
-                {detail.seasons.map((sItem) => {
-                  const active = sItem.seasonNumber === selectedSeason;
-                  return (
-                    <Pressable
-                      key={sItem.seasonNumber}
-                      onPress={() => void handleSelectSeason(sItem.seasonNumber)}
-                      style={[
-                        d.seasonPill,
-                        active && { backgroundColor: "#0EA5E9", borderColor: "#0EA5E9" },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          d.seasonPillText,
-                          active && { color: "#FFFFFF" },
-                        ]}
-                      >
-                        {sItem.name} ({sItem.episodeCount})
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
-            ) : null}
-
-            {seasonLoading ? (
-              <View style={{ paddingVertical: 30, alignItems: "center" }}>
-                <ActivityIndicator size="small" color="#0EA5E9" />
-              </View>
+          {/* Cast / Actors */}
+          {tab === "chars" &&
+            (detail.cast.length === 0 ? (
+              <Text style={d.emptyTabText}>لا تتوفر بيانات طاقم التمثيل حالياً</Text>
             ) : (
-              <View style={{ gap: 9 }}>
-                {seasonEpisodes.map((ep) => {
-                  const watched = Boolean(
-                    watchedMap[makeEpisodeKey(detail.id, ep.seasonNumber, ep.episodeNumber, detail.tmdbType)],
-                  );
-                  const stillSrc = getImageSource(ep.stillUrl || detail.backdropUrl);
-                  return (
-                    <Pressable
-                      key={ep.id}
-                      onPress={() => openWatch(ep)}
-                      style={[d.epCard, watched && d.epCardWatched]}
-                    >
-                      <View style={d.epCardContent}>
-                        <View style={d.epThumbWrap}>
-                          {stillSrc ? (
-                            <Image source={stillSrc} style={d.epThumb} resizeMode="cover" />
+              <View>
+                <Text style={d.tabSubTitle}>أبرز نجوم وممثلي العمل</Text>
+                <View style={[d.charGrid, tvMode && d.tvCharGrid]}>
+                  {detail.cast.map((member, idx) => {
+                    const isSaved = savedCastIds.has(member.id);
+                    const imgUri = member.profileUrl || detail.posterUrl;
+                    return (
+                      <View key={`${member.id}-${idx}`} style={[d.charCard, { width: charCardWidth }]}>
+                        <View
+                          style={[
+                            d.charImgWrap,
+                            { width: charCardWidth, height: Math.round(charCardWidth / 0.72) },
+                            idx < 4 && d.charImgMain,
+                          ]}
+                        >
+                          {imgUri ? (
+                            <Image source={getImageSource(imgUri)} style={d.charImg} resizeMode="cover" />
                           ) : (
-                            <View style={d.epNumBadge}>
-                              <Text style={d.epNumText}>{ep.episodeNumber}</Text>
+                            <View style={[d.charImg, { alignItems: "center", justifyContent: "center" }]}>
+                              <Ionicons name="person" size={26} color={colors.textMuted} />
                             </View>
                           )}
+                          <Pressable
+                            onPress={() => handleToggleCastSave(member)}
+                            focusable={tvMode}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            style={({ focused }) => [
+                              d.charHeartBtn,
+                              isSaved && d.charHeartBtnActive,
+                              tvMode && tvFocusStyle(focused),
+                            ]}
+                          >
+                            <Ionicons name={isSaved ? "heart" : "heart-outline"} size={13} color="#fff" />
+                          </Pressable>
                         </View>
-                        <View style={{ flex: 1, minWidth: 0, alignItems: ALIGN_RIGHT }}>
-                          <Text style={d.epTitle} numberOfLines={1}>
-                            {ep.episodeNumber}. {ep.titleAr}
-                          </Text>
-                          <Text style={d.epMeta} numberOfLines={1}>
-                            {ep.runtimeMin} دقيقة{ep.airDate ? ` · ${ep.airDate}` : ""}
-                          </Text>
-                        </View>
-                      </View>
-                      <View style={d.epActions}>
-                        <Pressable
-                          onPress={(e) => {
-                            e.stopPropagation();
-                            void handleToggleEpWatched(ep);
-                          }}
-                          style={[d.epCheckBtn, watched && d.epCheckBtnActive]}
-                          hitSlop={8}
-                        >
-                          <Ionicons
-                            name={watched ? "checkmark" : "eye-outline"}
-                            size={14}
-                            color={watched ? "#FFFFFF" : colors.textMuted}
-                          />
-                        </Pressable>
-                        <View style={d.epPlayBtn}>
-                          <Ionicons name="play" size={13} color="#FFFFFF" />
-                        </View>
-                      </View>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            )}
-          </View>
-        ) : null}
-
-        {/* TAB 3: Cast */}
-        {tab === "cast" ? (
-          <View style={d.tabContent}>
-            <View style={d.castGrid}>
-              {detail.cast.map((member) => {
-                const profSrc = getImageSource(member.profileUrl);
-                return (
-                  <View
-                    key={`${member.id}-${member.character}`}
-                    style={[d.castCard, { width: (width - 42) / 2 }]}
-                  >
-                    <View style={d.castHead}>
-                      {profSrc ? (
-                        <Image source={profSrc} style={d.castAvatarImg} resizeMode="cover" />
-                      ) : (
-                        <View style={d.castAvatar}>
-                          <Ionicons name="person" size={16} color="#38BDF8" />
-                        </View>
-                      )}
-                      <View style={{ flex: 1, minWidth: 0, alignItems: ALIGN_RIGHT }}>
-                        <Text style={d.castName} numberOfLines={1}>
+                        <Text style={d.charName} numberOfLines={2}>
                           {member.name}
                         </Text>
-                        <Text style={d.castRole} numberOfLines={1}>
-                          {member.character}
-                        </Text>
                       </View>
-                    </View>
-                  </View>
-                );
-              })}
-            </View>
-          </View>
-        ) : null}
+                    );
+                  })}
+                </View>
+              </View>
+            ))}
 
-        {/* TAB 4: Related Recommendations */}
-        {tab === "related" ? (
-          <View style={d.tabContent}>
-            <View style={d.relatedGrid}>
-              {detail.recommendations.map((item) => (
-                <FilmPosterCard
-                  key={`${item.tmdbType}-${item.id}`}
-                  item={item}
-                  cardWidth={Math.floor((width - 44) / 2)}
-                  tvFocusable={false}
-                />
-              ))}
-            </View>
-          </View>
-        ) : null}
-      </ScrollView>
-
-      {/* YouTube Trailer Modal */}
-      <YoutubeTrailerModal
-        visible={showTrailerModal}
-        videoId={detail.trailerYoutubeKey}
-        title={detail.titleAr}
-        onClose={() => setShowTrailerModal(false)}
-      />
-
-      {/* Fallback Info Modal */}
-      <Modal
-        visible={showInfoModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowInfoModal(false)}
-      >
-        <View style={d.modalBackdrop}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowInfoModal(false)} />
-          <View style={d.modalCard}>
-            <View style={d.modalHeader}>
-              <Text style={d.modalTitle}>بطاقة العرض — {detail.titleAr}</Text>
-              <Pressable onPress={() => setShowInfoModal(false)} style={d.modalClose}>
-                <Ionicons name="close" size={18} color={colors.textPrimary} />
-              </Pressable>
-            </View>
-            <Text style={d.modalSub}>
-              {detail.titleEn} · {detail.year} · {detail.qualityBadge}
-            </Text>
-            <Text style={d.modalBody}>{detail.overviewAr}</Text>
-            <Pressable
-              onPress={() => {
-                setShowInfoModal(false);
-                openWatch(nextUnwatchedEp);
-              }}
-              style={d.watchBtn}
-            >
-              <Ionicons name="play" size={16} color="#FFFFFF" />
-              <Text style={d.watchBtnText}>بدء المشاهدة الآن</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
-
-      {/* User Rating Modal */}
-      <Modal
-        visible={showRatingModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowRatingModal(false)}
-      >
-        <View style={d.modalBackdrop}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowRatingModal(false)} />
-          <View style={d.modalCard}>
-            <Text style={d.modalTitle}>تقييمك الشخصي لـ {detail.titleAr}</Text>
-            <View style={d.ratingStarsRow}>
-              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((num) => {
-                const active = num <= myRating;
-                return (
+          {/* Related Works */}
+          {tab === "related" &&
+            (relatedList.length === 0 ? (
+              <Text style={d.emptyTabText}>لا توجد أعمال ذات صلة</Text>
+            ) : (
+              <ScrollView
+                horizontal
+                focusable={false}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ gap: 10 }}
+              >
+                {relatedList.map((rel) => (
                   <Pressable
-                    key={num}
-                    onPress={() => void handlePickRating(num)}
-                    style={[
-                      d.ratingNumBtn,
-                      active && { backgroundColor: "#0EA5E9", borderColor: "#0EA5E9" },
+                    key={`rel-${rel.tmdbType}-${rel.id}`}
+                    onPress={() =>
+                      router.push({
+                        pathname: "/film/[id]",
+                        params: { id: String(rel.id), type: rel.tmdbType, title: rel.titleAr },
+                      })
+                    }
+                    focusable={tvMode}
+                    style={({ focused }) => [
+                      d.relCard,
+                      tvMode && { borderRadius: 12, padding: 2 },
+                      tvMode && tvFocusStyle(focused),
                     ]}
                   >
-                    <Text style={[d.ratingNumText, active && { color: "#FFFFFF" }]}>
-                      {num}
+                    <View style={d.relImgWrap}>
+                      <SafePosterImage uri={rel.posterUrl} style={d.relImg} />
+                      <View style={d.relTypeBadge}>
+                        <Text style={d.relTypeBadgeText}>
+                          {rel.tmdbType === "tv" ? "مسلسل" : "فيلم"}
+                        </Text>
+                      </View>
+                      {rel.imdbRating ? (
+                        <View style={d.relScoreBadge}>
+                          <Ionicons name="star" size={7} color="#FBBF24" />
+                          <Text style={{ fontSize: 7, color: "#fff", fontWeight: "800" }}>
+                            {" "}
+                            {Number(rel.imdbRating).toFixed(1)}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    <Text style={d.relTitle} numberOfLines={2}>
+                      {rel.titleAr || rel.titleEn}
                     </Text>
+                    {rel.titleEn && rel.titleEn.trim() !== (rel.titleAr || "").trim() ? (
+                      <Text style={d.relSubtitle} numberOfLines={1}>
+                        {rel.titleEn}
+                      </Text>
+                    ) : null}
+                  </Pressable>
+                ))}
+              </ScrollView>
+            ))}
+
+          {/* Similar / Recommendations */}
+          {tab === "similar" &&
+            (similarList.length === 0 ? (
+              <Text style={d.emptyTabText}>لا توجد توصيات مشابهة</Text>
+            ) : (
+              <View style={d.simGrid}>
+                {similarList.slice(0, 12).map((rec) => (
+                  <Pressable
+                    key={`sim-${rec.tmdbType}-${rec.id}`}
+                    onPress={() =>
+                      router.push({
+                        pathname: "/film/[id]",
+                        params: { id: String(rec.id), type: rec.tmdbType, title: rec.titleAr },
+                      })
+                    }
+                    focusable={tvMode}
+                    style={({ focused }) => [
+                      d.simCard,
+                      tvMode && { width: Math.floor((width - 88 - 48) / 5), borderRadius: 12, padding: 2 },
+                      tvMode && tvFocusStyle(focused),
+                    ]}
+                  >
+                    <View style={d.simImgWrap}>
+                      <SafePosterImage uri={rec.posterUrl} style={d.simImg} />
+                      {rec.imdbRating ? (
+                        <View style={d.simScore}>
+                          <Ionicons name="star" size={7} color="#FBBF24" />
+                          <Text style={{ fontSize: 7, color: "#fff", fontWeight: "800" }}>
+                            {" "}
+                            {Number(rec.imdbRating).toFixed(1)}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    <Text style={d.simTitle} numberOfLines={2}>
+                      {rec.titleAr || rec.titleEn}
+                    </Text>
+                    {rec.titleEn && rec.titleEn.trim() !== (rec.titleAr || "").trim() ? (
+                      <Text style={d.simSubtitle} numberOfLines={1}>
+                        {rec.titleEn}
+                      </Text>
+                    ) : null}
+                  </Pressable>
+                ))}
+              </View>
+            ))}
+        </View>
+      </ScrollView>
+
+      {/* ── Trailer Modal ── */}
+      <YoutubeTrailerModal
+        visible={showTrailer}
+        videoId={trailerYT}
+        title={detail.titleAr || detail.titleEn}
+        onClose={() => setShowTrailer(false)}
+        tvMode={tvMode}
+      />
+
+      {/* ── Rating Bottom Sheet ── */}
+      {showRating && (tvMode || Platform.OS === "android") ? (
+        <View
+          style={[d.ratingOverlay, StyleSheet.absoluteFillObject, { zIndex: 9999, elevation: 9999 }]}
+          testID="nova-tv-modal-root"
+        >
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            focusable={false}
+            accessible={false}
+            onPress={() => setShowRating(false)}
+          />
+          <View style={d.ratingSheet}>
+            <Text style={d.ratingTitle}>أضف تقييمك</Text>
+            <Text style={d.ratingSub}>اختر تقييمك من 1 إلى 10</Text>
+            <View style={d.ratingBtns}>
+              {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => {
+                const isPreferred = tvMode && (myRating > 0 ? n === myRating : n === 8);
+                return (
+                  <Pressable
+                    key={n}
+                    onPress={() => submitRating(n)}
+                    focusable={tvMode}
+                    hasTVPreferredFocus={isPreferred}
+                    testID={isPreferred ? "nova-tv-preferred-focus" : undefined}
+                    style={({ focused }) => [
+                      d.ratingNum,
+                      n <= myRating && d.ratingNumActive,
+                      tvMode && tvFocusStyle(focused),
+                    ]}
+                  >
+                    <Text style={[d.ratingNumText, n <= myRating && d.ratingNumTextActive]}>{n}</Text>
                   </Pressable>
                 );
               })}
             </View>
+            {myRating > 0 && (
+              <Pressable
+                onPress={() => submitRating(0)}
+                focusable={tvMode}
+                style={({ focused }) => [
+                  { marginTop: 10, paddingVertical: 6, paddingHorizontal: 14, borderRadius: 10 },
+                  tvMode && tvFocusStyle(focused),
+                ]}
+              >
+                <Text style={{ color: colors.destructive, fontSize: 12, fontFamily: "Cairo_700Bold", textAlign: "center" }}>
+                  حذف التقييم
+                </Text>
+              </Pressable>
+            )}
+            <Pressable
+              onPress={() => setShowRating(false)}
+              focusable={tvMode}
+              style={({ focused }) => [
+                {
+                  marginTop: 8,
+                  paddingVertical: 8,
+                  paddingHorizontal: 18,
+                  borderRadius: 10,
+                  backgroundColor: colors.surfaceElevated,
+                },
+                tvMode && tvFocusStyle(focused),
+              ]}
+            >
+              <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: "Cairo_700Bold", textAlign: "center" }}>
+                إغلاق
+              </Text>
+            </Pressable>
           </View>
         </View>
-      </Modal>
-    </View>
-  );
-}
-
-function InfoRow({
-  label,
-  value,
-  d,
-}: {
-  label: string;
-  value: string;
-  d: ReturnType<typeof createDetailStyles>;
-}) {
-  return (
-    <View style={d.infoLine}>
-      <Text style={d.infoLabel}>{label}</Text>
-      <Text style={d.infoVal} numberOfLines={2}>
-        {value}
-      </Text>
+      ) : (
+        <Modal visible={showRating} animationType="slide" transparent onRequestClose={() => setShowRating(false)}>
+          <View style={d.ratingOverlay}>
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              focusable={false}
+              accessible={false}
+              onPress={() => setShowRating(false)}
+            />
+            <View style={d.ratingSheet}>
+              <Text style={d.ratingTitle}>أضف تقييمك</Text>
+              <Text style={d.ratingSub}>اختر تقييمك من 1 إلى 10</Text>
+              <View style={d.ratingBtns}>
+                {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
+                  <Pressable
+                    key={n}
+                    onPress={() => submitRating(n)}
+                    style={[d.ratingNum, n <= myRating && d.ratingNumActive]}
+                  >
+                    <Text style={[d.ratingNumText, n <= myRating && d.ratingNumTextActive]}>{n}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              {myRating > 0 && (
+                <Pressable onPress={() => submitRating(0)} style={{ marginTop: 10 }}>
+                  <Text style={{ color: colors.destructive, fontSize: 11, fontFamily: "Cairo_700Bold", textAlign: "center" }}>
+                    حذف التقييم
+                  </Text>
+                </Pressable>
+              )}
+            </View>
+          </View>
+        </Modal>
+      )}
     </View>
   );
 }
@@ -810,35 +1213,9 @@ function InfoRow({
 function createDetailStyles(colors: ThemePalette) {
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
-    centerWrap: {
-      flex: 1,
-      alignItems: "center",
-      justifyContent: "center",
-      paddingHorizontal: 32,
-      gap: 14,
-    },
-    loadingText: {
-      fontSize: 13.5,
-      lineHeight: 21,
-      fontFamily: "Cairo_700Bold",
-      color: colors.textSecondary,
-      textAlign: "center",
-    },
-    retryBtn: {
-      flexDirection: ROW_RTL,
-      alignItems: "center",
-      gap: 8,
-      backgroundColor: "#0EA5E9",
-      paddingHorizontal: 22,
-      paddingVertical: 11,
-      borderRadius: 13,
-    },
-    retryBtnText: {
-      color: "#FFFFFF",
-      fontSize: 13,
-      fontFamily: "Cairo_700Bold",
-    },
+    center: { flex: 1, alignItems: "center", justifyContent: "center" },
     topBar: {
+      height: 54,
       flexDirection: ROW_RTL,
       alignItems: "center",
       justifyContent: "space-between",
@@ -848,16 +1225,6 @@ function createDetailStyles(colors: ThemePalette) {
       borderBottomWidth: 1,
       borderBottomColor: colors.border,
     },
-    topBarBack: {
-      width: 38,
-      height: 38,
-      borderRadius: 12,
-      alignItems: "center",
-      justifyContent: "center",
-      backgroundColor: colors.surfaceElevated,
-      borderWidth: 1,
-      borderColor: colors.border,
-    },
     topBarTitle: {
       flex: 1,
       textAlign: "right",
@@ -865,7 +1232,6 @@ function createDetailStyles(colors: ThemePalette) {
       fontSize: 15,
       lineHeight: 22,
       fontFamily: "Cairo_800ExtraBold",
-      includeFontPadding: true,
     },
     topBarStatus: {
       flexDirection: ROW_RTL,
@@ -878,60 +1244,56 @@ function createDetailStyles(colors: ThemePalette) {
       borderWidth: 1,
       borderColor: colors.border,
     },
-    topBarStatusDot: { width: 7, height: 7, borderRadius: 4 },
-    topBarStatusText: {
-      fontSize: 11,
-      lineHeight: 16,
-      fontFamily: "Cairo_700Bold",
-      color: colors.textPrimary,
-      includeFontPadding: true,
-    },
-    hero: { height: 225, position: "relative", overflow: "hidden", backgroundColor: "#111319" },
-    favCircleBtn: {
-      position: "absolute",
-      left: 16,
-      top: 16,
-      width: 40,
-      height: 40,
-      borderRadius: 14,
-      backgroundColor: "rgba(9,10,12,0.65)",
-      borderWidth: 1,
-      borderColor: "rgba(255,255,255,0.2)",
+    topBarStatusDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#E2E8F0" },
+    topBarStatusText: { fontSize: 11, lineHeight: 16, fontFamily: "Cairo_700Bold", color: colors.textPrimary },
+    topBarBack: {
+      width: 38,
+      height: 38,
+      borderRadius: 12,
       alignItems: "center",
       justifyContent: "center",
+      backgroundColor: colors.surfaceElevated,
+      borderWidth: 1,
+      borderColor: colors.border,
     },
-    infoRow: {
-      flexDirection: ROW_RTL,
-      paddingHorizontal: 16,
-      marginTop: -74,
-      gap: 14,
-      alignItems: "flex-end",
+    topBarBackRight: {},
+    topBarSpacer: { width: 50 },
+    hero: { height: 240, justifyContent: "flex-end", overflow: "hidden" },
+    favBtn: {
+      position: "absolute",
+      right: 14,
+      top: 14,
+      width: 36,
+      height: 36,
+      backgroundColor: "rgba(0,0,0,0.5)",
+      borderRadius: 14,
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 1,
+      borderColor: "rgba(255,255,255,0.1)",
     },
-    cover: {
-      width: 112,
-      height: 164,
-      borderRadius: 16,
-      borderWidth: 2,
-      borderColor: "rgba(255,255,255,0.20)",
-      backgroundColor: "#14171C",
-    },
-    infoText: { flex: 1, paddingBottom: 4, gap: 5, alignItems: ALIGN_RIGHT },
+    infoRow: { flexDirection: ROW_RTL, paddingHorizontal: 16, marginTop: -76, gap: 14, alignItems: "flex-end" },
+    cover: { width: 112, height: 162, borderRadius: 16, borderWidth: 2, borderColor: "rgba(255,255,255,0.12)" },
+    infoText: { flex: 1, paddingBottom: 6, gap: 6 },
     titleMain: {
       fontSize: 20,
-      lineHeight: 29,
       fontFamily: "Cairo_800ExtraBold",
       color: colors.textPrimary,
+      lineHeight: 28,
       textAlign: "right",
-      includeFontPadding: true,
+      writingDirection: "rtl",
     },
-    titleSubEn: {
-      fontSize: 12,
-      lineHeight: 18,
-      fontFamily: "Cairo_600SemiBold",
+    titleArabicMain: { writingDirection: "rtl", textAlign: "right" },
+    titleArabic: {
+      fontSize: 13,
       color: colors.textSecondary,
-      textAlign: "right",
+      fontFamily: "Cairo_700Bold",
+      lineHeight: 19,
+      textAlign: "left",
+      writingDirection: "ltr",
     },
-    badgeRow: { flexDirection: ROW_RTL, flexWrap: "wrap", gap: 6, marginTop: 2 },
+    tvTitleArabic: { fontSize: 14, lineHeight: 21 },
+    badgeRow: { flexDirection: ROW_RTL, gap: 6, flexWrap: "wrap", marginTop: 4 },
     badge: {
       borderRadius: 10,
       paddingHorizontal: 10,
@@ -941,83 +1303,80 @@ function createDetailStyles(colors: ThemePalette) {
       alignItems: "center",
       gap: 4,
     },
-    badgeScore: {
-      backgroundColor: "rgba(15,23,42,0.88)",
-      borderColor: "rgba(251,191,36,0.4)",
-    },
-    badgeScoreText: {
-      fontSize: 11,
-      fontFamily: "Cairo_800ExtraBold",
-      color: "#FBBF24",
-    },
-    badgePrimary: {
-      backgroundColor: colors.accentSurface,
-      borderColor: colors.accentBorder,
-    },
-    badgePrimaryText: {
-      fontSize: 11,
-      lineHeight: 16,
-      fontFamily: "Cairo_700Bold",
-      color: colors.accent,
-      includeFontPadding: true,
-    },
-    badgeDefault: {
-      backgroundColor: colors.surfaceElevated,
-      borderColor: colors.border,
-    },
-    badgeDefaultText: {
-      fontSize: 11,
-      lineHeight: 16,
-      fontFamily: "Cairo_700Bold",
-      color: colors.textPrimary,
-      includeFontPadding: true,
-    },
-    statsRow: { flexDirection: ROW_RTL, flexWrap: "wrap", gap: 10, marginTop: 2 },
+    badgePrimary: { backgroundColor: colors.accentSurface, borderColor: colors.accentBorder },
+    badgePrimaryText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: colors.accent },
+    badgeDefault: { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
+    badgeDefaultText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: colors.textPrimary },
+    badgeScore: { backgroundColor: "rgba(14,165,233,0.15)", borderColor: "rgba(56,189,248,0.35)" },
+    badgeScoreText: { fontSize: 11, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+    statsRow: { flexDirection: ROW_RTL, gap: 10 },
     statItem: { flexDirection: ROW_RTL, alignItems: "center", gap: 4 },
-    statText: { fontSize: 11, fontFamily: "Cairo_600SemiBold", color: colors.textSecondary },
-    watchRow: { paddingHorizontal: 16, marginTop: 16 },
+    statText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: colors.textPrimary },
     watchBtn: {
-      minHeight: 50,
-      backgroundColor: "#0EA5E9",
-      borderRadius: 15,
-      paddingHorizontal: 16,
+      minHeight: 62,
+      borderRadius: 16,
       flexDirection: ROW_RTL,
       alignItems: "center",
+      justifyContent: "space-between",
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      backgroundColor: "#0EA5E9",
+    },
+    watchBtnRight: { flexDirection: ROW_RTL, alignItems: "center", gap: 12, flex: 1 },
+    watchBtnIcon: {
+      width: 38,
+      height: 38,
+      backgroundColor: "rgba(0,0,0,0.22)",
+      borderRadius: 12,
+      alignItems: "center",
       justifyContent: "center",
-      gap: 9,
     },
-    watchBtnText: {
-      color: "#FFFFFF",
-      fontSize: 14,
-      lineHeight: 21,
-      fontFamily: "Cairo_800ExtraBold",
-      includeFontPadding: true,
+    watchBtnTextWrap: { flex: 1, alignItems: "flex-end", gap: 1 },
+    watchBtnText: { fontSize: 16, fontFamily: "Cairo_800ExtraBold", color: "#fff", lineHeight: 22, textAlign: "right" },
+    watchBtnSub: {
+      fontSize: 10,
+      fontFamily: "Cairo_600SemiBold",
+      color: "rgba(255,255,255,0.86)",
+      lineHeight: 15,
+      textAlign: "right",
     },
-    watchBtnPill: {
+    watchBtnEpPill: {
       flexDirection: ROW_RTL,
       alignItems: "center",
       gap: 4,
       backgroundColor: "rgba(0,0,0,0.22)",
-      paddingHorizontal: 10,
-      paddingVertical: 3,
-      borderRadius: 9,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 12,
     },
-    watchBtnPillText: {
-      color: "#FFFFFF",
-      fontSize: 11,
-      fontFamily: "Cairo_700Bold",
-      includeFontPadding: true,
-    },
-    actionGrid: {
-      flexDirection: ROW_RTL,
-      gap: 9,
-      paddingHorizontal: 16,
+    watchBtnEpText: { fontSize: 12, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+    warnBox: {
+      marginHorizontal: 16,
       marginTop: 12,
+      padding: 12,
+      borderRadius: 14,
+      backgroundColor: "rgba(245,158,11,0.12)",
+      borderWidth: 1,
+      borderColor: "rgba(245,158,11,0.35)",
+      gap: 6,
     },
+    warnHeader: { flexDirection: ROW_RTL, alignItems: "center", gap: 6 },
+    warnTitle: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#F59E0B", textAlign: "right" },
+    warnText: { fontSize: 11, fontFamily: "Cairo_400Regular", color: colors.textSecondary, textAlign: "right", lineHeight: 18 },
+    warnBtn: {
+      alignSelf: "flex-start",
+      backgroundColor: "rgba(245,158,11,0.2)",
+      paddingHorizontal: 12,
+      paddingVertical: 5,
+      borderRadius: 8,
+      marginTop: 2,
+    },
+    warnBtnText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#F59E0B" },
+    actionGrid: { flexDirection: ROW_RTL, paddingHorizontal: 16, gap: 8, marginTop: 12 },
     actionBtn: {
       flex: 1,
-      minHeight: 48,
-      borderRadius: 13,
+      minHeight: 46,
+      borderRadius: 14,
       borderWidth: 1,
       borderColor: colors.border,
       backgroundColor: colors.card,
@@ -1025,317 +1384,299 @@ function createDetailStyles(colors: ThemePalette) {
       alignItems: "center",
       justifyContent: "center",
       gap: 6,
-      paddingHorizontal: 8,
+      paddingVertical: 8,
     },
-    actionBtnLabel: {
-      fontSize: 11.5,
-      lineHeight: 17,
-      fontFamily: "Cairo_700Bold",
-      color: colors.textPrimary,
-      includeFontPadding: true,
-    },
-    statsBox: {
-      marginHorizontal: 16,
+    actionBtnLabel: { fontSize: 12, fontFamily: "Cairo_700Bold", color: colors.textPrimary },
+    malBox: {
       marginTop: 14,
+      padding: 14,
       borderRadius: 16,
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.border,
+      gap: 12,
+    },
+    malHeader: { flexDirection: ROW_RTL, alignItems: "center", justifyContent: "space-between" },
+    malTitle: { fontSize: 12, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary },
+    malId: {
+      fontSize: 10,
+      fontFamily: "Cairo_700Bold",
+      color: colors.accent,
+      backgroundColor: colors.accentSurface,
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      borderRadius: 6,
+    },
+    malStats: { flexDirection: ROW_RTL, alignItems: "center" },
+    malStat: { flex: 1, alignItems: "center", gap: 2 },
+    malStatDivider: { borderRightWidth: 1, borderRightColor: colors.border },
+    malStatVal: { fontSize: 16, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary },
+    malStatSub: { fontSize: 10, fontFamily: "Cairo_400Regular", color: colors.textMuted },
+    section: { marginTop: 18, paddingHorizontal: 16 },
+    secHeader: { flexDirection: ROW_RTL, alignItems: "center", gap: 8, marginBottom: 10 },
+    secBar: { width: 3.5, height: 16, borderRadius: 2, backgroundColor: colors.accent },
+    secTitle: { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, textAlign: "right" },
+    descBox: {
+      padding: 14,
+      borderRadius: 16,
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.border,
+      gap: 10,
+    },
+    descText: {
+      fontSize: 13,
+      fontFamily: "Cairo_400Regular",
+      color: colors.textSecondary,
+      lineHeight: 22,
+      textAlign: "right",
+      writingDirection: "rtl",
+    },
+    readMoreBtn: {
+      alignSelf: "center",
+      flexDirection: ROW_RTL,
+      alignItems: "center",
+      gap: 5,
+      paddingHorizontal: 14,
+      paddingVertical: 5,
+      borderRadius: 10,
+      backgroundColor: colors.surfaceElevated,
+    },
+    readMoreText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: colors.textSecondary },
+    genreChip: {
+      paddingHorizontal: 14,
+      paddingVertical: 6,
+      borderRadius: 12,
+      backgroundColor: colors.accentSurface,
+      borderWidth: 1,
+      borderColor: colors.accentBorder,
+    },
+    genreChipText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: colors.accent },
+    metaGrid: { flexDirection: "row-reverse", flexWrap: "wrap", columnGap: 8, rowGap: 8 },
+    metaCard: {
+      width: "48%",
+      minHeight: 68,
+      justifyContent: "space-between",
+      gap: 7,
+      padding: 11,
+      borderRadius: 14,
       borderWidth: 1,
       borderColor: colors.border,
       backgroundColor: colors.card,
-      padding: 14,
-      gap: 12,
     },
-    statsBoxHeader: {
-      flexDirection: ROW_RTL,
-      alignItems: "center",
-      justifyContent: "space-between",
-    },
-    statsBoxTitle: {
-      fontSize: 13,
-      lineHeight: 19,
-      fontFamily: "Cairo_800ExtraBold",
-      color: colors.textPrimary,
-      includeFontPadding: true,
-    },
-    statsBoxBadge: {
-      fontSize: 11,
-      fontFamily: "Cairo_800ExtraBold",
-      color: "#0EA5E9",
+    metaCardWide: { width: "100%" },
+    metaLabel: { fontSize: 10, color: colors.textMuted, fontFamily: "Cairo_400Regular", textAlign: "right" },
+    metaCardValue: { fontSize: 12, color: colors.textPrimary, fontFamily: "Cairo_700Bold", textAlign: "right" },
+    metaBadge: {
+      alignSelf: "flex-end",
       backgroundColor: colors.accentSurface,
-      paddingHorizontal: 10,
-      paddingVertical: 3,
       borderRadius: 8,
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      maxWidth: "100%",
     },
-    statsGrid: { flexDirection: ROW_RTL, alignItems: "center" },
-    statsCell: { flex: 1, alignItems: "center", gap: 3 },
-    statsDivider: { borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: colors.border },
-    statsVal: { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary },
-    statsSub: { fontSize: 10.5, fontFamily: "Cairo_400Regular", color: colors.textMuted },
-    tabsBar: {
-      flexDirection: ROW_RTL,
-      marginTop: 16,
-      paddingHorizontal: 12,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: colors.border,
-      justifyContent: "space-around",
-    },
-    tabItem: {
-      minHeight: 44,
-      justifyContent: "center",
+    metaBadgeText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: colors.accent },
+    trailerBtn: { height: 180, borderRadius: 16, overflow: "hidden", position: "relative", backgroundColor: "#111" },
+    trailerImg: { width: "100%", height: "100%", resizeMode: "cover" },
+    trailerPlayBtn: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center" },
+    trailerPlay: {
+      width: 56,
+      height: 56,
+      backgroundColor: "rgba(255,0,0,0.85)",
+      borderRadius: 28,
       alignItems: "center",
-      paddingHorizontal: 6,
+      justifyContent: "center",
+      shadowColor: "#FF0000",
+      shadowOpacity: 0.5,
+      shadowRadius: 12,
+      elevation: 8,
+    },
+    trailerBottom: { position: "absolute", bottom: 0, left: 0, right: 0, padding: 12 },
+    trailerLabel: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "right" },
+    trailerSub: { fontSize: 10, color: "rgba(255,255,255,0.55)", fontFamily: "Cairo_400Regular", marginTop: 2, textAlign: "right" },
+    trailerSheetHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      backgroundColor: colors.surface,
+    },
+    trailerModalTitle: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary },
+    trailerCloseBtn: {
+      width: 36,
+      height: 36,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.surfaceElevated,
+      borderRadius: 12,
+    },
+    tabNav: {
+      flexDirection: "row",
+      gap: 4,
+      padding: 4,
+      borderRadius: 14,
+      backgroundColor: colors.surfaceElevated,
+      borderWidth: 1,
+      borderColor: colors.border,
+      marginBottom: 14,
+    },
+    tabBtn: {
+      flex: 1,
+      minHeight: 40,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 5,
+      borderRadius: 10,
       position: "relative",
     },
-    tabItemText: {
-      fontSize: 12,
-      lineHeight: 18,
-      fontFamily: "Cairo_700Bold",
-      includeFontPadding: true,
-    },
-    tabUnderline: {
-      position: "absolute",
-      bottom: 0,
-      left: 0,
-      right: 0,
-      height: 3,
-      backgroundColor: "#0EA5E9",
-      borderTopLeftRadius: 3,
-      borderTopRightRadius: 3,
-    },
-    tabContent: { padding: 16, gap: 14 },
-    cardPanel: {
-      backgroundColor: colors.card,
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: 16,
-      padding: 14,
-      gap: 10,
-    },
-    sectionLabel: {
-      fontSize: 14,
-      lineHeight: 21,
-      fontFamily: "Cairo_800ExtraBold",
-      color: colors.textPrimary,
-      textAlign: "right",
-      includeFontPadding: true,
-    },
-    synopsis: {
-      fontSize: 13.5,
-      lineHeight: 23,
-      fontFamily: "Cairo_400Regular",
-      color: colors.textSecondary,
-      textAlign: "right",
-      includeFontPadding: true,
-    },
-    readMoreRow: { flexDirection: ROW_RTL, alignItems: "center", gap: 5 },
-    readMoreText: { fontSize: 12.5, fontFamily: "Cairo_700Bold", color: "#0EA5E9" },
-    genresStrip: { flexDirection: ROW_RTL, gap: 8, paddingVertical: 4 },
-    genreChip: {
-      backgroundColor: colors.surfaceElevated,
-      borderWidth: 1,
-      borderColor: colors.border,
-      paddingHorizontal: 14,
-      paddingVertical: 7,
-      borderRadius: 12,
-    },
-    genreChipText: {
-      fontSize: 12,
-      lineHeight: 18,
-      fontFamily: "Cairo_700Bold",
-      color: colors.textPrimary,
-      includeFontPadding: true,
-    },
-    infoLine: {
-      flexDirection: ROW_RTL,
-      justifyContent: "space-between",
-      alignItems: "center",
-      paddingVertical: 4,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: colors.border,
-      gap: 12,
-    },
-    infoLabel: { fontSize: 12, fontFamily: "Cairo_600SemiBold", color: colors.textMuted },
-    infoVal: {
-      fontSize: 12.5,
-      fontFamily: "Cairo_700Bold",
-      color: colors.textPrimary,
-      flex: 1,
-      textAlign: "left",
-    },
-    epHeaderRow: {
-      flexDirection: ROW_RTL,
-      alignItems: "center",
-      justifyContent: "space-between",
-    },
-    epSubLabel: { fontSize: 11.5, fontFamily: "Cairo_400Regular", color: colors.textMuted, textAlign: "right" },
-    openAllEpsBtn: { flexDirection: ROW_RTL, alignItems: "center", gap: 3 },
-    openAllEpsText: {
-      fontSize: 12.5,
-      lineHeight: 18,
-      fontFamily: "Cairo_700Bold",
-      color: "#0EA5E9",
-      includeFontPadding: true,
-    },
-    seasonsRow: { flexDirection: ROW_RTL, gap: 8, paddingVertical: 4 },
-    seasonPill: {
-      paddingHorizontal: 14,
-      paddingVertical: 7,
-      borderRadius: 11,
-      backgroundColor: colors.card,
-      borderWidth: 1,
-      borderColor: colors.border,
-    },
-    seasonPillText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: colors.textPrimary },
-    epCard: {
-      flexDirection: ROW_RTL,
-      alignItems: "center",
-      justifyContent: "space-between",
-      padding: 10,
-      borderRadius: 14,
-      borderWidth: 1,
-      borderColor: colors.border,
-      backgroundColor: colors.card,
-      gap: 10,
-    },
-    epCardWatched: {
-      borderColor: "rgba(16,185,129,0.45)",
-      backgroundColor: "rgba(16,185,129,0.06)",
-    },
-    epCardContent: { flex: 1, flexDirection: ROW_RTL, alignItems: "center", gap: 10 },
-    epThumbWrap: {
-      width: 82,
-      height: 52,
+    tabBtnActive: { backgroundColor: colors.accent },
+    tabBtnText: { fontSize: 13, fontFamily: "Cairo_700Bold", color: colors.textMuted },
+    tabBtnTextActive: { color: colors.primaryForeground },
+    tabSubTitle: { fontSize: 10, color: colors.textSecondary, fontFamily: "Cairo_700Bold", marginBottom: 10, textAlign: "right" },
+    charGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", columnGap: 12, rowGap: 12 },
+    charCard: { alignItems: "center", gap: 4 },
+    charImgWrap: {
+      aspectRatio: 0.72,
       borderRadius: 10,
       overflow: "hidden",
+      borderWidth: 1,
+      borderColor: colors.border,
       backgroundColor: colors.surfaceElevated,
-      alignItems: "center",
-      justifyContent: "center",
+      position: "relative",
     },
-    epThumb: { width: "100%", height: "100%" },
-    epNumBadge: {
-      width: 38,
-      height: 38,
-      borderRadius: 11,
-      backgroundColor: colors.accentSurface,
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    epNumText: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: colors.accent },
-    epTitle: {
-      fontSize: 13,
-      lineHeight: 19,
-      fontFamily: "Cairo_700Bold",
-      color: colors.textPrimary,
-      textAlign: "right",
-      includeFontPadding: true,
-    },
-    epMeta: { fontSize: 11, fontFamily: "Cairo_400Regular", color: colors.textMuted, textAlign: "right" },
-    epActions: { flexDirection: ROW_RTL, alignItems: "center", gap: 8 },
-    epCheckBtn: {
-      width: 32,
-      height: 32,
+    charImgMain: { borderColor: colors.accent, borderWidth: 2 },
+    charImg: { width: "100%", height: "100%" },
+    charHeartBtn: {
+      position: "absolute",
+      bottom: 4,
+      right: 4,
+      backgroundColor: "rgba(0,0,0,0.65)",
       borderRadius: 10,
+      padding: 5,
+      zIndex: 20,
+      elevation: 8,
+      borderWidth: 1.5,
+      borderColor: "rgba(255,255,255,0.35)",
+    },
+    charHeartBtnActive: { backgroundColor: "rgba(244,63,94,0.85)", borderColor: "#f43f5e" },
+    charName: { fontSize: 10, color: colors.textSecondary, fontFamily: "Cairo_400Regular", textAlign: "center", lineHeight: 15 },
+    emptyTabText: { textAlign: "center", color: colors.textMuted, fontSize: 12, fontFamily: "Cairo_400Regular", paddingVertical: 20 },
+    tvContent: { paddingHorizontal: 28, paddingBottom: 100 },
+    tvTopBar: { height: 52, paddingHorizontal: 22 },
+    tvTopBarTitle: { fontSize: 15, lineHeight: 22 },
+    tvTopBarStatus: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 9 },
+    tvTopBarStatusText: { fontSize: 11, lineHeight: 17 },
+    tvTopBarBack: { width: 38, height: 38, borderRadius: 11 },
+    tvCharGrid: { columnGap: 12, rowGap: 12 },
+    tvSection: { marginTop: 16 },
+    tvSectionHeader: { gap: 8, marginBottom: 10 },
+    tvSectionBar: { width: 3.5, height: 18, borderRadius: 2 },
+    tvSectionTitle: { fontSize: 16, lineHeight: 24 },
+    tvActionGrid: { paddingHorizontal: 16, gap: 10, marginTop: 12 },
+    tvBackBtn: { width: 40, height: 40, borderRadius: 12 },
+    tvHero: { height: 220 },
+    tvInfoRow: { paddingHorizontal: 24, gap: 16, marginTop: -68 },
+    tvCover: { width: 124, height: 180, borderRadius: 14 },
+    tvTitleMain: { fontSize: 21, lineHeight: 29 },
+    tvBodyText: { fontSize: 14, lineHeight: 23 },
+    tvButtonText: { fontSize: 15, lineHeight: 22 },
+    tvWatchBtn: { minHeight: 54, borderRadius: 15, gap: 10 },
+    tvWatchBtnIcon: { width: 36, height: 36, borderRadius: 11 },
+    tvActionBtn: { minHeight: 52, paddingVertical: 10, borderRadius: 14, gap: 7 },
+    tvActionBtnLabel: { fontSize: 13, lineHeight: 20 },
+    tvDescBox: { padding: 16, borderRadius: 15 },
+    tvReadMoreBtn: { minHeight: 40, paddingHorizontal: 16, borderRadius: 11, backgroundColor: colors.accentSurface },
+    tvReadMoreText: { fontSize: 13, lineHeight: 20 },
+    tvGenreChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14 },
+    tvGenreChipText: { fontSize: 12, lineHeight: 18 },
+    tvTabNav: { marginBottom: 12 },
+    tvTabBtn: { paddingBottom: 8, minHeight: 40 },
+    tvTabBtnText: { fontSize: 14, lineHeight: 21 },
+    relCard: { width: 100, gap: 6 },
+    relImgWrap: {
+      width: 100,
+      height: 140,
+      borderRadius: 12,
+      overflow: "hidden",
+      position: "relative",
       backgroundColor: colors.surfaceElevated,
-      borderWidth: 1,
-      borderColor: colors.border,
+    },
+    relImg: { width: "100%", height: "100%" },
+    relTypeBadge: {
+      position: "absolute",
+      top: 5,
+      right: 5,
+      backgroundColor: "rgba(0,0,0,0.75)",
+      borderRadius: 6,
+      paddingHorizontal: 5,
+      paddingVertical: 2,
+    },
+    relTypeBadgeText: { fontSize: 7, color: "#fff", fontFamily: "Cairo_700Bold" },
+    relScoreBadge: {
+      position: "absolute",
+      bottom: 5,
+      left: 5,
+      flexDirection: "row",
       alignItems: "center",
-      justifyContent: "center",
+      gap: 2,
+      backgroundColor: "rgba(0,0,0,0.7)",
+      borderRadius: 6,
+      paddingHorizontal: 4,
+      paddingVertical: 2,
     },
-    epCheckBtnActive: { backgroundColor: "#10B981", borderColor: "#10B981" },
-    epPlayBtn: {
-      width: 34,
-      height: 34,
-      borderRadius: 11,
-      backgroundColor: "#0EA5E9",
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    castGrid: { flexDirection: ROW_RTL, flexWrap: "wrap", gap: 10 },
-    castCard: {
-      backgroundColor: colors.card,
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: 14,
-      padding: 10,
-    },
-    castHead: { flexDirection: ROW_RTL, alignItems: "center", gap: 9 },
-    castAvatar: {
-      width: 38,
-      height: 38,
-      borderRadius: 19,
-      backgroundColor: colors.accentSurface,
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    castAvatarImg: {
-      width: 38,
-      height: 38,
-      borderRadius: 19,
-      backgroundColor: colors.surfaceElevated,
-    },
-    castName: {
-      fontSize: 12,
-      lineHeight: 18,
-      fontFamily: "Cairo_700Bold",
-      color: colors.textPrimary,
-      textAlign: "right",
-      includeFontPadding: true,
-    },
-    castRole: { fontSize: 10.5, fontFamily: "Cairo_400Regular", color: colors.textMuted, textAlign: "right" },
-    relatedGrid: { flexDirection: ROW_RTL, flexWrap: "wrap", gap: 12 },
-    modalBackdrop: {
-      flex: 1,
-      backgroundColor: "rgba(0,0,0,0.72)",
-      justifyContent: "center",
-      alignItems: "center",
-      padding: 20,
-    },
-    modalCard: {
+    relTitle: { fontSize: 10, color: colors.textPrimary, fontFamily: "Cairo_700Bold", textAlign: "center" },
+    relSubtitle: { fontSize: 8.5, color: colors.textMuted, fontFamily: "Cairo_400Regular", textAlign: "center", writingDirection: "ltr" },
+    simGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+    simCard: { width: (W - 32 - 16) / 3, gap: 4 },
+    simImgWrap: {
       width: "100%",
-      maxWidth: 420,
-      backgroundColor: colors.surface,
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: 20,
-      padding: 18,
-      gap: 12,
-    },
-    modalHeader: { flexDirection: ROW_RTL, alignItems: "center", justifyContent: "space-between" },
-    modalTitle: {
-      fontSize: 15,
-      lineHeight: 22,
-      fontFamily: "Cairo_800ExtraBold",
-      color: colors.textPrimary,
-      textAlign: "right",
-      flex: 1,
-      includeFontPadding: true,
-    },
-    modalClose: {
-      width: 32,
-      height: 32,
-      borderRadius: 10,
+      aspectRatio: 0.7,
+      borderRadius: 12,
+      overflow: "hidden",
+      position: "relative",
       backgroundColor: colors.surfaceElevated,
+    },
+    simImg: { width: "100%", height: "100%" },
+    simScore: {
+      position: "absolute",
+      bottom: 5,
+      left: 5,
+      flexDirection: "row",
       alignItems: "center",
-      justifyContent: "center",
+      gap: 2,
+      backgroundColor: "rgba(0,0,0,0.7)",
+      borderRadius: 6,
+      paddingHorizontal: 4,
+      paddingVertical: 2,
     },
-    modalSub: { fontSize: 12, fontFamily: "Cairo_600SemiBold", color: "#0EA5E9", textAlign: "right" },
-    modalBody: {
-      fontSize: 13.5,
-      lineHeight: 22,
-      fontFamily: "Cairo_400Regular",
-      color: colors.textSecondary,
-      textAlign: "right",
+    simTitle: { fontSize: 10, color: colors.textPrimary, fontFamily: "Cairo_700Bold", textAlign: "center" },
+    simSubtitle: { fontSize: 8.5, color: colors.textMuted, fontFamily: "Cairo_400Regular", textAlign: "center", writingDirection: "ltr" },
+    ratingOverlay: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end" },
+    ratingSheet: {
+      backgroundColor: colors.surface,
+      borderTopLeftRadius: 28,
+      borderTopRightRadius: 28,
+      padding: 24,
+      gap: 16,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
     },
-    ratingStarsRow: { flexDirection: ROW_RTL, flexWrap: "wrap", gap: 8, justifyContent: "center" },
-    ratingNumBtn: {
+    ratingTitle: { fontSize: 18, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, textAlign: "center" },
+    ratingSub: { fontSize: 12, color: colors.textMuted, fontFamily: "Cairo_400Regular", textAlign: "center" },
+    ratingBtns: { flexDirection: "row", flexWrap: "wrap", gap: 8, justifyContent: "center" },
+    ratingNum: {
       width: 44,
       height: 44,
-      borderRadius: 12,
-      borderWidth: 1,
-      borderColor: colors.border,
-      backgroundColor: colors.card,
+      borderRadius: 14,
       alignItems: "center",
       justifyContent: "center",
+      backgroundColor: colors.surfaceElevated,
+      borderWidth: 1,
+      borderColor: colors.border,
     },
-    ratingNumText: { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary },
+    ratingNumActive: { backgroundColor: colors.accentSurface, borderColor: colors.accent },
+    ratingNumText: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: colors.textSecondary },
+    ratingNumTextActive: { color: colors.textPrimary },
   });
 }

@@ -6,7 +6,8 @@ import { MediaCatalogGrid } from "@/components/MediaCatalogGrid";
 import { useColors } from "@/hooks/useColors";
 import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 
-const FIRST_SEASON_YEAR = 1990;
+const FIRST_SEASON_YEAR = 1995;
+
 const SEASONS = [
   { id: "WINTER", label: "شتاء", index: 0 },
   { id: "SPRING", label: "ربيع", index: 1 },
@@ -18,10 +19,10 @@ type SeasonId = (typeof SEASONS)[number]["id"];
 type SeasonChoice = { season: SeasonId; year: number };
 
 const TABS = [
-  { id: "current", label: "الموسم الحالي" },
-  { id: "upcoming", label: "الموسم القادم" },
-  { id: "previous", label: "الموسم السابق" },
-  { id: "all", label: "جميع المواسم" },
+  { id: "current", label: "إصدارات العام الحالي" },
+  { id: "previous", label: "العام السابق" },
+  { id: "classic", label: "أبرز إصدارات 2024" },
+  { id: "all", label: "جميع الأعوام" },
 ];
 
 function getCurrentSeason(): SeasonChoice {
@@ -29,14 +30,6 @@ function getCurrentSeason(): SeasonChoice {
   const month = now.getMonth() + 1;
   const index = month <= 2 ? 0 : month <= 5 ? 1 : month <= 8 ? 2 : 3;
   return { season: SEASONS[index].id, year: now.getFullYear() };
-}
-
-function shiftSeason(choice: SeasonChoice, amount: number): SeasonChoice {
-  const currentIndex = SEASONS.findIndex((item) => item.id === choice.season);
-  const absoluteIndex = choice.year * 4 + currentIndex + amount;
-  const year = Math.floor(absoluteIndex / 4);
-  const seasonIndex = ((absoluteIndex % 4) + 4) % 4;
-  return { season: SEASONS[seasonIndex].id, year };
 }
 
 function seasonName(season: SeasonId) {
@@ -48,12 +41,14 @@ export default function SeasonsScreen() {
   const [activeTab, setActiveTab] = useState("current");
   const [selectedSeason, setSelectedSeason] = useState<SeasonChoice | null>(null);
   const [focusedSeasonKey, setFocusedSeasonKey] = useState<string | null>(null);
+
   const current = useMemo(getCurrentSeason, []);
-  const relativeSeason = activeTab === "upcoming"
-    ? shiftSeason(current, 1)
-    : activeTab === "previous"
-      ? shiftSeason(current, -1)
-      : current;
+  const relativeSeason: SeasonChoice =
+    activeTab === "previous"
+      ? { season: current.season, year: current.year - 1 }
+      : activeTab === "classic"
+        ? { season: current.season, year: 2024 }
+        : current;
   const shownSeason = selectedSeason || (activeTab === "all" ? null : relativeSeason);
   const tvMode = isTvDevice();
 
@@ -61,9 +56,7 @@ export default function SeasonsScreen() {
     const now = new Date();
     const rows: SeasonChoice[] = [];
     for (let year = now.getFullYear(); year >= FIRST_SEASON_YEAR; year -= 1) {
-      for (let index = 3; index >= 0; index -= 1) {
-        rows.push({ season: SEASONS[index].id, year });
-      }
+      rows.push({ season: "FALL", year });
     }
     return rows;
   }, []);
@@ -76,8 +69,12 @@ export default function SeasonsScreen() {
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <CatalogPageHeader
-        title="المواسم"
-        onBack={activeTab === "all" && selectedSeason ? () => setSelectedSeason(null) : undefined}
+        title="إصدارات الأعوام والمواسم"
+        onBack={
+          activeTab === "all" && selectedSeason
+            ? () => setSelectedSeason(null)
+            : undefined
+        }
       />
       <CatalogTabs tabs={TABS} activeId={activeTab} onSelect={handleTabSelect} />
 
@@ -93,10 +90,14 @@ export default function SeasonsScreen() {
           renderItem={({ item }) => (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={`${seasonName(item.season)} عام ${item.year}`}
+              accessibilityLabel={`إصدارات عام ${item.year}`}
               onPress={() => setSelectedSeason(item)}
               onFocus={() => setFocusedSeasonKey(`${item.season}-${item.year}`)}
-              onBlur={() => setFocusedSeasonKey((current) => current === `${item.season}-${item.year}` ? null : current)}
+              onBlur={() =>
+                setFocusedSeasonKey((curr) =>
+                  curr === `${item.season}-${item.year}` ? null : curr,
+                )
+              }
               focusable={tvMode}
               style={[
                 styles.seasonRow,
@@ -111,7 +112,7 @@ export default function SeasonsScreen() {
                 style={styles.seasonArrow}
               />
               <Text style={[styles.seasonText, { color: colors.textPrimary }]}>
-                {seasonName(item.season)} عام {item.year}
+                أفلام ومسلسلات عام {item.year}
               </Text>
             </Pressable>
           )}
@@ -119,16 +120,16 @@ export default function SeasonsScreen() {
       ) : shownSeason ? (
         <View style={styles.catalog}>
           <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
-            أنميات موسم {seasonName(shownSeason.season)} {shownSeason.year}
+            أفلام ومسلسلات عام {shownSeason.year} ({seasonName(shownSeason.season)})
           </Text>
           <MediaCatalogGrid
             key={`${shownSeason.season}-${shownSeason.year}`}
-            mediaType="ANIME"
+            mediaType="FILM"
             variant="stats"
             season={shownSeason.season}
             seasonYear={shownSeason.year}
             sort="POPULARITY_DESC"
-            emptyText="لا توجد أنميات مسجلة لهذا الموسم"
+            emptyText="لا توجد أعمال مسجلة لهذا العام"
           />
         </View>
       ) : null}

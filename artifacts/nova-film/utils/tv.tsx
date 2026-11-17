@@ -411,6 +411,7 @@ export function tvLayout(width: number, height: number) {
   const hPad = tv && wide ? 32 : wide ? 24 : 16;
   return {
     tv,
+    isTv: tv,
     contentWidth: tv && wide ? Math.min(Math.max(width - 64, 0), 1440) : width,
     horizontalPadding: hPad,
     controlHeight: tv && wide ? 48 : 42,
@@ -470,6 +471,7 @@ export function useTvMetrics() {
     width,
     height,
     tv,
+    isTv: tv,
     isTablet,
     deviceScale,
     size,
@@ -484,3 +486,8 @@ export const tvReadable = {
   small: { fontSize: 14, lineHeight: 20 },
   button: { minHeight: 50, paddingHorizontal: 20, paddingVertical: 12 },
 };
+
+export function usePhoneScale(): number {
+  const { deviceScale } = useTvMetrics();
+  return deviceScale;
+}

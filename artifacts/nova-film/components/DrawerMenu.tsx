@@ -47,12 +47,15 @@ type NavItem = {
 
 const NAV_MAIN: NavItem[] = [
   { icon: "home",            label: "الرئيسية",                  route: "/(tabs)",                        color: "#F59E0B" },
+  { icon: "sparkles",        label: "آخر الإضافات والحلقات",      route: "/latest",                        color: "#0EA5E9" },
   { icon: "film",            label: "الأفلام الأجنبية والآسيوية", route: "/(tabs)/browse?type=movie",      color: "#F97316" },
   { icon: "albums",          label: "المسلسلات الأجنبية",         route: "/(tabs)/browse?type=series",     color: "#10B981" },
-  { icon: "sparkles",        label: "أفلام ومسلسلات الأنميشن",    route: "/(tabs)/browse?type=animation",  color: "#8B5CF6" },
+  { icon: "color-palette",   label: "أفلام ومسلسلات الأنيميشن",   route: "/(tabs)/animations",             color: "#8B5CF6" },
   { icon: "grid",            label: "التصفح والفلترة المتقدمة",  route: "/(tabs)/browse",                 color: "#3B82F6" },
-  { icon: "download",        label: "تنزيلاتي",                   route: "/(tabs)/downloads",              color: "#8B5CF6" },
+  { icon: "trophy",          label: "الإحصائيات والتقييم العالمي", route: "/stats",                         color: "#EAB308" },
+  { icon: "layers",          label: "إصدارات الأعوام والمواسم",   route: "/seasons",                       color: "#EC4899" },
   { icon: "calendar",        label: "جدول البث الأسبوعي",        route: "/schedule",                      color: "#10B981" },
+  { icon: "download",        label: "تنزيلاتي",                   route: "/(tabs)/downloads",              color: "#8B5CF6" },
 ];
 
 const NAV_LIBRARY: NavItem[] = [

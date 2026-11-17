@@ -5,33 +5,33 @@ import { MediaCatalogGrid } from "@/components/MediaCatalogGrid";
 import { useColors } from "@/hooks/useColors";
 
 const TABS = [
-  { id: "anime", label: "أفضل الأنميات" },
-  { id: "ongoing", label: "أفضل الأنميات المستمرة" },
+  { id: "all", label: "أفضل الأعمال" },
   { id: "movies", label: "أفضل الأفلام" },
   { id: "series", label: "أفضل المسلسلات" },
-  { id: "ova", label: "أفضل الأوفا" },
-  { id: "ona", label: "أفضل الأونا" },
+  { id: "animation", label: "أفضل الأنميشن" },
 ];
 
 export default function GlobalStatsScreen() {
   const colors = useColors();
-  const [activeTab, setActiveTab] = useState("anime");
-  const selected = TABS.find((tab) => tab.id === activeTab)?.id || "anime";
+  const [activeTab, setActiveTab] = useState("all");
+  const selected = TABS.find((tab) => tab.id === activeTab)?.id || "all";
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
-      <CatalogPageHeader title="الإحصائيات العالمية" />
+      <CatalogPageHeader title="الإحصائيات والتقييم العالمي" />
       <CatalogTabs tabs={TABS} activeId={selected} onSelect={setActiveTab} />
       <MediaCatalogGrid
         key={selected}
-        mediaType="ANIME"
+        mediaType="FILM"
         variant="stats"
-        status={selected === "ongoing" ? "RELEASING" : undefined}
-        format={
-          selected === "movies" ? "MOVIE" :
-          selected === "series" ? "TV" :
-          selected === "ova" ? "OVA" :
-          selected === "ona" ? "ONA" : undefined
+        category={
+          selected === "movies"
+            ? "movie"
+            : selected === "series"
+              ? "series"
+              : selected === "animation"
+                ? "animation"
+                : "all"
         }
         sort="SCORE_DESC"
         emptyText="لا توجد نتائج لهذا التصنيف"

@@ -177,7 +177,7 @@ export function AnimeFilterSheet({
               <Text style={styles.resetText}>إعادة ضبط</Text>
             </Pressable>
           </View>
-          <Text style={styles.title}>فلترة وتصفية الأنمي</Text>
+          <Text style={styles.title}>فلترة وتصفية الأعمال</Text>
         </View>
 
         <ScrollView

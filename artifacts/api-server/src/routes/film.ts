@@ -1,182 +1,490 @@
 import { Router, type Request, type Response } from "express";
+import { issueAnonToken } from "../lib/security.js";
+import { pool } from "../lib/db.js";
 
 const router = Router();
 
-const TMDB_KEY = process.env.TMDB_API_KEY || "8265bd1679663a7ea12ac168da84d2e8";
+const TMDB_KEY = process.env.TMDB_API_KEY || "4ef0d7355d9ffb5151e987764708ce96";
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const TMDB_IMG_POSTER = "https://image.tmdb.org/t/p/w500";
 const TMDB_IMG_BACKDROP = "https://image.tmdb.org/t/p/w1280";
 const TMDB_IMG_PROFILE = "https://image.tmdb.org/t/p/w185";
-const TMDB_IMG_STILL = "https://image.tmdb.org/t/p/w500";
 
-const GENRE_AR_MAP: Record<number, string> = {
-  28: "أكشن",
-  12: "مغامرة",
-  16: "أنميشن",
-  35: "كوميديا",
-  80: "جريمة",
-  99: "وثائقي",
-  18: "دراما",
-  10751: "عائلي",
-  14: "فانتازيا",
-  36: "تاريخي",
-  27: "رعب",
-  10402: "موسيقي",
-  9648: "غموض",
-  10749: "رومانسي",
-  878: "خيال علمي",
-  10759: "أكشن ومغامرة",
-  10762: "أطفال",
-  10765: "خيال علمي وفانتازيا",
-  10768: "حرب وسياسة",
-  53: "إثارة",
-  10752: "حرب",
-  37: "ويسترن",
+const BROWSER_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+
+type TmdbCacheEntry = { data: any; ts: number };
+const _tmdbCache = new Map<string, TmdbCacheEntry>();
+const _sourceResolveCache = new Map<string, { items: ResolvedSource[]; tracks: SubTrack[]; titleEn: string; tmdbId: number | null; ts: number }>();
+
+type SubTrack = { id: string; lang: string; label: string; url: string };
+type ResolvedSource = {
+  site: string;
+  label: string;
+  tier: string;
+  url: string;
+  directUrl: string;
+  proxyUrl?: string;
+  isEmbed: boolean;
+  subtitleUrl?: string;
 };
 
-const GENRE_ID_BY_AR: Record<string, number> = Object.fromEntries(
-  Object.entries(GENRE_AR_MAP).map(([id, name]) => [name, Number(id)]),
-);
-
-type CacheEntry = { data: any; ts: number };
-const _cache = new Map<string, CacheEntry>();
-
-function hasCJK(text: string): boolean {
-  return /[\u3040-\u30ff\u4e00-\u9fff\u3400-\u4dbf\uff00-\uffef\uac00-\ud7a3]/.test(text);
+function encodeMediaUrl(raw?: string | null): string | null {
+  const s = String(raw || "").trim();
+  if (!s || !s.startsWith("http")) return null;
+  if (s.includes("/uploads/images.jpg")) return null;
+  try {
+    return new URL(s).toString();
+  } catch {
+    try {
+      return encodeURI(s);
+    } catch {
+      return s;
+    }
+  }
 }
 
-function isJapaneseAnime(item: any): boolean {
-  const genres: number[] = Array.isArray(item?.genre_ids)
-    ? item.genre_ids
-    : Array.isArray(item?.genres)
-      ? item.genres.map((g: any) => g.id)
-      : [];
-  const origLang = String(item?.original_language || "").toLowerCase();
-  const originCountry: string[] = Array.isArray(item?.origin_country) ? item.origin_country : [];
-  if (genres.includes(16) && (origLang === "ja" || originCountry.includes("JP"))) {
-    return true;
+function safeJsonArray<T = any>(raw: any): T[] {
+  if (Array.isArray(raw)) return raw;
+  try {
+    const parsed = JSON.parse(String(raw || "[]"));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
   }
-  return false;
 }
 
-async function tmdbFetch(path: string, ttlMs = 10 * 60_000, lang = "ar"): Promise<any> {
-  const sep = path.includes("?") ? "&" : "?";
-  const url = `${TMDB_BASE}${path}${sep}api_key=${TMDB_KEY}&language=${lang}`;
-  const hit = _cache.get(url);
-  if (hit && Date.now() - hit.ts < ttlMs) return hit.data;
-
-  const r = await fetch(url, { signal: AbortSignal.timeout(12_000) });
-  if (!r.ok) throw new Error(`TMDB ${r.status} for ${path}`);
-  const data = await r.json();
-  _cache.set(url, { data, ts: Date.now() });
-  return data;
+function formatDurationOrSeasons(row: any): string {
+  if (row.tmdb_type === "tv" || row.media_type === "series") {
+    const seasons = Math.max(1, Number(row.season_count || 1));
+    const eps = Math.max(1, Number(row.playable_episode_count || row.episode_count || 1));
+    return seasons > 1 ? `${seasons} مواسم · ${eps} حلقة` : `الموسم 1 · ${eps} حلقة`;
+  }
+  return "فيلم كامل";
 }
 
-function mapGenres(raw: any): string[] {
-  if (Array.isArray(raw?.genres) && raw.genres.length > 0) {
-    return raw.genres
-      .map((g: any) => GENRE_AR_MAP[g.id] || g.name)
-      .filter(Boolean)
-      .slice(0, 4);
-  }
-  if (Array.isArray(raw?.genre_ids)) {
-    return raw.genre_ids
-      .map((id: number) => GENRE_AR_MAP[id])
-      .filter(Boolean)
-      .slice(0, 4);
-  }
-  return ["دراما"];
-}
-
-function normalizeFilmSummary(raw: any, forceTmdbType?: "movie" | "tv"): any | null {
-  if (!raw || !raw.id) return null;
-  if (raw.media_type === "person" || (!raw.title && !raw.name)) return null;
-  if (isJapaneseAnime(raw)) return null;
-
-  const tmdbType: "movie" | "tv" =
-    forceTmdbType || (raw.media_type === "tv" || (!raw.title && !!raw.name) ? "tv" : "movie");
-
-  const rawTitleAr = String(raw.title || raw.name || "").trim();
-  const rawTitleEn = String(raw.original_title || raw.original_name || rawTitleAr).trim();
-  if (!rawTitleAr || (hasCJK(rawTitleAr) && hasCJK(rawTitleEn))) return null;
-  if (!raw.poster_path && !raw.backdrop_path) return null;
-
-  const genreIds: number[] = Array.isArray(raw.genre_ids)
-    ? raw.genre_ids
-    : Array.isArray(raw.genres)
-      ? raw.genres.map((g: any) => g.id)
-      : [];
-  const isAnim = genreIds.includes(16);
-  const mediaType = isAnim ? "animation" : tmdbType === "tv" ? "series" : "movie";
-  const origLang = String(raw.original_language || "en").toLowerCase();
-  const dateStr = String(raw.release_date || raw.first_air_date || "");
-  const year = Number(dateStr.slice(0, 4)) || new Date().getFullYear();
-  const voteAvg = Number(raw.vote_average || 0);
-  const imdbRating = Number(Math.max(5.2, Math.min(9.9, voteAvg)).toFixed(1));
-
-  let categoryLabel = "أفلام أجنبية";
-  if (mediaType === "animation") {
-    categoryLabel = tmdbType === "tv" ? "مسلسلات أنميشن" : "أفلام أنميشن";
-  } else if (mediaType === "series") {
-    categoryLabel = ["ko", "zh", "tr", "hi", "th"].includes(origLang)
-      ? "مسلسلات آسيوية وعالمية"
-      : "مسلسلات عالمية";
-  } else if (["ko", "zh", "hi", "tr", "th"].includes(origLang)) {
-    categoryLabel = "أفلام آسيوية";
-  }
-
+function rowToFilmSummary(row: any) {
+  const posterUrl = encodeMediaUrl(row.poster_url);
+  const backdropUrl = encodeMediaUrl(row.backdrop_url) || posterUrl;
+  const genres = safeJsonArray<string>(row.genres_json);
+  const imdbRating = Number(Number(row.imdb_rating || 0).toFixed(1));
   return {
-    id: Number(raw.id),
-    tmdbType,
-    mediaType,
-    titleAr: hasCJK(rawTitleAr) ? rawTitleEn : rawTitleAr,
-    titleEn: rawTitleEn,
-    overviewAr: String(raw.overview || "").trim(),
-    posterUrl: raw.poster_path ? `${TMDB_IMG_POSTER}${raw.poster_path}` : null,
-    backdropUrl: raw.backdrop_path
-      ? `${TMDB_IMG_BACKDROP}${raw.backdrop_path}`
-      : raw.poster_path
-        ? `${TMDB_IMG_POSTER}${raw.poster_path}`
-        : null,
-    year,
+    id: Number(row.id),
+    tmdbType: row.tmdb_type === "tv" ? "tv" : "movie",
+    mediaType:
+      row.media_type === "animation"
+        ? "animation"
+        : row.media_type === "series" || row.tmdb_type === "tv"
+          ? "series"
+          : "movie",
+    titleAr: String(row.title_ar || row.title_en || "عمل عالمي").trim(),
+    titleEn: String(row.title_en || row.title_ar || "").trim(),
+    overviewAr: String(row.synopsis || "").trim(),
+    posterUrl,
+    backdropUrl,
+    year: Number(row.year || new Date().getFullYear()),
     imdbRating,
-    voteCount: Number(raw.vote_count || 0),
-    popularity: Number(raw.popularity || 0),
-    qualityBadge: imdbRating >= 7.8 ? "4K UHD" : "1080p FHD",
-    audioLabel: isAnim ? "مدبلج ومترجم" : "مترجم",
-    categoryLabel,
-    genres: mapGenres(raw),
-    originalLanguage: origLang,
-    releaseDate: dateStr,
+    voteCount: Number(row.playable_episode_count || 1),
+    popularity: Number(row.year || 2020) * 10 + imdbRating,
+    qualityBadge: String(row.quality_badge || "1080p FHD"),
+    audioLabel: String(row.audio_label || "مترجم"),
+    categoryLabel: String(row.category_label || "أفلام أجنبية"),
+    genres: genres.length > 0 ? genres : ["دراما"],
+    durationOrSeasons: formatDurationOrSeasons(row),
   };
 }
 
-function dedupeAndFilter(list: any[], forceType?: "movie" | "tv"): any[] {
-  const seen = new Set<string>();
-  const out: any[] = [];
-  for (const raw of list) {
-    const item = normalizeFilmSummary(raw, forceType);
-    if (!item) continue;
-    const k = `${item.tmdbType}:${item.id}`;
-    if (seen.has(k)) continue;
-    seen.add(k);
-    out.push(item);
+async function tmdbFetchOptional(path: string, lang = "ar"): Promise<any | null> {
+  if (!TMDB_KEY) return null;
+  const sep = path.includes("?") ? "&" : "?";
+  const url = `${TMDB_BASE}${path}${sep}api_key=${TMDB_KEY}&language=${lang}`;
+  const hit = _tmdbCache.get(url);
+  if (hit && Date.now() - hit.ts < 30 * 60_000) return hit.data;
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(4500) });
+    if (!r.ok) return null;
+    const data = await r.json();
+    _tmdbCache.set(url, { data, ts: Date.now() });
+    return data;
+  } catch {
+    return null;
   }
-  return out;
+}
+
+async function enrichDetailFromTmdb(row: any): Promise<{
+  tmdbId: number | null;
+  backdropUrl: string | null;
+  overviewAr: string;
+  runtimeMin: number;
+  ageRating: string;
+  director: string;
+  productionCompany: string;
+  imdbId: string | null;
+  trailerYoutubeKey: string | null;
+  cast: any[];
+}> {
+  const type: "movie" | "tv" = row.tmdb_type === "tv" ? "tv" : "movie";
+  const cleanEn = String(row.title_en || "").trim();
+  const year = Number(row.year || 0);
+  let tmdbId = row.tmdb_id ? Number(row.tmdb_id) : null;
+
+  if (!tmdbId && cleanEn && /[A-Za-z]{2,}/.test(cleanEn)) {
+    const yearParam = year >= 1930 ? (type === "tv" ? `&first_air_date_year=${year}` : `&year=${year}`) : "";
+    const searchData = await tmdbFetchOptional(
+      `/search/${type}?query=${encodeURIComponent(cleanEn)}${yearParam}&include_adult=false`,
+      "en-US",
+    );
+    const first = Array.isArray(searchData?.results) ? searchData.results[0] : null;
+    if (first?.id) {
+      tmdbId = Number(first.id);
+    }
+  }
+
+  if (!tmdbId) {
+    return {
+      tmdbId: null,
+      backdropUrl: null,
+      overviewAr: String(row.synopsis || "").trim(),
+      runtimeMin: type === "tv" ? 45 : 112,
+      ageRating: "PG-13",
+      director: "سينما عالمية",
+      productionCompany: "NOVA FILM",
+      imdbId: null,
+      trailerYoutubeKey: null,
+      cast: [],
+    };
+  }
+
+  const append =
+    type === "tv"
+      ? "aggregate_credits,credits,videos,content_ratings,external_ids"
+      : "credits,videos,release_dates,external_ids";
+  const [arData, enData] = await Promise.all([
+    tmdbFetchOptional(`/${type}/${tmdbId}?append_to_response=${append}`, "ar"),
+    tmdbFetchOptional(`/${type}/${tmdbId}?append_to_response=videos`, "en-US"),
+  ]);
+
+  const data = arData || enData;
+  if (!data) {
+    return {
+      tmdbId,
+      backdropUrl: null,
+      overviewAr: String(row.synopsis || "").trim(),
+      runtimeMin: type === "tv" ? 45 : 112,
+      ageRating: "PG-13",
+      director: "سينما عالمية",
+      productionCompany: "NOVA FILM",
+      imdbId: null,
+      trailerYoutubeKey: null,
+      cast: [],
+    };
+  }
+
+  const backdropUrl = data.backdrop_path ? `${TMDB_IMG_BACKDROP}${data.backdrop_path}` : null;
+  if (backdropUrl && (!row.tmdb_id || !row.backdrop_url || row.backdrop_url === row.poster_url)) {
+    pool
+      .query(`UPDATE film_vault_titles SET tmdb_id = $1, backdrop_url = $2 WHERE id = $3`, [
+        tmdbId,
+        backdropUrl,
+        row.id,
+      ])
+      .catch(() => {});
+  }
+
+  const allVideos: any[] = [...(arData?.videos?.results || []), ...(enData?.videos?.results || [])];
+  const trailer =
+    allVideos.find((v) => v.site === "YouTube" && v.type === "Trailer") ||
+    allVideos.find((v) => v.site === "YouTube" && v.type === "Teaser") ||
+    allVideos.find((v) => v.site === "YouTube");
+
+  const crew: any[] = data?.credits?.crew || [];
+  const directorObj =
+    crew.find((c) => c.job === "Director") ||
+    (Array.isArray(data?.created_by) ? data.created_by[0] : null);
+  const rawCast: any[] =
+    data?.credits?.cast?.length > 0 ? data.credits.cast : data?.aggregate_credits?.cast || [];
+  const cast = rawCast.slice(0, 14).map((c: any) => ({
+    id: Number(c.id),
+    name: String(c.name || c.original_name || ""),
+    character: String(c.character || (Array.isArray(c.roles) ? c.roles[0]?.character : "") || "ممثل"),
+    profileUrl: c.profile_path ? `${TMDB_IMG_PROFILE}${c.profile_path}` : null,
+  }));
+
+  let ageRating = "PG-13";
+  if (type === "tv") {
+    const usR = (data?.content_ratings?.results || []).find((r: any) => r.iso_3166_1 === "US");
+    if (usR?.rating) ageRating = usR.rating;
+  } else {
+    const usR = (data?.release_dates?.results || []).find((r: any) => r.iso_3166_1 === "US");
+    const cert = usR?.release_dates?.find((d: any) => d.certification)?.certification;
+    if (cert) ageRating = cert;
+  }
+
+  return {
+    tmdbId,
+    backdropUrl,
+    overviewAr: String(row.synopsis || "").trim() || String(arData?.overview || enData?.overview || "").trim(),
+    runtimeMin: Number(data?.runtime || (Array.isArray(data?.episode_run_time) ? data.episode_run_time[0] : 0) || (type === "tv" ? 45 : 112)),
+    ageRating,
+    director: directorObj?.name || (type === "tv" ? "إنتاج تلفزيوني" : "سينما عالمية"),
+    productionCompany: data?.production_companies?.[0]?.name || "NOVA FILM",
+    imdbId: data?.external_ids?.imdb_id || null,
+    trailerYoutubeKey: trailer?.key || null,
+    cast,
+  };
+}
+
+// ── FirePlayer (vidhls.com / embed.hamml.com) real HLS extractor ────────────
+function extractFirePlayerConfig(html: string): any | null {
+  const fpIdx = html.search(/FirePlayer\s*\(/);
+  if (fpIdx === -1) return null;
+  const objStart = html.indexOf("{", fpIdx);
+  if (objStart === -1) return null;
+  let depth = 0;
+  let configEnd = -1;
+  let inStr = false;
+  let escNext = false;
+  for (let i = objStart; i < html.length; i++) {
+    const ch = html[i];
+    if (escNext) {
+      escNext = false;
+      continue;
+    }
+    if (ch === "\\" && inStr) {
+      escNext = true;
+      continue;
+    }
+    if (ch === '"') {
+      inStr = !inStr;
+      continue;
+    }
+    if (inStr) continue;
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) {
+        configEnd = i;
+        break;
+      }
+    }
+  }
+  if (configEnd === -1) return null;
+  try {
+    return JSON.parse(html.slice(objStart, configEnd + 1));
+  } catch {
+    return null;
+  }
+}
+
+async function resolveMoviztimeServer(
+  srv: { name?: string; url: string; host?: string },
+  idx: number,
+): Promise<{ sources: ResolvedSource[]; tracks: SubTrack[] }> {
+  const outSources: ResolvedSource[] = [];
+  const outTracks: SubTrack[] = [];
+  const embedUrl = String(srv.url || "").trim();
+  if (!embedUrl.startsWith("http")) return { sources: outSources, tracks: outTracks };
+
+  const lower = embedUrl.toLowerCase();
+  const srvLabel = String(srv.name || `السيرفر ${idx + 1}`).trim();
+
+  if (lower.includes("vidhls.com") || lower.includes("embed.hamml.com")) {
+    try {
+      const resp = await fetch(embedUrl, {
+        headers: {
+          "User-Agent": BROWSER_UA,
+          Referer: "https://moviztime.top/",
+          Accept: "text/html,application/xhtml+xml,*/*;q=0.8",
+        },
+        signal: AbortSignal.timeout(12_000),
+      });
+      if (resp.ok) {
+        const html = await resp.text();
+        const cfg = extractFirePlayerConfig(html);
+        if (cfg && cfg.videoUrl) {
+          const cleanPath = String(cfg.videoUrl).replace(/\\\//g, "/");
+          const srvParam = String(cfg.videoServer ?? "1");
+          const masterUrl = `https://vidhls.com${cleanPath.startsWith("/") ? "" : "/"}${cleanPath}?s=${encodeURIComponent(srvParam)}`;
+          const refForHls = lower.includes("vidhls.com") ? embedUrl : "https://vidhls.com/";
+
+          // Extract inline subtitle tracks if available
+          if (Array.isArray(cfg.tracks)) {
+            for (let ti = 0; ti < cfg.tracks.length; ti++) {
+              const tr = cfg.tracks[ti];
+              const trFile = String(tr?.file || "").trim();
+              if (!trFile) continue;
+              const absSub = trFile.startsWith("http")
+                ? trFile
+                : `https://vidhls.com${trFile.startsWith("/") ? "" : "/"}${trFile}`;
+              const label = String(tr?.label || "ترجمة");
+              const lang = /arab|عرب|\bar\b/i.test(label) ? "ar" : "en";
+              outTracks.push({
+                id: `vh-sub-${idx}-${ti}`,
+                lang,
+                label,
+                url: absSub,
+              });
+            }
+          }
+
+          // Verify real #EXTM3U stream before emitting as playable HLS
+          const mResp = await fetch(masterUrl, {
+            headers: {
+              "User-Agent": BROWSER_UA,
+              Referer: refForHls,
+              Accept: "*/*",
+            },
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (mResp.ok) {
+            const mText = await mResp.text();
+            if (mText.includes("#EXTM3U")) {
+              const streamInf = mText
+                .split(/\r?\n/)
+                .filter((l) => l.startsWith("#EXT-X-STREAM-INF"))
+                .join("\n");
+              const titleHint = String(cfg.title || "");
+              let tier = "1080p FHD";
+              if (/3840x2160|2160p/i.test(streamInf)) tier = "4K UHD";
+              else if (/1920x1080|1080p/i.test(streamInf) || /1080/.test(titleHint)) tier = "1080p FHD";
+              else if (/1280x720|720p/i.test(streamInf) || /\[720\]/.test(titleHint)) tier = "720p HD";
+              else if (/854x480|640x360|480p/i.test(streamInf)) tier = "480p SD";
+
+              const proxyUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(masterUrl)}&ref=${encodeURIComponent(refForHls)}`;
+              const subUrl = outTracks.find((t) => t.lang === "ar")?.url;
+              outSources.push({
+                site: "vidhls",
+                label: `${srvLabel} · ${tier.replace("1080p FHD", "1080p FHD مباشر").replace("720p HD", "720p HD مباشر").replace("4K UHD", "4K UHD مباشر")}`,
+                tier,
+                url: masterUrl,
+                directUrl: proxyUrl,
+                proxyUrl,
+                isEmbed: false,
+                subtitleUrl: subUrl,
+              });
+
+              const childLine = mText
+                .split(/\r?\n/)
+                .map((l) => l.trim())
+                .find((l) => l.startsWith("http"));
+              if (childLine) {
+                const childProxyUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(childLine)}&ref=${encodeURIComponent(refForHls)}&child=1`;
+                const altTier = tier === "1080p FHD" ? "720p HD" : "1080p FHD";
+                outSources.push({
+                  site: "vidhls-alt",
+                  label: `سيرفر ${idx + 2} (vidhls CDN) · ${altTier}`,
+                  tier: altTier,
+                  url: childLine,
+                  directUrl: childProxyUrl,
+                  proxyUrl: childProxyUrl,
+                  isEmbed: false,
+                  subtitleUrl: subUrl,
+                });
+              }
+              return { sources: outSources, tracks: outTracks };
+            }
+          }
+        }
+      }
+    } catch {
+      // direct extraction failed; do not emit broken embed fallback
+    }
+  }
+  return { sources: outSources, tracks: outTracks };
+}
+
+async function resolveEpisodeFromVault(
+  titleId: number,
+  tmdbType: "movie" | "tv",
+  season: number,
+  episode: number,
+): Promise<{ sources: ResolvedSource[]; tracks: SubTrack[]; titleEn: string; tmdbId: number | null }> {
+  const cacheKey = `${tmdbType}:${titleId}:s${season}:e${episode}`;
+  const cached = _sourceResolveCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < 20 * 60_000 && cached.items.length > 0) {
+    return { sources: cached.items, tracks: cached.tracks, titleEn: cached.titleEn, tmdbId: cached.tmdbId };
+  }
+
+  const titleRes = await pool.query(
+    `SELECT id, title_ar, title_en, tmdb_id, tmdb_type FROM film_vault_titles WHERE id = $1 AND is_archived = FALSE LIMIT 1`,
+    [titleId],
+  );
+  const titleRow = titleRes.rows[0];
+
+  let epRow: any = null;
+  if (tmdbType === "movie") {
+    const epRes = await pool.query(
+      `SELECT servers_json, source_url FROM film_vault_episodes WHERE title_id = $1 AND is_archived = FALSE ORDER BY has_live_server DESC, season_number ASC, episode_number ASC LIMIT 1`,
+      [titleId],
+    );
+    epRow = epRes.rows[0];
+  } else {
+    const epRes = await pool.query(
+      `SELECT servers_json, source_url FROM film_vault_episodes WHERE title_id = $1 AND season_number = $2 AND episode_number = $3 AND is_archived = FALSE LIMIT 1`,
+      [titleId, season, episode],
+    );
+    epRow = epRes.rows[0];
+  }
+
+  const servers = safeJsonArray<{ name?: string; url: string; host?: string; live?: boolean }>(
+    epRow?.servers_json,
+  );
+  // Prioritize live servers first
+  const orderedServers = [...servers].sort((a, b) => Number(Boolean(b.live)) - Number(Boolean(a.live)));
+
+  const resolvedAll: ResolvedSource[] = [];
+  const tracksAll: SubTrack[] = [];
+
+  const results = await Promise.all(orderedServers.slice(0, 4).map((srv, idx) => resolveMoviztimeServer(srv, idx)));
+  for (const r of results) {
+    resolvedAll.push(...r.sources);
+    tracksAll.push(...r.tracks);
+  }
+
+  if (resolvedAll.some((s) => !s.isEmbed)) {
+    // Drop embed-only fallbacks when we have verified HLS streams so player picks clean HLS
+    const directOnly = resolvedAll.filter((s) => !s.isEmbed);
+    _sourceResolveCache.set(cacheKey, { items: directOnly, tracks: tracksAll, titleEn: String(titleRow?.title_en || ""), tmdbId: titleRow?.tmdb_id ? Number(titleRow.tmdb_id) : null, ts: Date.now() });
+    return {
+      sources: directOnly,
+      tracks: tracksAll,
+      titleEn: String(titleRow?.title_en || ""),
+      tmdbId: titleRow?.tmdb_id ? Number(titleRow.tmdb_id) : null,
+    };
+  }
+
+  if (resolvedAll.length === 0 && titleId > 0) {
+    if (tmdbType === "movie") {
+      pool.query("UPDATE film_vault_titles SET has_live_server = FALSE WHERE id = ", [titleId]).catch(() => {});
+      pool.query("UPDATE film_vault_episodes SET has_live_server = FALSE WHERE title_id = ", [titleId]).catch(() => {});
+    } else {
+      pool.query("UPDATE film_vault_episodes SET has_live_server = FALSE WHERE title_id =  AND season_number =  AND episode_number = ", [titleId, season, episode]).catch(() => {});
+    }
+  }
+  if (resolvedAll.length > 0) {
+    _sourceResolveCache.set(cacheKey, { items: resolvedAll, tracks: tracksAll, titleEn: String(titleRow?.title_en || ""), tmdbId: titleRow?.tmdb_id ? Number(titleRow.tmdb_id) : null, ts: Date.now() });
+  }
+  return {
+    sources: resolvedAll,
+    tracks: tracksAll,
+    titleEn: String(titleRow?.title_en || ""),
+    tmdbId: titleRow?.tmdb_id ? Number(titleRow.tmdb_id) : null,
+  };
 }
 
 // ── 1. Clean NOVA FILM remote config ─────────────────────────────────────────
 router.get("/config", (_req: Request, res: Response) => {
   res.json({
     app: "nova-film",
-    version: "1.0.9",
-    latestVersion: "1.0.9",
-    latestVersionCode: 9,
+    version: "1.0.10",
+    latestVersion: "1.0.10",
+    latestVersionCode: 10,
     forceUpdate: false,
     maintenanceMode: false,
+    catalogSource: "moviztime-vault",
     announcements: [],
     features: {
-      comments: false,
+      comments: true,
       watchHistory: true,
       subscriptions: true,
       downloads: true,
@@ -184,198 +492,150 @@ router.get("/config", (_req: Request, res: Response) => {
       subtitles: true,
     },
     sources: {
-      starcima: true,
-      vidfast: true,
-      vidfast_vc: true,
-      dahmermovies: true,
-      nebula: true,
-      vidbolt_flux3: true,
-      nflixmovies_flux2: true,
-      dulo_anim: true,
-      vaplayer_anim: true,
+      moviztime: true,
+      vidhls: true,
+      hamml: true,
     },
     limits: { downloadLimit: 6, watchAccessMinutes: 120 },
   });
 });
 
-// ── 2. Home batched real TMDB feeds ──────────────────────────────────────────
+// ── 2. Home batched real vault feeds ─────────────────────────────────────────
 router.get("/home", async (_req: Request, res: Response) => {
   try {
     const [
+      heroRes,
       trendingRes,
-      latestMoviesRes,
-      asianMoviesRes,
+      latestRes,
+      asianRes,
       seriesRes,
       topRatedRes,
-      animMoviesRes,
-      animSeriesRes,
+      animRes,
     ] = await Promise.all([
-      tmdbFetch("/trending/all/week?page=1", 10 * 60_000),
-      tmdbFetch("/discover/movie?without_genres=16&sort_by=popularity.desc&vote_count.gte=120&page=1", 10 * 60_000),
-      tmdbFetch("/discover/movie?with_original_language=ko|zh|hi|tr&without_genres=16&sort_by=popularity.desc&vote_count.gte=30&page=1", 15 * 60_000),
-      tmdbFetch("/discover/tv?without_genres=16&without_keywords=210024&sort_by=popularity.desc&vote_count.gte=80&page=1", 10 * 60_000),
-      tmdbFetch("/discover/movie?without_genres=16&sort_by=vote_average.desc&vote_count.gte=2500&page=1", 30 * 60_000),
-      tmdbFetch("/discover/movie?with_genres=16&without_keywords=210024&sort_by=popularity.desc&vote_count.gte=80&page=1", 15 * 60_000),
-      tmdbFetch("/discover/tv?with_genres=16&without_keywords=210024&sort_by=popularity.desc&vote_count.gte=40&page=1", 15 * 60_000),
+      pool.query(
+        `SELECT * FROM film_vault_titles
+         WHERE is_archived = FALSE AND has_live_server = TRUE
+           AND poster_url != '' AND poster_url NOT LIKE '%images.jpg%'
+         ORDER BY COALESCE(year, 2020) DESC, COALESCE(imdb_rating, 7.0) DESC, updated_at DESC
+         LIMIT 8`,
+      ),
+      pool.query(
+        `SELECT * FROM film_vault_titles
+         WHERE is_archived = FALSE AND has_live_server = TRUE AND media_type = 'movie'
+           AND poster_url != ''
+         ORDER BY (COALESCE(year, 2020) * 1.5 + COALESCE(imdb_rating, 6.8) * 10) DESC, id DESC
+         LIMIT 16`,
+      ),
+      pool.query(
+        `SELECT * FROM film_vault_titles
+         WHERE is_archived = FALSE AND has_live_server = TRUE AND media_type = 'movie'
+         ORDER BY COALESCE(year, 2020) DESC, updated_at DESC, id DESC
+         LIMIT 16`,
+      ),
+      pool.query(
+        `SELECT * FROM film_vault_titles
+         WHERE is_archived = FALSE AND has_live_server = TRUE AND media_type = 'movie'
+           AND category_label IN ('أفلام آسيوية', 'أفلام أوروبية')
+         ORDER BY COALESCE(year, 2020) DESC, COALESCE(imdb_rating, 6.5) DESC, id DESC
+         LIMIT 16`,
+      ),
+      pool.query(
+        `SELECT * FROM film_vault_titles
+         WHERE is_archived = FALSE AND has_live_server = TRUE AND media_type = 'series'
+         ORDER BY COALESCE(year, 2020) DESC, playable_episode_count DESC, updated_at DESC
+         LIMIT 16`,
+      ),
+      pool.query(
+        `SELECT * FROM film_vault_titles
+         WHERE is_archived = FALSE AND has_live_server = TRUE AND media_type = 'movie'
+           AND imdb_rating IS NOT NULL
+         ORDER BY imdb_rating DESC, COALESCE(year, 2020) DESC, id DESC
+         LIMIT 16`,
+      ),
+      pool.query(
+        `SELECT * FROM film_vault_titles
+         WHERE is_archived = FALSE AND has_live_server = TRUE AND media_type = 'animation'
+         ORDER BY COALESCE(year, 2020) DESC, COALESCE(imdb_rating, 6.8) DESC, id DESC
+         LIMIT 16`,
+      ),
     ]);
 
-    const trending = dedupeAndFilter(trendingRes?.results || []);
-    const hero = trending.filter((x) => x.backdropUrl).slice(0, 6);
-    const trendingMovies = trending.filter((x) => x.tmdbType === "movie").slice(0, 14);
-    const latestMovies = dedupeAndFilter(latestMoviesRes?.results || [], "movie").slice(0, 14);
-    const asianMovies = dedupeAndFilter(asianMoviesRes?.results || [], "movie").slice(0, 14);
-    const popularSeries = dedupeAndFilter(seriesRes?.results || [], "tv").slice(0, 14);
-    const topRated = dedupeAndFilter(topRatedRes?.results || [], "movie").slice(0, 14);
-    const animations = [
-      ...dedupeAndFilter(animMoviesRes?.results || [], "movie").slice(0, 8),
-      ...dedupeAndFilter(animSeriesRes?.results || [], "tv").slice(0, 6),
-    ];
-
     res.json({
-      hero,
-      trendingMovies,
-      latestMovies,
-      asianMovies,
-      popularSeries,
-      topRated,
-      animations,
+      hero: heroRes.rows.map(rowToFilmSummary).slice(0, 6),
+      trendingMovies: trendingRes.rows.map(rowToFilmSummary).slice(0, 14),
+      latestMovies: latestRes.rows.map(rowToFilmSummary).slice(0, 14),
+      asianMovies: asianRes.rows.map(rowToFilmSummary).slice(0, 14),
+      popularSeries: seriesRes.rows.map(rowToFilmSummary).slice(0, 14),
+      topRated: topRatedRes.rows.map(rowToFilmSummary).slice(0, 14),
+      animations: animRes.rows.map(rowToFilmSummary).slice(0, 14),
     });
   } catch (err: any) {
-    res.status(502).json({ error: String(err?.message || err) });
+    res.status(500).json({ error: String(err?.message || err) });
   }
 });
 
-// ── 3. Browse / Filter / Paginated Discovery & Search ────────────────────────
+// ── 3. Browse / Discover with real DB filters ────────────────────────────────
 router.get("/browse", async (req: Request, res: Response) => {
   try {
     const category = String(req.query.category || "all");
-    const genreRaw = String(req.query.genre || "").trim();
+    const genre = String(req.query.genre || "الكل").trim();
     const sortRaw = String(req.query.sort || "popular");
-    const page = Math.max(1, Number.parseInt(String(req.query.page || "1"), 10) || 1);
     const q = String(req.query.q || "").trim();
+    const page = Math.max(1, Number.parseInt(String(req.query.page || "1"), 10) || 1);
+    const limit = 24;
+    const offset = (page - 1) * limit;
+
+    const conditions: string[] = ["is_archived = FALSE", "has_live_server = TRUE"];
+    const params: any[] = [];
+
+    if (category === "movie" || category === "series" || category === "animation") {
+      params.push(category);
+      conditions.push(`media_type = $${params.length}`);
+    }
+
+    if (genre && genre !== "الكل") {
+      if (genre === "أنميشن") {
+        conditions.push(`(media_type = 'animation' OR genres_json ILIKE '%أنميشن%')`);
+      } else {
+        params.push(`%${genre}%`);
+        conditions.push(`genres_json ILIKE $${params.length}`);
+      }
+    }
 
     if (q) {
-      const searchType =
-        category === "movie" ? "movie" : category === "series" ? "tv" : "multi";
-      const data = await tmdbFetch(
-        `/search/${searchType}?query=${encodeURIComponent(q)}&page=${page}&include_adult=false`,
-        5 * 60_000,
-      );
-      let results = dedupeAndFilter(
-        data?.results || [],
-        searchType === "multi" ? undefined : searchType,
-      );
-      if (category === "animation") {
-        results = results.filter((r) => r.mediaType === "animation");
-      }
-      res.json({
-        results,
-        page,
-        totalPages: Math.min(20, Number(data?.total_pages || 1)),
-        totalResults: Number(data?.total_results || results.length),
-      });
-      return;
+      params.push(`%${q}%`);
+      conditions.push(`(title_ar ILIKE $${params.length} OR title_en ILIKE $${params.length} OR synopsis ILIKE $${params.length})`);
     }
 
-    const genreId =
-      genreRaw && genreRaw !== "الكل" && genreRaw !== "all"
-        ? Number.isFinite(Number(genreRaw))
-          ? Number(genreRaw)
-          : GENRE_ID_BY_AR[genreRaw] || 0
-        : 0;
+    const whereSql = `WHERE ${conditions.join(" AND ")}`;
 
-    const movieSort =
-      sortRaw === "rating"
-        ? "vote_average.desc"
-        : sortRaw === "year" || sortRaw === "latest"
-          ? "primary_release_date.desc"
-          : "popularity.desc";
-    const tvSort =
-      sortRaw === "rating"
-        ? "vote_average.desc"
-        : sortRaw === "year" || sortRaw === "latest"
-          ? "first_air_date.desc"
-          : "popularity.desc";
-
-    const minVotes = sortRaw === "rating" ? 400 : 25;
-
-    if (category === "movie") {
-      const gPart = genreId ? `&with_genres=${genreId}&without_genres=16` : "&without_genres=16";
-      const data = await tmdbFetch(
-        `/discover/movie?sort_by=${movieSort}&page=${page}&vote_count.gte=${minVotes}&include_adult=false${gPart}`,
-      );
-      res.json({
-        results: dedupeAndFilter(data?.results || [], "movie"),
-        page,
-        totalPages: Math.min(30, Number(data?.total_pages || 1)),
-        totalResults: Number(data?.total_results || 0),
-      });
-      return;
+    let orderSql =
+      "ORDER BY (COALESCE(year, 2020) * 1.5 + COALESCE(imdb_rating, 6.8) * 10 + LEAST(playable_episode_count, 20) * 0.3) DESC, id DESC";
+    if (sortRaw === "rating") {
+      orderSql = "ORDER BY COALESCE(imdb_rating, 0) DESC, COALESCE(year, 2020) DESC, id DESC";
+    } else if (sortRaw === "year") {
+      orderSql = "ORDER BY COALESCE(year, 2020) DESC, updated_at DESC, id DESC";
     }
 
-    if (category === "series") {
-      const gPart = genreId ? `&with_genres=${genreId}&without_genres=16` : "&without_genres=16";
-      const data = await tmdbFetch(
-        `/discover/tv?sort_by=${tvSort}&page=${page}&without_keywords=210024&vote_count.gte=${minVotes}&include_adult=false${gPart}`,
-      );
-      res.json({
-        results: dedupeAndFilter(data?.results || [], "tv"),
-        page,
-        totalPages: Math.min(30, Number(data?.total_pages || 1)),
-        totalResults: Number(data?.total_results || 0),
-      });
-      return;
-    }
-
-    if (category === "animation") {
-      const gParam = genreId && genreId !== 16 ? `16,${genreId}` : "16";
-      const [mData, tData] = await Promise.all([
-        tmdbFetch(
-          `/discover/movie?with_genres=${gParam}&without_keywords=210024&sort_by=${movieSort}&page=${page}&vote_count.gte=20&include_adult=false`,
-        ),
-        tmdbFetch(
-          `/discover/tv?with_genres=${gParam}&without_keywords=210024&sort_by=${tvSort}&page=${page}&vote_count.gte=15&include_adult=false`,
-        ),
-      ]);
-      const combined = [
-        ...dedupeAndFilter(mData?.results || [], "movie"),
-        ...dedupeAndFilter(tData?.results || [], "tv"),
-      ].sort((a, b) => (sortRaw === "rating" ? b.imdbRating - a.imdbRating : b.popularity - a.popularity));
-      res.json({
-        results: combined,
-        page,
-        totalPages: Math.min(20, Math.max(Number(mData?.total_pages || 1), Number(tData?.total_pages || 1))),
-        totalResults: combined.length,
-      });
-      return;
-    }
-
-    // "all": mix movies + series cleanly
-    const gPart = genreId ? `&with_genres=${genreId}` : "";
-    const [mData, tData] = await Promise.all([
-      tmdbFetch(
-        `/discover/movie?sort_by=${movieSort}&page=${page}&without_keywords=210024&vote_count.gte=${minVotes}&include_adult=false${gPart}`,
-      ),
-      tmdbFetch(
-        `/discover/tv?sort_by=${tvSort}&page=${page}&without_keywords=210024&vote_count.gte=${minVotes}&include_adult=false${gPart}`,
+    const [countRes, rowsRes] = await Promise.all([
+      pool.query(`SELECT COUNT(*)::int AS total FROM film_vault_titles ${whereSql}`, params),
+      pool.query(
+        `SELECT * FROM film_vault_titles ${whereSql} ${orderSql} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+        [...params, limit, offset],
       ),
     ]);
-    const movies = dedupeAndFilter(mData?.results || [], "movie");
-    const series = dedupeAndFilter(tData?.results || [], "tv");
-    const mixed: any[] = [];
-    const maxLen = Math.max(movies.length, series.length);
-    for (let i = 0; i < maxLen; i++) {
-      if (movies[i]) mixed.push(movies[i]);
-      if (series[i]) mixed.push(series[i]);
-    }
+
+    const totalResults = Number(countRes.rows[0]?.total || 0);
+    const totalPages = Math.max(1, Math.ceil(totalResults / limit));
+
     res.json({
-      results: mixed,
+      results: rowsRes.rows.map(rowToFilmSummary),
       page,
-      totalPages: Math.min(30, Math.max(Number(mData?.total_pages || 1), Number(tData?.total_pages || 1))),
-      totalResults: mixed.length,
+      totalPages,
+      totalResults,
     });
   } catch (err: any) {
-    res.status(502).json({ error: String(err?.message || err) });
+    res.status(500).json({ error: String(err?.message || err) });
   }
 });
 
@@ -385,336 +645,408 @@ router.get("/search", async (req: Request, res: Response) => {
     const q = String(req.query.q || "").trim();
     const type = String(req.query.type || "multi");
     const page = Math.max(1, Number.parseInt(String(req.query.page || "1"), 10) || 1);
+    const limit = 24;
+    const offset = (page - 1) * limit;
+
     if (!q) {
       res.json({ results: [], page: 1, totalPages: 1 });
       return;
     }
-    const validType = type === "movie" || type === "tv" ? type : "multi";
-    const data = await tmdbFetch(
-      `/search/${validType}?query=${encodeURIComponent(q)}&page=${page}&include_adult=false`,
-      5 * 60_000,
-    );
-    const results = dedupeAndFilter(
-      data?.results || [],
-      validType === "multi" ? undefined : validType,
-    );
+
+    const conditions: string[] = ["is_archived = FALSE", "has_live_server = TRUE"];
+    const params: any[] = [];
+
+    if (type === "movie") {
+      conditions.push(`tmdb_type = 'movie'`);
+    } else if (type === "tv") {
+      conditions.push(`tmdb_type = 'tv'`);
+    }
+
+    params.push(`%${q}%`);
+    conditions.push(`(title_ar ILIKE $${params.length} OR title_en ILIKE $${params.length})`);
+    const whereSql = `WHERE ${conditions.join(" AND ")}`;
+
+    const [countRes, rowsRes] = await Promise.all([
+      pool.query(`SELECT COUNT(*)::int AS total FROM film_vault_titles ${whereSql}`, params),
+      pool.query(
+        `SELECT * FROM film_vault_titles ${whereSql}
+         ORDER BY COALESCE(year, 2020) DESC, COALESCE(imdb_rating, 6.5) DESC, id DESC
+         LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+        [...params, limit, offset],
+      ),
+    ]);
+
+    const total = Number(countRes.rows[0]?.total || 0);
     res.json({
-      results,
+      results: rowsRes.rows.map(rowToFilmSummary),
       page,
-      totalPages: Math.min(20, Number(data?.total_pages || 1)),
+      totalPages: Math.max(1, Math.ceil(total / limit)),
     });
   } catch (err: any) {
-    res.status(502).json({ error: String(err?.message || err) });
+    res.status(500).json({ error: String(err?.message || err) });
   }
 });
 
-// ── 5. Full Detail (credits, videos, seasons, episodes, recommendations) ─────
+// ── 5. Full Detail (vault episodes + optional TMDB cast/trailer enrichment) ──
 router.get("/detail", async (req: Request, res: Response) => {
   try {
-    const type: "movie" | "tv" = String(req.query.type || "movie") === "tv" ? "tv" : "movie";
-    const id = String(req.query.id || "").trim();
-    if (!id) {
+    const rawId = Number.parseInt(String(req.query.id || "0"), 10);
+    if (!rawId) {
       res.status(400).json({ error: "id is required" });
       return;
     }
 
-    const append =
-      type === "tv"
-        ? "aggregate_credits,credits,recommendations,videos,content_ratings,external_ids"
-        : "credits,recommendations,videos,release_dates,external_ids";
-
-    const [arData, enData] = await Promise.all([
-      tmdbFetch(`/${type}/${id}?append_to_response=${append}`, 20 * 60_000, "ar"),
-      tmdbFetch(`/${type}/${id}?append_to_response=videos`, 20 * 60_000, "en-US").catch(() => null),
-    ]);
-
-    const summary = normalizeFilmSummary(arData, type);
-    const titleAr = summary?.titleAr || String(arData?.title || arData?.name || enData?.title || enData?.name || "عمل سينمائي");
-    const titleEn = String(enData?.title || enData?.name || arData?.original_title || arData?.original_name || titleAr);
-    const overviewAr = String(arData?.overview || "").trim() || String(enData?.overview || "").trim() || "لا يوجد ملخص متوفر حالياً.";
-
-    // Trailer key (prefer YouTube Trailer -> Teaser -> English trailer)
-    const arVideos: any[] = arData?.videos?.results || [];
-    const enVideos: any[] = enData?.videos?.results || [];
-    const allVideos = [...arVideos, ...enVideos];
-    const trailer =
-      allVideos.find((v) => v.site === "YouTube" && v.type === "Trailer") ||
-      allVideos.find((v) => v.site === "YouTube" && v.type === "Teaser") ||
-      allVideos.find((v) => v.site === "YouTube");
-
-    // Credits (Director & Cast)
-    const crew: any[] = arData?.credits?.crew || [];
-    const directorObj =
-      crew.find((c) => c.job === "Director") ||
-      (Array.isArray(arData?.created_by) ? arData.created_by[0] : null);
-    const director = directorObj?.name || (type === "tv" ? "إخراج عالمي" : "سينما عالمية");
-
-    const rawCast: any[] =
-      arData?.credits?.cast?.length > 0
-        ? arData.credits.cast
-        : arData?.aggregate_credits?.cast || [];
-    const cast = rawCast.slice(0, 14).map((c: any) => ({
-      id: Number(c.id),
-      name: String(c.name || c.original_name || ""),
-      character: String(
-        c.character || (Array.isArray(c.roles) ? c.roles[0]?.character : "") || "ممثل",
-      ),
-      profileUrl: c.profile_path ? `${TMDB_IMG_PROFILE}${c.profile_path}` : null,
-    }));
-
-    // Production company
-    const prodCompanies: any[] = arData?.production_companies || [];
-    const productionCompany = prodCompanies[0]?.name || "NOVA FILM";
-
-    // Age rating
-    let ageRating = "PG-13";
-    if (type === "tv") {
-      const usR = (arData?.content_ratings?.results || []).find((r: any) => r.iso_3166_1 === "US");
-      if (usR?.rating) ageRating = usR.rating;
-    } else {
-      const usR = (arData?.release_dates?.results || []).find((r: any) => r.iso_3166_1 === "US");
-      const cert = usR?.release_dates?.find((d: any) => d.certification)?.certification;
-      if (cert) ageRating = cert;
+    let titleRes = await pool.query(
+      `SELECT * FROM film_vault_titles WHERE id = $1 AND is_archived = FALSE LIMIT 1`,
+      [rawId],
+    );
+    if (titleRes.rows.length === 0) {
+      const reqType = String(req.query.type || "movie") === "tv" ? "tv" : "movie";
+      titleRes = await pool.query(
+        `SELECT * FROM film_vault_titles WHERE tmdb_id = $1 AND tmdb_type = $2 AND is_archived = FALSE LIMIT 1`,
+        [rawId, reqType],
+      );
     }
 
-    // Status
-    const statusRaw = String(arData?.status || "");
-    const statusLabel =
-      type === "tv"
-        ? statusRaw === "Returning Series"
-          ? "مستمر"
-          : statusRaw === "Ended"
-            ? "مكتمل"
-            : "يُعرض حالياً"
-        : "فيلم كامل";
+    const row = titleRes.rows[0];
+    if (!row) {
+      res.status(404).json({ error: "Title not found in vault" });
+      return;
+    }
 
-    // Seasons & Episodes
-    const rawSeasons: any[] = Array.isArray(arData?.seasons)
-      ? arData.seasons.filter((s: any) => Number(s.season_number) >= 1)
+    const summary = rowToFilmSummary(row);
+    const isTv = summary.tmdbType === "tv";
+
+    const [seasonsRes, tmdbExtra, recsRes] = await Promise.all([
+      pool.query(
+        `SELECT season_number, COUNT(*)::int AS ep_count
+         FROM film_vault_episodes
+         WHERE title_id = $1 AND is_archived = FALSE AND has_live_server = TRUE
+         GROUP BY season_number
+         ORDER BY season_number ASC`,
+        [row.id],
+      ),
+      enrichDetailFromTmdb(row),
+      pool.query(
+        `SELECT * FROM film_vault_titles
+         WHERE id != $1 AND is_archived = FALSE AND has_live_server = TRUE AND media_type = $2
+         ORDER BY COALESCE(imdb_rating, 6.5) DESC, COALESCE(year, 2020) DESC
+         LIMIT 10`,
+        [row.id, row.media_type],
+      ),
+    ]);
+
+    const seasons = isTv
+      ? seasonsRes.rows.map((s: any) => ({
+          seasonNumber: Number(s.season_number),
+          name: `الموسم ${s.season_number}`,
+          episodeCount: Number(s.ep_count),
+          posterUrl: summary.posterUrl,
+          airDate: String(row.year || ""),
+        }))
       : [];
-    const seasons = rawSeasons.map((s: any) => ({
-      seasonNumber: Number(s.season_number),
-      name: String(s.name || `الموسم ${s.season_number}`),
-      episodeCount: Number(s.episode_count || 0),
-      posterUrl: s.poster_path ? `${TMDB_IMG_POSTER}${s.poster_path}` : summary?.posterUrl || null,
-      airDate: String(s.air_date || ""),
-    }));
 
+    const firstSeasonNum = seasons[0]?.seasonNumber || 1;
     let episodes: any[] = [];
-    if (type === "movie") {
-      const runtimeMin = Number(arData?.runtime || 115);
+
+    if (!isTv) {
       episodes = [
         {
-          id: `${id}-m-1`,
+          id: `${row.id}-m-1`,
           seasonNumber: 1,
           episodeNumber: 1,
-          titleAr,
-          titleEn,
-          overview: overviewAr,
-          runtimeMin,
-          airDate: String(arData?.release_date || ""),
-          stillUrl: summary?.backdropUrl || summary?.posterUrl || null,
+          titleAr: summary.titleAr,
+          titleEn: summary.titleEn,
+          overview: tmdbExtra.overviewAr || summary.overviewAr || "لا يوجد ملخص متوفر حالياً.",
+          runtimeMin: tmdbExtra.runtimeMin,
+          airDate: String(row.year || ""),
+          stillUrl: tmdbExtra.backdropUrl || summary.backdropUrl || summary.posterUrl,
         },
       ];
     } else {
-      const firstSeasonNum = seasons[0]?.seasonNumber || 1;
-      try {
-        const sData = await tmdbFetch(`/tv/${id}/season/${firstSeasonNum}`, 15 * 60_000, "ar");
-        episodes = normalizeSeasonEpisodes(sData, id, firstSeasonNum, summary?.backdropUrl);
-      } catch {
-        episodes = [];
-      }
+      const epsRes = await pool.query(
+        `SELECT id, season_number, episode_number, raw_title
+         FROM film_vault_episodes
+         WHERE title_id = $1 AND season_number = $2 AND is_archived = FALSE AND has_live_server = TRUE
+         ORDER BY episode_number ASC`,
+        [row.id, firstSeasonNum],
+      );
+      episodes = epsRes.rows.map((ep: any) => ({
+        id: `${row.id}-s${ep.season_number}-e${ep.episode_number}`,
+        seasonNumber: Number(ep.season_number),
+        episodeNumber: Number(ep.episode_number),
+        titleAr: `الحلقة ${ep.episode_number}`,
+        titleEn: `Episode ${ep.episode_number}`,
+        overview: "",
+        runtimeMin: tmdbExtra.runtimeMin || 45,
+        airDate: String(row.year || ""),
+        stillUrl: tmdbExtra.backdropUrl || summary.backdropUrl || summary.posterUrl,
+      }));
     }
 
-    const runtimeMin =
-      type === "movie"
-        ? Number(arData?.runtime || 115)
-        : Number(arData?.episode_run_time?.[0] || 45);
-    const durationOrSeasons =
-      type === "movie"
-        ? `${runtimeMin} دقيقة`
-        : `${Math.max(1, seasons.length || Number(arData?.number_of_seasons || 1))} مواسم · ${Number(arData?.number_of_episodes || episodes.length)} حلقة`;
-
-    const recommendations = dedupeAndFilter(arData?.recommendations?.results || []).slice(0, 12);
-
     res.json({
-      id: Number(id),
-      tmdbType: type,
-      mediaType: summary?.mediaType || (type === "tv" ? "series" : "movie"),
-      titleAr,
-      titleEn,
-      overviewAr,
-      posterUrl: summary?.posterUrl || (arData?.poster_path ? `${TMDB_IMG_POSTER}${arData.poster_path}` : null),
-      backdropUrl: summary?.backdropUrl || (arData?.backdrop_path ? `${TMDB_IMG_BACKDROP}${arData.backdrop_path}` : null),
-      year: summary?.year || Number(String(arData?.release_date || arData?.first_air_date || "").slice(0, 4)) || 2025,
-      imdbRating: summary?.imdbRating || Number(Number(arData?.vote_average || 7.5).toFixed(1)),
-      voteCount: Number(arData?.vote_count || 0),
-      popularity: Number(arData?.popularity || 0),
-      qualityBadge: summary?.qualityBadge || "1080p FHD",
-      audioLabel: summary?.audioLabel || "مترجم",
-      categoryLabel: summary?.categoryLabel || (type === "tv" ? "مسلسلات عالمية" : "أفلام أجنبية"),
-      genres: mapGenres(arData),
-      originalLanguage: String(arData?.original_language || "en"),
-      runtimeMin,
-      durationOrSeasons,
-      statusLabel,
-      ageRating,
-      director,
-      productionCompany,
-      imdbId: arData?.external_ids?.imdb_id || null,
-      trailerYoutubeKey: trailer?.key || null,
-      cast,
+      ...summary,
+      backdropUrl: tmdbExtra.backdropUrl || summary.backdropUrl,
+      overviewAr: tmdbExtra.overviewAr || summary.overviewAr || "لا يوجد ملخص متوفر حالياً.",
+      runtimeMin: tmdbExtra.runtimeMin,
+      durationOrSeasons: formatDurationOrSeasons(row),
+      statusLabel: isTv ? (seasons.length > 1 ? "مكتمل" : "متوفر") : "فيلم كامل",
+      ageRating: tmdbExtra.ageRating,
+      director: tmdbExtra.director,
+      productionCompany: tmdbExtra.productionCompany,
+      imdbId: tmdbExtra.imdbId,
+      trailerYoutubeKey: tmdbExtra.trailerYoutubeKey,
+      cast: tmdbExtra.cast,
       seasons,
       episodes,
-      recommendations,
+      relations: recsRes.rows.slice(0, 6).map(rowToFilmSummary),
+      recommendations: recsRes.rows.map(rowToFilmSummary),
     });
   } catch (err: any) {
-    res.status(502).json({ error: String(err?.message || err) });
+    res.status(500).json({ error: String(err?.message || err) });
   }
 });
 
-function normalizeSeasonEpisodes(sData: any, tmdbId: string, seasonNumber: number, fallbackBackdrop?: string | null) {
-  const rawEps: any[] = Array.isArray(sData?.episodes) ? sData.episodes : [];
-  return rawEps.map((ep: any) => ({
-    id: `${tmdbId}-s${seasonNumber}-e${ep.episode_number}`,
-    seasonNumber,
-    episodeNumber: Number(ep.episode_number),
-    titleAr: String(ep.name || `الحلقة ${ep.episode_number}`),
-    titleEn: `Episode ${ep.episode_number}`,
-    overview: String(ep.overview || "").trim(),
-    runtimeMin: Number(ep.runtime || 45),
-    airDate: String(ep.air_date || ""),
-    stillUrl: ep.still_path ? `${TMDB_IMG_STILL}${ep.still_path}` : fallbackBackdrop || null,
-  }));
-}
-
-// ── 6. Season episodes ───────────────────────────────────────────────────────
+// ── 6. Season Episodes ───────────────────────────────────────────────────────
 router.get("/season", async (req: Request, res: Response) => {
   try {
-    const id = String(req.query.id || "").trim();
+    const id = Number.parseInt(String(req.query.id || "0"), 10);
     const season = Math.max(1, Number.parseInt(String(req.query.season || "1"), 10) || 1);
     if (!id) {
       res.status(400).json({ error: "id is required" });
       return;
     }
-    const data = await tmdbFetch(`/tv/${id}/season/${season}`, 15 * 60_000, "ar");
+
+    const [titleRes, epsRes] = await Promise.all([
+      pool.query(`SELECT poster_url, backdrop_url, year FROM film_vault_titles WHERE id = $1 LIMIT 1`, [id]),
+      pool.query(
+        `SELECT id, season_number, episode_number, raw_title
+         FROM film_vault_episodes
+         WHERE title_id = $1 AND season_number = $2 AND is_archived = FALSE AND has_live_server = TRUE
+         ORDER BY episode_number ASC`,
+        [id, season],
+      ),
+    ]);
+
+    const tRow = titleRes.rows[0];
+    const stillUrl = encodeMediaUrl(tRow?.backdrop_url) || encodeMediaUrl(tRow?.poster_url);
+
     res.json({
       seasonNumber: season,
-      name: String(data?.name || `الموسم ${season}`),
-      episodes: normalizeSeasonEpisodes(data, id, season, null),
+      name: `الموسم ${season}`,
+      episodes: epsRes.rows.map((ep: any) => ({
+        id: `${id}-s${ep.season_number}-e${ep.episode_number}`,
+        seasonNumber: Number(ep.season_number),
+        episodeNumber: Number(ep.episode_number),
+        titleAr: `الحلقة ${ep.episode_number}`,
+        titleEn: `Episode ${ep.episode_number}`,
+        overview: "",
+        runtimeMin: 45,
+        airDate: String(tRow?.year || ""),
+        stillUrl,
+      })),
     });
   } catch (err: any) {
-    res.status(502).json({ error: String(err?.message || err) });
+    res.status(500).json({ error: String(err?.message || err) });
   }
 });
 
-// ── 7. Weekly Broadcast & Upcoming Cinema Schedule ───────────────────────────
+// ── 7. Schedule (recent real playable releases distributed across week days) ─
 router.get("/schedule", async (_req: Request, res: Response) => {
   try {
-    const [tvAir, upMovies] = await Promise.all([
-      tmdbFetch("/tv/on_the_air?page=1", 20 * 60_000),
-      tmdbFetch("/movie/upcoming?page=1", 20 * 60_000),
+    const [seriesRes, moviesRes] = await Promise.all([
+      pool.query(
+        `SELECT * FROM film_vault_titles
+         WHERE is_archived = FALSE AND has_live_server = TRUE AND media_type = 'series'
+         ORDER BY COALESCE(year, 2020) DESC, updated_at DESC
+         LIMIT 14`,
+      ),
+      pool.query(
+        `SELECT * FROM film_vault_titles
+         WHERE is_archived = FALSE AND has_live_server = TRUE AND media_type IN ('movie', 'animation')
+         ORDER BY COALESCE(year, 2020) DESC, updated_at DESC
+         LIMIT 10`,
+      ),
     ]);
-    const tvItems = dedupeAndFilter(tvAir?.results || [], "tv").slice(0, 14).map((item, idx) => {
-      const parsed = item.releaseDate ? new Date(item.releaseDate) : null;
-      const dayIdx = parsed && !Number.isNaN(parsed.getTime()) ? parsed.getDay() : idx % 7;
-      return { ...item, releaseDayIndex: dayIdx, scheduleNote: "حلقة أسبوعية جديدة" };
-    });
-    const movieItems = dedupeAndFilter(upMovies?.results || [], "movie").slice(0, 10).map((item, idx) => {
-      const parsed = item.releaseDate ? new Date(item.releaseDate) : null;
-      const dayIdx = parsed && !Number.isNaN(parsed.getTime()) ? parsed.getDay() : (idx + 3) % 7;
-      return { ...item, releaseDayIndex: dayIdx, scheduleNote: item.releaseDate || "قريباً في المنصة" };
-    });
-    res.json({ items: [...tvItems, ...movieItems] });
+
+    const seriesItems = seriesRes.rows.map((r: any, idx: number) => ({
+      ...rowToFilmSummary(r),
+      releaseDayIndex: idx % 7,
+      scheduleNote: `${r.playable_episode_count || r.episode_count || 1} حلقة متاحة للمشاهدة`,
+    }));
+
+    const movieItems = moviesRes.rows.map((r: any, idx: number) => ({
+      ...rowToFilmSummary(r),
+      releaseDayIndex: (idx + 3) % 7,
+      scheduleNote: r.year ? `إصدار ${r.year} · جاهز للبث` : "متاح للمشاهدة الآن",
+    }));
+
+    res.json({ items: [...seriesItems, ...movieItems] });
   } catch (err: any) {
-    res.status(502).json({ error: String(err?.message || err) });
+    res.status(500).json({ error: String(err?.message || err) });
   }
 });
 
-// ── 8. Video Streaming Sources & Subtitles (delegating cleanly on localhost) ──
-function forwardMobileHeaders(req: Request): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const h of [
-    "x-app-token",
-    "x-nova-client",
-    "x-nova-version",
-    "x-nova-package",
-    "user-agent",
-  ] as const) {
-    const v = req.headers[h];
-    if (typeof v === "string" && v) out[h] = v;
-  }
-  return out;
-}
-
+// ── 8. Real Moviztime/VidHLS Streaming Sources (SSE) & Resolve & Subtitles ───
 router.get("/sources-stream", async (req: Request, res: Response) => {
-  const port = Number(process.env.PORT || 5000);
-  const qs = new URLSearchParams(req.query as Record<string, string>).toString();
-  const ac = new AbortController();
-  req.on("close", () => ac.abort());
+  const tmdbId = Number.parseInt(String(req.query.tmdbId || "0"), 10);
+  const type: "movie" | "tv" = String(req.query.type || "movie") === "tv" ? "tv" : "movie";
+  const season = Math.max(1, Number.parseInt(String(req.query.season || "1"), 10) || 1);
+  const ep = Math.max(1, Number.parseInt(String(req.query.ep || "1"), 10) || 1);
+
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders();
+
+  const sendEvent = (event: string, data: any) => {
+    if (res.writableEnded) return;
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
 
   try {
-    const upstream = await fetch(`http://127.0.0.1:${port}/api/animation/sources-stream?${qs}`, {
-      headers: forwardMobileHeaders(req),
-      signal: ac.signal,
-    });
-    if (!upstream.ok || !upstream.body) {
-      res.status(upstream.status || 502).json({ error: `sources stream failed (${upstream.status})` });
+    sendEvent("status", { msg: "جاري سحب السيرفرات المباشرة من أرشيف نوفا فيلم..." });
+    if (!tmdbId) {
+      sendEvent("done", { ok: false, count: 0 });
+      res.end();
       return;
     }
 
-    res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
-    res.setHeader("X-Accel-Buffering", "no");
-    res.flushHeaders();
-
-    const reader = upstream.body.getReader();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value && !res.writableEnded) {
-        res.write(Buffer.from(value));
-      }
+    const resolved = await resolveEpisodeFromVault(tmdbId, type, season, ep);
+    let emitted = 0;
+    for (const src of resolved.sources) {
+      sendEvent("source", src);
+      emitted++;
     }
-    if (!res.writableEnded) res.end();
+    // Also query multi-CDN providers (/api/animation/sources-stream) if titleEn is available
+    if (resolved.titleEn) {
+      try {
+        const port = Number(process.env.PORT || 5000);
+        const tok = issueAnonToken().token;
+        const qs = new URLSearchParams({
+          tmdbId: String(resolved.tmdbId || ""),
+          type,
+          season: String(season),
+          ep: String(ep),
+          title: resolved.titleEn,
+        });
+        const up = await fetch(`http://127.0.0.1:${port}/api/animation/sources-stream?${qs.toString()}`, {
+          headers: {
+            "x-app-token": tok,
+            "x-nova-client": "nova-anime-mobile-v1",
+            "x-nova-package": "com.nova.anime",
+            "x-nova-version": "1.0.0",
+          },
+          signal: AbortSignal.timeout(9000),
+        });
+        if (up.ok && up.body) {
+          const reader = up.body.getReader();
+          const dec = new TextDecoder();
+          let buf = "";
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buf += dec.decode(value, { stream: true });
+            const blocks = buf.split("\n\n");
+            buf = blocks.pop() || "";
+            for (const b of blocks) {
+              const evMatch = b.match(/^event:\s*(\S+)/m);
+              const dtMatch = b.match(/^data:\s*(.+)$/m);
+              if (evMatch?.[1] === "source" && dtMatch?.[1]) {
+                try {
+                  const sObj = JSON.parse(dtMatch[1]);
+                  if (sObj && (sObj.url || sObj.directUrl || sObj.proxyUrl)) {
+                    sendEvent("source", {
+                      ...sObj,
+                      tier: /2160|4k/i.test(sObj.label || "") ? "4K UHD" : /1080/i.test(sObj.label || "") ? "1080p FHD" : "720p HD",
+                      isEmbed: false,
+                    });
+                    emitted++;
+                  }
+                } catch {}
+              }
+            }
+          }
+        }
+      } catch {}
+    }
+    sendEvent("done", { ok: true, count: emitted });
+    res.end();
   } catch (err: any) {
-    if (!res.headersSent) res.status(502).json({ error: String(err?.message || err) });
-    else if (!res.writableEnded) res.end();
+    sendEvent("status", { msg: `تعذر جلب السيرفرات: ${err?.message || "خطأ غير متوقع"}` });
+    sendEvent("done", { ok: false, count: 0 });
+    if (!res.writableEnded) res.end();
   }
 });
 
 router.post("/source-resolve", async (req: Request, res: Response) => {
-  const port = Number(process.env.PORT || 5000);
   try {
-    const upstream = await fetch(`http://127.0.0.1:${port}/api/animation/source-resolve`, {
-      method: "POST",
-      headers: {
-        ...forwardMobileHeaders(req),
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(req.body || {}),
-      signal: AbortSignal.timeout(28_000),
-    });
-    const text = await upstream.text();
-    res.status(upstream.status).setHeader("Content-Type", "application/json").send(text);
+    const tmdbId = Number.parseInt(String(req.body?.tmdbId || "0"), 10);
+    const type: "movie" | "tv" = String(req.body?.type || "movie") === "tv" ? "tv" : "movie";
+    const season = Math.max(1, Number.parseInt(String(req.body?.season || "1"), 10) || 1);
+    const ep = Math.max(1, Number.parseInt(String(req.body?.ep || "1"), 10) || 1);
+
+    if (!tmdbId) {
+      res.status(400).json({ error: "tmdbId is required" });
+      return;
+    }
+
+    const resolved = await resolveEpisodeFromVault(tmdbId, type, season, ep);
+    if (!resolved.sources.length) {
+      res.status(404).json({ error: "No playable source found" });
+      return;
+    }
+    res.json(resolved.sources[0]);
   } catch (err: any) {
     res.status(502).json({ error: String(err?.message || err) });
   }
 });
 
 router.get("/subtitle-tracks", async (req: Request, res: Response) => {
-  const port = Number(process.env.PORT || 5000);
-  const qs = new URLSearchParams(req.query as Record<string, string>).toString();
   try {
-    const upstream = await fetch(`http://127.0.0.1:${port}/api/animation/subtitle-tracks?${qs}`, {
-      headers: forwardMobileHeaders(req),
-      signal: AbortSignal.timeout(14_000),
-    });
-    const text = await upstream.text();
-    res.status(upstream.status).setHeader("Content-Type", "application/json").send(text);
+    const tmdbId = Number.parseInt(String(req.query.tmdbId || "0"), 10);
+    const type: "movie" | "tv" = String(req.query.type || "movie") === "tv" ? "tv" : "movie";
+    const season = Math.max(1, Number.parseInt(String(req.query.season || "1"), 10) || 1);
+    const ep = Math.max(1, Number.parseInt(String(req.query.ep || "1"), 10) || 1);
+    const titleParam = String(req.query.title || "").trim();
+
+    let tracks: SubTrack[] = [];
+    let lookupTitle = titleParam;
+    let realTmdbId: number | null = null;
+
+    if (tmdbId > 0) {
+      const resolved = await resolveEpisodeFromVault(tmdbId, type, season, ep);
+      tracks.push(...resolved.tracks);
+      if (resolved.titleEn) lookupTitle = resolved.titleEn;
+      if (resolved.tmdbId) realTmdbId = resolved.tmdbId;
+    }
+
+    if (tracks.length === 0 && (realTmdbId || lookupTitle)) {
+      const port = Number(process.env.PORT || 5000);
+      const qs = new URLSearchParams({
+        tmdbId: String(realTmdbId || ""),
+        type,
+        season: String(season),
+        ep: String(ep),
+        title: lookupTitle,
+      });
+      try {
+        const subRes = await fetch(`http://127.0.0.1:${port}/api/animation/subtitle-tracks?${qs.toString()}`, {
+          signal: AbortSignal.timeout(8000),
+        });
+        if (subRes.ok) {
+          const data = (await subRes.json()) as { tracks?: SubTrack[] };
+          if (Array.isArray(data?.tracks)) tracks.push(...data.tracks);
+        }
+      } catch {
+        // external subtitles optional because moviztime streams have burned-in Arabic subs
+      }
+    }
+
+    res.json({ tracks });
   } catch (err: any) {
-    res.status(502).json({ tracks: [], error: String(err?.message || err) });
+    res.json({ tracks: [], error: String(err?.message || err) });
   }
 });
 
