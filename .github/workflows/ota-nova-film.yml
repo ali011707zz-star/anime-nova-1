@@ -1,0 +1,177 @@
+name: ⚡ نشر تحديث OTA لـ NOVA FILM
+
+on:
+  push:
+    branches: [nova-film]
+    paths:
+      - 'artifacts/nova-film/**'
+      - 'artifacts/api-server/src/routes/otaFilm.ts'
+      - 'artifacts/api-server/src/app.ts'
+      - '.github/workflows/ota-nova-film.yml'
+    paths-ignore:
+      - 'artifacts/nova-film/android/**'
+      - 'artifacts/nova-film/ota-dist/**'
+  workflow_dispatch:
+    inputs:
+      backend_domain:
+        description: 'Backend API URL'
+        required: false
+        default: 'https://animenovaa.duckdns.org'
+
+env:
+  EXPO_PUBLIC_DOMAIN: ${{ github.event.inputs.backend_domain || 'https://animenovaa.duckdns.org' }}
+  EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: "413058110781-cbielvl5jhrf2bje392f8l9fnulvegp7.apps.googleusercontent.com"
+  EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: "413058110781-r8otf4jg4v1e7akp4ujii01brj3hv8kg.apps.googleusercontent.com"
+  EXPO_PUBLIC_SENTRY_DSN: "https://f58d23758aeb03d3d03a23a212c91dd8b@o4511863460265984.ingest.us.sentry.io/4511863487266816"
+
+jobs:
+  publish-ota:
+    name: Export & Publish NOVA FILM OTA
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+    steps:
+      - name: 📦 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🔧 Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 📦 Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: 💾 pnpm store path
+        id: pnpm-cache
+        run: echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+
+      - name: 💾 Cache pnpm
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: pnpm-v2-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: pnpm-v2-${{ runner.os }}-
+
+      - name: 📥 Install dependencies
+        env:
+          NODE_ENV: ""
+        run: pnpm install --no-frozen-lockfile
+
+      - name: 🧪 TypeScript typecheck
+        working-directory: artifacts/nova-film
+        run: pnpm run typecheck
+
+      - name: 📦 Export NOVA FILM OTA bundle
+        working-directory: artifacts/nova-film
+        run: |
+          pnpm run export:ota
+          test -s ota-dist/ota-manifest.json
+          node -e '
+            const m = JSON.parse(require("fs").readFileSync("ota-dist/ota-manifest.json", "utf8"));
+            console.log("OTA id:", m.id, "runtimeVersion:", m.runtimeVersion, "assets:", (m.assets || []).length);
+          '
+
+      - name: 📤 Upload OTA bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NovaFilm-OTA-v${{ github.run_number }}
+          path: artifacts/nova-film/ota-dist
+          retention-days: 14
+
+      - name: 📦 Pack OTA payload tarball
+        run: |
+          tar -czf nova-film-ota-stage.tar.gz \
+            artifacts/nova-film/ota-dist \
+            artifacts/api-server/src/routes/otaFilm.ts \
+            artifacts/api-server/src/routes/ota.ts \
+            artifacts/api-server/src/app.ts
+          ls -lh nova-film-ota-stage.tar.gz
+
+      - name: 🌐 Upload OTA payload to VPS
+        if: ${{ env.VPS_HOST != '' && env.VPS_USER != '' && env.VPS_SSH_KEY != '' }}
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ env.VPS_HOST }}
+          username: ${{ env.VPS_USER }}
+          key: ${{ env.VPS_SSH_KEY }}
+          port: 22
+          source: nova-film-ota-stage.tar.gz
+          target: /tmp/nova-film-ota-${{ github.run_id }}
+          overwrite: true
+
+      - name: 🚀 Activate NOVA FILM OTA on VPS
+        if: ${{ env.VPS_HOST != '' && env.VPS_USER != '' && env.VPS_SSH_KEY != '' }}
+        uses: appleboy/ssh-action@v1.2.2
+        env:
+          RUN_ID: ${{ github.run_id }}
+        with:
+          host: ${{ env.VPS_HOST }}
+          username: ${{ env.VPS_USER }}
+          key: ${{ env.VPS_SSH_KEY }}
+          port: 22
+          envs: RUN_ID
+          script: |
+            set -eu
+            export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$HOME/.local/share/pnpm:$HOME/.npm-global/bin:$PATH"
+            [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" || true
+            STAGE="/tmp/nova-film-ota-${RUN_ID}"
+            TARBALL="$(find "${STAGE}" -type f -name 'nova-film-ota-stage.tar.gz' | head -1)"
+            test -n "${TARBALL}" && test -s "${TARBALL}"
+            tar -xzf "${TARBALL}" -C "${STAGE}"
+
+            APP_DIR="/opt/anime-nova"
+            OTA_TARGET="${APP_DIR}/artifacts/nova-film/ota-dist"
+
+            mkdir -p "${APP_DIR}/artifacts/nova-film"
+            rm -rf "${OTA_TARGET}.next"
+            cp -r "${STAGE}/artifacts/nova-film/ota-dist" "${OTA_TARGET}.next"
+            rm -rf "${OTA_TARGET}"
+            mv "${OTA_TARGET}.next" "${OTA_TARGET}"
+
+            NEED_REBUILD=0
+            if [ ! -f "${APP_DIR}/artifacts/api-server/src/routes/otaFilm.ts" ] || \
+               ! cmp -s "${STAGE}/artifacts/api-server/src/routes/otaFilm.ts" "${APP_DIR}/artifacts/api-server/src/routes/otaFilm.ts" || \
+               ! cmp -s "${STAGE}/artifacts/api-server/src/routes/ota.ts" "${APP_DIR}/artifacts/api-server/src/routes/ota.ts" || \
+               ! cmp -s "${STAGE}/artifacts/api-server/src/app.ts" "${APP_DIR}/artifacts/api-server/src/app.ts"; then
+              NEED_REBUILD=1
+            fi
+
+            if ! curl -sf "http://127.0.0.1:5000/api/ota-film/status" | grep -q '"nova-film"'; then
+              NEED_REBUILD=1
+            fi
+
+            if [ "$NEED_REBUILD" -eq 1 ]; then
+              echo "🔄 Updating api-server OTA routes..."
+              cp "${STAGE}/artifacts/api-server/src/routes/otaFilm.ts" "${APP_DIR}/artifacts/api-server/src/routes/otaFilm.ts"
+              cp "${STAGE}/artifacts/api-server/src/routes/ota.ts" "${APP_DIR}/artifacts/api-server/src/routes/ota.ts"
+              cp "${STAGE}/artifacts/api-server/src/app.ts" "${APP_DIR}/artifacts/api-server/src/app.ts"
+              cd "${APP_DIR}"
+              pnpm --filter @workspace/api-server run build
+              pm2 delete anime-nova-api 2>/dev/null || true
+              pm2 start "${APP_DIR}/ecosystem.config.cjs" --only anime-nova-api
+              pm2 save || true
+              sleep 4
+            fi
+
+            rm -rf "${STAGE}"
+            echo "=== Local OTA status ==="
+            curl -sf "http://127.0.0.1:5000/api/ota-film/status"
+            echo ""
+
+      - name: 🔎 Verify live OTA endpoint
+        run: |
+          STATUS=$(curl -s "https://animenovaa.duckdns.org/api/ota-film/status" || true)
+          echo "Live /api/ota-film/status: $STATUS"
+          if echo "$STATUS" | grep -q '"activeUpdate":true'; then
+            echo "✅ NOVA FILM OTA is LIVE!"
+          else
+            echo "⚠️ Live OTA endpoint did not return activeUpdate:true yet"
+            exit 1
+          fi

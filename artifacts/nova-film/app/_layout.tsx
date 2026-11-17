@@ -25,6 +25,7 @@ import { installGlobalCrashHandlers } from "@/utils/crashLogger";
 import { getRuntimeIntegrity, runtimeIntegrityMessage } from "@/utils/runtimeIntegrity";
 import { isTvDevice, useTvMetrics } from "@/utils/tv";
 import { pingMobileAppPresence } from "@/utils/analytics";
+import { checkAndApplyOtaUpdate } from "@/utils/otaUpdater";
 import { registerPushNotifications, subscribeToPushTokenChanges } from "@/utils/pushNotifications";
 
 if (Platform.OS !== "web") {
@@ -249,6 +250,7 @@ function RootLayout() {
     const t = setTimeout(() => {
       if (AppState.currentState !== "background") {
         pingMobileAppPresence();
+        checkAndApplyOtaUpdate({ manual: false }).catch(() => {});
         import("@/utils/downloadManager")
           .then((m) => m.restoreInterruptedDownloads())
           .catch(() => {});
@@ -257,6 +259,7 @@ function RootLayout() {
     const interval = setInterval(() => {
       if (AppState.currentState === "active") {
         pingMobileAppPresence();
+        checkAndApplyOtaUpdate({ manual: false }).catch(() => {});
       }
     }, 120_000);
     const sub = AppState.addEventListener("change", (state) => {

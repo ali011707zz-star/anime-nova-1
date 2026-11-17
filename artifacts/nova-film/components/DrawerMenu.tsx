@@ -1,4 +1,5 @@
-import { CURRENT_APP_VERSION, openAppUpdateModal } from "@/components/AppUpdateModal";
+import { CURRENT_APP_VERSION } from "@/components/AppUpdateModal";
+import { checkAndApplyOtaUpdate } from "@/utils/otaUpdater";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -339,9 +340,9 @@ export function DrawerMenu({ visible, onClose }: Props) {
           <DrawerItem
             item={{
               icon: "cloud-download-outline",
-              label: "تحديث التطبيق",
+              label: "تحديث التطبيق (OTA)",
               route: "",
-              badge: `v${CURRENT_APP_VERSION}`,
+              badge: `v${CURRENT_APP_VERSION} • OTA`,
               showChevron: false,
               color: "#0EA5E9",
             }}
@@ -349,7 +350,9 @@ export function DrawerMenu({ visible, onClose }: Props) {
             colors={colors}
             onPress={() => {
               onClose();
-              setTimeout(() => openAppUpdateModal(), 180);
+              setTimeout(() => {
+                checkAndApplyOtaUpdate({ manual: true }).catch(() => {});
+              }, 180);
             }}
           />
           {NAV_OTHER.map((item) => (

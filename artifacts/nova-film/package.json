@@ -75,6 +75,8 @@
     "expo-manifests": "~1.0.11",
     "expo-structured-headers": "~5.0.0",
     "expo-eas-client": "~1.0.8",
-    "expo-json-utils": "~0.15.0"
+    "expo-json-utils": "~0.15.0",
+    "expo-updates": "~29.0.20",
+    "expo-updates-interface": "~2.0.0"
   }
 }

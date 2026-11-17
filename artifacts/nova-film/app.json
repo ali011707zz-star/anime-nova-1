@@ -93,7 +93,8 @@
           "organization": "anime-nova",
           "project": "react-native"
         }
-      ]
+      ],
+      "expo-updates"
     ],
     "experiments": {
       "typedRoutes": true,
@@ -104,9 +105,9 @@
         "projectId": "07296477-c5e8-4a47-a804-95f28b46ef7b"
       }
     },
-    "runtimeVersion": "1.0.0",
+    "runtimeVersion": "1.0.9",
     "updates": {
-      "enabled": false,
+      "enabled": true,
       "url": "https://animenovaa.duckdns.org/api/ota-film/manifest",
       "checkAutomatically": "ON_LOAD",
       "fallbackToCacheTimeout": 0

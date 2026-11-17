@@ -3,6 +3,13 @@ name: 🎬 بناء APK نوفا فيلم المستقل (NOVA FILM)
 on:
   push:
     branches: [nova-film]
+    paths:
+      - 'artifacts/nova-film/app.json'
+      - 'artifacts/nova-film/package.json'
+      - 'artifacts/nova-film/plugins/**'
+      - 'artifacts/nova-film/modules/**'
+      - 'artifacts/nova-film/assets/**'
+      - '.github/workflows/build-nova-film.yml'
   workflow_dispatch:
     inputs:
       backend_domain:
@@ -324,10 +331,10 @@ jobs:
             gradle/wrapper/gradle-wrapper.properties
 
           grep -q '^ext.kotlinVersion' build.gradle || {
-            printf '\n// react-native-video + expo-updates KSP compatibility with RN 0.81 / Expo 54\next.kotlinVersion = "2.0.21"\next.kspVersion = "2.0.21-1.0.28"\n' >> build.gradle
+            printf '\n// react-native-video + expo-updates KSP compatibility with RN 0.81 / Expo 54\next.kotlinVersion = "2.1.20"\next.kspVersion = "2.1.20-2.0.1"\n' >> build.gradle
           }
           grep -q '^kotlinVersion=' gradle.properties || {
-            printf '\nkotlinVersion=2.0.21\nkspVersion=2.0.21-1.0.28\n' >> gradle.properties
+            printf '\nkotlinVersion=2.1.20\nkspVersion=2.1.20-2.0.1\n' >> gradle.properties
           }
 
           RNV_BUILD="../node_modules/react-native-video/android/build.gradle"
@@ -383,8 +390,8 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-8.13-${{ hashFiles('artifacts/nova-film/android/app/build.gradle') }}
-          restore-keys: gradle-${{ runner.os }}-8.13-
+          key: gradle-${{ runner.os }}-8.13-v2-${{ hashFiles('artifacts/nova-film/android/app/build.gradle') }}
+          restore-keys: gradle-${{ runner.os }}-8.13-v2-
 
       - name: 🔨 Build APK
         working-directory: artifacts/nova-film/android
