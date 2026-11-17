@@ -75,7 +75,7 @@ export default function NovaFilmBrowseScreen() {
           />
         </View>
 
-        <ScrollView horizontal inverted showsHorizontalScrollIndicator={false} contentContainerStyle={s.chipsRow}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chipsRow}>
           {TYPE_FILTERS.map((f) => {
             const active = selectedType === f.id;
             return (

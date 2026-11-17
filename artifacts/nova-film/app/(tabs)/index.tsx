@@ -295,9 +295,7 @@ export default function NovaFilmHomeScreen() {
         </View>
 
         {/* Quick Category Chips */}
-        <ScrollView
-          horizontal
-          inverted
+        <ScrollView horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={s.quickPills}
         >
