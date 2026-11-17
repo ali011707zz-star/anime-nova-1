@@ -1,8 +1,8 @@
-name: 🎬 بناء APK نوفا فيلم (NOVA FILM)
+name: 🤖 بناء APK أندرويد
 
 on:
   push:
-    branches: [nova-film]
+    branches: [main]
   workflow_dispatch:
     inputs:
       backend_domain:
@@ -199,21 +199,9 @@ jobs:
           const app = JSON.parse(fs.readFileSync("app.json", "utf8")).expo;
           const firebase = JSON.parse(fs.readFileSync("google-services.json", "utf8"));
           const expectedPackage = app.android?.package;
-          let configuredPackages = (firebase.client || [])
+          const configuredPackages = (firebase.client || [])
             .map((client) => client.client_info?.android_client_info?.package_name)
             .filter(Boolean);
-          if (expectedPackage && !configuredPackages.includes(expectedPackage) && Array.isArray(firebase.client) && firebase.client.length > 0) {
-            const clonedClient = JSON.parse(JSON.stringify(firebase.client[0]));
-            if (clonedClient.client_info && clonedClient.client_info.android_client_info) {
-              clonedClient.client_info.android_client_info.package_name = expectedPackage;
-            }
-            firebase.client.push(clonedClient);
-            fs.writeFileSync("google-services.json", JSON.stringify(firebase, null, 2));
-            configuredPackages = (firebase.client || [])
-              .map((client) => client.client_info?.android_client_info?.package_name)
-              .filter(Boolean);
-            console.log(`Added Firebase Android client entry for ${expectedPackage}`);
-          }
           if (!expectedPackage || !configuredPackages.includes(expectedPackage)) {
             console.error(`Firebase Android package mismatch. Expected ${expectedPackage || "(missing app package)"}; configured ${configuredPackages.join(", ") || "(none)"}.`);
             process.exit(1);
@@ -429,7 +417,7 @@ jobs:
           fi
           "$APKSIGNER" verify --verbose "$APK"
           PACKAGE="$("$AAPT" dump badging "$APK" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -1)"
-          if [ "$PACKAGE" != "com.nova.film" ] && [ "$PACKAGE" != "com.nova.anime" ]; then
+          if [ "$PACKAGE" != "com.nova.anime" ]; then
             echo "❌ Unexpected APK package: ${PACKAGE:-missing}"
             exit 1
           fi
@@ -443,7 +431,7 @@ jobs:
       - name: 📱 Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: NovaFilm-v${{ github.run_number }}
+          name: AnimeNova-v${{ github.run_number }}
           path: artifacts/nova-mobile/android/app/build/outputs/apk/release/*.apk
           retention-days: 30
 
@@ -487,17 +475,23 @@ jobs:
               cp -p "/opt/anime-nova/public/nova.apk" \
                 "/opt/anime-nova/public/nova.apk.bak-${RUN_ID}"
             fi
-            install -m 0644 "$apk" "/opt/anime-nova/public/Nova-Film.apk"
-            install -m 0644 "$apk" "/opt/anime-nova/public/Nova-Film-TV.apk"
+            install -m 0644 "$apk" "/opt/anime-nova/public/Anime Nova.apk"
+            install -m 0644 "$apk" "/opt/anime-nova/public/Anime-Nova.apk"
+            install -m 0644 "$apk" "/opt/anime-nova/public/nova.apk"
+            install -m 0644 "$apk" "/opt/anime-nova/public/Anime-Nova-TV.apk"
             if [ -d "/opt/anime-nova/artifacts/anime-scraper/public" ]; then
-              install -m 0644 "$apk" "/opt/anime-nova/artifacts/anime-scraper/public/Nova-Film.apk"
-              install -m 0644 "$apk" "/opt/anime-nova/artifacts/anime-scraper/public/Nova-Film-TV.apk"
+              install -m 0644 "$apk" "/opt/anime-nova/artifacts/anime-scraper/public/Anime Nova.apk"
+              install -m 0644 "$apk" "/opt/anime-nova/artifacts/anime-scraper/public/Anime-Nova.apk"
+              install -m 0644 "$apk" "/opt/anime-nova/artifacts/anime-scraper/public/nova.apk"
+              install -m 0644 "$apk" "/opt/anime-nova/artifacts/anime-scraper/public/Anime-Nova-TV.apk"
             fi
             if [ -d "/opt/anime-nova/artifacts/anime-scraper/dist/public" ]; then
-              install -m 0644 "$apk" "/opt/anime-nova/artifacts/anime-scraper/dist/public/Nova-Film.apk"
-              install -m 0644 "$apk" "/opt/anime-nova/artifacts/anime-scraper/dist/public/Nova-Film-TV.apk"
+              install -m 0644 "$apk" "/opt/anime-nova/artifacts/anime-scraper/dist/public/Anime Nova.apk"
+              install -m 0644 "$apk" "/opt/anime-nova/artifacts/anime-scraper/dist/public/Anime-Nova.apk"
+              install -m 0644 "$apk" "/opt/anime-nova/artifacts/anime-scraper/dist/public/nova.apk"
+              install -m 0644 "$apk" "/opt/anime-nova/artifacts/anime-scraper/dist/public/Anime-Nova-TV.apk"
             fi
-            sha256sum "/opt/anime-nova/public/Nova-Film.apk" "/opt/anime-nova/public/Nova-Film-TV.apk"
+            sha256sum "/opt/anime-nova/public/Anime Nova.apk" "/opt/anime-nova/public/Anime-Nova.apk" "/opt/anime-nova/public/nova.apk"
             rm -rf /opt/anime-nova/artifacts/nova-mobile/ota-dist
             rm -rf "$apk_dir"
 

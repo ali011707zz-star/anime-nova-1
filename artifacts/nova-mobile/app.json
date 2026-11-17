@@ -93,8 +93,7 @@
           "organization": "anime-nova",
           "project": "react-native"
         }
-      ],
-      "expo-updates"
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
