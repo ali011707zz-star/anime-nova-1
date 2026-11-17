@@ -92,3 +92,4 @@ artifacts/nova-mobile/.env.production
 
 # Expo OTA build output
 artifacts/nova-mobile/ota-dist/
+artifacts/api-server/data/stardima-v2-catalog.json

@@ -241,6 +241,38 @@ function RootLayout() {
 
   // أظهر شاشة Anime NOVA المخصصة فوراً بدلاً من إبقاء native splash (الأيقونة فقط)
   // فوقها أثناء انتظار الخطوط.
+  // Silent OTA check & background download for v1.0.10+ builds
+  useEffect(() => {
+    if (__DEV__ || Platform.OS === "web" || !RUNTIME_INTEGRITY.trusted) return;
+    let disposed = false;
+    let lastCheckedAt = 0;
+    const checkOta = async () => {
+      if (disposed || AppState.currentState === "background") return;
+      const now = Date.now();
+      if (now - lastCheckedAt < 15 * 60_000) return;
+      lastCheckedAt = now;
+      try {
+        const Updates = await import("expo-updates");
+        if (!Updates.isEnabled) return;
+        const res = await Updates.checkForUpdateAsync();
+        if (res.isAvailable && !disposed) {
+          await Updates.fetchUpdateAsync();
+        }
+      } catch {
+        // Silent OTA check must never interrupt startup or playback.
+      }
+    };
+    const timer = setTimeout(() => { void checkOta(); }, 3000);
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") void checkOta();
+    });
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+      sub.remove();
+    };
+  }, []);
+
   useEffect(() => {
     SplashScreen.hideAsync().catch(() => {});
     if (!RUNTIME_INTEGRITY.trusted) return;

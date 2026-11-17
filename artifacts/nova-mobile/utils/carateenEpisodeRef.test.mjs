@@ -18,6 +18,19 @@ test("parses a Carateen URI case-insensitively and accepts a trailing slash", ()
   });
 });
 
+test("parses a StarDima V2 (sd2) episode and movie URI", () => {
+  assert.deepEqual(parseCarateenEpisodeUrl("carateen://sd2/6aeed362b8a92/105288"), {
+    provider: "sd2",
+    showId: "6aeed362b8a92",
+    episodeId: "105288",
+  });
+  assert.deepEqual(parseCarateenEpisodeUrl("carateen://sd2/6af5fd5d3ae1c/movie-6af5fd5d3ae1c"), {
+    provider: "sd2",
+    showId: "6af5fd5d3ae1c",
+    episodeId: "movie-6af5fd5d3ae1c",
+  });
+});
+
 test("rejects unrelated URLs and incomplete Carateen episode references", () => {
   assert.equal(parseCarateenEpisodeUrl("https://example.com/episode"), null);
   assert.equal(parseCarateenEpisodeUrl("carateen://sp/41"), null);

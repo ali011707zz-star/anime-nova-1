@@ -164,9 +164,13 @@ router.get("/manifest", (req: Request, res: Response) => {
     .send(JSON.stringify(responseManifest));
 });
 
-router.get("/assets/*", (req: Request, res: Response) => {
+router.use("/assets", (req: Request, res: Response, next) => {
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    next();
+    return;
+  }
   const otaDir = resolveOtaDistDir();
-  const relPath = String((req.params as Record<string, string>)[0] || "").replace(/^\/+/, "");
+  const relPath = decodeURIComponent(req.path || "").replace(/^\/+/, "");
   if (!relPath || relPath.includes("..")) {
     res.status(400).json({ error: "Invalid asset path" });
     return;

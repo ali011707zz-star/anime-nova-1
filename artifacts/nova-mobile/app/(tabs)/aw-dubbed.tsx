@@ -63,7 +63,42 @@ interface SpacetoonCatalogCacheEntry {
   savedAt: number;
 }
 
-type TabKey = "animation" | "spacetoon" | "cartoon";
+interface Cartoon2Item {
+  id: number;
+  slug: string;
+  provider: "sd2";
+  providerLabel: string;
+  title: string;
+  image: string;
+  mediaType: "series" | "movie";
+  isMovie: boolean;
+  year: string;
+  languageLabel: string;
+  isDubbed: boolean;
+  isSubbed: boolean;
+  category: string;
+}
+
+interface Cartoon2CacheEntry {
+  items: Cartoon2Item[];
+  page: number;
+  totalPages: number;
+  savedAt: number;
+}
+
+type TabKey = "animation" | "spacetoon" | "cartoon" | "cartoon2";
+type Cartoon2TypeFilter = "all" | "series" | "movie";
+type Cartoon2OrderFilter = "newest" | "oldest" | "title";
+const cartoon2CatalogCache = new Map<string, Cartoon2CacheEntry>();
+function rememberCartoon2Catalog(key: string, entry: Cartoon2CacheEntry): void {
+  cartoon2CatalogCache.delete(key);
+  cartoon2CatalogCache.set(key, entry);
+  while (cartoon2CatalogCache.size > 12) {
+    const oldest = cartoon2CatalogCache.keys().next().value;
+    if (oldest === undefined) break;
+    cartoon2CatalogCache.delete(oldest);
+  }
+}
 const CARTOON_CATALOG_CACHE_KEY = "nova:cartoon-catalog:v2";
 const CARTOON_CATALOG_CACHE_LIMIT = 60;
 const SPACETOON_CATALOG_CACHE_TTL_MS = 10 * 60_000;
@@ -955,6 +990,278 @@ function SpacetoonList({ searchQ }: { searchQ: string }) {
 }
 
 // ─────────────────────────────────────────────────────────
+// كرتون مدبلج 2 list (StarDima V2)
+// ─────────────────────────────────────────────────────────
+
+function isCartoon2Item(item: unknown): item is Cartoon2Item {
+  if (!item || typeof item !== "object") return false;
+  const row = item as Partial<Cartoon2Item>;
+  return row.provider === "sd2" && typeof row.slug === "string" && typeof row.title === "string";
+}
+
+function Cartoon2List({ searchQ }: { searchQ: string }) {
+  const colors = useColors();
+  const { width } = useWindowDimensions();
+  const { gridWidth, columns, gap, cardWidth, cardHeight, tvMode } = getGridMetrics(width);
+  const router = useRouter();
+  const [posterRetryToken, setPosterRetryToken] = useState(0);
+  useFocusEffect(useCallback(() => {
+    setPosterRetryToken(token => token + 1);
+  }, []));
+  const BASE = getBaseUrl();
+  const [typeFilter, setTypeFilter] = useState<Cartoon2TypeFilter>("all");
+  const [orderFilter, setOrderFilter] = useState<Cartoon2OrderFilter>("newest");
+  const queryPart = spacetoonQueryKey(searchQ);
+  const cacheKey = `${typeFilter}|${orderFilter}|${queryPart}`;
+  const initialCache = cartoon2CatalogCache.get(cacheKey);
+  const [items, setItems] = useState<Cartoon2Item[]>(() => initialCache?.items ?? []);
+  const [page, setPage] = useState(() => initialCache?.page ?? 1);
+  const [totalPages, setTotalPages] = useState(() => initialCache?.totalPages ?? 1);
+  const [loading, setLoading] = useState(() => !initialCache?.items.length);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [failedPage, setFailedPage] = useState<number | null>(null);
+  const loadingMoreRef = useRef(false);
+  const requestIdRef = useRef(0);
+
+  const loadPage = useCallback(async (nextPage: number, reset = false) => {
+    if (!reset && loadingMoreRef.current) return;
+    const requestId = ++requestIdRef.current;
+    if (reset) {
+      const cached = cartoon2CatalogCache.get(cacheKey);
+      loadingMoreRef.current = false;
+      setLoading(!cached?.items.length);
+      setLoadingMore(false);
+      setLoadError(false);
+      setFailedPage(null);
+      setItems(cached?.items ?? []);
+      setPage(cached?.page ?? 1);
+      setTotalPages(cached?.totalPages ?? 1);
+    } else {
+      loadingMoreRef.current = true;
+      setLoadingMore(true);
+    }
+    try {
+      const query = searchQ.trim().length >= 2 ? searchQ.trim() : "";
+      const params = new URLSearchParams({
+        page: String(nextPage),
+        limit: "36",
+        type: typeFilter,
+        order: orderFilter,
+      });
+      if (query) params.set("q", query);
+      const response = await fetch(`${BASE}/api/dubbed/sd2/catalog?${params}`);
+      if (!response.ok) throw new Error(`sd2_catalog_${response.status}`);
+      const data = await response.json();
+      if (requestId !== requestIdRef.current) return;
+      const results = Array.isArray(data.results) ? data.results.filter(isCartoon2Item) : [];
+      const responsePage = Number(data.page) || nextPage;
+      const responseTotalPages = Math.max(1, Number(data.totalPages) || 1);
+      const cached = cartoon2CatalogCache.get(cacheKey);
+      const merged = new Map<string, Cartoon2Item>();
+      if (reset) {
+        for (const item of results) merged.set(`${item.mediaType}:${item.slug}`, item);
+        for (const item of cached?.items ?? []) {
+          const k = `${item.mediaType}:${item.slug}`;
+          if (!merged.has(k)) merged.set(k, item);
+        }
+      } else {
+        for (const item of cached?.items ?? []) merged.set(`${item.mediaType}:${item.slug}`, item);
+        for (const item of results) merged.set(`${item.mediaType}:${item.slug}`, item);
+      }
+      const nextItems = [...merged.values()];
+      const nextCachedPage = reset && cached?.items.length ? Math.max(responsePage, cached.page) : responsePage;
+      rememberCartoon2Catalog(cacheKey, {
+        items: nextItems,
+        page: nextCachedPage,
+        totalPages: responseTotalPages,
+        savedAt: Date.now(),
+      });
+      setItems(nextItems);
+      setPage(nextCachedPage);
+      setTotalPages(responseTotalPages);
+      setLoadError(false);
+      setFailedPage(null);
+    } catch {
+      if (requestId === requestIdRef.current) {
+        setLoadError(true);
+        setFailedPage(nextPage);
+      }
+    } finally {
+      if (requestId === requestIdRef.current) {
+        setLoading(false);
+        setLoadingMore(false);
+        loadingMoreRef.current = false;
+      }
+    }
+  }, [BASE, cacheKey, orderFilter, searchQ, typeFilter]);
+
+  useEffect(() => {
+    requestIdRef.current += 1;
+    loadingMoreRef.current = false;
+    const cached = cartoon2CatalogCache.get(cacheKey);
+    if (cached) {
+      setItems(cached.items);
+      setPage(cached.page);
+      setTotalPages(cached.totalPages);
+      setLoading(false);
+      setLoadingMore(false);
+      setLoadError(false);
+      setFailedPage(null);
+    } else {
+      setItems([]);
+      setPage(1);
+      setTotalPages(1);
+      setLoading(true);
+      setLoadError(false);
+      setFailedPage(null);
+    }
+    if (cached && Date.now() - cached.savedAt < SPACETOON_CATALOG_CACHE_TTL_MS) return;
+    const timer = setTimeout(() => { void loadPage(1, true); }, queryPart ? 300 : 0);
+    return () => clearTimeout(timer);
+  }, [cacheKey, loadPage, queryPart]);
+
+  useEffect(() => () => {
+    requestIdRef.current += 1;
+    loadingMoreRef.current = false;
+  }, []);
+
+  const openDetail = (item: Cartoon2Item) => {
+    router.push({
+      pathname: "/dubbed/[id]",
+      params: {
+        id: `sd2-${item.slug}`,
+        provider: "sd2",
+        showId: item.slug,
+        slug: item.slug,
+        isMovie: item.isMovie ? "1" : "0",
+        title: item.title,
+        img: item.image || "",
+        languageLabel: item.languageLabel || "",
+      },
+    });
+  };
+
+  const cycleOrder = () => {
+    setOrderFilter(prev => prev === "newest" ? "oldest" : prev === "oldest" ? "title" : "newest");
+  };
+  const orderLabel = orderFilter === "newest" ? "الأحدث" : orderFilter === "oldest" ? "الأقدم" : "الاسم";
+
+  return (
+    <View style={{ flex: 1 }}>
+      <View style={[s.filterBar, { borderBottomColor: colors.border }]}>
+        <View style={s.filterGroup}>
+          {([
+            { key: "all" as const, label: "الكل" },
+            { key: "series" as const, label: "مسلسلات" },
+            { key: "movie" as const, label: "أفلام" },
+          ]).map(opt => {
+            const active = typeFilter === opt.key;
+            return (
+              <Pressable
+                key={opt.key}
+                onPress={() => setTypeFilter(opt.key)}
+                focusable={tvMode}
+                style={({ focused }) => [
+                  s.filterChip,
+                  { backgroundColor: colors.surface, borderColor: colors.border },
+                  active && { backgroundColor: "rgba(245,158,11,0.16)", borderColor: "rgba(245,158,11,0.55)" },
+                  tvMode && tvFocusStyle(focused),
+                ]}
+              >
+                <Text style={[s.filterChipText, { color: active ? "#FBBF24" : colors.textSecondary }]}>{opt.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        <Pressable
+          onPress={cycleOrder}
+          focusable={tvMode}
+          style={({ focused }) => [
+            s.sortChip,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+            tvMode && tvFocusStyle(focused),
+          ]}
+        >
+          <Ionicons name="swap-vertical" size={13} color="#FBBF24" />
+          <Text style={[s.filterChipText, { color: colors.textPrimary }]}>{orderLabel}</Text>
+        </Pressable>
+      </View>
+
+      <FlatList
+        data={items}
+        style={{ width: gridWidth, alignSelf: "center" }}
+        key={`cartoon2-grid-${columns}`}
+        keyExtractor={item => `sd2:${item.mediaType}:${item.slug}`}
+        numColumns={columns}
+        contentContainerStyle={shared.grid}
+        columnWrapperStyle={{ gap }}
+        initialNumToRender={10}
+        maxToRenderPerBatch={6}
+        updateCellsBatchingPeriod={50}
+        windowSize={tvMode ? 9 : 7}
+        removeClippedSubviews={false}
+        renderItem={({ item }) => (
+          <View style={{ width: cardWidth }}>
+            <PosterCard
+              uri={item.image || null}
+              title={item.title}
+              seasons={0}
+              tint="#F59E0B"
+              badge={item.languageLabel}
+              badgeTint={item.isSubbed ? "#D94141" : "#35B955"}
+              retryToken={posterRetryToken}
+              retryDelayMs={(item.id % 5) * 90}
+              meta={`${item.isMovie ? "فيلم" : "مسلسل"}${item.year ? ` · ${item.year}` : ""}`}
+              testID={`cartoon2-title-${item.slug}`}
+              cardWidth={cardWidth}
+              cardHeight={cardHeight}
+              onPress={() => openDetail(item)}
+            />
+          </View>
+        )}
+        onEndReached={() => {
+          if (!loading && !loadingMore && page < totalPages) void loadPage(page + 1);
+        }}
+        onEndReachedThreshold={0.35}
+        ListFooterComponent={loadingMore ? (
+          <ActivityIndicator color="#FBBF24" style={{ marginVertical: 16 }} />
+        ) : loadError && items.length > 0 ? (
+          <Pressable
+            onPress={() => {
+              const retryPage = failedPage ?? page + 1;
+              void loadPage(retryPage, retryPage === 1);
+            }}
+            style={shared.retryBtn}
+          >
+            <Ionicons name="refresh" size={15} color="#FBBF24" />
+            <Text style={[shared.retryText, { color: colors.buttonText }]}>تعذّر تحميل المزيد — أعد المحاولة</Text>
+          </Pressable>
+        ) : null}
+        ListEmptyComponent={
+          <View style={shared.center}>
+            {loading ? <ActivityIndicator color="#FBBF24" /> : null}
+            {loadError && !loading ? (
+              <>
+                <Text style={[shared.emptyText, { color: colors.textMuted }]}>تعذّر تحميل كرتون مدبلج 2</Text>
+                <Pressable onPress={() => { void loadPage(1, true); }} style={shared.retryBtn}>
+                  <Ionicons name="refresh" size={15} color="#FBBF24" />
+                  <Text style={[shared.retryText, { color: colors.buttonText }]}>إعادة المحاولة</Text>
+                </Pressable>
+              </>
+            ) : !loading ? (
+              <Text style={[shared.emptyText, { color: colors.textMuted }]}>
+                {searchQ.trim().length >= 2 ? "لا توجد نتائج مطابقة" : "لا توجد أعمال متاحة"}
+              </Text>
+            ) : null}
+          </View>
+        }
+      />
+    </View>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
 // Main Screen
 // ─────────────────────────────────────────────────────────
 
@@ -965,11 +1272,13 @@ export default function DubbedTabScreen() {
   const topPad = Platform.OS === "web" ? 0 : insets.top;
   const routeParams = useLocalSearchParams<{ tab?: string | string[] }>();
   const routeTab = Array.isArray(routeParams.tab) ? routeParams.tab[0] : routeParams.tab;
-  const requestedTab: TabKey = routeTab === "cartoon"
-    ? "cartoon"
-    : routeTab === "spacetoon"
-      ? "spacetoon"
-      : "animation";
+  const requestedTab: TabKey = routeTab === "cartoon2"
+    ? "cartoon2"
+    : routeTab === "cartoon"
+      ? "cartoon"
+      : routeTab === "spacetoon"
+        ? "spacetoon"
+        : "animation";
 
   const [activeTab, setActiveTab] = useState<TabKey>(requestedTab);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -977,7 +1286,7 @@ export default function DubbedTabScreen() {
   const searchInput = useRef<TextInput>(null);
 
   // Tab underline slide animation
-  const tabPosition = (tab: TabKey) => tab === "animation" ? 0 : tab === "spacetoon" ? 1 : 2;
+  const tabPosition = (tab: TabKey) => tab === "animation" ? 0 : tab === "spacetoon" ? 1 : tab === "cartoon" ? 2 : 3;
   const slideAnim = useRef(new Animated.Value(tabPosition(requestedTab))).current;
   useEffect(() => {
     setActiveTab(requestedTab);
@@ -1006,7 +1315,9 @@ export default function DubbedTabScreen() {
               ? "أنيميشن مدبلج ومترجم"
               : activeTab === "spacetoon"
                 ? "مسلسلات سبيستون"
-                : "كرتون مدبلج أو مترجم للعربية"}
+                : activeTab === "cartoon2"
+                  ? "مكتبة مسلسلات وأفلام كرتون مدبلج 2"
+                  : "كرتون مدبلج أو مترجم للعربية"}
           </Text>
         </View>
         <Pressable
@@ -1025,9 +1336,9 @@ export default function DubbedTabScreen() {
 
       {/* ── Inner tabs ── */}
       <View style={[s.tabsRow, { borderBottomColor: colors.border }]}>
-        {(["animation", "spacetoon", "cartoon"] as TabKey[]).map(tab => {
+        {(["animation", "spacetoon", "cartoon", "cartoon2"] as TabKey[]).map(tab => {
           const active = activeTab === tab;
-          const color = tab === "animation" ? "#10B981" : tab === "spacetoon" ? "#06B6D4" : "#7C3AED";
+          const color = tab === "animation" ? "#10B981" : tab === "spacetoon" ? "#06B6D4" : tab === "cartoon2" ? "#F59E0B" : "#7C3AED";
           return (
               <Pressable key={tab} testID={`dubbed-tab-${tab}`} onPress={() => handleTab(tab)}
               focusable={tvMode}
@@ -1037,12 +1348,14 @@ export default function DubbedTabScreen() {
                 active && { borderColor: `${color}55`, backgroundColor: `${color}12` },
                 tvMode && tvFocusStyle(focused),
               ]}>
-              <Text style={[s.tabText, { color: active ? color : colors.textSecondary }]}>
+              <Text style={[s.tabText, { color: active ? color : colors.textSecondary }]} numberOfLines={2}>
                 {tab === "animation"
-                  ? "أنيميشن مدبلج ومترجم"
+                  ? "أنيميشن مدبلج"
                   : tab === "spacetoon"
-                    ? "مسلسلات سبيستون"
-                    : "كرتون مدبلج ومترجم"}
+                    ? "سبيستون"
+                    : tab === "cartoon2"
+                      ? "كرتون مدبلج 2"
+                      : "كرتون مدبلج"}
               </Text>
             </Pressable>
           );
@@ -1062,7 +1375,9 @@ export default function DubbedTabScreen() {
                 ? "ابحث في الأنيميشن المدبلج والمترجم..."
                 : activeTab === "spacetoon"
                   ? "ابحث في مسلسلات سبيستون..."
-                  : "ابحث في الكرتون المدبلج والمترجم..."
+                  : activeTab === "cartoon2"
+                    ? "ابحث في كرتون مدبلج 2..."
+                    : "ابحث في الكرتون المدبلج والمترجم..."
             }
             placeholderTextColor={colors.textMuted}
             style={[s.searchInput, { color: colors.textPrimary }]}
@@ -1082,6 +1397,8 @@ export default function DubbedTabScreen() {
         <AnimationList key="animation" searchQ={searchQ} />
       ) : activeTab === "spacetoon" ? (
         <SpacetoonList key="spacetoon" searchQ={searchQ} />
+      ) : activeTab === "cartoon2" ? (
+        <Cartoon2List key="cartoon2" searchQ={searchQ} />
       ) : (
         <CartoonList key="cartoon" searchQ={searchQ} />
       )}
@@ -1109,10 +1426,24 @@ const s = StyleSheet.create({
     alignItems: "center", justifyContent: "center",
   },
   tabsRow: {
-    flexDirection: "row", gap: 10,
-    paddingHorizontal: 16, paddingVertical: 10,
+    flexDirection: "row", gap: 6,
+    paddingHorizontal: 12, paddingVertical: 10,
     borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)",
   },
+  filterBar: {
+    flexDirection: "row-reverse", alignItems: "center", justifyContent: "space-between",
+    paddingHorizontal: 14, paddingVertical: 8, gap: 8,
+    borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)",
+  },
+  filterGroup: { flexDirection: "row-reverse", alignItems: "center", gap: 6 },
+  filterChip: {
+    paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, borderWidth: 1,
+  },
+  sortChip: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, borderWidth: 1,
+  },
+  filterChipText: { fontSize: 11, fontFamily: "Cairo_700Bold" },
   tabBtn: {
     flex: 1, paddingVertical: 8, borderRadius: 14, alignItems: "center",
     backgroundColor: "rgba(255,255,255,0.04)",

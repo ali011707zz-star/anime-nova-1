@@ -24,9 +24,9 @@ import { EpisodeDivider } from "@/components/EpisodeDivider";
 
 const Pressable = TvPressable;
 
-interface Season { label: string; arabicToonsId: string; }
-interface Episode { number: number; epId: string; url: string; thumbnail?: string; videoId?: string; pref?: string; }
-type CarateenProvider = "sp" | "carateen";
+interface Season { label: string; arabicToonsId: string; episodes?: Episode[]; }
+interface Episode { number: number; epId: string; url: string; thumbnail?: string; videoId?: string; pref?: string; watchUrl?: string; }
+type CarateenProvider = "sp" | "carateen" | "sd2";
 
 function apiBase(): string {
   return getBaseUrl().replace(/\/$/, "");
@@ -115,26 +115,37 @@ export default function DubbedDetailScreen() {
     img,
     provider: providerParam,
     showId: showIdParam,
+    slug: slugParam,
     isMovie: isMovieParam,
+    languageLabel: languageLabelParam,
   } = useLocalSearchParams<{
     id: string; title: string; seasons: string; img: string;
-    provider?: string; showId?: string; isMovie?: string;
+    provider?: string; showId?: string; slug?: string; isMovie?: string; languageLabel?: string;
   }>();
 
   const title = titleParam || decodeURIComponent(id || "");
   const providerValue = Array.isArray(providerParam) ? providerParam[0] : providerParam;
   const carateenProvider: CarateenProvider | null =
-    providerValue === "sp" || providerValue === "carateen" ? providerValue : null;
+    providerValue === "sp" || providerValue === "carateen" || providerValue === "sd2" ? providerValue : null;
   const showIdValue = Array.isArray(showIdParam) ? showIdParam[0] : showIdParam;
+  const slugValue = Array.isArray(slugParam) ? slugParam[0] : slugParam;
+  const sd2Slug = (slugValue || showIdValue || "").trim();
   const showId = Number(showIdValue);
-  const isCarateenEntry = !!carateenProvider && Number.isSafeInteger(showId) && showId > 0;
+  const isSd2Entry = carateenProvider === "sd2" && Boolean(sd2Slug);
+  const isCarateenEntry = (carateenProvider === "sp" || carateenProvider === "carateen") && Number.isSafeInteger(showId) && showId > 0;
+  const isExternalProvider = isCarateenEntry || isSd2Entry;
   const isMovie = (Array.isArray(isMovieParam) ? isMovieParam[0] : isMovieParam) === "1";
+  const langLabelStr = (Array.isArray(languageLabelParam) ? languageLabelParam[0] : languageLabelParam) || "";
   const legacySeasons: Season[] = (() => {
     try { return JSON.parse(decodeURIComponent(seasonsParam || "[]")); } catch { return []; }
   })();
-  const seasons: Season[] = isCarateenEntry
-    ? [{ label: "قائمة الحلقات", arabicToonsId: `${carateenProvider}:${showId}` }]
-    : legacySeasons;
+  const [sd2Seasons, setSd2Seasons] = useState<Season[]>([]);
+  const [epDescOrder, setEpDescOrder] = useState(false);
+  const seasons: Season[] = isSd2Entry
+    ? (sd2Seasons.length > 0 ? sd2Seasons : [{ label: isMovie ? "الفيلم" : "قائمة الحلقات", arabicToonsId: `sd2:${sd2Slug}` }])
+    : isCarateenEntry
+      ? [{ label: "قائمة الحلقات", arabicToonsId: `${carateenProvider}:${showId}` }]
+      : legacySeasons;
   const imgSrc = img ? decodeURIComponent(img) : null;
   const posterSrc = imgSrc?.startsWith("http") ? imgSrc : (imgSrc ? `${apiBase()}${imgSrc}` : null);
 
@@ -146,9 +157,11 @@ export default function DubbedDetailScreen() {
   const episodeFocusScroll = useTvListFocusScroll(episodeListRef, 0.35);
 
   const curSeason = seasons[selSeason];
-  const seriesKey = isCarateenEntry
-    ? `${carateenProvider}:${showId}`
-    : (curSeason?.arabicToonsId || id || "");
+  const seriesKey = isSd2Entry
+    ? `sd2:${sd2Slug}`
+    : isCarateenEntry
+      ? `${carateenProvider}:${showId}`
+      : (curSeason?.arabicToonsId || id || "");
   const watchedStorageKey = `watched-dubbed-${seriesKey}`;
 
   const syncWatched = useCallback(() => {
@@ -187,6 +200,53 @@ export default function DubbedDetailScreen() {
   }, [seriesKey, watchedStorageKey]);
 
   useEffect(() => {
+    if (!isSd2Entry) return;
+    const ctrl = new AbortController();
+    setEpLoading(true);
+    setEpisodes([]);
+    setSd2Seasons([]);
+    setSelSeason(0);
+    const endpoint = `${apiBase()}/api/dubbed/sd2/episodes?slug=${encodeURIComponent(sd2Slug)}&mediaType=${isMovie ? "movie" : "series"}`;
+    fetch(endpoint, { signal: ctrl.signal })
+      .then(r => { if (!r.ok) throw new Error(`sd2_episodes_${r.status}`); return r.json(); })
+      .then(d => {
+        if (ctrl.signal.aborted) return;
+        const rawSeasons = Array.isArray(d.seasons) ? d.seasons : [];
+        const mappedSeasons: Season[] = rawSeasons.map((s: any, sIdx: number) => {
+          const epsRaw = Array.isArray(s.episodes) ? s.episodes : [];
+          const mappedEps: Episode[] = epsRaw.map((raw: any, idx: number) => ({
+            number: Number(raw.number || idx + 1) || (idx + 1),
+            epId: String(raw.epId || raw.id || idx + 1),
+            url: String(raw.url || `carateen://sd2/${sd2Slug}/${raw.epId || idx + 1}`),
+            thumbnail: String(raw.thumbnail || d.image || ""),
+            pref: String(raw.title || "").trim(),
+            watchUrl: String(raw.watchUrl || ""),
+          }));
+          return {
+            label: String(s.label || `الموسم ${sIdx + 1}`),
+            arabicToonsId: `sd2:${sd2Slug}:s${s.seasonNumber ?? sIdx + 1}`,
+            episodes: mappedEps,
+          };
+        });
+        if (mappedSeasons.length > 0) {
+          setSd2Seasons(mappedSeasons);
+          setEpisodes(mappedSeasons[0].episodes || []);
+        } else {
+          setEpisodes([]);
+        }
+        setEpLoading(false);
+      })
+      .catch((e) => { if (e?.name !== "AbortError") setEpLoading(false); });
+    return () => ctrl.abort();
+  }, [isSd2Entry, sd2Slug, isMovie]);
+
+  useEffect(() => {
+    if (isSd2Entry) {
+      if (sd2Seasons[selSeason]?.episodes) {
+        setEpisodes(sd2Seasons[selSeason].episodes || []);
+      }
+      return;
+    }
     if (!curSeason) return;
     const ctrl = new AbortController();
     setEpLoading(true);
@@ -214,7 +274,9 @@ export default function DubbedDetailScreen() {
       })
       .catch((e) => { if (e?.name !== "AbortError") setEpLoading(false); });
     return () => ctrl.abort();
-  }, [curSeason?.arabicToonsId, isCarateenEntry, carateenProvider, showId]);
+  }, [curSeason?.arabicToonsId, isCarateenEntry, isSd2Entry, sd2Seasons, selSeason, carateenProvider, showId]);
+
+  const displayedEpisodes = epDescOrder ? [...episodes].reverse() : episodes;
 
   const openWatch = (ep: Episode) => {
     if (seriesKey) {
@@ -230,19 +292,23 @@ export default function DubbedDetailScreen() {
       pathname: "/dubbed/watch",
       params: {
         epUrl: ep.url,
-        series: isCarateenEntry
-          ? `${carateenProvider}:${showId}`
-          : curSeason?.arabicToonsId || "",
+        series: isSd2Entry
+          ? `sd2:${sd2Slug}`
+          : isCarateenEntry
+            ? `${carateenProvider}:${showId}`
+            : curSeason?.arabicToonsId || "",
         title,
         ep: String(ep.number),
         totalEps: String(episodes.length || ep.number),
         season: curSeason?.label || "الموسم 1",
         poster: imgSrc || "",
-        at: isCarateenEntry ? `${carateenProvider}:${showId}` : at,
-        provider: isCarateenEntry ? carateenProvider || "" : "",
-        showId: isCarateenEntry ? String(showId) : "",
-        episodeId: isCarateenEntry ? ep.epId : "",
+        at: isSd2Entry ? `sd2:${sd2Slug}` : isCarateenEntry ? `${carateenProvider}:${showId}` : at,
+        provider: isExternalProvider ? carateenProvider || "" : "",
+        showId: isSd2Entry ? sd2Slug : isCarateenEntry ? String(showId) : "",
+        slug: isSd2Entry ? sd2Slug : "",
+        episodeId: isExternalProvider ? ep.epId : "",
         videoId: isCarateenEntry ? (ep.videoId || "") : "",
+        watchUrl: isSd2Entry ? (ep.watchUrl || "") : "",
         isMovie: isMovie ? "1" : "0",
       },
     });
@@ -351,7 +417,7 @@ export default function DubbedDetailScreen() {
       <TvFocusGuideView autoFocus={tvMode} style={styles.tvFocusGuide}>
         <FlatList
           ref={episodeListRef}
-          data={episodes}
+          data={displayedEpisodes}
           keyExtractor={ep => ep.epId || String(ep.number)}
           renderItem={renderEp}
           onViewableItemsChanged={episodeFocusScroll.onViewableItemsChanged}
@@ -386,10 +452,13 @@ export default function DubbedDetailScreen() {
               <View style={styles.heroInfo}>
                 <Text style={[styles.heroTitle, { color: colors.textPrimary }]}>{title}</Text>
                 <View style={styles.heroMetaRow}>
-                  <View style={styles.badge}>
-                    <Ionicons name="volume-high-outline" size={11} color="#10B981" />
-                    <Text style={styles.badgeText}>
-                      {isCarateenEntry && carateenProvider === "sp" ? "سبيستون مدبلج" : "مدبلج عربي"}
+                  <View style={[
+                    styles.badge,
+                    langLabelStr === "مترجم" && { backgroundColor: "rgba(239,68,68,0.16)", borderColor: "rgba(239,68,68,0.35)" },
+                  ]}>
+                    <Ionicons name="volume-high-outline" size={11} color={langLabelStr === "مترجم" ? "#EF4444" : "#10B981"} />
+                    <Text style={[styles.badgeText, langLabelStr === "مترجم" && { color: "#EF4444" }]}>
+                      {langLabelStr || (isCarateenEntry && carateenProvider === "sp" ? "سبيستون مدبلج" : "مدبلج عربي")}
                     </Text>
                   </View>
                   {watchedCount > 0 ? (
@@ -399,7 +468,9 @@ export default function DubbedDetailScreen() {
                   ) : null}
                 </View>
                 {episodes.length > 0 && (
-                  <Text style={[styles.epCount, { color: colors.textSecondary }]}>{episodes.length} حلقة</Text>
+                  <Text style={[styles.epCount, { color: colors.textSecondary }]}>
+                    {isMovie && episodes.length === 1 ? "فيلم كامل" : `${episodes.length} حلقة`}
+                  </Text>
                 )}
               </View>
             </View>
@@ -434,10 +505,35 @@ export default function DubbedDetailScreen() {
               </ScrollView>
             )}
 
-            <View style={styles.epSectionHeader}>
+            <View style={[styles.epSectionHeader, { justifyContent: "space-between" }]}>
               <Text style={[styles.epSectionTitle, { color: colors.textPrimary }]}>
-                الحلقات {episodes.length > 0 ? `(${episodes.length})` : ""}
+                {isMovie && episodes.length <= 1 ? "المشاهدة" : `الحلقات ${episodes.length > 0 ? `(${episodes.length})` : ""}`}
               </Text>
+              {episodes.length > 1 && (
+                <Pressable
+                  onPress={() => setEpDescOrder(v => !v)}
+                  focusable={tvMode}
+                  style={({ focused }) => [
+                    {
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 4,
+                      paddingHorizontal: 10,
+                      paddingVertical: 4,
+                      borderRadius: 10,
+                      backgroundColor: colors.surface,
+                      borderWidth: 1,
+                      borderColor: colors.border,
+                    },
+                    tvMode && tvFocusStyle(focused),
+                  ]}
+                >
+                  <Ionicons name="swap-vertical" size={13} color="#10B981" />
+                  <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: "Cairo_700Bold" }}>
+                    {epDescOrder ? "الأحدث أولاً" : "من الحلقة 1"}
+                  </Text>
+                </Pressable>
+              )}
             </View>
 
             {epLoading && (

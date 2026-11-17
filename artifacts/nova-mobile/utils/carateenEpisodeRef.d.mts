@@ -1,4 +1,4 @@
-export type CarateenProvider = "sp" | "carateen";
+export type CarateenProvider = "sp" | "carateen" | "sd2";
 export type CarateenEpisodeRef = {
   provider: CarateenProvider;
   showId: string;

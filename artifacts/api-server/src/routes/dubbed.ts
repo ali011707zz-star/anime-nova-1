@@ -4,6 +4,14 @@ import { logger } from "../lib/logger";
 import { mergeAwSourceRows } from "../lib/awSourceRows.mjs";
 import { parseCarateenEpisodeUrl } from "../lib/carateenEpisodeRef.mjs";
 import {
+  findStardimaV2ByIdOrSlug,
+  getStardimaV2Catalog,
+  getStardimaV2Episodes,
+  getStardimaV2Servers,
+  isAllowedHyperwatchingUrl,
+  resolveStardimaV2Stream,
+} from "../lib/stardimaV2Source.js";
+import {
   getCarateenCatalog,
   getCarateenEpisodes,
   getCarateenEpisodeStream,
@@ -702,6 +710,93 @@ router.get("/dubbed/carateen/watch-src", async (req, res) => {
       "dubbed: Carateen stream unavailable",
     );
     res.status(502).json({ error: "تعذر استخراج رابط الحلقة" });
+  }
+});
+
+// ── StarDima V2 (كرتون مدبلج 2) routes ──
+router.get("/dubbed/sd2/catalog", async (req, res) => {
+  const page = Math.max(1, Number.parseInt(String(req.query.page || "1"), 10) || 1);
+  const limit = Math.min(60, Math.max(12, Number.parseInt(String(req.query.limit || "36"), 10) || 36));
+  const query = normalizeCarateenText(String(req.query.q || ""));
+  const typeFilter = String(req.query.type || "all").toLowerCase();
+  const order = req.query.order === "oldest" ? "oldest" : req.query.order === "title" ? "title" : "newest";
+  try {
+    const all = await getStardimaV2Catalog(req.query.refresh === "1");
+    const byType = typeFilter === "series" ? all.filter((e) => e.mediaType === "series") : typeFilter === "movie" ? all.filter((e) => e.mediaType === "movie") : all;
+    const filtered = query ? byType.filter((e) => normalizeCarateenText(e.title + " " + e.languageLabel + " " + e.category).includes(query)) : byType;
+    const sorted = [...filtered].sort((a, b) => {
+      if (order === "title") return a.title.localeCompare(b.title, "ar");
+      const ya = parseInt(a.year || "0", 10) || 0;
+      const yb = parseInt(b.year || "0", 10) || 0;
+      if (order === "oldest") { if (ya && yb && ya !== yb) return ya - yb; return a.id - b.id; }
+      if (ya && yb && ya !== yb) return yb - ya;
+      return 0;
+    });
+    const totalPages = Math.max(1, Math.ceil(sorted.length / limit));
+    const start = (page - 1) * limit;
+    res.setHeader("Cache-Control", req.query.refresh === "1" ? "no-store" : "public, max-age=300");
+    res.json({ results: sorted.slice(start, start + limit), page, limit, totalResults: sorted.length, totalPages, counts: { all: all.length, series: all.filter((e) => e.mediaType === "series").length, movies: all.filter((e) => e.mediaType === "movie").length } });
+  } catch (error) {
+    logger.warn({ err: error }, "dubbed: StarDima V2 catalog unavailable");
+    res.status(502).json({ error: "تعذر تحميل كتالوج كرتون مدبلج 2" });
+  }
+});
+router.get("/dubbed/sd2/episodes", async (req, res) => {
+  const slugParam = String(req.query.slug || req.query.showId || "").trim();
+  const mediaTypeParam = String(req.query.mediaType || "").trim();
+  const mediaTypeHint = mediaTypeParam === "movie" ? "movie" : mediaTypeParam === "series" ? "series" : undefined;
+  if (!slugParam) { res.status(400).json({ error: "slug or showId is required" }); return; }
+  try {
+    const detail = await getStardimaV2Episodes(slugParam, mediaTypeHint, req.query.refresh === "1");
+    const known = findStardimaV2ByIdOrSlug(slugParam);
+    const seasons = detail.seasons.map((season) => ({
+      label: season.label,
+      seasonNumber: season.seasonNumber,
+      episodes: season.episodes.map((ep) => ({
+        number: ep.number,
+        epId: ep.epId,
+        url: "carateen://sd2/" + detail.slug + "/" + ep.epId,
+        watchUrl: ep.watchUrl,
+        title: ep.title,
+        thumbnail: ep.thumbnail || detail.image || known?.image || "",
+        season: ep.seasonNumber,
+        seasonLabel: ep.seasonLabel,
+      })),
+    }));
+    const flatEpisodes = seasons.flatMap((s) => s.episodes);
+    res.setHeader("Cache-Control", req.query.refresh === "1" ? "no-store" : "public, max-age=900");
+    res.json({ slug: detail.slug, title: detail.title, mediaType: detail.mediaType, image: detail.image, year: detail.year, languageLabel: detail.languageLabel, seasons, episodes: flatEpisodes });
+  } catch (error) {
+    logger.warn({ err: error, slug: slugParam }, "dubbed: StarDima V2 episodes unavailable");
+    res.status(502).json({ error: error?.message || "تعذر تحميل حلقات هذا العمل" });
+  }
+});
+router.get("/dubbed/sd2/servers", async (req, res) => {
+  const watchUrl = String(req.query.watchUrl || "").trim();
+  if (!watchUrl || !isAllowedHyperwatchingUrl(watchUrl)) { res.status(400).json({ error: "valid watchUrl is required" }); return; }
+  try {
+    const servers = await getStardimaV2Servers(watchUrl);
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.json({ watchUrl, servers });
+  } catch (error) {
+    logger.warn({ err: error, watchUrl }, "dubbed: StarDima V2 servers unavailable");
+    res.status(502).json({ error: error?.message || "تعذر جلب سيرفرات التشغيل" });
+  }
+});
+router.get("/dubbed/sd2/watch-src", async (req, res) => {
+  const watchUrl = String(req.query.watchUrl || "").trim();
+  const serverId = String(req.query.serverId || "").trim() || undefined;
+  if (!watchUrl || !isAllowedHyperwatchingUrl(watchUrl)) { res.status(400).json({ error: "valid watchUrl is required" }); return; }
+  try {
+    const resolved = await resolveStardimaV2Stream(watchUrl, serverId);
+    const isHls = resolved.type === "hls";
+    const proxyPath = isHls ? "/api/anime/hls-proxy" : "/api/anime/video-proxy";
+    const proxiedUrl = proxyPath + "?url=" + encodeURIComponent(resolved.streamUrl) + "&ref=" + encodeURIComponent(resolved.referer);
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ hlsUrl: proxiedUrl, rawUrl: resolved.streamUrl, referer: resolved.referer, type: resolved.type, serverId: resolved.serverId, serverName: resolved.serverName, quality: resolved.quality });
+  } catch (error) {
+    logger.warn({ err: error, watchUrl, serverId }, "dubbed: StarDima V2 stream unavailable");
+    res.status(502).json({ error: error?.message || "تعذر استخراج رابط الفيديو" });
   }
 });
 

@@ -179,6 +179,23 @@ export default function HomeScreen() {
     return () => ctrl.abort();
   }, []);
 
+  /* ── كرتون مدبلج 2 (sd2) catalog ── */
+  const [cartoon2HomeItems, setCartoon2HomeItems] = useState<any[]>([]);
+  useEffect(() => {
+    const ctrl = new AbortController();
+    fetch(`${getBaseUrl()}/api/dubbed/sd2/catalog?page=1&limit=14`, { signal: ctrl.signal })
+      .then((r) => r.json())
+      .then((d) => {
+        if (!ctrl.signal.aborted && Array.isArray(d.results)) {
+          setCartoon2HomeItems(d.results.slice(0, 14));
+        }
+      })
+      .catch((e) => {
+        if (e?.name !== "AbortError") console.warn("[Home] cartoon2 catalog fetch error");
+      });
+    return () => ctrl.abort();
+  }, []);
+
   /* ── سبيستون مدبلج (spacetoon) catalog ── */
   const [spacetoonHomeItems, setSpacetoonHomeItems] = useState<any[]>([]);
   useEffect(() => {
@@ -301,6 +318,7 @@ export default function HomeScreen() {
     | { kind: "animationHome"; key: string }
     | { kind: "dubbedHome"; key: string }
     | { kind: "spacetoonHome"; key: string }
+    | { kind: "cartoon2Home"; key: string }
     | { kind: "manhwa"; key: string }
     | { kind: "manga"; key: string }
     | { kind: "anilist"; key: string; title: string; items: AnilistMedia[]; onSeeAll: () => void };
@@ -312,6 +330,7 @@ export default function HomeScreen() {
     if (animationHomeRows.length > 0) sections.push({ kind: "animationHome", key: "animationHome" });
     if (dubbedHomeRows.length > 0) sections.push({ kind: "dubbedHome", key: "dubbedHome" });
     if (spacetoonHomeItems.length > 0) sections.push({ kind: "spacetoonHome", key: "spacetoonHome" });
+    if (cartoon2HomeItems.length > 0) sections.push({ kind: "cartoon2Home", key: "cartoon2Home" });
     if (!isTvLayout && manhwaItems.length > 0) sections.push({ kind: "manhwa", key: "manhwa" });
     if (!isTvLayout && mangaItems.length > 0) sections.push({ kind: "manga", key: "manga" });
     if (!isLoading) {
@@ -354,6 +373,7 @@ export default function HomeScreen() {
     animationHomeRows.length,
     dubbedHomeRows.length,
     spacetoonHomeItems.length,
+    cartoon2HomeItems.length,
     isTvLayout,
     manhwaItems.length,
     mangaItems.length,
@@ -901,6 +921,89 @@ export default function HomeScreen() {
                     >
                       <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: isTvLayout ? 12 : 9 }}>
                         سبيستون
+                      </Text>
+                    </View>
+                    <LinearGradient colors={["transparent", "rgba(0,0,0,0.92)"]} style={todayStyles.grad}>
+                      <Text style={todayStyles.title} numberOfLines={2}>{item.title}</Text>
+                    </LinearGradient>
+                  </Pressable>
+                );
+              }}
+              initialNumToRender={isTvLayout ? 5 : 5}
+              maxToRenderPerBatch={isTvLayout ? 4 : 5}
+              windowSize={isTvLayout ? 5 : 3}
+              removeClippedSubviews={false}
+            />
+          </View>
+        )}
+
+        {/* ── كرتون مدبلج 2 ── */}
+        {section.kind === "cartoon2Home" && cartoon2HomeItems.length > 0 && (
+          <View style={{ marginBottom: 24 }}>
+            <SectionHeader
+              onSeeAll={() => router.push({ pathname: "/aw-dubbed" as any, params: { tab: "cartoon2" } })}
+              focusable={isTvLayout && sectionFocusable}
+              onFocus={handleSectionFocus}
+            >
+              <View style={styles.sectionRightRow}>
+                <Text style={[styles.sectionTitle, isTvLayout && styles.tvSectionTitle, { color: colors.text }]}>كرتون مدبلج 2 ✨</Text>
+                <View style={[styles.continueAccent, { backgroundColor: "#F59E0B" }]} />
+              </View>
+            </SectionHeader>
+            <FlatList
+              data={cartoon2HomeItems}
+              horizontal
+              keyExtractor={(item, idx) => `sd2-home:${item.slug || idx}`}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
+              renderItem={({ item }) => {
+                const imgUri = String(item.image || "").trim() || null;
+                return (
+                  <Pressable
+                    onPress={() =>
+                      router.push({
+                        pathname: "/dubbed/[id]" as any,
+                        params: {
+                          id: `sd2-${item.slug}`,
+                          provider: "sd2",
+                          showId: item.slug,
+                          slug: item.slug,
+                          isMovie: item.isMovie ? "1" : "0",
+                          title: item.title,
+                          img: item.image || "",
+                          languageLabel: item.languageLabel || "",
+                        },
+                      })
+                    }
+                    onFocus={handleSectionFocus}
+                    focusable={isTvLayout && sectionFocusable}
+                    style={({ focused }) => [
+                      todayStyles.card,
+                      { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border },
+                      isTvLayout && tvFocusStyle(focused),
+                    ]}
+                  >
+                    {imgUri ? (
+                      <Image source={{ uri: imgUri }} style={todayStyles.img} resizeMode="cover" resizeMethod="resize" fadeDuration={isTvLayout ? 0 : 100} />
+                    ) : (
+                      <View style={[todayStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
+                        <Ionicons name="film-outline" size={28} color="rgba(255,255,255,0.2)" />
+                      </View>
+                    )}
+                    <View
+                      style={{
+                        position: "absolute",
+                        top: 8,
+                        right: 8,
+                        zIndex: 2,
+                        paddingHorizontal: 8,
+                        paddingVertical: 3,
+                        borderRadius: 7,
+                        backgroundColor: item.isSubbed ? "#D94141" : "#F59E0B",
+                      }}
+                    >
+                      <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: isTvLayout ? 12 : 9 }}>
+                        {item.languageLabel || "مدبلج"}
                       </Text>
                     </View>
                     <LinearGradient colors={["transparent", "rgba(0,0,0,0.92)"]} style={todayStyles.grad}>

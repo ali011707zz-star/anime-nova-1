@@ -9,6 +9,10 @@ on:
         description: 'Backend API URL'
         required: false
         default: 'https://animenovaa.duckdns.org'
+      publish_to_website:
+        description: 'Publish built APK to website (nova.apk) - keep false for test builds'
+        required: false
+        default: 'false'
 
 env:
   EXPO_PUBLIC_DOMAIN: ${{ github.event.inputs.backend_domain || 'https://animenovaa.duckdns.org' }}
@@ -439,7 +443,7 @@ jobs:
       # VPS_PASSWORD in the repository's GitHub Actions secrets. The APK
       # remains available as an Actions artifact when these are not configured.
       - name: 🌐 Publish APK to website
-        if: ${{ env.VPS_HOST != '' && env.VPS_USER != '' && env.VPS_PASSWORD != '' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.publish_to_website == 'true' && env.VPS_HOST != '' && env.VPS_USER != '' && env.VPS_PASSWORD != '' }}
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ env.VPS_HOST }}
@@ -451,7 +455,7 @@ jobs:
           overwrite: true
 
       - name: 🔁 Activate website APK
-        if: ${{ env.VPS_HOST != '' && env.VPS_USER != '' && env.VPS_PASSWORD != '' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.publish_to_website == 'true' && env.VPS_HOST != '' && env.VPS_USER != '' && env.VPS_PASSWORD != '' }}
         uses: appleboy/ssh-action@v1.2.2
         env:
           RUN_ID: ${{ github.run_id }}
