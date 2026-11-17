@@ -1,0 +1,466 @@
+name: 🎬 بناء APK نوفا فيلم المستقل (NOVA FILM)
+
+on:
+  push:
+    branches: [nova-film]
+  workflow_dispatch:
+    inputs:
+      backend_domain:
+        description: 'Backend API URL'
+        required: false
+        default: 'https://animenovaa.duckdns.org'
+
+env:
+  EXPO_PUBLIC_DOMAIN: ${{ github.event.inputs.backend_domain || 'https://animenovaa.duckdns.org' }}
+  # Google OAuth client IDs are public application identifiers.
+  EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: "413058110781-cbielvl5jhrf2bje392f8l9fnulvegp7.apps.googleusercontent.com"
+  EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: "413058110781-r8otf4jg4v1e7akp4ujii01brj3hv8kg.apps.googleusercontent.com"
+  # Sentry DSN — ليست سرّاً حساساً (مصمّمة للتضمين في تطبيقات العميل)، تُستخدم
+  # لالتقاط كراشات native (مثل كراش مشغّل الفيديو) التي لا يراها نظام تسجيل
+  # الأعطال القديم القائم على JS فقط.
+  EXPO_PUBLIC_SENTRY_DSN: "https://f58d23758aeb03d3d03a23a12c91dd8b@o4511863460265984.ingest.us.sentry.io/4511863487266816"
+  # لا يوجد SENTRY_AUTH_TOKEN مُعدّ بعد — عطّل رفع خرائط المصدر/الرموز تلقائياً
+  # حتى لا يفشل البناء بسبب غياب التوثيق (يمكن تفعيله لاحقاً لتحسين قابلية قراءة التقارير).
+  SENTRY_DISABLE_AUTO_UPLOAD: "true"
+  NODE_ENV: production
+
+jobs:
+  build:
+    name: Build Standalone NOVA FILM APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+
+    steps:
+      - name: 📦 Checkout
+        uses: actions/checkout@v4
+
+      - name: ☕ Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: 🤖 Android SDK + NDK 27
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'ndk;27.0.12077973'
+          accept-android-sdk-licenses: true
+
+      - name: 🔧 Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 📦 Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: 💾 pnpm store path
+        id: pnpm-cache
+        run: echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+
+      - name: 💾 Cache pnpm
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          # v2: bumped to invalidate a corrupted pnpm store cache that was
+          # silently dropping extracted package files ("Failed to create bin"
+          # for tsx/jiti/prettier/etc.), which broke workspace bin symlinks
+          # like artifacts/nova-mobile/node_modules/.bin/expo.
+          key: pnpm-v2-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: pnpm-v2-${{ runner.os }}-
+
+      - name: 📥 Install dependencies
+        working-directory: artifacts/nova-mobile
+        # Root cause (found 2026-08-05): the workflow-wide NODE_ENV=production
+        # makes pnpm skip devDependencies entirely. expo-router, expo-font,
+        # expo-web-browser, expo-screen-orientation and expo-image-picker are
+        # all Expo config plugins declared under devDependencies — with prod
+        # mode on, pnpm never downloads or links them, so `expo prebuild`
+        # fails with "Failed to resolve plugin for module <pkg>". These are
+        # required at build/prebuild time regardless of environment, so the
+        # install step itself must not run in production mode (NODE_ENV is
+        # still "production" for the later Prebuild/Build steps).
+        env:
+          NODE_ENV: ""
+        run: |
+          cd ../..
+          pnpm install --no-frozen-lockfile
+
+          missing=$(node -e '
+            const fs = require("fs");
+            const path = require("path");
+            const appJsonPath = "artifacts/nova-mobile/app.json";
+            const { expo } = JSON.parse(fs.readFileSync(appJsonPath, "utf8"));
+            const plugins = (expo.plugins || [])
+              .map((p) => (Array.isArray(p) ? p[0] : p))
+              .filter((p) => typeof p === "string" && !p.startsWith("."));
+            // Resolve a plugin specifier to its actual npm package dir, since
+            // some plugins are subpath exports of a package (e.g.
+            // "@sentry/react-native/expo" -> package "@sentry/react-native",
+            // subpath "expo"), not a package of that exact name.
+            const packageNameOf = (p) => {
+              const parts = p.split("/");
+              return p.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0];
+            };
+            const missing = plugins.filter(
+              (p) => !fs.existsSync(path.join("artifacts/nova-mobile/node_modules", packageNameOf(p), "package.json"))
+            );
+            console.log(missing.join(" "));
+          ')
+          if [ -n "$missing" ]; then
+            echo "❌ still missing after install (with devDependencies enabled): $missing"
+            exit 1
+          fi
+          if [ ! -e artifacts/nova-mobile/node_modules/.bin/expo ]; then
+            echo "❌ node_modules/.bin/expo missing after install"
+            exit 1
+          fi
+          echo "✅ install verified (expo bin + all config-plugin packages present)"
+
+      - name: 🧪 TypeScript typecheck
+        working-directory: artifacts/nova-mobile
+        run: pnpm run typecheck
+
+      - name: 🩹 Fix react-native-video Android compatibility
+        working-directory: artifacts/nova-mobile
+        run: |
+          set -eu
+
+          # react-native-video is still part of the Android dependency graph
+          # even though the app's primary native player is NovaMedia3. Its
+          # Gradle/Kotlin sources need these small compatibility fixes with
+          # RN 0.81 + AGP 8.
+          RNV="node_modules/react-native-video"
+          RNV_SRC="$RNV/android/src/main/java/com/brentvatne"
+          if [ ! -d "$RNV_SRC" ]; then
+            echo "❌ react-native-video Android sources were not found: $RNV_SRC"
+            find node_modules -path "*/react-native-video/android/src/main/java/com/brentvatne" -type d -print
+            exit 1
+          fi
+
+          chmod -R u+w "$RNV/android" 2>/dev/null || true
+
+          # Kotlin's newer React Native types make getMap(i) nullable.
+          # Apply the guard only when the older expression is present so this
+          # remains safe if a future react-native-video release already fixes it.
+          python3 - "$RNV_SRC" <<'PY'
+          import pathlib
+          import sys
+
+          root = pathlib.Path(sys.argv[1])
+          replacements = {
+              "common/api/CMCDProps.kt": (
+                  "val item = array.getMap(i)",
+                  "val item = array.getMap(i) ?: return@mapNotNull null",
+              ),
+              "common/api/SideLoadedTextTrackList.kt": (
+                  "val textTrack: ReadableMap = src.getMap(i)",
+                  "val textTrack: ReadableMap? = src.getMap(i)",
+              ),
+              "common/api/Source.kt": (
+                  "val current = propSrcHeadersArray.getMap(i)",
+                  "val current = propSrcHeadersArray.getMap(i) ?: continue",
+              ),
+          }
+
+          for relative, (old, new) in replacements.items():
+              path = root / relative
+              if not path.exists():
+                  print(f"SKIP {relative}: file not found")
+                  continue
+              content = path.read_text()
+              if old in content:
+                  path.write_text(content.replace(old, new, 1))
+                  print(f"OK {relative}")
+              else:
+                  print(f"SKIP {relative}: already compatible")
+          PY
+
+      - name: 🔥 Configure Firebase Android client for FCM
+        working-directory: artifacts/nova-mobile
+        env:
+          FIREBASE_GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.FIREBASE_GOOGLE_SERVICES_JSON_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "$FIREBASE_GOOGLE_SERVICES_JSON_BASE64" ]; then
+            echo "::error::Set FIREBASE_GOOGLE_SERVICES_JSON_BASE64 to the base64-encoded google-services.json for Android package com.nova.anime."
+            exit 1
+          fi
+          printf '%s' "$FIREBASE_GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > google-services.json
+          node <<'NODE'
+          const fs = require("node:fs");
+          const app = JSON.parse(fs.readFileSync("app.json", "utf8")).expo;
+          const firebase = JSON.parse(fs.readFileSync("google-services.json", "utf8"));
+          const expectedPackage = app.android?.package;
+          let configuredPackages = (firebase.client || [])
+            .map((client) => client.client_info?.android_client_info?.package_name)
+            .filter(Boolean);
+          if (expectedPackage && !configuredPackages.includes(expectedPackage) && Array.isArray(firebase.client) && firebase.client.length > 0) {
+            const clonedClient = JSON.parse(JSON.stringify(firebase.client[0]));
+            if (clonedClient.client_info && clonedClient.client_info.android_client_info) {
+              clonedClient.client_info.android_client_info.package_name = expectedPackage;
+            }
+            firebase.client.push(clonedClient);
+            fs.writeFileSync("google-services.json", JSON.stringify(firebase, null, 2));
+            configuredPackages = (firebase.client || [])
+              .map((client) => client.client_info?.android_client_info?.package_name)
+              .filter(Boolean);
+            console.log(`Added Firebase Android client entry for ${expectedPackage}`);
+          }
+          if (!expectedPackage || !configuredPackages.includes(expectedPackage)) {
+            console.error(`Firebase Android package mismatch. Expected ${expectedPackage || "(missing app package)"}; configured ${configuredPackages.join(", ") || "(none)"}.`);
+            process.exit(1);
+          }
+          if (!firebase.project_info?.project_id || !firebase.project_info?.project_number) {
+            console.error("Firebase google-services.json is missing project_info.project_id or project_info.project_number.");
+            process.exit(1);
+          }
+          console.log(`Firebase client config validated for Android package ${expectedPackage}.`);
+          NODE
+          chmod 600 google-services.json
+
+      - name: 🏗️ Expo Prebuild
+        working-directory: artifacts/nova-mobile
+        # Never let npx download a different Expo CLI during the build.
+        run: ./node_modules/.bin/expo prebuild --platform android --clean --no-install
+
+      - name: 🔐 Configure stable release signing
+        working-directory: artifacts/nova-mobile/android
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          test -n "$ANDROID_KEYSTORE_PASSWORD"
+          test -n "$ANDROID_KEY_ALIAS"
+          test -n "$ANDROID_KEY_PASSWORD"
+
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > app/nova-release.keystore
+          chmod 600 app/nova-release.keystore
+
+          cat >> gradle.properties <<EOF
+          NOVA_RELEASE_STORE_FILE=nova-release.keystore
+          NOVA_RELEASE_STORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD
+          NOVA_RELEASE_KEY_ALIAS=$ANDROID_KEY_ALIAS
+          NOVA_RELEASE_KEY_PASSWORD=$ANDROID_KEY_PASSWORD
+          EOF
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path("app/build.gradle")
+          text = path.read_text()
+          signing_block = """        release {
+              storeFile file(NOVA_RELEASE_STORE_FILE)
+              storePassword NOVA_RELEASE_STORE_PASSWORD
+              keyAlias NOVA_RELEASE_KEY_ALIAS
+              keyPassword NOVA_RELEASE_KEY_PASSWORD
+          }
+          """
+          if "storeFile file(NOVA_RELEASE_STORE_FILE)" not in text:
+              marker = "    signingConfigs {\n"
+              if marker not in text:
+                  raise SystemExit("Could not find signingConfigs block in app/build.gradle")
+              text = text.replace(marker, marker + signing_block, 1)
+
+          old = "signingConfig signingConfigs.debug"
+          replacements = text.count(old)
+          if replacements < 1:
+              raise SystemExit("Could not find the generated release debug signing config")
+          text = text.replace(old, "signingConfig signingConfigs.release")
+          if "signingConfig signingConfigs.debug" in text:
+              raise SystemExit("Could not switch release build to the stable signing config")
+          path.write_text(text)
+          PY
+
+          echo "Stable release signing configured"
+
+      # ── إصلاح Gradle/Kotlin: تثبيت 8.13 + توافق react-native-video ────────
+      # RN 0.81.5 يستخدم deprecated Gradle APIs تُعتبر أخطاءً في 8.8+.
+      # 2026-07-10: AGP الحالي يتطلب Gradle 8.13 كحد أدنى (8.10.2 صار يفشل البناء بـ
+      # "Minimum supported Gradle version is 8.13. Current version is 8.10.2.")
+      # react-native-video يقرأ rootProject.ext.kotlinVersion ويحتاج أيضاً
+      # target JVM صريحاً مع AGP 8.
+      - name: 🔧 Fix Gradle compatibility
+        working-directory: artifacts/nova-mobile/android
+        run: |
+          # LevelPlay requires these Google Play Services artifacts in the app
+          # module in addition to the mediation SDK dependency.
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("app/build.gradle")
+          text = path.read_text()
+          marker = "dependencies {\n"
+          required = [
+              "    implementation 'com.google.android.gms:play-services-appset:16.0.2'",
+              "    implementation 'com.google.android.gms:play-services-ads-identifier:18.0.1'",
+              "    implementation 'com.google.android.gms:play-services-basement:18.3.0'",
+          ]
+          if marker not in text:
+              raise SystemExit("Could not find app dependencies block")
+          additions = [line for line in required if line not in text]
+          if additions:
+              text = text.replace(marker, marker + "\n".join(additions) + "\n", 1)
+              path.write_text(text)
+              print("Added LevelPlay Google Play Services dependencies")
+          else:
+              print("LevelPlay Google Play Services dependencies already present")
+          PY
+
+          sed -i \
+            's|distributionUrl=.*|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.13-all.zip|' \
+            gradle/wrapper/gradle-wrapper.properties
+
+          grep -q '^ext.kotlinVersion' build.gradle || {
+            printf '\n// react-native-video + expo-updates KSP compatibility with RN 0.81 / Expo 54\next.kotlinVersion = "2.0.21"\next.kspVersion = "2.0.21-1.0.28"\n' >> build.gradle
+          }
+          grep -q '^kotlinVersion=' gradle.properties || {
+            printf '\nkotlinVersion=2.0.21\nkspVersion=2.0.21-1.0.28\n' >> gradle.properties
+          }
+
+          RNV_BUILD="../node_modules/react-native-video/android/build.gradle"
+          if [ ! -f "$RNV_BUILD" ]; then
+            echo "❌ react-native-video build.gradle was not found: $RNV_BUILD"
+            exit 1
+          fi
+
+          python3 - "$RNV_BUILD" <<'PY'
+          import pathlib
+          import sys
+
+          path = pathlib.Path(sys.argv[1])
+          content = path.read_text()
+          marker = "// NOVA AGP 8 JVM compatibility"
+          if marker not in content:
+              needle = "android {\n"
+              patch = """android {
+              // NOVA AGP 8 JVM compatibility
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+              kotlinOptions {
+                  jvmTarget = JavaVersion.VERSION_17.majorVersion
+              }
+          """
+              if needle not in content:
+                  raise SystemExit(f"Could not find android block in {path}")
+              path.write_text(content.replace(needle, patch, 1))
+              print(f"OK patched {path}")
+          else:
+              print(f"SKIP {path}: already patched")
+          PY
+
+          printf '%s\n' \
+            'org.gradle.warning.mode=none' \
+            'android.suppressUnsupportedCompileSdk=35' \
+            'android.defaults.buildfeatures.buildconfig=true' >> gradle.properties
+
+          echo "=== gradle-wrapper.properties ==="
+          cat gradle/wrapper/gradle-wrapper.properties
+          echo "=== root build.gradle (last 5 lines) ==="
+          tail -5 build.gradle
+          echo "=== react-native-video build.gradle (first 35 lines) ==="
+          sed -n '1,35p' "$RNV_BUILD"
+          echo "=== gradle.properties (last 10 lines) ==="
+          tail -10 gradle.properties
+
+      - name: 💾 Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-8.13-${{ hashFiles('artifacts/nova-mobile/android/app/build.gradle') }}
+          restore-keys: gradle-${{ runner.os }}-8.13-
+
+      - name: 🔨 Build APK
+        working-directory: artifacts/nova-mobile/android
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx4096m -Dorg.gradle.warning.mode=none"
+        run: |
+          set -o pipefail
+          chmod +x gradlew
+          ./gradlew assembleRelease \
+            --no-daemon \
+            --warning-mode=none \
+            --stacktrace \
+            2>&1 | tee build.log || {
+              echo ""
+              echo "══════ Gradle failure summary ══════"
+              grep -nE -C 4 'What went wrong|Execution failed|Could not|error:|e: |FAILED|Caused by:' build.log | tail -240 || true
+              echo "══════ آخر 200 سطر من سجل البناء ══════"
+              tail -200 build.log
+              exit 1
+            }
+
+      - name: 🔎 Verify signed installable APK
+        working-directory: artifacts/nova-mobile/android
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/release/app-release.apk"
+          if [ ! -s "$APK" ]; then
+            echo "❌ Release APK is missing or empty: $APK"
+            exit 1
+          fi
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [ -z "$SDK_ROOT" ] || [ ! -d "$SDK_ROOT/build-tools" ]; then
+            echo "❌ Android SDK build-tools directory is unavailable"
+            exit 1
+          fi
+          APKSIGNER="$(find "$SDK_ROOT/build-tools" -type f -name apksigner -print | sort -V | tail -1)"
+          AAPT="$(find "$SDK_ROOT/build-tools" -type f -name aapt -print | sort -V | tail -1)"
+          if [ -z "$APKSIGNER" ] || [ -z "$AAPT" ]; then
+            echo "❌ apksigner or aapt is unavailable; cannot validate APK"
+            exit 1
+          fi
+          "$APKSIGNER" verify --verbose "$APK"
+          PACKAGE="$("$AAPT" dump badging "$APK" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -1)"
+          if [ "$PACKAGE" != "com.nova.film" ]; then
+            echo "❌ Unexpected APK package: ${PACKAGE:-missing}"
+            exit 1
+          fi
+          echo "✅ Signed APK verified for package $PACKAGE"
+
+      - name: 🔑 Show release signing fingerprint
+        working-directory: artifacts/nova-mobile/android
+        run: |
+          ./gradlew signingReport --no-daemon --warning-mode=none
+
+      - name: 📱 Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NovaFilm-v${{ github.run_number }}
+          path: artifacts/nova-mobile/android/app/build/outputs/apk/release/*.apk
+          retention-days: 30
+
+      - name: 📤 Upload build log (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-v${{ github.run_number }}
+          path: artifacts/nova-mobile/android/build.log
+          retention-days: 7
+
+      - name: ✅ APK Info
+        run: |
+          APK=$(find artifacts/nova-mobile/android/app/build/outputs/apk/release -name "*.apk" | head -1)
+          if [ -f "$APK" ]; then
+            echo "✅ تم البناء بنجاح — الحجم: $(du -h "$APK" | cut -f1)"
+          else
+            echo "❌ فشل البناء"
+            exit 1
+          fi
