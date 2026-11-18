@@ -13,7 +13,7 @@ import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch } from "@/utils/secureApi";
-import { toggleTvMode, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
+import { setTvFullScreenOverlayActive, toggleTvMode, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { useWindowDimensions } from "react-native";
 
 const { width: W } = Dimensions.get("window");
@@ -171,8 +171,30 @@ export function DrawerMenu({ visible, onClose }: Props) {
   const opacity = useRef(new Animated.Value(visible ? 1 : 0)).current;
 
   useEffect(() => {
+    if (!tvMode) {
+      setTvFullScreenOverlayActive(false);
+      return;
+    }
+    setTvFullScreenOverlayActive(visible);
+    return () => {
+      setTvFullScreenOverlayActive(false);
+    };
+  }, [tvMode, visible]);
+
+  useEffect(() => {
     if (visible) {
       setMounted(true);
+      if (tvMode) {
+        slideX.setValue(0);
+        opacity.setValue(0);
+        Animated.timing(opacity, {
+          toValue: 1,
+          duration: 120,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }).start();
+        return;
+      }
       slideX.setValue(drawerWidth);
       opacity.setValue(0);
       const raf = requestAnimationFrame(() => {
@@ -195,6 +217,11 @@ export function DrawerMenu({ visible, onClose }: Props) {
       return () => cancelAnimationFrame(raf);
     }
     if (mounted) {
+      if (tvMode) {
+        setMounted(false);
+        opacity.setValue(0);
+        return;
+      }
       Animated.parallel([
         Animated.timing(slideX, {
           toValue: drawerWidth,
@@ -212,7 +239,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
         if (finished) setMounted(false);
       });
     }
-  }, [drawerWidth, mounted, opacity, slideX, visible]);
+  }, [drawerWidth, mounted, opacity, slideX, tvMode, visible]);
 
   useEffect(() => {
     if (!visible || Platform.OS !== "android") return;
@@ -228,10 +255,13 @@ export function DrawerMenu({ visible, onClose }: Props) {
     requestAnimationFrame(() => router.push(route as any));
   }
 
-  if (!mounted) return null;
+  if (tvMode ? !visible : !mounted) return null;
 
   const content = (
-    <View style={[StyleSheet.absoluteFillObject, { zIndex: 9999, elevation: 9999 }]}>
+    <View
+      testID={tvMode && visible ? "nova-tv-modal-root" : undefined}
+      style={[StyleSheet.absoluteFillObject, { zIndex: 9999, elevation: 9999 }]}
+    >
       {/* Backdrop */}
       <Animated.View style={[s.backdrop, { opacity }]}>
         <Pressable style={StyleSheet.absoluteFill} focusable={false} accessible={false} onPress={onClose} />
@@ -239,7 +269,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
 
       {/* Drawer panel — slides from RIGHT (RTL) */}
       <Animated.View
-        renderToHardwareTextureAndroid={true}
+        renderToHardwareTextureAndroid={!tvMode}
         shouldRasterizeIOS={true}
         style={[s.drawer, tvMode && s.tvDrawer, { width: drawerWidth, transform: [{ translateX: slideX }], paddingTop: topPad, backgroundColor: colors.surface, borderLeftColor: colors.border }]}
       >
@@ -267,7 +297,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
             </View>
             <Pressable
               onPress={onClose}
-              focusable={tvMode}
+              focusable={tvMode && visible}
               hitSlop={10}
               accessibilityRole="button"
               accessibilityLabel="إغلاق القائمة"
@@ -285,7 +315,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
           {/* ── Enhanced User Profile Card ── */}
           <Pressable
             onPress={() => nav(isLogged ? "/profile" : "/settings")}
-            focusable={tvMode}
+            focusable={tvMode && visible}
             style={({ focused }) => [
               s.userCard,
               tvMode && s.tvUserCard,
@@ -348,7 +378,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
           {/* ── Main navigation ── */}
           <SectionHeading label="القائمة الرئيسية" colors={colors} />
           {visibleNavMain.map((item, idx) => (
-            <DrawerItem key={item.label} item={item} tvMode={tvMode} hasTVPreferredFocus={tvMode && idx === 0} colors={colors} onPress={() => nav(item.route)} />
+            <DrawerItem key={item.label} item={item} tvMode={tvMode && visible} hasTVPreferredFocus={tvMode && visible && idx === 0} colors={colors} onPress={() => nav(item.route)} />
           ))}
 
           {/* ── Library ── */}
@@ -358,7 +388,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
               key={item.label}
               item={item}
               badge={item.label === "المفضلة" ? visibleFavoritesCount : watchHistory.length}
-              tvMode={tvMode}
+              tvMode={tvMode && visible}
               colors={colors}
               onPress={() => nav(item.route)}
             />
@@ -375,7 +405,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
               showChevron: false,
               color: tvMode ? "#06b6d4" : "#8B5CF6",
             }}
-            tvMode={tvMode}
+            tvMode={tvMode && visible}
             colors={colors}
             onPress={() => {
               toggleTvMode();
@@ -390,7 +420,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
               showChevron: false,
               color: "#0EA5E9",
             }}
-            tvMode={tvMode}
+            tvMode={tvMode && visible}
             colors={colors}
             onPress={() => {
               onClose();
@@ -398,7 +428,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
             }}
           />
           {NAV_OTHER.map((item) => (
-            <DrawerItem key={item.label} item={item} tvMode={tvMode} colors={colors} onPress={() => nav(item.route)} />
+            <DrawerItem key={item.label} item={item} tvMode={tvMode && visible} colors={colors} onPress={() => nav(item.route)} />
           ))}
 
           {/* ── Footer ── */}
@@ -414,7 +444,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
     </View>
   );
 
-  if (Platform.OS === "web") {
+  if (tvMode || Platform.OS === "android" || Platform.OS === "web") {
     return content;
   }
 

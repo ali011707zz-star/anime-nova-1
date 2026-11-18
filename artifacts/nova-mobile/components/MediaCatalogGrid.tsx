@@ -192,7 +192,6 @@ export function MediaCatalogGrid({
   const requestSequence = useRef(0);
   const controllerRef = useRef<AbortController | null>(null);
   const flatListRef = useRef<FlatList<CatalogMedia>>(null);
-  const rowStep = posterHeight + 82;
 
   const cacheKey = `${mediaType}_${variant}_${countryOfOrigin || ""}_${status || ""}_${format || ""}_${search || ""}_${sort}`;
 
@@ -385,15 +384,6 @@ export function MediaCatalogGrid({
         testID={tvMode && index === 0 ? "nova-tv-preferred-focus" : `catalog-item-${item.id}`}
         hasTVPreferredFocus={tvMode && index === 0}
         onPress={() => openMedia(item)}
-        onFocus={() => {
-          if (!tvMode) return;
-          const rowIdx = Math.floor(index / columns);
-          try {
-            flatListRef.current?.scrollToIndex({ index: rowIdx, animated: true, viewPosition: 0.35 });
-          } catch {
-            flatListRef.current?.scrollToOffset({ offset: Math.max(0, rowIdx * rowStep - 80), animated: true });
-          }
-        }}
         focusable={tvMode}
         style={({ focused }) => [
           styles.card,
@@ -508,9 +498,6 @@ export function MediaCatalogGrid({
     <FlatList
       ref={flatListRef}
       key={`catalog-${columns}`}
-      onScrollToIndexFailed={({ index: rowIdx }) => {
-        flatListRef.current?.scrollToOffset({ offset: Math.max(0, rowIdx * rowStep - 80), animated: true });
-      }}
       data={items}
       numColumns={columns}
       keyExtractor={(item) => String(item.id)}

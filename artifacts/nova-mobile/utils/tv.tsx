@@ -3,9 +3,9 @@ import React from "react";
 import {
   DeviceEventEmitter,
   Dimensions,
+  findNodeHandle,
   Platform,
   Pressable,
-  StyleSheet,
   View,
   useWindowDimensions,
 } from "react-native";
@@ -26,19 +26,22 @@ let hardwareDpadDetected = false;
 let cachedHardwareTv: boolean | null = null;
 const tvListeners = new Set<() => void>();
 let activeClearFocusFn: (() => void) | null = null;
+let activeFocusNodeTag: number | null = null;
 
-export function claimTvFocus(clearFn: () => void) {
+export function claimTvFocus(clearFn: () => void, nodeTag?: number | null) {
   if (activeClearFocusFn && activeClearFocusFn !== clearFn) {
     try {
       activeClearFocusFn();
     } catch {}
   }
   activeClearFocusFn = clearFn;
+  activeFocusNodeTag = typeof nodeTag === "number" ? nodeTag : null;
 }
 
 export function releaseTvFocus(clearFn: () => void) {
   if (activeClearFocusFn === clearFn) {
     activeClearFocusFn = null;
+    activeFocusNodeTag = null;
   }
 }
 
@@ -86,10 +89,12 @@ if (Platform.OS === "android") {
         notifyTvListeners();
       }
     });
-    DeviceEventEmitter.addListener("novaTvFocusChanged", () => {
-      if (activeClearFocusFn) {
+    DeviceEventEmitter.addListener("novaTvFocusChanged", (evt: any) => {
+      const nextTag = typeof evt?.viewTag === "number" ? evt.viewTag : null;
+      if (activeClearFocusFn && (nextTag === null || activeFocusNodeTag === null || nextTag !== activeFocusNodeTag)) {
         const fn = activeClearFocusFn;
         activeClearFocusFn = null;
+        activeFocusNodeTag = null;
         try {
           fn();
         } catch {}
@@ -233,12 +238,10 @@ export function tvFocusStyle(focused: boolean, isWhite?: boolean): ViewStyle {
   const white = typeof isWhite === "boolean" ? isWhite : activeThemeIsWhite;
   if (white) {
     return {
-      borderWidth: 2.5,
       borderColor: "#EA580C",
     };
   }
   return {
-    borderWidth: 2.5,
     borderColor: "#FACC15",
   };
 }
@@ -361,19 +364,14 @@ export const TvPressable = React.forwardRef<View, TvPressableProps>(function TvP
   }, [focused]);
   React.useEffect(() => {
     if (!tv || !hasTVPreferredFocus || isDisabled) return;
-    const tryFocus = () => {
+    const t1 = setTimeout(() => {
       if (focusedRef.current) return;
       try {
         (innerRef.current as any)?.focus?.();
       } catch {}
-    };
-    const raf = requestAnimationFrame(tryFocus);
-    const t1 = setTimeout(tryFocus, 55);
-    const t2 = setTimeout(tryFocus, 160);
+    }, 45);
     return () => {
-      cancelAnimationFrame(raf);
       clearTimeout(t1);
-      clearTimeout(t2);
     };
   }, [tv, hasTVPreferredFocus, isDisabled]);
 
@@ -390,7 +388,8 @@ export const TvPressable = React.forwardRef<View, TvPressableProps>(function TvP
       android_disableSound={false}
       android_ripple={tv ? null : props.android_ripple}
       onFocus={(event: any) => {
-        claimTvFocus(clearSelfFocus);
+        const tag = innerRef.current ? findNodeHandle(innerRef.current) : null;
+        claimTvFocus(clearSelfFocus, tag);
         setFocused(true);
         onFocus?.(event);
       }}
@@ -414,42 +413,13 @@ export const TvPressable = React.forwardRef<View, TvPressableProps>(function TvP
         ];
       }}
     >
-      {(state: PressableStateCallbackType) => {
-        if (!tv) {
-          return typeof children === "function"
-            ? (children as any)({ ...state, focused: false })
-            : children;
-        }
-        const isFocused = Boolean(focused || (state as any)?.focused);
-        const resolvedChildren =
-          typeof children === "function"
-            ? (children as any)({ ...state, focused: isFocused })
-            : children;
-        if (!isFocused) return resolvedChildren;
-        const baseStyle = typeof style === "function" ? style({ ...state, focused: true }) : style;
-        const flat = StyleSheet.flatten(baseStyle) as ViewStyle | undefined;
-        if (flat?.overflow !== "hidden") return resolvedChildren;
-        const radius = typeof flat?.borderRadius === "number" ? flat.borderRadius : 12;
-        return (
-          <>
-            {resolvedChildren}
-            <View
-              pointerEvents="none"
-              style={{
-                position: "absolute",
-                top: 0,
-                right: 0,
-                bottom: 0,
-                left: 0,
-                borderRadius: radius,
-                borderWidth: 2.5,
-                borderColor: activeThemeIsWhite ? "#EA580C" : "#FACC15",
-                zIndex: 999,
-              }}
-            />
-          </>
-        );
-      }}
+      {typeof children === "function"
+        ? (state: PressableStateCallbackType) =>
+            (children as any)({
+              ...state,
+              focused: tv ? Boolean(focused || (state as any)?.focused) : false,
+            })
+        : children}
     </Pressable>
   );
 });

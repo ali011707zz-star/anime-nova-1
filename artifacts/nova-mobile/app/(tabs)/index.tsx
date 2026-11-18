@@ -71,7 +71,6 @@ export default function HomeScreen() {
   const todayEpsListRef = useRef<FlatList<any> | null>(null);
   const dubbedRailListRef = useRef<FlatList<any> | null>(null);
   const mangaRailListRef = useRef<FlatList<any> | null>(null);
-  const { scrollToFocusedIndex: scrollHomeSectionIntoView } = useTvListFocusScroll(homeListRef, 0.22);
   const { scrollToFocusedIndex: scrollContinueIntoView } = useTvListFocusScroll(continueListRef, 0.35);
   const { scrollToFocusedIndex: scrollTodayEpsIntoView } = useTvListFocusScroll(todayEpsListRef, 0.35);
   const { scrollToFocusedIndex: scrollDubbedRailIntoView } = useTvListFocusScroll(dubbedRailListRef, 0.35);
@@ -413,9 +412,9 @@ export default function HomeScreen() {
     [railCardWidth, railStride],
   );
 
-  const renderHomeSection = ({ item: section, index: sectionIndex }: { item: HomeSectionItem; index: number }) => {
+  const renderHomeSection = ({ item: section }: { item: HomeSectionItem; index: number }) => {
     const sectionFocusable = true;
-    const handleSectionFocus = isTvLayout ? () => scrollHomeSectionIntoView(sectionIndex) : undefined;
+    const handleSectionFocus = undefined;
     if (section.kind === "anilist") {
       return (
         <SectionRow
@@ -732,7 +731,10 @@ export default function HomeScreen() {
                 return (
                   <Pressable
                     key={tabOpt.key}
-                    onPress={() => setActiveDubbedTab(tabOpt.key)}
+                    onPress={() => {
+                      setActiveDubbedTab(tabOpt.key);
+                      dubbedRailListRef.current?.scrollToOffset({ offset: 0, animated: false });
+                    }}
                     onFocus={handleSectionFocus}
                     focusable={isTvLayout && sectionFocusable}
                     style={({ focused }) => [
@@ -1329,9 +1331,6 @@ export default function HomeScreen() {
       <FlatList
         ref={homeListRef}
         data={homeSections}
-        onScrollToIndexFailed={({ index }) => {
-          homeListRef.current?.scrollToOffset({ offset: Math.max(0, index * 320), animated: true });
-        }}
         keyExtractor={(item) => item.key}
         renderItem={renderHomeSection}
         ListHeaderComponent={
