@@ -1,0 +1,34 @@
+name: 🚀 نشر تحديث هوائي (OTA)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'artifacts/nova-mobile/app/**'
+      - 'artifacts/nova-mobile/components/**'
+      - 'artifacts/nova-mobile/context/**'
+      - 'artifacts/nova-mobile/hooks/**'
+      - 'artifacts/nova-mobile/utils/**'
+      - 'artifacts/nova-mobile/scripts/export-ota.mjs'
+      - 'artifacts/nova-mobile/scripts/publish-ota.mjs'
+      - '.github/workflows/publish-ota.yml'
+
+jobs:
+  publish-ota:
+    name: Publish OTA Update to VPS
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 🚀 Trigger OTA Export on VPS
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          command_timeout: 8m
+          script: |
+            set -e
+            bash /opt/anime-nova/scripts/publish-ota.sh
+            curl -fsSL http://127.0.0.1:8080/api/ota/status || curl -fsSL https://animenovaa.duckdns.org/api/ota/status
