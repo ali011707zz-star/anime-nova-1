@@ -117,6 +117,7 @@ function RootLayoutNav() {
   const tvMode = isTvDevice(Dimensions.get("window").width, Dimensions.get("window").height);
   const watchScreenOptions = {
     headerShown: false,
+    ...(Platform.OS === "android" ? { animation: "none" as const } : {}),
     ...(tvMode ? { orientation: "landscape" as const } : {}),
   };
 
@@ -368,7 +369,7 @@ function RootContent({
           onClose={onCloseAnnouncement}
         />
       )}
-      {false && !brandSplashVisible && <AppUpdateModal />}
+      {!brandSplashVisible && <AppUpdateModal />}
     </GestureHandlerRootView>
   );
 }

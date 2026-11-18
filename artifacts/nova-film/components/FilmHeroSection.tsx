@@ -58,11 +58,18 @@ export function FilmHeroSection({ items, tvFocusable = true }: Props) {
 
   if (!items.length) return null;
 
+  const lastHeroNavAtRef = useRef(0);
   const openDetails = (item: FilmSummary) => {
+    const now = Date.now();
+    if (now - lastHeroNavAtRef.current < 750) return;
+    lastHeroNavAtRef.current = now;
     router.push({ pathname: "/film/[id]" as any, params: { id: String(item.id), type: item.tmdbType, title: item.titleAr } });
   };
 
   const quickWatch = (item: FilmSummary) => {
+    const now = Date.now();
+    if (now - lastHeroNavAtRef.current < 750) return;
+    lastHeroNavAtRef.current = now;
     router.push({
       pathname: "/film/watch" as any,
       params: {

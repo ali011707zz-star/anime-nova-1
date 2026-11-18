@@ -263,8 +263,12 @@ export default function FilmDetailScreen() {
     [detail],
   );
 
+  const lastWatchPressAtRef = useRef(0);
   const handlePrimaryWatch = useCallback(() => {
     if (!detail) return;
+    const now = Date.now();
+    if (now - lastWatchPressAtRef.current < 750) return;
+    lastWatchPressAtRef.current = now;
     if (detail.tmdbType === "tv") {
       router.push({
         pathname: "/film/episodes/[id]",

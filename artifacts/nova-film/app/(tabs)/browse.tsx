@@ -36,6 +36,7 @@ const FORMAT_OPTIONS: AnimeFilterOption[] = [
   { label: "الكل", value: "all" },
   { label: "أفلام أجنبية", value: "movie" },
   { label: "مسلسلات", value: "series" },
+  { label: "سينما آسيوية وعربية", value: "asian" },
   { label: "أنميشن", value: "animation" },
 ];
 
@@ -84,6 +85,7 @@ const FILTER_GENRES: AnimeFilterOption[] = [
 const FORMAT_AR: Record<string, string> = {
   movie: "أفلام أجنبية",
   series: "مسلسلات",
+  asian: "سينما آسيوية وعربية",
   animation: "أنميشن",
 };
 
@@ -239,6 +241,7 @@ const FilmBrowseCard = React.memo(function FilmBrowseCard({
 export default function BrowseScreen() {
   const params = useLocalSearchParams<{
     category?: string;
+    type?: string;
     genre?: string;
     year?: string;
     sort?: string;
@@ -257,11 +260,14 @@ export default function BrowseScreen() {
   const [filterVisible, setFilterVisible] = useState(false);
 
   const [format, setFormat] = useState<string>(() => {
-    const c = String(params.category || "all");
-    return ["movie", "series", "animation"].includes(c) ? c : "all";
+    const c = String(params.category || params.type || "all");
+    return ["movie", "series", "animation", "asian"].includes(c) ? c : "all";
   });
   const [activeGenre, setActiveGenre] = useState<string>(() => String(params.genre || ""));
-  const [sort, setSort] = useState<string>(() => String(params.sort || "popularity"));
+  const [sort, setSort] = useState<string>(() => {
+    const s = String(params.sort || "popularity");
+    return s === "rating" || s === "year" ? s : "popularity";
+  });
   const [season, setSeason] = useState<string>("");
   const [status, setStatus] = useState<string>("");
   const [year, setYear] = useState<string>(() => String(params.year || ""));
@@ -276,8 +282,15 @@ export default function BrowseScreen() {
   const listRef = useRef<FlatList<FilmSummary>>(null);
 
   useEffect(() => {
-    if (params.category && ["movie", "series", "animation", "all"].includes(params.category)) {
-      setFormat(params.category);
+    const rawCat = params.category ?? params.type;
+    if (typeof rawCat === "string" && ["movie", "series", "animation", "asian", "all"].includes(rawCat)) {
+      setFormat(rawCat);
+      setView("list");
+      setSeason("");
+    }
+    if (typeof params.sort === "string" && ["popularity", "popular", "rating", "year"].includes(params.sort)) {
+      setSort(params.sort === "popular" ? "popularity" : params.sort);
+      setView("list");
     }
     if (typeof params.genre === "string") {
       setActiveGenre(params.genre === "الكل" ? "" : params.genre);
@@ -285,7 +298,8 @@ export default function BrowseScreen() {
     if (typeof params.year === "string") {
       setYear(params.year);
     }
-  }, [params.category, params.genre, params.year]);
+    listRef.current?.scrollToOffset({ offset: 0, animated: false });
+  }, [params.category, params.type, params.sort, params.genre, params.year]);
 
   const effectiveYear = year || season;
 

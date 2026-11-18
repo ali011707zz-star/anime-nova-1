@@ -48,6 +48,7 @@ type HomeRailSpec = {
   accentColor: string;
   items: FilmSummary[];
   browseType: string;
+  browseSort: string;
 };
 
 const QUICK_PILLS = [
@@ -68,7 +69,7 @@ const HomePosterRail = React.memo(function HomePosterRail({
   railCardWidth: number;
   watchedMap: Record<string, boolean>;
   isTv: boolean;
-  onSeeAll: (browseType: string) => void;
+  onSeeAll: (browseType: string, browseSort: string) => void;
 }) {
   const itemStride = railCardWidth + 11;
   return (
@@ -77,7 +78,7 @@ const HomePosterRail = React.memo(function HomePosterRail({
         title={rail.title}
         subtitle={rail.subtitle}
         accentColor={rail.accentColor}
-        onSeeAll={() => onSeeAll(rail.browseType)}
+        onSeeAll={() => onSeeAll(rail.browseType, rail.browseSort)}
         focusable={isTv}
       />
       <FlatList
@@ -209,6 +210,7 @@ export default function NovaFilmHomeScreen() {
         accentColor: "#0EA5E9",
         items: trendingMovies,
         browseType: "movie",
+        browseSort: "popularity",
       },
       {
         key: "latest-movies",
@@ -217,6 +219,7 @@ export default function NovaFilmHomeScreen() {
         accentColor: "#F59E0B",
         items: latestMovies,
         browseType: "movie",
+        browseSort: "year",
       },
       {
         key: "popular-series",
@@ -225,6 +228,7 @@ export default function NovaFilmHomeScreen() {
         accentColor: "#10B981",
         items: popularSeries,
         browseType: "series",
+        browseSort: "popularity",
       },
       {
         key: "asian",
@@ -232,7 +236,8 @@ export default function NovaFilmHomeScreen() {
         subtitle: "أبرز الأعمال الكورية والصينية والهندية",
         accentColor: "#EC4899",
         items: asianMovies,
-        browseType: "movie",
+        browseType: "asian",
+        browseSort: "year",
       },
       {
         key: "top-rated",
@@ -240,7 +245,8 @@ export default function NovaFilmHomeScreen() {
         subtitle: "روائع خالدة بأعلى تقييمات المشاهدين",
         accentColor: "#38BDF8",
         items: topRatedItems,
-        browseType: "all",
+        browseType: "movie",
+        browseSort: "rating",
       },
       {
         key: "animations",
@@ -249,14 +255,18 @@ export default function NovaFilmHomeScreen() {
         accentColor: "#8B5CF6",
         items: animationList,
         browseType: "animation",
+        browseSort: "year",
       },
     ];
     return specs.filter((r) => r.items.length > 0);
   }, [effectiveHome, trendingMovies, latestMovies, popularSeries, asianMovies, topRatedItems, animationList]);
 
   const handleSeeAll = useCallback(
-    (browseType: string) => {
-      router.push({ pathname: "/(tabs)/browse" as any, params: { type: browseType } });
+    (browseType: string, browseSort: string) => {
+      router.push({
+        pathname: "/(tabs)/browse" as any,
+        params: { category: browseType, sort: browseSort, genre: "", year: "" },
+      });
     },
     [router],
   );
@@ -380,7 +390,7 @@ export default function NovaFilmHomeScreen() {
               {QUICK_PILLS.map((pill) => (
                 <Pressable
                   key={pill.label}
-                  onPress={() => router.push({ pathname: "/(tabs)/browse" as any, params: { type: pill.type } })}
+                  onPress={() => router.push({ pathname: "/(tabs)/browse" as any, params: { category: pill.type, sort: "popularity", genre: "", year: "" } })}
                   style={({ pressed }) => [
                     s.quickPill,
                     {

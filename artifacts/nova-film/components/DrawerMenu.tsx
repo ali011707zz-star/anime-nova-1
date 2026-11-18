@@ -1,5 +1,4 @@
-import { CURRENT_APP_VERSION } from "@/components/AppUpdateModal";
-import { checkAndApplyOtaUpdate } from "@/utils/otaUpdater";
+import { CURRENT_APP_VERSION, openAppUpdateModal } from "@/components/AppUpdateModal";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -59,9 +58,9 @@ type NavItem = {
 
 const NAV_MAIN: NavItem[] = [
   { icon: "home",     label: "الرئيسية",                  route: "/(tabs)",                    color: "#F59E0B" },
-  { icon: "film",     label: "الأفلام الأجنبية والآسيوية", route: "/(tabs)/browse?type=movie",  color: "#F97316" },
-  { icon: "albums",   label: "المسلسلات الأجنبية",         route: "/(tabs)/browse?type=series", color: "#10B981" },
-  { icon: "grid",     label: "التصفح والفلترة المتقدمة",  route: "/(tabs)/browse",             color: "#3B82F6" },
+  { icon: "film",     label: "الأفلام الأجنبية والآسيوية", route: "/(tabs)/browse?category=movie&sort=popularity&genre=&year=",  color: "#F97316" },
+  { icon: "albums",   label: "المسلسلات الأجنبية",         route: "/(tabs)/browse?category=series&sort=popularity&genre=&year=", color: "#10B981" },
+  { icon: "grid",     label: "التصفح والفلترة المتقدمة",  route: "/(tabs)/browse?category=all&sort=popularity&genre=&year=",             color: "#3B82F6" },
   { icon: "download", label: "تنزيلاتي",                   route: "/(tabs)/downloads",          color: "#8B5CF6" },
 ];
 
@@ -464,9 +463,9 @@ export function DrawerMenu({ visible, onClose }: Props) {
           <DrawerItem
             item={{
               icon: "cloud-download-outline",
-              label: "تحديث التطبيق (OTA)",
+              label: "تحديث التطبيق",
               route: "",
-              badge: `v${CURRENT_APP_VERSION} • OTA`,
+              badge: `v${CURRENT_APP_VERSION}`,
               showChevron: false,
               color: "#0EA5E9",
             }}
@@ -474,7 +473,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
             colors={colors}
             onPress={() => {
               animateAndClose(() => {
-                checkAndApplyOtaUpdate({ manual: true }).catch(() => {});
+                openAppUpdateModal();
               });
             }}
           />
