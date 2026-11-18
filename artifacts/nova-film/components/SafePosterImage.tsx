@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { Image, ImageProps, ImageStyle, StyleProp, StyleSheet, View } from "react-native";
+import React, { useEffect, useMemo, useState } from "react";
+import { Image, ImageProps, ImageStyle, Platform, StyleProp, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
 type Props = Omit<ImageProps, "source"> & {
@@ -10,7 +10,7 @@ type Props = Omit<ImageProps, "source"> & {
   iconSize?: number;
 };
 
-export function SafePosterImage({
+export const SafePosterImage = React.memo(function SafePosterImage({
   uri,
   fallbackUris = [],
   style,
@@ -19,9 +19,14 @@ export function SafePosterImage({
   resizeMode = "cover",
   ...rest
 }: Props) {
-  const candidates = [uri, ...fallbackUris]
-    .filter((u): u is string => typeof u === "string" && u.trim().length > 0)
-    .map((u) => u.trim());
+  const fallbackKey = fallbackUris.join("|");
+  const candidates = useMemo(
+    () =>
+      [uri, ...fallbackUris]
+        .filter((u): u is string => typeof u === "string" && u.trim().length > 0)
+        .map((u) => u.trim()),
+    [uri, fallbackKey],
+  );
 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [allFailed, setAllFailed] = useState(candidates.length === 0);
@@ -29,7 +34,7 @@ export function SafePosterImage({
   useEffect(() => {
     setCurrentIndex(0);
     setAllFailed(candidates.length === 0);
-  }, [uri, fallbackUris.join("|")]);
+  }, [uri, fallbackKey, candidates.length]);
 
   const activeUri = candidates[currentIndex];
 
@@ -47,6 +52,8 @@ export function SafePosterImage({
       source={{ uri: activeUri }}
       style={[styles.base, style]}
       resizeMode={resizeMode}
+      fadeDuration={0}
+      resizeMethod={Platform.OS === "android" ? "resize" : undefined}
       onError={() => {
         if (currentIndex + 1 < candidates.length) {
           setCurrentIndex((prev) => prev + 1);
@@ -56,7 +63,7 @@ export function SafePosterImage({
       }}
     />
   );
-}
+});
 
 const styles = StyleSheet.create({
   base: {

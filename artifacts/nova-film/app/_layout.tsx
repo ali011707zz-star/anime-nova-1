@@ -18,6 +18,7 @@ import * as ScreenOrientation from "expo-screen-orientation";
 import * as Sentry from "@sentry/react-native";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AppUpdateModal } from "@/components/AppUpdateModal";
+import { TelegramAnnouncementModal } from "@/components/TelegramAnnouncementModal";
 import { AppProvider, useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { loadRuntimeApiUrl } from "@/utils/baseUrl";
@@ -233,8 +234,7 @@ function RootLayout() {
 
   // إجبار إخفاء الـ splash بعد 3.5 ثانية حتى لو فشل تحميل الخطوط
   const [brandSplashVisible, setBrandSplashVisible] = useState(true);
-  const telegramAnnouncementVisible = false;
-  const setTelegramAnnouncementVisible = (_v: boolean) => {};
+  const [telegramAnnouncementVisible, setTelegramAnnouncementVisible] = useState(false);
   const { tv: tvMode } = useTvMetrics();
 
   // TV uses the same app bundle as phones. Only the detected TV runtime is
@@ -362,6 +362,12 @@ function RootContent({
         </View>
       )}
       
+      {!tvMode && (
+        <TelegramAnnouncementModal
+          visible={telegramAnnouncementVisible}
+          onClose={onCloseAnnouncement}
+        />
+      )}
       {false && !brandSplashVisible && <AppUpdateModal />}
     </GestureHandlerRootView>
   );

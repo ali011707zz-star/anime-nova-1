@@ -784,7 +784,7 @@ export default function AnimationWatchScreen() {
     } else if (tmdbId) {
       router.replace(`/animation/${type}/${tmdbId}` as any);
     } else {
-      router.replace("/(tabs)/animations" as any);
+      router.replace("/(tabs)/browse?type=animation" as any);
     }
   }, [screen, tmdbId, type, season, router, progressKey]);
 

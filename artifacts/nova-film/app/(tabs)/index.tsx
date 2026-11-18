@@ -41,6 +41,76 @@ function formatRemaining(pos: number, dur: number): string {
   return `متبقي ${left} د`;
 }
 
+type HomeRailSpec = {
+  key: string;
+  title: string;
+  subtitle: string;
+  accentColor: string;
+  items: FilmSummary[];
+  browseType: string;
+};
+
+const QUICK_PILLS = [
+  { label: "الكل", icon: "grid-outline", type: "all", color: "#0EA5E9" },
+  { label: "أفلام أجنبية", icon: "film-outline", type: "movie", color: "#F59E0B" },
+  { label: "مسلسلات", icon: "albums-outline", type: "series", color: "#10B981" },
+  { label: "أنميشن", icon: "sparkles-outline", type: "animation", color: "#8B5CF6" },
+] as const;
+
+const HomePosterRail = React.memo(function HomePosterRail({
+  rail,
+  railCardWidth,
+  watchedMap,
+  isTv,
+  onSeeAll,
+}: {
+  rail: HomeRailSpec;
+  railCardWidth: number;
+  watchedMap: Record<string, boolean>;
+  isTv: boolean;
+  onSeeAll: (browseType: string) => void;
+}) {
+  const itemStride = railCardWidth + 11;
+  return (
+    <View style={s.sectionWrap}>
+      <FilmSectionHeader
+        title={rail.title}
+        subtitle={rail.subtitle}
+        accentColor={rail.accentColor}
+        onSeeAll={() => onSeeAll(rail.browseType)}
+        focusable={isTv}
+      />
+      <FlatList
+        data={rail.items}
+        horizontal
+        keyExtractor={(item) => `${rail.browseType}-${item.tmdbType}-${item.id}`}
+        showsHorizontalScrollIndicator={false}
+        overScrollMode="never"
+        nestedScrollEnabled
+        initialNumToRender={4}
+        maxToRenderPerBatch={4}
+        windowSize={3}
+        removeClippedSubviews={Platform.OS === "android"}
+        getItemLayout={(_, index) => ({ length: itemStride, offset: itemStride * index, index })}
+        contentContainerStyle={{ paddingHorizontal: 14, gap: 11 }}
+        renderItem={({ item }) => {
+          const watchedKey = makeEpisodeKey(item.id, 1, 1, item.tmdbType);
+          const watchedCount = watchedMap[watchedKey] ? 1 : 0;
+          return (
+            <FilmPosterCard
+              item={item}
+              cardWidth={railCardWidth}
+              watchedCount={watchedCount}
+              progress={0}
+              tvFocusable={isTv}
+            />
+          );
+        }}
+      />
+    </View>
+  );
+});
+
 export default function NovaFilmHomeScreen() {
   const colors = useColors();
   const router = useRouter();
@@ -99,6 +169,7 @@ export default function NovaFilmHomeScreen() {
   const topPad = Platform.OS === "web" ? 12 : Math.max(insets.top, Platform.OS === "android" ? 28 : 44);
   const railCardWidth = getFilmRailCardWidth(width, 3, 10);
   const historyCardWidth = Math.max(152, Math.min(205, Math.floor((width - 40) / 2.15)));
+  const historyStride = historyCardWidth + 11;
 
   const heroItems = effectiveHome?.hero || [];
   const trendingMovies = effectiveHome?.trendingMovies || [];
@@ -128,68 +199,78 @@ export default function NovaFilmHomeScreen() {
       .filter(Boolean) as { rec: FilmPlaybackRecord; title: FilmSummary }[];
   }, [playbackHistory, allPool]);
 
-  const renderPosterRail = (
-    title: string,
-    subtitle: string,
-    accentColor: string,
-    items: FilmSummary[],
-    browseType: string,
-  ) => {
-    if (!items.length) return null;
-    return (
-      <View style={s.sectionWrap}>
-        <FilmSectionHeader
-          title={title}
-          subtitle={subtitle}
-          accentColor={accentColor}
-          onSeeAll={() =>
-            router.push({ pathname: "/(tabs)/browse" as any, params: { type: browseType } })
-          }
-          focusable={isTv}
-        />
-        <FlatList
-          data={items}
-          horizontal
-          keyExtractor={(item) => `${browseType}-${item.tmdbType}-${item.id}`}
-          showsHorizontalScrollIndicator={false}
-          initialNumToRender={5}
-          maxToRenderPerBatch={5}
-          windowSize={3}
-          removeClippedSubviews={Platform.OS === "android"}
-          contentContainerStyle={{ paddingHorizontal: 14, gap: 11 }}
-          renderItem={({ item }) => {
-            const watchedKey = makeEpisodeKey(item.id, 1, 1, item.tmdbType);
-            const watchedCount = watchedMap[watchedKey] ? 1 : 0;
-            return (
-              <FilmPosterCard
-                item={item}
-                cardWidth={railCardWidth}
-                watchedCount={watchedCount}
-                progress={0}
-                tvFocusable={isTv}
-              />
-            );
-          }}
-        />
-      </View>
-    );
-  };
+  const rails = useMemo<HomeRailSpec[]>(() => {
+    if (!effectiveHome) return [];
+    const specs: HomeRailSpec[] = [
+      {
+        key: "trending",
+        title: "الأعمال الرائجة هذا الأسبوع",
+        subtitle: "الأكثر مشاهدة وتداولاً في المنصة",
+        accentColor: "#0EA5E9",
+        items: trendingMovies,
+        browseType: "movie",
+      },
+      {
+        key: "latest-movies",
+        title: "الأفلام الأجنبية",
+        subtitle: "أحدث الإصدارات السينمائية المترجمة",
+        accentColor: "#F59E0B",
+        items: latestMovies,
+        browseType: "movie",
+      },
+      {
+        key: "popular-series",
+        title: "المسلسلات العالمية",
+        subtitle: "مواسم كاملة وحلقات متجددة",
+        accentColor: "#10B981",
+        items: popularSeries,
+        browseType: "series",
+      },
+      {
+        key: "asian",
+        title: "سينما آسيوية وعربية وتركية",
+        subtitle: "أبرز الأعمال الكورية والصينية والهندية",
+        accentColor: "#EC4899",
+        items: asianMovies,
+        browseType: "movie",
+      },
+      {
+        key: "top-rated",
+        title: "الأعلى تقييماً في التاريخ",
+        subtitle: "روائع خالدة بأعلى تقييمات المشاهدين",
+        accentColor: "#38BDF8",
+        items: topRatedItems,
+        browseType: "all",
+      },
+      {
+        key: "animations",
+        title: "أفلام ومسلسلات الأنميشن",
+        subtitle: "عالم الرسوم المتحركة العائلية والسينمائية",
+        accentColor: "#8B5CF6",
+        items: animationList,
+        browseType: "animation",
+      },
+    ];
+    return specs.filter((r) => r.items.length > 0);
+  }, [effectiveHome, trendingMovies, latestMovies, popularSeries, asianMovies, topRatedItems, animationList]);
 
-  return (
-    <View style={[s.container, { backgroundColor: colors.background }]}>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 98 }}
-        refreshControl={
-          <RefreshControl refreshing={isRefetching} onRefresh={handleRefresh} tintColor={colors.homeAccent} />
-        }
-      >
+  const handleSeeAll = useCallback(
+    (browseType: string) => {
+      router.push({ pathname: "/(tabs)/browse" as any, params: { type: browseType } });
+    },
+    [router],
+  );
+
+  const renderListHeader = useCallback(
+    () => (
+      <>
         {/* Top App Bar: Menu on TOP-LEFT, Search + | NOVA FILM Logo on TOP-RIGHT */}
         <View style={[s.header, { paddingTop: topPad + 4 }]}>
           <Pressable
             accessibilityLabel="فتح القائمة"
             onPress={() => setDrawerVisible(true)}
             focusable={isTv}
+            hitSlop={10}
             style={({ focused, pressed }) => [
               s.menuBtn,
               {
@@ -243,20 +324,20 @@ export default function NovaFilmHomeScreen() {
           <View style={s.skeletonWrap}>
             <View style={[s.skeletonHero, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <ActivityIndicator size="small" color="#0EA5E9" />
-              <Text style={[s.loadingText, { color: colors.textSecondary }]}>
-                جارٍ تجهيز الواجهة...
+              <Text style={[s.loadingText, { color: colors.textSecondary, fontSize: 12.5 }]}>
+                جارٍ تجهيز مكتبة الأفلام والمسلسلات...
               </Text>
             </View>
             <View style={s.skeletonPillsRow}>
-              {[1, 2, 3, 4].map((k) => (
+              {[0, 1, 2, 3].map((k) => (
                 <View key={k} style={[s.skeletonPill, { backgroundColor: colors.card, borderColor: colors.border }]} />
               ))}
             </View>
-            {[1, 2].map((row) => (
+            {[0, 1].map((row) => (
               <View key={row} style={{ marginTop: 18 }}>
                 <View style={[s.skeletonTitle, { backgroundColor: colors.card }]} />
                 <View style={s.skeletonCardsRow}>
-                  {[1, 2, 3].map((c) => (
+                  {[0, 1, 2].map((c) => (
                     <View
                       key={c}
                       style={[
@@ -280,38 +361,26 @@ export default function NovaFilmHomeScreen() {
             <Text style={[s.loadingText, { color: colors.textPrimary }]}>
               تعذّر الاتصال بالخادم، تحقق من الإنترنت وأعد المحاولة
             </Text>
-            <Pressable
-              onPress={() => void refetch()}
-              style={[s.retryBtn, { backgroundColor: "#0EA5E9" }]}
-            >
+            <Pressable onPress={() => void refetch()} style={[s.retryBtn, { backgroundColor: "#0EA5E9" }]}>
               <Ionicons name="refresh" size={16} color="#FFFFFF" />
               <Text style={s.retryBtnText}>إعادة المحاولة</Text>
             </Pressable>
           </View>
         ) : (
           <>
-            {/* Hero Banner Carousel */}
             <FilmHeroSection items={heroItems} tvFocusable={isTv} />
 
-            {/* Quick Category Pills */}
+            {/* Quick Category Pills (without hidden Schedule route) */}
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
+              overScrollMode="never"
               contentContainerStyle={s.quickPillsRow}
             >
-              {[
-                { label: "الكل", icon: "grid-outline", type: "all", color: "#0EA5E9" },
-                { label: "أفلام أجنبية", icon: "film-outline", type: "movie", color: "#F59E0B" },
-                { label: "مسلسلات", icon: "albums-outline", type: "series", color: "#10B981" },
-                { label: "أنميشن", icon: "sparkles-outline", type: "animation", color: "#8B5CF6" },
-                { label: "جدول البث", icon: "calendar-outline", route: "/schedule", color: "#EC4899" },
-              ].map((pill) => (
+              {QUICK_PILLS.map((pill) => (
                 <Pressable
                   key={pill.label}
-                  onPress={() => {
-                    if (pill.route) router.push(pill.route as any);
-                    else router.push({ pathname: "/(tabs)/browse" as any, params: { type: pill.type } });
-                  }}
+                  onPress={() => router.push({ pathname: "/(tabs)/browse" as any, params: { type: pill.type } })}
                   style={({ pressed }) => [
                     s.quickPill,
                     {
@@ -342,6 +411,12 @@ export default function NovaFilmHomeScreen() {
                   horizontal
                   keyExtractor={(item) => item.rec.key}
                   showsHorizontalScrollIndicator={false}
+                  overScrollMode="never"
+                  nestedScrollEnabled
+                  initialNumToRender={3}
+                  maxToRenderPerBatch={3}
+                  windowSize={3}
+                  getItemLayout={(_, index) => ({ length: historyStride, offset: historyStride * index, index })}
                   contentContainerStyle={{ paddingHorizontal: 14, gap: 11 }}
                   renderItem={({ item: { rec, title } }) => {
                     const pct = Math.min(
@@ -375,7 +450,13 @@ export default function NovaFilmHomeScreen() {
                         ]}
                       >
                         {imgSrc ? (
-                          <Image source={imgSrc} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                          <Image
+                            source={imgSrc}
+                            style={StyleSheet.absoluteFill}
+                            resizeMode="cover"
+                            fadeDuration={0}
+                            resizeMethod={Platform.OS === "android" ? "resize" : undefined}
+                          />
                         ) : null}
                         <LinearGradient
                           colors={["rgba(9,10,12,0.15)", "rgba(9,10,12,0.92)"]}
@@ -414,53 +495,55 @@ export default function NovaFilmHomeScreen() {
                 />
               </View>
             ) : null}
-
-            {/* Live Server Rails */}
-            {renderPosterRail(
-              "الأعمال الرائجة هذا الأسبوع",
-              "الأكثر مشاهدة وتداولاً في المنصة",
-              "#0EA5E9",
-              trendingMovies,
-              "movie",
-            )}
-            {renderPosterRail(
-              "الأفلام الأجنبية",
-              "أحدث الإصدارات السينمائية المترجمة",
-              "#F59E0B",
-              latestMovies,
-              "movie",
-            )}
-            {renderPosterRail(
-              "المسلسلات العالمية",
-              "مواسم كاملة وحلقات متجددة",
-              "#10B981",
-              popularSeries,
-              "series",
-            )}
-            {renderPosterRail(
-              "سينما آسيوية وعربية وتركية",
-              "أبرز الأعمال الكورية والصينية والهندية",
-              "#EC4899",
-              asianMovies,
-              "movie",
-            )}
-            {renderPosterRail(
-              "الأعلى تقييماً في التاريخ",
-              "روائع خالدة بأعلى تقييمات المشاهدين",
-              "#38BDF8",
-              topRatedItems,
-              "all",
-            )}
-            {renderPosterRail(
-              "أفلام ومسلسلات الأنميشن",
-              "عالم الرسوم المتحركة العائلية والسينمائية",
-              "#8B5CF6",
-              animationList,
-              "animation",
-            )}
           </>
         )}
-      </ScrollView>
+      </>
+    ),
+    [
+      topPad,
+      isTv,
+      scaleSize,
+      colors,
+      router,
+      width,
+      isLoading,
+      effectiveHome,
+      railCardWidth,
+      error,
+      refetch,
+      heroItems,
+      continueItems,
+      historyCardWidth,
+      historyStride,
+    ],
+  );
+
+  return (
+    <View style={[s.container, { backgroundColor: colors.background }]}>
+      <FlatList
+        data={rails}
+        keyExtractor={(item) => item.key}
+        ListHeaderComponent={renderListHeader}
+        showsVerticalScrollIndicator={false}
+        overScrollMode="never"
+        initialNumToRender={2}
+        maxToRenderPerBatch={2}
+        windowSize={4}
+        removeClippedSubviews={Platform.OS === "android"}
+        contentContainerStyle={{ paddingBottom: 98 }}
+        refreshControl={
+          <RefreshControl refreshing={isRefetching} onRefresh={handleRefresh} tintColor={colors.homeAccent} />
+        }
+        renderItem={({ item }) => (
+          <HomePosterRail
+            rail={item}
+            railCardWidth={railCardWidth}
+            watchedMap={watchedMap}
+            isTv={isTv}
+            onSeeAll={handleSeeAll}
+          />
+        )}
+      />
 
       <DrawerMenu visible={drawerVisible} onClose={() => setDrawerVisible(false)} />
     </View>
@@ -648,7 +731,6 @@ const s = StyleSheet.create({
     lineHeight: 19,
     fontFamily: "Cairo_800ExtraBold",
     textAlign: "right",
-    includeFontPadding: true,
   },
   histResumeRow: {
     flexDirection: "row",
@@ -657,15 +739,13 @@ const s = StyleSheet.create({
   },
   histPctText: {
     color: "#38BDF8",
-    fontSize: 10,
-    fontFamily: "Cairo_700Bold",
+    fontSize: 10.5,
+    fontFamily: "Cairo_800ExtraBold",
   },
   histResumeLabel: {
-    color: "#E2E8F0",
+    color: "#CBD5E1",
     fontSize: 10,
-    lineHeight: 15,
     fontFamily: "Cairo_600SemiBold",
-    includeFontPadding: true,
   },
   histTrack: {
     height: 3.5,

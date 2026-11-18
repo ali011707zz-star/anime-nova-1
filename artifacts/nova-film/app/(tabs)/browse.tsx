@@ -96,7 +96,7 @@ function useBrowseTheme() {
   return { colors, g };
 }
 
-function GenreCard({
+const GenreCard = React.memo(function GenreCard({
   item,
   liveCoverUrl,
   onPress,
@@ -157,9 +157,9 @@ function GenreCard({
       </View>
     </Pressable>
   );
-}
+});
 
-function FilmBrowseCard({
+const FilmBrowseCard = React.memo(function FilmBrowseCard({
   film,
   onPress,
   columns,
@@ -234,7 +234,7 @@ function FilmBrowseCard({
       </View>
     </Pressable>
   );
-}
+});
 
 export default function BrowseScreen() {
   const params = useLocalSearchParams<{
@@ -473,6 +473,7 @@ export default function BrowseScreen() {
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
+          overScrollMode="never"
           style={g.mobileGenreRail}
           contentContainerStyle={g.mobileGenreRailContent}
         >
@@ -500,6 +501,11 @@ export default function BrowseScreen() {
           contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 6, paddingBottom: 88 }}
           columnWrapperStyle={{ gap: 10, marginBottom: 10 }}
           showsVerticalScrollIndicator={false}
+          overScrollMode="never"
+          initialNumToRender={12}
+          maxToRenderPerBatch={8}
+          windowSize={5}
+          removeClippedSubviews={Platform.OS === "android"}
           renderItem={({ item }) => (
             <GenreCard
               item={item}
@@ -529,6 +535,11 @@ export default function BrowseScreen() {
               contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 6, paddingBottom: 88 }}
               columnWrapperStyle={{ gap: 10, marginBottom: 10 }}
               showsVerticalScrollIndicator={false}
+              overScrollMode="never"
+              initialNumToRender={9}
+              maxToRenderPerBatch={6}
+              windowSize={5}
+              removeClippedSubviews={Platform.OS === "android"}
               onEndReached={() => {
                 if (!loading && !loadingMore && page < totalPages) {
                   void loadPage(page + 1, false);

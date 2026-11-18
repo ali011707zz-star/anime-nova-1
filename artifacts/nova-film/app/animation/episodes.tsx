@@ -268,7 +268,7 @@ export default function AnimationEpisodesScreen() {
       {/* ── Header ── */}
       <View style={s.header}>
         <View style={s.headerRow}>
-          <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)/animations")} focusable={tvMode}
+          <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)/browse?type=animation")} focusable={tvMode}
              style={({ focused }) => [s.backBtn, tvMode && s.tvBackBtn, tvMode && tvFocusStyle(focused)]}>
             <Ionicons name="chevron-forward" size={tvMode ? 30 : 18} color="rgba(255,255,255,0.7)" />
           </Pressable>

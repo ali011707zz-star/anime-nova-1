@@ -292,6 +292,13 @@ export default function FilmDetailScreen() {
     }
   }, [detail, router]);
 
+  const isSeries = detail?.tmdbType === "tv";
+  const watchedSeriesCount = useMemo(() => {
+    if (!isSeries) return 0;
+    const prefix = `tv:${filmId}:`;
+    return Object.entries(watchedMap).filter(([k, v]) => v && k.startsWith(prefix)).length;
+  }, [isSeries, filmId, watchedMap]);
+
   if (loading && !detail) {
     return (
       <View style={[d.container, { paddingTop: topPad }]}>
@@ -369,13 +376,7 @@ export default function FilmDetailScreen() {
     );
   }
 
-  const isSeries = detail.tmdbType === "tv";
   const isMovieWatched = !isSeries && Boolean(watchedMap[makeEpisodeKey(filmId, 1, 1, "movie")]);
-  const watchedSeriesCount = useMemo(() => {
-    if (!isSeries) return 0;
-    const prefix = `tv:${filmId}:`;
-    return Object.entries(watchedMap).filter(([k, v]) => v && k.startsWith(prefix)).length;
-  }, [isSeries, filmId, watchedMap]);
   const totalEpisodesCount = isSeries
     ? detail.seasons.reduce((acc, s) => acc + (s.episodeCount || 0), 0) || detail.episodes.length
     : 1;

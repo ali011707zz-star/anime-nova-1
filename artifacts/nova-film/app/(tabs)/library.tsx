@@ -192,6 +192,8 @@ export default function LibraryScreen() {
             source={{ uri: item.poster || item.backdrop }}
             style={s.historyImage}
             resizeMode="cover"
+                  fadeDuration={0}
+                  resizeMethod={Platform.OS === "android" ? "resize" : undefined}
           />
           <View style={s.kindBadge}>
             <Ionicons
@@ -374,6 +376,11 @@ export default function LibraryScreen() {
           keyExtractor={(item) => `${item.filmId}_${item.episodeId || "main"}`}
           contentContainerStyle={s.list}
           showsVerticalScrollIndicator={false}
+          overScrollMode="never"
+          initialNumToRender={9}
+          maxToRenderPerBatch={6}
+          windowSize={5}
+          removeClippedSubviews={Platform.OS === "android"}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -404,6 +411,11 @@ export default function LibraryScreen() {
           keyExtractor={(item) => `${item.filmId}_${item.episodeId || "main"}_${item.updatedAt}`}
           contentContainerStyle={s.list}
           showsVerticalScrollIndicator={false}
+          overScrollMode="never"
+          initialNumToRender={9}
+          maxToRenderPerBatch={6}
+          windowSize={5}
+          removeClippedSubviews={Platform.OS === "android"}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -436,6 +448,11 @@ export default function LibraryScreen() {
           contentContainerStyle={s.grid}
           columnWrapperStyle={s.gridRow}
           showsVerticalScrollIndicator={false}
+          overScrollMode="never"
+          initialNumToRender={9}
+          maxToRenderPerBatch={6}
+          windowSize={5}
+          removeClippedSubviews={Platform.OS === "android"}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -474,6 +491,8 @@ export default function LibraryScreen() {
                   source={{ uri: item.poster || item.posterUrl || "" }}
                   style={s.favImg}
                   resizeMode="cover"
+                  fadeDuration={0}
+                  resizeMethod={Platform.OS === "android" ? "resize" : undefined}
                 />
                 <LinearGradient
                   colors={[
@@ -515,6 +534,11 @@ export default function LibraryScreen() {
           contentContainerStyle={s.grid}
           columnWrapperStyle={s.gridRow}
           showsVerticalScrollIndicator={false}
+          overScrollMode="never"
+          initialNumToRender={9}
+          maxToRenderPerBatch={6}
+          windowSize={5}
+          removeClippedSubviews={Platform.OS === "android"}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -556,6 +580,8 @@ export default function LibraryScreen() {
                     source={{ uri: item.avatar || item.image }}
                     style={s.charImg}
                     resizeMode="cover"
+                  fadeDuration={0}
+                  resizeMethod={Platform.OS === "android" ? "resize" : undefined}
                   />
                 ) : (
                   <View style={[s.charImg, s.charPlaceholder]}>

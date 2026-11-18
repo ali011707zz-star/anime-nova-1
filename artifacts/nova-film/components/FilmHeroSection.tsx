@@ -1,9 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { useRouter } from "expo-router";
-import React, { useEffect, useRef, useState } from "react";
+import { useFocusEffect, useRouter } from "expo-router";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
+  AppState,
   I18nManager,
+  Platform,
   Image,
   ScrollView,
   StyleSheet,
@@ -23,6 +25,13 @@ type Props = {
 
 export function FilmHeroSection({ items, tvFocusable = true }: Props) {
   const router = useRouter();
+  const [isFocused, setIsFocused] = useState(true);
+  useFocusEffect(
+    useCallback(() => {
+      setIsFocused(true);
+      return () => setIsFocused(false);
+    }, []),
+  );
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const { tv: tvMode, size: scaleSize } = useTvMetrics();
 
@@ -36,15 +45,16 @@ export function FilmHeroSection({ items, tvFocusable = true }: Props) {
   const idxRef = useRef(0);
 
   useEffect(() => {
-    if (items.length <= 1 || tvMode) return;
+    if (items.length <= 1 || tvMode || !isFocused) return;
     const t = setInterval(() => {
+      if (AppState.currentState !== "active") return;
       const next = (idxRef.current + 1) % items.length;
       idxRef.current = next;
       setIdx(next);
       scrollRef.current?.scrollTo({ x: next * slideWidth, animated: true });
     }, 6000);
     return () => clearInterval(t);
-  }, [items.length, slideWidth, tvMode]);
+  }, [items.length, slideWidth, tvMode, isFocused]);
 
   if (!items.length) return null;
 
@@ -75,6 +85,7 @@ export function FilmHeroSection({ items, tvFocusable = true }: Props) {
           pagingEnabled
           scrollEnabled={!tvMode && items.length > 1}
           showsHorizontalScrollIndicator={false}
+          overScrollMode="never"
           onMomentumScrollEnd={(e) => {
             const x = e.nativeEvent.contentOffset.x;
             const next = Math.round(x / slideWidth);
@@ -90,6 +101,8 @@ export function FilmHeroSection({ items, tvFocusable = true }: Props) {
                 source={getImageSource(item.backdropUrl || item.posterUrl)}
                 style={StyleSheet.absoluteFill}
                 resizeMode="cover"
+                fadeDuration={0}
+                resizeMethod={Platform.OS === "android" ? "resize" : undefined}
               />
               <LinearGradient
                 colors={[

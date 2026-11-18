@@ -1,8 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import React from "react";
-import { Image, StyleSheet, Text, View } from "react-native";
+import React, { useCallback, useMemo } from "react";
+import { Image, Platform, StyleSheet, Text, View } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { getImageSource, type FilmSummary } from "@/utils/filmCatalog";
 import { tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
@@ -45,7 +45,7 @@ export const FilmPosterCard = React.memo(function FilmPosterCard({
   const { tv: tvMode, size: scaleSize } = useTvMetrics();
 
   const cardHeight = Math.round(cardWidth * 1.48);
-  const posterSrc = getImageSource(item.posterUrl || item.backdropUrl);
+  const posterSrc = useMemo(() => getImageSource(item.posterUrl || item.backdropUrl), [item.posterUrl, item.backdropUrl]);
   const typeTag =
     item.mediaType === "animation"
       ? "أنميشن"
@@ -59,7 +59,7 @@ export const FilmPosterCard = React.memo(function FilmPosterCard({
         ? "rgba(139,92,246,0.90)"
         : "rgba(14,165,233,0.90)";
 
-  const openDetail = () => {
+  const openDetail = useCallback(() => {
     router.push({
       pathname: "/film/[id]" as any,
       params: {
@@ -68,7 +68,7 @@ export const FilmPosterCard = React.memo(function FilmPosterCard({
         title: item.titleAr,
       },
     });
-  };
+  }, [router, item.id, item.tmdbType, item.titleAr]);
 
   return (
     <Pressable
@@ -95,7 +95,7 @@ export const FilmPosterCard = React.memo(function FilmPosterCard({
         ]}
       >
         {posterSrc ? (
-          <Image source={posterSrc} style={styles.image} resizeMode="cover" />
+          <Image source={posterSrc} style={styles.image} resizeMode="cover" fadeDuration={0} resizeMethod={Platform.OS === "android" ? "resize" : undefined} />
         ) : (
           <View style={styles.fallbackImg}>
             <Ionicons name="film-outline" size={28} color="#475569" />

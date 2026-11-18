@@ -781,6 +781,7 @@ export default function DownloadsScreen() {
         ref={scrollRef}
         contentContainerStyle={[s.scrollContent, { paddingBottom: insets.bottom + 96 }]}
         showsVerticalScrollIndicator={false}
+        overScrollMode="never"
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
       >
