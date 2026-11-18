@@ -88,9 +88,60 @@ export default function StardimaServersScreen() {
   const episodeNumber = readParam(params.episodeNumber);
   const seasonNumber = readParam(params.seasonNumber);
   const poster = readParam(params.poster);
-  const prevEpisodeId = readParam(params.prevEpisodeId);
-  const nextEpisodeId = readParam(params.nextEpisodeId);
+  const paramPrevEpisodeId = readParam(params.prevEpisodeId);
+  const paramNextEpisodeId = readParam(params.nextEpisodeId);
   const isMovie = readParam(params.mediaType) === "movie";
+  const [episodeSequence, setEpisodeSequence] = useState<Array<{
+    id: number | string;
+    episode_number?: number;
+    season_number?: number;
+    title?: string | null;
+  }>>([]);
+
+  useEffect(() => {
+    if (!providerTitleId || isMovie) {
+      setEpisodeSequence([]);
+      return;
+    }
+    const controller = new AbortController();
+    void fetch(
+      `${getBaseUrl()}/api/source-catalog/titles/stardima_catalog/${encodeURIComponent(providerTitleId)}`,
+      { signal: controller.signal },
+    )
+      .then(async (response) => (response.ok ? response.json() : null))
+      .then((data: any) => {
+        if (controller.signal.aborted) return;
+        const rows = Array.isArray(data?.episodes) ? [...data.episodes] : [];
+        rows.sort(
+          (a, b) =>
+            (Number(a.season_number) || 1) - (Number(b.season_number) || 1) ||
+            (Number(a.episode_number) || 1) - (Number(b.episode_number) || 1),
+        );
+        setEpisodeSequence(rows);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setEpisodeSequence([]);
+      });
+    return () => controller.abort();
+  }, [isMovie, providerTitleId]);
+
+  const currentSeqIdx = useMemo(() => {
+    if (!episodeSequence.length) return -1;
+    if (episodeId) {
+      const byId = episodeSequence.findIndex((e) => String(e.id) === episodeId);
+      if (byId >= 0) return byId;
+    }
+    const epNumVal = Number(episodeNumber) || 1;
+    const secNumVal = Number(seasonNumber) || 1;
+    return episodeSequence.findIndex(
+      (e) => (Number(e.season_number) || 1) === secNumVal && (Number(e.episode_number) || 1) === epNumVal,
+    );
+  }, [episodeSequence, episodeId, episodeNumber, seasonNumber]);
+
+  const seqPrev = currentSeqIdx > 0 ? episodeSequence[currentSeqIdx - 1] : null;
+  const seqNext = currentSeqIdx >= 0 && currentSeqIdx < episodeSequence.length - 1 ? episodeSequence[currentSeqIdx + 1] : null;
+  const prevEpisodeId = paramPrevEpisodeId || (seqPrev ? String(seqPrev.id) : "");
+  const nextEpisodeId = paramNextEpisodeId || (seqNext ? String(seqNext.id) : "");
   const numericEp = Math.max(1, parseInt(episodeNumber || "1", 10) || 1);
   const numericAnimeId = useMemo(
     () => getWatchContentId("dubbed", `stardima:${providerTitleId || title}`),
@@ -115,12 +166,22 @@ export default function StardimaServersScreen() {
   const requestRef = useRef<AbortController | null>(null);
 
   const navigateAdjacentEpisode = useCallback((direction: "prev" | "next") => {
+    const seqTarget = direction === "prev" ? seqPrev : seqNext;
     const targetEpisodeId = direction === "prev" ? prevEpisodeId : nextEpisodeId;
     if (!targetEpisodeId) return;
-    const targetEpNum = direction === "prev" ? readParam(params.prevEpisodeNumber) : readParam(params.nextEpisodeNumber);
-    const targetSeasonNum = direction === "prev" ? readParam(params.prevSeasonNumber) : readParam(params.nextSeasonNumber);
-    const targetEpTitle = direction === "prev" ? readParam(params.prevEpisodeTitle) : readParam(params.nextEpisodeTitle);
-    const targetEpIndex = direction === "prev" ? readParam(params.prevEpisodeIndex) : readParam(params.nextEpisodeIndex);
+    const targetEpNum =
+      (direction === "prev" ? readParam(params.prevEpisodeNumber) : readParam(params.nextEpisodeNumber)) ||
+      (seqTarget ? String(Number(seqTarget.episode_number) || 1) : "");
+    const targetSeasonNum =
+      (direction === "prev" ? readParam(params.prevSeasonNumber) : readParam(params.nextSeasonNumber)) ||
+      (seqTarget ? String(Number(seqTarget.season_number) || 1) : "");
+    const targetEpTitle =
+      (direction === "prev" ? readParam(params.prevEpisodeTitle) : readParam(params.nextEpisodeTitle)) ||
+      (seqTarget ? (seqTarget.title || `الحلقة ${seqTarget.episode_number || 1}`) : "");
+    const targetIndexNum =
+      seqTarget && currentSeqIdx >= 0
+        ? currentSeqIdx + (direction === "prev" ? -1 : 1)
+        : Number(direction === "prev" ? readParam(params.prevEpisodeIndex) : readParam(params.nextEpisodeIndex)) || 0;
 
     router.replace({
       pathname: "/stardima-servers" as any,
@@ -133,11 +194,11 @@ export default function StardimaServersScreen() {
         title,
         mediaType: readParam(params.mediaType) || "series",
         poster,
-        episodeIndex: targetEpIndex,
-        totalEpisodes: readParam(params.totalEpisodes),
+        episodeIndex: String(targetIndexNum),
+        totalEpisodes: String(episodeSequence.length || readParam(params.totalEpisodes) || ""),
       },
     });
-  }, [episodeNumber, nextEpisodeId, params, poster, prevEpisodeId, providerTitleId, router, seasonNumber, title]);
+  }, [currentSeqIdx, episodeNumber, episodeSequence.length, nextEpisodeId, params, poster, prevEpisodeId, providerTitleId, router, seasonNumber, seqNext, seqPrev, title]);
 
   const loadServers = useCallback(async (signal: AbortSignal) => {
     if (!episodeId) {
@@ -315,18 +376,18 @@ export default function StardimaServersScreen() {
           seasonNumber: readParam(params.seasonNumber),
           mediaType: readParam(params.mediaType) || "series",
           poster: readParam(params.poster),
-          episodeIndex: readParam(params.episodeIndex),
-          totalEpisodes: readParam(params.totalEpisodes),
-          prevEpisodeId: readParam(params.prevEpisodeId),
-          prevEpisodeNumber: readParam(params.prevEpisodeNumber),
-          prevSeasonNumber: readParam(params.prevSeasonNumber),
-          prevEpisodeTitle: readParam(params.prevEpisodeTitle),
-          prevEpisodeIndex: readParam(params.prevEpisodeIndex),
-          nextEpisodeId: readParam(params.nextEpisodeId),
-          nextEpisodeNumber: readParam(params.nextEpisodeNumber),
-          nextSeasonNumber: readParam(params.nextSeasonNumber),
-          nextEpisodeTitle: readParam(params.nextEpisodeTitle),
-          nextEpisodeIndex: readParam(params.nextEpisodeIndex),
+          episodeIndex: readParam(params.episodeIndex) || (currentSeqIdx >= 0 ? String(currentSeqIdx) : ""),
+          totalEpisodes: readParam(params.totalEpisodes) || (episodeSequence.length ? String(episodeSequence.length) : ""),
+          prevEpisodeId: prevEpisodeId,
+          prevEpisodeNumber: readParam(params.prevEpisodeNumber) || (seqPrev ? String(Number(seqPrev.episode_number) || 1) : ""),
+          prevSeasonNumber: readParam(params.prevSeasonNumber) || (seqPrev ? String(Number(seqPrev.season_number) || 1) : ""),
+          prevEpisodeTitle: readParam(params.prevEpisodeTitle) || (seqPrev ? (seqPrev.title || `الحلقة ${seqPrev.episode_number || 1}`) : ""),
+          prevEpisodeIndex: readParam(params.prevEpisodeIndex) || (currentSeqIdx > 0 ? String(currentSeqIdx - 1) : ""),
+          nextEpisodeId: nextEpisodeId,
+          nextEpisodeNumber: readParam(params.nextEpisodeNumber) || (seqNext ? String(Number(seqNext.episode_number) || 1) : ""),
+          nextSeasonNumber: readParam(params.nextSeasonNumber) || (seqNext ? String(Number(seqNext.season_number) || 1) : ""),
+          nextEpisodeTitle: readParam(params.nextEpisodeTitle) || (seqNext ? (seqNext.title || `الحلقة ${seqNext.episode_number || 1}`) : ""),
+          nextEpisodeIndex: readParam(params.nextEpisodeIndex) || (seqNext && currentSeqIdx >= 0 ? String(currentSeqIdx + 1) : ""),
           title,
           episodeTitle: episodeSubheading,
         },
@@ -336,7 +397,7 @@ export default function StardimaServersScreen() {
     } finally {
       setOpeningServerId("");
     }
-  }, [episodeId, episodeSubheading, openingServerId, params, providerTitleId, router, title]);
+  }, [currentSeqIdx, episodeId, episodeSequence.length, episodeSubheading, nextEpisodeId, openingServerId, params, prevEpisodeId, providerTitleId, router, seqNext, seqPrev, title]);
 
   const isLightTheme = !colors.background.startsWith("#0");
 

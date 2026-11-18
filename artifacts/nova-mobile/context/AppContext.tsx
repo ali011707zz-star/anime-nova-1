@@ -4,6 +4,7 @@ import { StyleSheet, Text, View } from "react-native";
 import { DEFAULT_CONFIG, fetchRemoteConfig, getBaseUrl, RemoteConfig } from "@/utils/api";
 import { getAuthToken, secureFetch, setUserAuthToken } from "@/utils/secureApi";
 import { setActiveThemeIsWhite } from "@/utils/tv";
+import { resolveDubbedHistoryParams } from "@/utils/carateenEpisodeRef.mjs";
 
 export type Theme = "white" | "black";
 
@@ -122,8 +123,14 @@ function serverAnimeType(item: WatchProgress): string {
       `${encodeURIComponent(item.catalogMediaType || "series")}:${season}:` +
       encodeURIComponent(item.episodeTitle || "");
   }
-  const extra = kind === "dubbed" ? `:${encodeURIComponent(item.episodeUrl || "")}` : "";
-  return `${kind}:${key}${extra}:${season}`;
+  if (kind === "dubbed") {
+    const epUrlPart = encodeURIComponent(item.episodeUrl || "");
+    const epIdPart = item.catalogEpisodeId ? encodeURIComponent(item.catalogEpisodeId) : "";
+    const mediaPart = item.catalogMediaType === "movie" ? "movie" : "";
+    const tail = epIdPart || mediaPart ? `:${epIdPart}:${mediaPart}` : "";
+    return `${kind}:${key}:${epUrlPart}:${season}${tail}`;
+  }
+  return `${kind}:${key}:${season}`;
 }
 
 function decodeServerAnimeType(value: unknown): {
@@ -145,13 +152,14 @@ function decodeServerAnimeType(value: unknown): {
     try { return decodeURIComponent(part || ""); } catch { return part || ""; }
   };
   const kind = match[1] as WatchContentKind;
-  const catalogMediaType = decode(parts[kind === "stardima" ? 2 : -1]) === "movie" ? "movie" : "series";
+  const mediaIndex = kind === "stardima" ? 2 : kind === "dubbed" ? 4 : -1;
+  const catalogMediaType = mediaIndex >= 0 && decode(parts[mediaIndex]) === "movie" ? "movie" : "series";
   return {
     kind,
     key: decode(parts[0]),
     episodeUrl: kind === "dubbed" ? decode(parts[1]) : "",
-    catalogEpisodeId: kind === "stardima" ? decode(parts[1]) : "",
-    catalogMediaType: kind === "stardima" ? catalogMediaType : "series",
+    catalogEpisodeId: kind === "stardima" ? decode(parts[1]) : kind === "dubbed" ? decode(parts[3]) : "",
+    catalogMediaType: kind === "stardima" || kind === "dubbed" ? catalogMediaType : "series",
     episodeTitle: kind === "stardima" ? decode(parts[4]) : "",
     seasonLabel: decode(kind === "dubbed" ? parts[2] : kind === "stardima" ? parts[3] : parts[1]),
   };
@@ -160,12 +168,8 @@ function decodeServerAnimeType(value: unknown): {
 export function historyRoute(item: WatchProgress): string {
   const kind = item.contentKind || "anime";
   if (kind === "dubbed") {
-    return `/dubbed/watch?epUrl=${encodeURIComponent(item.episodeUrl || "")}` +
-      `&series=${encodeURIComponent(item.contentKey || "")}` +
-      `&title=${encodeURIComponent(item.title)}` +
-      `&ep=${item.ep}` +
-      `&season=${encodeURIComponent(item.seasonLabel || "الموسم 1")}` +
-      `&poster=${encodeURIComponent(item.thumbnail || "")}`;
+    const query = new URLSearchParams(resolveDubbedHistoryParams(item));
+    return `/dubbed/watch?${query.toString()}`;
   }
   if (kind === "aw-dubbed") {
     return `/aw-dubbed/watch?series=${encodeURIComponent(item.contentKey || "")}` +
@@ -208,6 +212,9 @@ function mapServerHistory(row: any): WatchProgress | null {
     catalogMediaType: encoded.catalogMediaType,
     episodeTitle: encoded.episodeTitle,
     seasonLabel: encoded.seasonLabel || String(row?.season_label ?? row?.seasonLabel ?? ""),
+    totalEps: asNumber(row?.total_eps ?? row?.totalEps) || undefined,
+    position: asNumber(row?.position) || undefined,
+    duration: asNumber(row?.duration) || undefined,
     titleAr: String(row?.title_ar ?? row?.titleAr ?? ""),
     title: String(row?.anime_title ?? row?.title ?? ""),
     english: String(row?.english_title ?? row?.english ?? row?.anime_title ?? row?.title ?? ""),
@@ -321,6 +328,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           animeType: serverAnimeType(item),
           episodeNumber: item.ep,
           seasonNumber: item.season || 1,
+          ...(item.position ? { position: Math.floor(item.position) } : {}),
+          ...(item.duration ? { duration: Math.floor(item.duration) } : {}),
+          ...(item.totalEps ? { totalEps: item.totalEps } : {}),
+          ...(item.titleAr ? { titleAr: item.titleAr } : {}),
+          ...(item.english ? { english: item.english } : {}),
         }),
       });
       return response.ok;
