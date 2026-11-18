@@ -1044,6 +1044,8 @@ export function RiftPlayer({
     if (!tvMode) return;
     const handleEvent = (evt: any) => {
       if (!evt) return;
+      const rawAction = evt.action ?? evt.eventKeyAction;
+      if (rawAction !== undefined && rawAction !== null && Number(rawAction) !== 0) return;
       const eventType = String(evt.eventType || "");
       const keyCode = Number(evt.keyCode || 0);
       const repeatCount = Number(evt.repeatCount || 0);
@@ -1696,7 +1698,7 @@ export function RiftPlayer({
       {tvMode && !controlsVisible && (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="إظهار أدوات المشغل"
+          accessibilityLabel="إظهار التحكم"
           hasTVPreferredFocus
           focusable
           onFocus={onTvFocus}

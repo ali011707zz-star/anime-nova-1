@@ -14,7 +14,7 @@ import { VolumeManager } from "../lib/volume-manager";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator, Alert, Animated, AppState, DeviceEventEmitter, Dimensions, Easing, I18nManager, Linking, Platform,
-  BackHandler, PanResponder, ScrollView, StyleSheet, Text, View,
+  BackHandler, findNodeHandle, PanResponder, ScrollView, StyleSheet, Text, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -583,7 +583,15 @@ function ExpoRiftPlayer({
   const [showControls, setShowControls] = useState(true);
   const [showTvRevealHint, setShowTvRevealHint] = useState(false);
   const progressFocusedRef = useRef(false);
+  const [isTvProgressFocused, setIsTvProgressFocused] = useState(false);
   const lastTvSeekAtRef = useRef(0);
+  const lastTvSeekExecAtRef = useRef(0);
+  const tvSeekBurstStartRef = useRef<number | null>(null);
+  const tvProgressRef = useRef<View | null>(null);
+  const tvProgressLeftBumperRef = useRef<View | null>(null);
+  const tvProgressRightBumperRef = useRef<View | null>(null);
+  const tvProgressBlurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [tvProgressHandles, setTvProgressHandles] = useState<{ left?: number; center?: number; right?: number }>({});
   const [showSpeedSheet, setShowSpeedSheet] = useState(false);
   const [showViewSheet, setShowViewSheet] = useState(false);
   const [showSubSheet, setShowSubSheet]   = useState(false);
@@ -2341,29 +2349,88 @@ function ExpoRiftPlayer({
   seekRef.current = seek;
 
   const tvHoldCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const syncTvProgressHandles = useCallback(() => {
+    if (!tvMode) return;
+    try {
+      const left = findNodeHandle(tvProgressLeftBumperRef.current) ?? undefined;
+      const center = findNodeHandle(tvProgressRef.current) ?? undefined;
+      const right = findNodeHandle(tvProgressRightBumperRef.current) ?? undefined;
+      setTvProgressHandles(prev =>
+        prev.left === left && prev.center === center && prev.right === right
+          ? prev
+          : { left, center, right }
+      );
+      if (center && left && right) {
+        (tvProgressRef.current as any)?.setNativeProps?.({
+          nextFocusLeft: left,
+          nextFocusRight: right,
+        });
+        (tvProgressLeftBumperRef.current as any)?.setNativeProps?.({
+          nextFocusLeft: center,
+          nextFocusRight: center,
+        });
+        (tvProgressRightBumperRef.current as any)?.setNativeProps?.({
+          nextFocusLeft: center,
+          nextFocusRight: center,
+        });
+      }
+    } catch {}
+  }, [tvMode]);
+
+  const markTvProgressFocused = useCallback(() => {
+    if (tvProgressBlurTimerRef.current) {
+      clearTimeout(tvProgressBlurTimerRef.current);
+      tvProgressBlurTimerRef.current = null;
+    }
+    progressFocusedRef.current = true;
+    setIsTvProgressFocused(true);
+  }, []);
+
+  const markTvProgressBlurred = useCallback(() => {
+    if (tvProgressBlurTimerRef.current) clearTimeout(tvProgressBlurTimerRef.current);
+    tvProgressBlurTimerRef.current = setTimeout(() => {
+      tvProgressBlurTimerRef.current = null;
+      progressFocusedRef.current = false;
+      setIsTvProgressFocused(false);
+    }, 80);
+  }, []);
 
   const performTvStepSeek = useCallback((direction: 1 | -1, repeatCount = 0) => {
     const maxDuration = durationRef.current;
     if (!Number.isFinite(maxDuration) || maxDuration <= 0) return;
-    const step = seekDurationRef.current || 10;
-    const basePos = pendingSeekRef.current?.target ?? positionRef.current;
-    const target = Math.min(Math.max(basePos + direction * step, 0), maxDuration);
+    const now = Date.now();
+    const isRapid = repeatCount > 0 || (now - lastTvSeekExecAtRef.current < 450);
+    lastTvSeekExecAtRef.current = now;
+
+    const currentBase = pendingSeekRef.current?.target ?? positionRef.current;
+    if (!isRapid || tvSeekBurstStartRef.current === null) {
+      tvSeekBurstStartRef.current = currentBase;
+    }
+
+    const baseStep = seekDurationRef.current || 10;
+    const step = repeatCount > 8 ? baseStep * 3 : repeatCount > 3 ? baseStep * 2 : baseStep;
+    const target = Math.min(Math.max(currentBase + direction * step, 0), maxDuration);
+    const totalDelta = target - (tvSeekBurstStartRef.current ?? currentBase);
+
     fadeIn();
-    if (repeatCount > 0) {
-      pendingSeekRef.current = { target, expiresAt: Date.now() + 8000 };
-      positionRef.current = target;
-      setPosition(target);
-      setPostSeekPct(target / maxDuration);
-      if (tvHoldCommitTimerRef.current) clearTimeout(tvHoldCommitTimerRef.current);
+    pendingSeekRef.current = { target, expiresAt: now + 8000 };
+    positionRef.current = target;
+    setPosition(target);
+    setPostSeekPct(target / maxDuration);
+    setFeedback({ type: "seek", value: target, delta: totalDelta });
+    if (feedbackTimer.current) clearTimeout(feedbackTimer.current);
+    feedbackTimer.current = setTimeout(() => {
+      setFeedback(null);
+      tvSeekBurstStartRef.current = null;
+    }, 950);
+
+    if (tvHoldCommitTimerRef.current) clearTimeout(tvHoldCommitTimerRef.current);
+    if (isRapid) {
       tvHoldCommitTimerRef.current = setTimeout(() => {
         tvHoldCommitTimerRef.current = null;
         applySeek(target);
-      }, 160);
+      }, 170);
     } else {
-      if (tvHoldCommitTimerRef.current) {
-        clearTimeout(tvHoldCommitTimerRef.current);
-        tvHoldCommitTimerRef.current = null;
-      }
       applySeek(target);
     }
   }, [applySeek, fadeIn]);
@@ -2371,15 +2438,32 @@ function ExpoRiftPlayer({
   useEffect(() => {
     return () => {
       if (tvHoldCommitTimerRef.current) clearTimeout(tvHoldCommitTimerRef.current);
+      if (tvProgressBlurTimerRef.current) clearTimeout(tvProgressBlurTimerRef.current);
     };
   }, []);
 
-  /* على التلفاز يبقى التركيز على شريط التقدم هدفاً حقيقياً للريموت؛
-     السهمان يسحبان الموضع بخطوة التقديم المختارة بدلاً من نقل التركيز
-     إلى زر آخر. ندعم أرقام Android keyCode وأسماء أحداث RN معاً. */
+  const handleTvBumperFocus = useCallback((direction: 1 | -1) => {
+    markTvProgressFocused();
+    fadeIn();
+    const now = Date.now();
+    if (now - lastTvSeekAtRef.current >= 70) {
+      lastTvSeekAtRef.current = now;
+      performTvStepSeek(direction, 0);
+    }
+    const refocusCenter = () => {
+      try {
+        (tvProgressRef.current as any)?.focus?.();
+      } catch {}
+    };
+    requestAnimationFrame(refocusCenter);
+    setTimeout(refocusCenter, 16);
+  }, [fadeIn, markTvProgressFocused, performTvStepSeek]);
+
   const handleTvProgressKeyDown = useCallback((event: any) => {
-    if (!tvMode || !showControls || !progressFocusedRef.current) return;
+    if (!tvMode || !showControls) return;
     const nativeEvent = event?.nativeEvent || {};
+    const rawAction = nativeEvent.action ?? nativeEvent.eventKeyAction;
+    if (rawAction !== undefined && rawAction !== null && Number(rawAction) !== 0) return;
     const keyCode = Number(nativeEvent.keyCode ?? nativeEvent.keycode);
     const repeatCount = Number(nativeEvent.repeatCount ?? 0);
     const eventName = String(
@@ -2390,15 +2474,20 @@ function ExpoRiftPlayer({
       keyCode === 22 || eventName.includes("right") ? 1 : 0;
     if (!direction) return;
     const now = Date.now();
-    if (now - lastTvSeekAtRef.current < 60) return;
+    if (now - lastTvSeekAtRef.current < 70) return;
     lastTvSeekAtRef.current = now;
+    markTvProgressFocused();
     performTvStepSeek(direction, repeatCount);
     event?.preventDefault?.();
-  }, [performTvStepSeek, showControls, tvMode]);
+  }, [markTvProgressFocused, performTvStepSeek, showControls, tvMode]);
 
   useEffect(() => {
     if (Platform.OS !== "android" || isLocked) return;
     const handleRemoteKey = (evt: any) => {
+      const rawAction = evt?.action ?? evt?.eventKeyAction;
+      if (rawAction !== undefined && rawAction !== null && Number(rawAction) !== 0) {
+        return;
+      }
       const keyCode = Number(evt?.keyCode ?? evt?.keycode ?? 0);
       const repeatCount = Number(evt?.repeatCount ?? 0);
       const eventType = String(evt?.eventType ?? evt?.key ?? "").toLowerCase();
@@ -2407,9 +2496,13 @@ function ExpoRiftPlayer({
       if (isRight || isLeft) {
         if (!showControls || progressFocusedRef.current || keyCode === 90 || keyCode === 89) {
           const now = Date.now();
-          if (now - lastTvSeekAtRef.current < 60) return;
+          if (now - lastTvSeekAtRef.current < 70) return;
           lastTvSeekAtRef.current = now;
+          markTvProgressFocused();
           performTvStepSeek(isRight ? 1 : -1, repeatCount);
+          setTimeout(() => {
+            try { (tvProgressRef.current as any)?.focus?.(); } catch {}
+          }, 0);
         } else {
           fadeIn();
         }
@@ -2432,7 +2525,7 @@ function ExpoRiftPlayer({
       sub1.remove();
       sub2.remove();
     };
-  }, [fadeIn, isLocked, performTvStepSeek, showControls, togglePlay]);
+  }, [fadeIn, isLocked, markTvProgressFocused, performTvStepSeek, showControls, togglePlay]);
 
   /* seekSilent: نفس seek لكن بدون إظهار controls (للـ double-tap والـ gestures) */
   const seekSilentRef = useRef<(s: number) => void>(() => {});
@@ -2853,6 +2946,23 @@ function ExpoRiftPlayer({
       clearTimeout(t2);
     };
   }, [tvMode, inIntroRange, inOutroRange, isLocked, error, isEnded]);
+
+  useEffect(() => {
+    if (!tvMode || !showControls || isLocked || error || isEnded || inIntroRange || inOutroRange) return;
+    if (showSubSheet || showSpeedSheet || showViewSheet) return;
+    const focusProgress = () => {
+      try {
+        syncTvProgressHandles();
+        (tvProgressRef.current as any)?.focus?.();
+      } catch {}
+    };
+    const t1 = setTimeout(focusProgress, 35);
+    const t2 = setTimeout(focusProgress, 140);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [tvMode, showControls, isLocked, error, isEnded, inIntroRange, inOutroRange, showSubSheet, showSpeedSheet, showViewSheet, syncTvProgressHandles]);
 
   /* ─── Tap handler with double-tap detection ─── */
   const handleTap = useCallback((pageX: number) => {
@@ -3468,37 +3578,74 @@ function ExpoRiftPlayer({
                 <View
                   ref={barRef}
                   style={[s.progressWrap, tvMode && s.tvProgressWrap, isDragging && s.progressWrapDragging]}
-                  onLayout={measureSeekBar}
-                  {...(seekBarPan.current?.panHandlers ?? {})}
+                  onLayout={() => {
+                    measureSeekBar();
+                    if (tvMode) syncTvProgressHandles();
+                  }}
+                  {...(tvMode ? {} : (seekBarPan.current?.panHandlers ?? {}))}
                 >
                   {tvMode && (
-                    <Pressable
-                      accessibilityRole="adjustable"
-                      accessibilityLabel="شريط تقدم الحلقة"
-                      hasTVPreferredFocus={tvMode}
-                      focusable={true}
-                      onPress={handleTvProgressPress}
-                      onFocus={() => {
-                        progressFocusedRef.current = true;
-                        fadeIn();
-                      }}
-                      onBlur={() => { progressFocusedRef.current = false; }}
-                      onKeyDown={handleTvProgressKeyDown}
-                      style={({ focused }) => [
-                        StyleSheet.absoluteFillObject,
-                        focused && [
-                          s.tvProgressFocus,
-                          {
-                            borderColor: colors.accent,
-                            backgroundColor: colors.overlay,
-                            shadowColor: "transparent",
-                            shadowOpacity: 0,
-                            shadowRadius: 0,
-                            elevation: 0,
-                          },
-                        ],
-                      ]}
-                    />
+                    <>
+                      <Pressable
+                        ref={tvProgressLeftBumperRef}
+                        accessibilityRole="adjustable"
+                        accessibilityLabel="شريط التقدم"
+                        focusable={true}
+                        nextFocusLeft={tvProgressHandles.center}
+                        nextFocusRight={tvProgressHandles.center}
+                        onPress={togglePlay}
+                        onFocus={() => handleTvBumperFocus(-1)}
+                        onBlur={markTvProgressBlurred}
+                        onKeyDown={handleTvProgressKeyDown}
+                        style={{ position: "absolute", left: 6, right: 6, top: 0, bottom: 0, zIndex: 19 }}
+                      />
+                      <Pressable
+                        ref={tvProgressRef}
+                        testID={!inIntroRange && !inOutroRange ? "nova-tv-preferred-focus" : undefined}
+                        accessibilityRole="adjustable"
+                        accessibilityLabel="شريط التقدم"
+                        hasTVPreferredFocus={tvMode && !inIntroRange && !inOutroRange}
+                        focusable={true}
+                        nextFocusLeft={tvProgressHandles.left}
+                        nextFocusRight={tvProgressHandles.right}
+                        onLayout={syncTvProgressHandles}
+                        onPress={handleTvProgressPress}
+                        onFocus={() => {
+                          markTvProgressFocused();
+                          syncTvProgressHandles();
+                          fadeIn();
+                        }}
+                        onBlur={markTvProgressBlurred}
+                        onKeyDown={handleTvProgressKeyDown}
+                        style={({ focused }) => [
+                          { position: "absolute", left: 6, right: 6, top: 0, bottom: 0, zIndex: 20 },
+                          (focused || isTvProgressFocused) && [
+                            s.tvProgressFocus,
+                            {
+                              borderColor: colors.accent,
+                              backgroundColor: colors.overlay,
+                              shadowColor: "transparent",
+                              shadowOpacity: 0,
+                              shadowRadius: 0,
+                              elevation: 0,
+                            },
+                          ],
+                        ]}
+                      />
+                      <Pressable
+                        ref={tvProgressRightBumperRef}
+                        accessibilityRole="adjustable"
+                        accessibilityLabel="شريط التقدم"
+                        focusable={true}
+                        nextFocusLeft={tvProgressHandles.center}
+                        nextFocusRight={tvProgressHandles.center}
+                        onPress={togglePlay}
+                        onFocus={() => handleTvBumperFocus(1)}
+                        onBlur={markTvProgressBlurred}
+                        onKeyDown={handleTvProgressKeyDown}
+                        style={{ position: "absolute", left: 6, right: 6, top: 0, bottom: 0, zIndex: 19 }}
+                      />
+                    </>
                   )}
                   <View style={[s.progressBg, tvMode && s.tvProgressBg, { backgroundColor: colors.playerTrack }]} />
                   {bufferedPct > 0 && (
@@ -3524,12 +3671,14 @@ function ExpoRiftPlayer({
                   />
                   <View style={[
                     s.thumb, tvMode && s.tvThumb,
-                    isDragging && s.thumbDragging,
+                    (isDragging || (tvMode && isTvProgressFocused)) && s.thumbDragging,
                     { [timelineStartEdge]: `${thumbPct}%` as any, backgroundColor: colors.accent },
                   ]} />
-                  {isDragging && (
+                  {(isDragging || (tvMode && isTvProgressFocused)) && (
                     <View style={[s.dragTooltip, { [timelineStartEdge]: `${tooltipPct}%` as any, backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
-                      <Text style={[s.dragTooltipText, { color: colors.textPrimary }]}>{fmtTime(displayPosition)}</Text>
+                      <Text style={[s.dragTooltipText, { color: colors.textPrimary }]}>
+                        {tvMode ? `◀  ${fmtTime(displayPosition)}  ▶` : fmtTime(displayPosition)}
+                      </Text>
                     </View>
                   )}
                 </View>
@@ -3639,7 +3788,7 @@ function ExpoRiftPlayer({
       {tvMode && !showControls && !error && !isEnded && !isLocked && (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="إظهار أدوات المشغل"
+          accessibilityLabel="إظهار التحكم"
           hasTVPreferredFocus={!inIntroRange && !inOutroRange}
           focusable={!inIntroRange && !inOutroRange}
           onPress={fadeIn}

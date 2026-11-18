@@ -755,6 +755,7 @@ const KOTLIN_METHODS = `
           return true
         }
         novaLastKeyRepeatMs = now
+        novaEmitKeyEventToJs(keyCode, event.action, event.repeatCount)
       }
 
       val modalHandled = novaEnsureModalFocus()
@@ -792,7 +793,7 @@ const KOTLIN_METHODS = `
       val focused = currentFocus
       val desc = focused?.contentDescription?.toString() ?: ""
       if (
-        (desc == "شريط تقدم الحلقة" || desc == "مشغل الفيديو النشط" || desc == "إظهار أدوات المشغل") &&
+        (desc == "شريط التقدم" || desc == "شريط تقدم الحلقة" || desc == "مشغل الفيديو النشط" || desc == "إظهار التحكم" || desc == "إظهار أدوات المشغل") &&
         (keyCode == android.view.KeyEvent.KEYCODE_DPAD_LEFT || keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT)
       ) {
         return true
