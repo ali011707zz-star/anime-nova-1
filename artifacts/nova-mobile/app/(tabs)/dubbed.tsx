@@ -9,7 +9,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
+import { tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
 import { isLegacyCartoonEntry } from "@/hooks/useDubbedCatalogFeed";
 
@@ -41,8 +41,7 @@ function getImg(s: Series): string | null {
 function SeriesCard({ s, onPress }: { s: Series; onPress: () => void }) {
   const colors = useColors();
   const imgUri = getImg(s);
-  const { width, height } = useWindowDimensions();
-  const tvMode = isTvDevice(width, height);
+  const { tv: tvMode } = useTvMetrics();
   return (
     <Pressable
       onPress={onPress}
@@ -79,8 +78,7 @@ function SeriesCard({ s, onPress }: { s: Series; onPress: () => void }) {
 export default function DubbedScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { width, height } = useWindowDimensions();
-  const tvMode = isTvDevice(width, height);
+  const { width, tv: tvMode } = useTvMetrics();
   const router = useRouter();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
   const numColumns = 3;

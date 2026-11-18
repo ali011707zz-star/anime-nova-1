@@ -17,8 +17,7 @@ import {
   tvFocusStyle,
   TvFocusGuideView,
   TvPressable,
-  useTvListFocusScroll,
-} from "@/utils/tv";
+  useTvListFocusScroll, useTvMetrics } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
 const Pressable = TvPressable;
 const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
@@ -41,7 +40,7 @@ export default function AwDubbedDetailScreen() {
   const insets   = useSafeAreaInsets();
   const router   = useRouter();
   const topPad   = Platform.OS === "web" ? 0 : insets.top;
-  const tvMode   = isTvDevice();
+  const { tv: tvMode } = useTvMetrics();
   const params   = useLocalSearchParams<{
     key: string; title: string; titleAr: string;
     seasons: string; poster: string;
@@ -217,7 +216,8 @@ export default function AwDubbedDetailScreen() {
             {/* Season pills */}
             {seasons.length > 1 && (
               <View style={styles.seasonsWrap}>
-                <ScrollView ref={tabsRef} horizontal showsHorizontalScrollIndicator={false}
+                <ScrollView
+        focusable={false} ref={tabsRef} horizontal showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.seasonsTabs}>
                   {seasons.map((s, i) => {
                     const active = i === selSeason;

@@ -38,7 +38,7 @@ export const SectionRow = React.memo(function SectionRow({
 }: Props) {
   const colors = useColors();
   const { width, height } = useWindowDimensions();
-  const tvMode = isTvDevice(width, height);
+  const { tv: tvMode } = useTvMetrics();
   const { size: scaleSize } = useTvMetrics();
   const cardWidth = getRailCardWidth(width, tvMode ? 5 : 3);
   const sidePadding = getRailSidePadding(width);
@@ -109,7 +109,7 @@ export function SkeletonRow() {
   return (
     <View style={styles.container}>
       <View style={[styles.skeletonTitle, { backgroundColor: colors.card }]} />
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.scroll}>
+      <ScrollView focusable={false} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.scroll}>
         {Array.from({ length: 5 }).map((_, i) => (
           <View key={i} style={styles.skeletonCard}>
             <View style={[styles.skeletonImg, { backgroundColor: colors.card }]} />

@@ -8,7 +8,7 @@ import {
   AppState, ScrollView, StyleSheet, Text, View, useWindowDimensions,
 } from "react-native";
 import { useColors } from "@/hooks/useColors";
-import { isTvDevice, TvPressable as Pressable } from "@/utils/tv";
+import { isTvDevice, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { getKnownArabicAnimeTitle } from "@/utils/arabicAnimeTitles";
 
 type Props = {
@@ -27,7 +27,7 @@ export function HeroSection({
   const colors = useColors();
   const router = useRouter();
   const { width, height } = useWindowDimensions();
-  const tvMode = isTvDevice(width, height);
+  const { tv: tvMode } = useTvMetrics();
   const isTablet = !tvMode && Math.min(width, height) >= 600;
   const heroWidth = tvMode ? Math.min(width - 64, 1400) : width - (isTablet ? 36 : 28);
   const heroHeight = tvMode

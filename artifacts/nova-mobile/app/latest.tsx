@@ -25,7 +25,7 @@ import {
   type LatestEpisodeItem,
 } from "@/utils/latestEpisodes";
 import { getPosterUri, getTvPosterUri } from "@/utils/media";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 
 const CACHE_KEY = "nova-latest-episodes";
 const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
@@ -101,7 +101,7 @@ export default function LatestEpisodesScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { width, height } = useWindowDimensions();
-  const tvMode = isTvDevice(width, height);
+  const { tv: tvMode } = useTvMetrics();
   const [items, setItems] = useState<LatestEpisodeItem[]>([]);
   const [filter, setFilter] = useState<LatestFilter>("all");
   const [loading, setLoading] = useState(true);

@@ -11,7 +11,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
+import { tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { getBaseUrl } from "@/utils/api";
 import { RiftPlayer, type PlayerSource } from "@/components/RiftPlayer";
 import { useWatchPlayerOrientation } from "@/utils/watchOrientation";
@@ -35,7 +35,7 @@ export default function StardimaPlayerScreen() {
   const colors = useColors();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const tvMode = isTvDevice();
+  const { tv: tvMode } = useTvMetrics();
   const { addToHistory } = useApp();
   const params = useLocalSearchParams<{
     serverId?: string;
@@ -494,7 +494,8 @@ export default function StardimaPlayerScreen() {
             accessibilityRole="button"
             accessibilityLabel="إعادة الاستعلام عن الخادم المختار"
             focusable={tvMode}
-            style={({ focused }) => [styles.action, tvMode && focused && tvFocusStyle(true)]}
+            hasTVPreferredFocus={tvMode}
+            style={({ focused }) => [styles.action, tvMode && tvFocusStyle(focused)]}
           >
             <Text style={styles.actionText}>إعادة فحص الخادم المحدد</Text>
             <Ionicons name="refresh" size={16} color={colors.accent} />

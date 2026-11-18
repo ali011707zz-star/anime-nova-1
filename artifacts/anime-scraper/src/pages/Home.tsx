@@ -319,6 +319,7 @@ export default function Home() {
   const [spacetoonCards, setSpacetoonCards] = useState<any[]>([]);
   const [manhwaCards, setManhwaCards] = useState<any[]>([]);
   const [mangaCards, setMangaCards] = useState<any[]>([]);
+  const [activeMangaTab, setActiveMangaTab] = useState<"manhwa" | "manga">("manhwa");
 
   useEffect(() => {
     setMergedContinue(loadMergedContinue());
@@ -1027,143 +1028,103 @@ export default function Home() {
           </div>
         )}
 
-        {/* ── 6. مانهوا 🔥 ── */}
-        {manhwaCards.length > 0 && (
-          <div>
-            <SectionHeader title="مانهوا 🔥" href="/manga?source=manhwa" />
-            <div
-              className="flex gap-2.5 overflow-x-auto px-3.5 pb-1"
-              style={{ scrollbarWidth: "none" }}
-            >
-              {manhwaCards.map((item: any, idx: number) => {
-                const id = item.id || item.slug || idx;
-                const title =
-                  item.title_ar ||
-                  item.title?.english ||
-                  item.title?.romaji ||
-                  item.title ||
-                  "مانهوا";
-                const cover = item.coverImage?.large || item.cover || item.poster || "";
-                const href = `/manga/${encodeURIComponent(String(id))}?source=manhwa&title=${encodeURIComponent(title)}&cover=${encodeURIComponent(cover)}`;
-                return (
-                  <Link key={`manhwa-${id}-${idx}`} href={href}>
-                    <motion.div
-                      whileTap={{ scale: 0.95 }}
-                      className="shrink-0 w-[120px] sm:w-[136px] cursor-pointer"
-                    >
-                      <div
-                        className="relative w-full h-[175px] sm:h-[196px] rounded-[12px] overflow-hidden border"
-                        style={{
-                          backgroundColor: "var(--bg-card, #14171C)",
-                          borderColor: "var(--border-subtle, rgba(255,255,255,0.08))",
-                        }}
+        {/* ── 6. المانجا والمانهوا (مدمجة) ── */}
+        {(manhwaCards.length > 0 || mangaCards.length > 0) && (() => {
+          const isManhwaView = activeMangaTab === "manhwa" ? manhwaCards.length > 0 : mangaCards.length === 0;
+          const activeCards = isManhwaView ? manhwaCards : mangaCards;
+          const activeSource = isManhwaView ? "manhwa" : "manga";
+          return (
+            <div>
+              <SectionHeader title="المانجا والمانهوا" href={`/manga?source=${activeSource}`} />
+              <div className="flex items-center gap-2 px-3.5 mb-3">
+                <button
+                  type="button"
+                  onClick={() => setActiveMangaTab("manhwa")}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold font-['Cairo'] border transition-colors ${
+                    isManhwaView
+                      ? "bg-amber-500/20 border-amber-400/60 text-amber-300"
+                      : "bg-white/5 border-white/10 text-zinc-400 hover:text-white"
+                  }`}
+                >
+                  مانهوا ملونة 🔥
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveMangaTab("manga")}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold font-['Cairo'] border transition-colors ${
+                    !isManhwaView
+                      ? "bg-emerald-500/20 border-emerald-400/60 text-emerald-300"
+                      : "bg-white/5 border-white/10 text-zinc-400 hover:text-white"
+                  }`}
+                >
+                  مانجا مترجمة 📚
+                </button>
+              </div>
+              <div
+                className="flex gap-2.5 overflow-x-auto px-3.5 pb-1"
+                style={{ scrollbarWidth: "none" }}
+              >
+                {activeCards.map((item: any, idx: number) => {
+                  const id = item.id || item.slug || idx;
+                  const title =
+                    item.title_ar ||
+                    item.title?.english ||
+                    item.title?.romaji ||
+                    item.title ||
+                    (isManhwaView ? "مانهوا" : "مانجا");
+                  const cover = item.coverImage?.large || item.cover || item.poster || "";
+                  const href = `/manga/${encodeURIComponent(String(id))}?source=${activeSource}&title=${encodeURIComponent(title)}&cover=${encodeURIComponent(cover)}`;
+                  return (
+                    <Link key={`${activeSource}-${id}-${idx}`} href={href}>
+                      <motion.div
+                        whileTap={{ scale: 0.95 }}
+                        className="shrink-0 w-[120px] sm:w-[136px] cursor-pointer"
                       >
-                        {cover ? (
-                          <img
-                            src={cover}
-                            alt={title}
-                            className="w-full h-full object-cover"
-                            loading="lazy"
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center">
-                            <BookOpen className="w-7 h-7 opacity-20" />
-                          </div>
-                        )}
                         <div
-                          className="absolute top-[7px] right-[7px] px-2 py-0.5 rounded-[12px] text-[9px] font-bold text-white"
-                          style={{ backgroundColor: "rgba(245,158,11,0.9)" }}
-                        >
-                          مانهوا
-                        </div>
-                        <div
-                          className="absolute bottom-0 inset-x-0 px-2 pb-2 pt-12"
+                          className="relative w-full h-[175px] sm:h-[196px] rounded-[12px] overflow-hidden border"
                           style={{
-                            background:
-                              "linear-gradient(to top, rgba(0,0,0,0.95) 0%, transparent 100%)",
+                            backgroundColor: "var(--bg-card, #14171C)",
+                            borderColor: "var(--border-subtle, rgba(255,255,255,0.08))",
                           }}
                         >
-                          <p className="text-[11px] font-semibold text-white leading-[15px] line-clamp-2 text-right font-['Cairo']">
-                            {title}
-                          </p>
-                        </div>
-                      </div>
-                    </motion.div>
-                  </Link>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* ── 7. مانجا مترجمة 📚 ── */}
-        {mangaCards.length > 0 && (
-          <div>
-            <SectionHeader title="مانجا مترجمة 📚" href="/manga?source=manga" />
-            <div
-              className="flex gap-2.5 overflow-x-auto px-3.5 pb-1"
-              style={{ scrollbarWidth: "none" }}
-            >
-              {mangaCards.map((item: any, idx: number) => {
-                const id = item.id || item.slug || idx;
-                const title =
-                  item.title_ar ||
-                  item.title?.english ||
-                  item.title?.romaji ||
-                  item.title ||
-                  "مانجا";
-                const cover = item.coverImage?.large || item.cover || item.poster || "";
-                const href = `/manga/${encodeURIComponent(String(id))}?source=manga&title=${encodeURIComponent(title)}&cover=${encodeURIComponent(cover)}`;
-                return (
-                  <Link key={`manga-${id}-${idx}`} href={href}>
-                    <motion.div
-                      whileTap={{ scale: 0.95 }}
-                      className="shrink-0 w-[120px] sm:w-[136px] cursor-pointer"
-                    >
-                      <div
-                        className="relative w-full h-[175px] sm:h-[196px] rounded-[12px] overflow-hidden border"
-                        style={{
-                          backgroundColor: "var(--bg-card, #14171C)",
-                          borderColor: "var(--border-subtle, rgba(255,255,255,0.08))",
-                        }}
-                      >
-                        {cover ? (
-                          <img
-                            src={cover}
-                            alt={title}
-                            className="w-full h-full object-cover"
-                            loading="lazy"
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center">
-                            <BookOpen className="w-7 h-7 opacity-20" />
+                          {cover ? (
+                            <img
+                              src={cover}
+                              alt={title}
+                              className="w-full h-full object-cover"
+                              loading="lazy"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                              <BookOpen className="w-7 h-7 opacity-20" />
+                            </div>
+                          )}
+                          <div
+                            className="absolute top-[7px] right-[7px] px-2 py-0.5 rounded-[12px] text-[9px] font-bold text-white"
+                            style={{ backgroundColor: isManhwaView ? "rgba(245,158,11,0.9)" : "rgba(16,185,129,0.88)" }}
+                          >
+                            {isManhwaView ? "مانهوا" : "مانجا"}
                           </div>
-                        )}
-                        <div
-                          className="absolute top-[7px] right-[7px] px-2 py-0.5 rounded-[12px] text-[9px] font-bold text-white"
-                          style={{ backgroundColor: "rgba(16,185,129,0.88)" }}
-                        >
-                          مانجا
+                          <div
+                            className="absolute bottom-0 inset-x-0 px-2 pb-2 pt-12"
+                            style={{
+                              background:
+                                "linear-gradient(to top, rgba(0,0,0,0.95) 0%, transparent 100%)",
+                            }}
+                          >
+                            <p className="text-[11px] font-semibold text-white leading-[15px] line-clamp-2 text-right font-['Cairo']">
+                              {title}
+                            </p>
+                          </div>
                         </div>
-                        <div
-                          className="absolute bottom-0 inset-x-0 px-2 pb-2 pt-12"
-                          style={{
-                            background:
-                              "linear-gradient(to top, rgba(0,0,0,0.95) 0%, transparent 100%)",
-                          }}
-                        >
-                          <p className="text-[11px] font-semibold text-white leading-[15px] line-clamp-2 text-right font-['Cairo']">
-                            {title}
-                          </p>
-                        </div>
-                      </div>
-                    </motion.div>
-                  </Link>
-                );
-              })}
+                      </motion.div>
+                    </Link>
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* ── 8. يُعرض حالياً ── */}
         {releasing.length > 0 && (

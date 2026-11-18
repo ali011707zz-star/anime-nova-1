@@ -13,7 +13,7 @@ import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch } from "@/utils/secureApi";
-import { isTvDevice, toggleTvMode, tvFocusStyle, TvPressable as Pressable, useTvModeOverride } from "@/utils/tv";
+import { toggleTvMode, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { useWindowDimensions } from "react-native";
 
 const { width: W } = Dimensions.get("window");
@@ -79,9 +79,7 @@ type Props = { visible: boolean; onClose: () => void };
 export function DrawerMenu({ visible, onClose }: Props) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  useTvModeOverride();
-  const { width: winW, height: winH } = useWindowDimensions();
-  const tvMode = isTvDevice(winW, winH);
+  const { width: winW, tv: tvMode } = useTvMetrics();
   const drawerWidth = tvMode && winW >= 700
     ? Math.min(winW * 0.32, 310)
     : winW >= 600
@@ -91,14 +89,8 @@ export function DrawerMenu({ visible, onClose }: Props) {
   const { watchHistory, favorites, theme, currentUser } = useApp();
   const colors = useColors();
   const [userData, setUserData] = React.useState<UserData | null>(null);
-  const visibleNavMain = React.useMemo(
-    () => (tvMode ? NAV_MAIN.filter((item) => item.route !== "/manga") : NAV_MAIN),
-    [tvMode],
-  );
-  const visibleFavoritesCount = React.useMemo(
-    () => (tvMode ? favorites.filter((f: any) => !f?.mangaId).length : favorites.length),
-    [favorites, tvMode],
-  );
+  const visibleNavMain = NAV_MAIN;
+  const visibleFavoritesCount = favorites.length;
 
   React.useEffect(() => {
     if (currentUser) {
@@ -252,6 +244,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
         style={[s.drawer, tvMode && s.tvDrawer, { width: drawerWidth, transform: [{ translateX: slideX }], paddingTop: topPad, backgroundColor: colors.surface, borderLeftColor: colors.border }]}
       >
         <ScrollView
+          focusable={false}
           showsVerticalScrollIndicator={false}
           bounces={true}
           overScrollMode="always"
@@ -421,12 +414,18 @@ export function DrawerMenu({ visible, onClose }: Props) {
     </View>
   );
 
-  if (tvMode || Platform.OS === "android") {
+  if (Platform.OS === "web") {
     return content;
   }
 
   return (
-    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
+    <Modal
+      visible={mounted}
+      transparent
+      animationType="none"
+      statusBarTranslucent
+      onRequestClose={onClose}
+    >
       {content}
     </Modal>
   );

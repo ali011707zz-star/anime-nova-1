@@ -5,7 +5,7 @@ import { useRouter } from "expo-router";
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useColors } from "@/hooks/useColors";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics, responsiveScale } from "@/utils/tv";
 import { getPosterUri, getTvPosterUri } from "@/utils/media";
 import { getKnownArabicAnimeTitle } from "@/utils/arabicAnimeTitles";
 
@@ -51,14 +51,14 @@ export function getGridColumnCount(windowWidth: number, _windowHeight?: number) 
 export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", cardWidth, progress, showProgress, onFocus, hasTVPreferredFocus = false, tvFocusable = true }: Props) {
   const router = useRouter();
   const colors = useColors();
-  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
-  const { size: scaleSize } = useTvMetrics();
+  const { width: windowWidth, tv: tvMode } = useTvMetrics();
+  const scaleSize = (phoneValue: number, tvValue?: number) =>
+    responsiveScale(phoneValue, windowWidth, tvMode, tvValue);
   // Recalculate on rotation/window resize and keep poster widths bounded so
   // tablets do not decode a handful of unnecessarily huge images.
   const smallCardWidth = getRailCardWidth(windowWidth, 3);
   const cardW = cardWidth ?? (size === "lg" ? 170 : size === "md" ? 145 : smallCardWidth);
   const cardH = cardW * 1.4;
-  const tvMode = isTvDevice(windowWidth, windowHeight);
 
   const knownAr = getKnownArabicAnimeTitle(anime.id, anime.title?.english, anime.title?.romaji);
   const synonyms = ((anime as any).synonyms as string[] | undefined) || [];

@@ -13,7 +13,7 @@ import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch, setUserAuthToken } from "@/utils/secureApi";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 
 const AUTH_KEY = "nova-mobile-user";
 const PROFILE_OVERRIDE_KEY = "nova-profile-override";
@@ -58,7 +58,7 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { width, height } = useWindowDimensions();
-  const tvMode = isTvDevice(width, height);
+  const { tv: tvMode } = useTvMetrics();
   const base = getBaseUrl();
   const topPad = Platform.OS === "web" ? 0 : Math.max(insets.top, Platform.OS === "android" ? 28 : 44);
 
@@ -336,6 +336,7 @@ export default function ProfileScreen() {
       </View>
 
       <ScrollView
+        focusable={false}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingHorizontal: 14, paddingTop: 16, paddingBottom: 60 }}
         keyboardShouldPersistTaps="handled"

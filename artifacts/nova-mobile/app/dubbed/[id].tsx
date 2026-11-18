@@ -15,8 +15,7 @@ import {
   tvFocusStyle,
   TvFocusGuideView,
   TvPressable,
-  useTvListFocusScroll,
-} from "@/utils/tv";
+  useTvListFocusScroll, useTvMetrics } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
 import { EpisodeDivider } from "@/components/EpisodeDivider";
 const Pressable = TvPressable;
@@ -102,7 +101,7 @@ export default function DubbedDetailScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
-  const tvMode = isTvDevice();
+  const { tv: tvMode } = useTvMetrics();
 
   const {
     id,
@@ -386,6 +385,7 @@ export default function DubbedDetailScreen() {
             {/* Season pills */}
             {seasons.length > 1 && (
               <ScrollView
+        focusable={false}
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.seasonTabsRow}

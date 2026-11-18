@@ -30,7 +30,7 @@ const SEASON_AR: Record<string, string> = {
 
 import { historyRoute, useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvListFocusScroll, useTvMetrics } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvListFocusScroll, useTvMetrics , TvFocusGuideView } from "@/utils/tv";
 import { useTvFocusMemory } from "@/utils/tvFocus";
 import { getPosterUri, getTvPosterUri, proxyPosterUrl } from "@/utils/media";
 import { getKnownArabicAnimeTitle } from "@/utils/arabicAnimeTitles";
@@ -64,19 +64,22 @@ export default function HomeScreen() {
   const [showDrawer, setShowDrawer] = useState(false);
   const [headerSearch, setHeaderSearch] = useState("");
   const [activeTvSectionIdx, setActiveTvSectionIdx] = useState(-1);
-  const isTvLayout = isTvDevice(width, height);
-  const { size: scaleSize } = useTvMetrics();
+  const { tv: isTvLayout, size: scaleSize } = useTvMetrics();
   const { ready } = useTvFocusMemory("home");
   const homeListRef = useRef<FlatList<any> | null>(null);
   const continueListRef = useRef<FlatList<any> | null>(null);
   const todayEpsListRef = useRef<FlatList<any> | null>(null);
   const dubbedRailListRef = useRef<FlatList<any> | null>(null);
+  const mangaRailListRef = useRef<FlatList<any> | null>(null);
   const { scrollToFocusedIndex: scrollHomeSectionIntoView } = useTvListFocusScroll(homeListRef, 0.22);
   const { scrollToFocusedIndex: scrollContinueIntoView } = useTvListFocusScroll(continueListRef, 0.35);
   const { scrollToFocusedIndex: scrollTodayEpsIntoView } = useTvListFocusScroll(todayEpsListRef, 0.35);
   const { scrollToFocusedIndex: scrollDubbedRailIntoView } = useTvListFocusScroll(dubbedRailListRef, 0.35);
+  const { scrollToFocusedIndex: scrollMangaRailIntoView } = useTvListFocusScroll(mangaRailListRef, 0.35);
   type DubbedHomeTab = "anime" | "animation" | "spacetoon" | "cartoon" | "cartoon2";
   const [activeDubbedTab, setActiveDubbedTab] = useState<DubbedHomeTab>("anime");
+  type MangaHomeTab = "manhwa" | "manga";
+  const [activeMangaTab, setActiveMangaTab] = useState<MangaHomeTab>("manhwa");
   const stardimaAnimation = useDubbedCatalogFeed("animation", "", activeDubbedTab === "animation");
   const stardimaCartoon = useDubbedCatalogFeed("cartoon", "", activeDubbedTab === "cartoon");
 
@@ -238,7 +241,7 @@ export default function HomeScreen() {
     return () => dubbedReqRef.current?.abort();
   }, [activeDubbedTab, fetchActiveDubbedTab]);
 
-  /* ── Manhwa (Azorafly) & Manga (MangaDar) from Backend (Hidden in TV mode) ── */
+  /* ── Manhwa (Azorafly) & Manga (MangaDar) from Backend (Phone + TV) ── */
   const { data: manhwaData, refetch: refetchManhwa } = useQuery({
     queryKey: ["homeManhwa"],
     queryFn: async () => {
@@ -246,7 +249,6 @@ export default function HomeScreen() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     },
-    enabled: !isTvLayout,
     staleTime: 10 * 60 * 1000,
   });
 
@@ -257,7 +259,6 @@ export default function HomeScreen() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     },
-    enabled: !isTvLayout,
     staleTime: 10 * 60 * 1000,
   });
 
@@ -341,8 +342,7 @@ export default function HomeScreen() {
     | { kind: "continue"; key: string }
     | { kind: "todayEps"; key: string }
     | { kind: "dubbedUnified"; key: string }
-    | { kind: "manhwa"; key: string }
-    | { kind: "manga"; key: string }
+    | { kind: "mangaUnified"; key: string }
     | { kind: "anilist"; key: string; title: string; items: AnilistMedia[]; onSeeAll: () => void };
 
   const homeSections = useMemo<HomeSectionItem[]>(() => {
@@ -350,8 +350,9 @@ export default function HomeScreen() {
     if (recentHistory.length > 0) sections.push({ kind: "continue", key: "continue" });
     if (todayEps.length > 0 || todayChecking) sections.push({ kind: "todayEps", key: "todayEps" });
     sections.push({ kind: "dubbedUnified", key: "dubbedUnified" });
-    if (!isTvLayout && manhwaItems.length > 0) sections.push({ kind: "manhwa", key: "manhwa" });
-    if (!isTvLayout && mangaItems.length > 0) sections.push({ kind: "manga", key: "manga" });
+    if (manhwaItems.length > 0 || mangaItems.length > 0) {
+      sections.push({ kind: "mangaUnified", key: "mangaUnified" });
+    }
     if (!isLoading) {
       sections.push(
         {
@@ -706,6 +707,7 @@ export default function HomeScreen() {
 
             <ScrollView
               horizontal
+              focusable={false}
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={{
                 flexDirection: "row-reverse",
@@ -776,7 +778,7 @@ export default function HomeScreen() {
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
                   renderItem={({ item, index: itemIdx }) => {
-                    const imgUri = item.poster ? String(item.poster) : null;
+                    const imgUri = proxyPosterUrl(item.poster) || null;
                     return (
                       <Pressable
                         onPress={() =>
@@ -1148,125 +1150,171 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* ── Manhwa Section (مانهوا — مخفية في وضع التلفاز) ── */}
-        {section.kind === "manhwa" && !isTvLayout && manhwaItems.length > 0 && (
-          <View style={{ marginBottom: 24 }}>
-            <SectionHeader
-              onSeeAll={() => router.push({ pathname: "/manga" as any, params: { tab: "manhwa" } })}
-              focusable={isTvLayout}
-            >
-              <View style={styles.sectionRightRow}>
-                <Text style={{ fontSize: isTvLayout ? 22 : 15 }}>🔥</Text>
-                <Text style={[styles.sectionTitle, isTvLayout && styles.tvSectionTitle, { color: colors.text }]}>مانهوا</Text>
-                <View style={[styles.continueAccent, { backgroundColor: "#f59e0b" }]} />
-              </View>
-            </SectionHeader>
-            <FlatList
-              data={manhwaItems}
-              horizontal
-              keyExtractor={(item, idx) => `manhwa-${item.id}-${idx}`}
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
-              renderItem={({ item }) => (
-                <Pressable
-                  onPress={() => router.push({ pathname: "/manga/[id]" as any, params: { id: String(item.id), title: item.title, english: item.subtitle, cover: item.poster, status: item.status, chapters: String(item.chapters || ""), score: String(item.score || ""), source: item.source } })}
-                  focusable={isTvLayout}
-                  style={({ focused }) => [
-                    todayStyles.card,
-                    { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border },
-                    isTvLayout && tvFocusStyle(focused),
-                  ]}
-                >
-                  {item.poster ? (
-                    <Image source={{ uri: item.poster }} style={todayStyles.img} resizeMode="cover" />
-                  ) : (
-                    <View style={[todayStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
-                      <Ionicons name="book-outline" size={28} color="rgba(255,255,255,0.2)" />
-                    </View>
-                  )}
-                  <View
-                    style={{
-                      position: "absolute",
-                      top: 8,
-                      right: 8,
-                      zIndex: 2,
-                      paddingHorizontal: 8,
-                      paddingVertical: 3,
-                      borderRadius: 7,
-                      backgroundColor: "rgba(245, 158, 11, 0.9)",
-                    }}
-                  >
-                    <Text style={{ color: "#09090b", fontFamily: "Cairo_700Bold", fontSize: isTvLayout ? 12 : 9 }}>
-                      مانهوا
-                    </Text>
-                  </View>
-                  <LinearGradient colors={["transparent", "rgba(0,0,0,0.92)"]} style={todayStyles.grad}>
-                    <Text style={todayStyles.title} numberOfLines={2}>{item.title}</Text>
-                    <Text style={{ color: "#fbbf24", fontSize: 9, fontFamily: "Cairo_700Bold", textAlign: "right" }}>
-                      {item.type}
-                    </Text>
-                  </LinearGradient>
-                </Pressable>
-              )}
-              initialNumToRender={5}
-              maxToRenderPerBatch={5}
-              windowSize={3}
-              removeClippedSubviews={false}
-            />
-          </View>
-        )}
+        {/* ── القسم المدمج للمانجا والمانهوا (الهاتف + التلفاز) ── */}
+        {section.kind === "mangaUnified" && (manhwaItems.length > 0 || mangaItems.length > 0) && (() => {
+          const activeList = activeMangaTab === "manhwa"
+            ? (manhwaItems.length > 0 ? manhwaItems : mangaItems)
+            : (mangaItems.length > 0 ? mangaItems : manhwaItems);
+          const isManhwaView = activeMangaTab === "manhwa" ? manhwaItems.length > 0 : mangaItems.length === 0;
+          return (
+            <View style={{ marginBottom: 24 }}>
+              <SectionHeader
+                onSeeAll={() => router.push({ pathname: "/manga" as any, params: { tab: isManhwaView ? "manhwa" : "all" } })}
+                focusable={isTvLayout && sectionFocusable}
+                onFocus={handleSectionFocus}
+              >
+                <View style={styles.sectionRightRow}>
+                  <Text style={{ fontSize: isTvLayout ? 22 : 15 }}>{isManhwaView ? "🔥" : "📚"}</Text>
+                  <Text style={[styles.sectionTitle, isTvLayout && styles.tvSectionTitle, { color: colors.text }]}>
+                    المانجا والمانهوا
+                  </Text>
+                  <View style={[styles.continueAccent, { backgroundColor: isManhwaView ? "#f59e0b" : "#10B981" }]} />
+                </View>
+              </SectionHeader>
 
-        {/* ── Manga Section (مانجا مترجمة — مخفية في وضع التلفاز) ── */}
-        {section.kind === "manga" && !isTvLayout && mangaItems.length > 0 && (
-          <View style={{ marginBottom: 24 }}>
-            <SectionHeader
-              onSeeAll={() => router.push("/manga" as any)}
-              focusable={isTvLayout}
-            >
-              <View style={styles.sectionRightRow}>
-                <Text style={{ fontSize: isTvLayout ? 22 : 15 }}>📚</Text>
-                <Text style={[styles.sectionTitle, isTvLayout && styles.tvSectionTitle, { color: colors.text }]}>مانجا مترجمة</Text>
-                <View style={[styles.continueAccent, { backgroundColor: colors.homeAccent || "#06b6d4" }]} />
-              </View>
-            </SectionHeader>
-            <FlatList
-              data={mangaItems}
-              horizontal
-              keyExtractor={(item, idx) => `manga-${item.id}-${idx}`}
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
-              renderItem={({ item }) => (
-                <Pressable
-                  onPress={() => router.push({ pathname: "/manga/[id]" as any, params: { id: String(item.id), title: item.title, english: item.subtitle, cover: item.poster, status: item.status, chapters: String(item.chapters || ""), score: String(item.score || ""), source: item.source } })}
-                  focusable={isTvLayout}
-                  style={({ focused }) => [
-                    todayStyles.card,
-                    { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border },
-                    isTvLayout && tvFocusStyle(focused),
-                  ]}
-                >
-                  {item.poster ? (
-                    <Image source={{ uri: item.poster }} style={todayStyles.img} resizeMode="cover" />
-                  ) : (
-                    <View style={[todayStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
-                      <Ionicons name="book-outline" size={28} color="rgba(255,255,255,0.2)" />
+              <ScrollView
+                horizontal
+                focusable={false}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{
+                  flexDirection: "row-reverse",
+                  alignItems: "center",
+                  gap: 8,
+                  paddingHorizontal: railSidePadding,
+                  marginBottom: 12,
+                }}
+              >
+                {([
+                  { key: "manhwa" as const, label: "مانهوا ملونة", color: "#f59e0b" },
+                  { key: "manga" as const, label: "مانجا مترجمة", color: "#10B981" },
+                ]).map((tabOpt) => {
+                  const isActive = activeMangaTab === tabOpt.key;
+                  return (
+                    <Pressable
+                      key={tabOpt.key}
+                      onPress={() => {
+                        setActiveMangaTab(tabOpt.key);
+                        mangaRailListRef.current?.scrollToOffset({ offset: 0, animated: false });
+                      }}
+                      onFocus={handleSectionFocus}
+                      focusable={isTvLayout && sectionFocusable}
+                      style={({ focused }) => [
+                        {
+                          paddingHorizontal: isTvLayout ? 20 : 16,
+                          paddingVertical: isTvLayout ? 9 : 7,
+                          borderRadius: 12,
+                          borderWidth: 1,
+                          flexShrink: 0,
+                          alignItems: "center",
+                          justifyContent: "center",
+                          backgroundColor: isActive ? `${tabOpt.color}22` : colors.card,
+                          borderColor: isActive ? `${tabOpt.color}88` : colors.border,
+                        },
+                        isTvLayout && tvFocusStyle(focused),
+                      ]}
+                    >
+                      <Text
+                        style={{
+                          fontSize: isTvLayout ? 15 : 12.5,
+                          lineHeight: isTvLayout ? 22 : 19,
+                          fontFamily: "Cairo_700Bold",
+                          color: isActive ? tabOpt.color : colors.mutedForeground,
+                          includeFontPadding: false,
+                          textAlign: "center",
+                          paddingHorizontal: 3,
+                          flexShrink: 0,
+                        }}
+                      >
+                        {` ${tabOpt.label} `}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+
+              <TvFocusGuideView autoFocus={false} style={isTvLayout ? { minHeight: 1 } : undefined}>
+              <FlatList
+                ref={mangaRailListRef}
+                data={activeList}
+                horizontal
+                getItemLayout={getRailItemLayout}
+                keyExtractor={(item, idx) => `manga-unified-${activeMangaTab}-${item.id}-${idx}`}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
+                onScrollToIndexFailed={({ index }) => {
+                  mangaRailListRef.current?.scrollToOffset({
+                    offset: Math.max(0, index * railStride),
+                    animated: true,
+                  });
+                }}
+                renderItem={({ item, index: mIdx }) => (
+                  <Pressable
+                    onPress={() =>
+                      router.push({
+                        pathname: "/manga/[id]" as any,
+                        params: {
+                          id: String(item.id),
+                          title: item.title,
+                          english: item.subtitle,
+                          cover: item.poster,
+                          status: item.status,
+                          chapters: String(item.chapters || ""),
+                          score: String(item.score || ""),
+                          source: item.source,
+                        },
+                      })
+                    }
+                    onFocus={() => {
+                      handleSectionFocus?.();
+                      if (isTvLayout) scrollMangaRailIntoView(mIdx);
+                    }}
+                    focusable={isTvLayout && sectionFocusable}
+                    style={({ focused }) => [
+                      todayStyles.card,
+                      { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border },
+                      isTvLayout && tvFocusStyle(focused),
+                    ]}
+                  >
+                    {item.poster ? (
+                      <Image source={{ uri: item.poster }} style={todayStyles.img} resizeMode="cover" resizeMethod="resize" fadeDuration={0} />
+                    ) : (
+                      <View style={[todayStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
+                        <Ionicons name="book-outline" size={28} color="rgba(255,255,255,0.2)" />
+                      </View>
+                    )}
+                    <View
+                      style={{
+                        position: "absolute",
+                        top: 8,
+                        right: 8,
+                        zIndex: 2,
+                        paddingHorizontal: 8,
+                        paddingVertical: 3,
+                        borderRadius: 7,
+                        backgroundColor: item.source === "manhwa" ? "rgba(245, 158, 11, 0.92)" : "rgba(16, 185, 129, 0.92)",
+                      }}
+                    >
+                      <Text style={{ color: item.source === "manhwa" ? "#09090b" : "#ffffff", fontFamily: "Cairo_700Bold", fontSize: isTvLayout ? 12 : 9 }}>
+                        {item.source === "manhwa" ? "مانهوا" : "مانجا"}
+                      </Text>
                     </View>
-                  )}
-                  <LinearGradient colors={["transparent", "rgba(0,0,0,0.92)"]} style={todayStyles.grad}>
-                    <Text style={todayStyles.title} numberOfLines={2}>{item.title}</Text>
-                    <Text style={{ color: colors.primary, fontSize: 9, fontFamily: "Cairo_700Bold", textAlign: "right" }}>
-                      {item.type || "مانجا"}
-                    </Text>
-                  </LinearGradient>
-                </Pressable>
-              )}
-              initialNumToRender={5}
-              maxToRenderPerBatch={5}
-              windowSize={3}
-              removeClippedSubviews={false}
-            />
-          </View>
-        )}
+                    <LinearGradient colors={["transparent", "rgba(0,0,0,0.92)"]} style={todayStyles.grad}>
+                      <Text style={todayStyles.title} numberOfLines={2}>{item.title}</Text>
+                      <Text style={{ color: item.source === "manhwa" ? "#fbbf24" : "#34d399", fontSize: isTvLayout ? 11 : 9, fontFamily: "Cairo_700Bold", textAlign: "right" }}>
+                        {item.type}
+                      </Text>
+                    </LinearGradient>
+                  </Pressable>
+                )}
+                initialNumToRender={8}
+                maxToRenderPerBatch={6}
+                windowSize={5}
+                removeClippedSubviews={false}
+              />
+              </TvFocusGuideView>
+            </View>
+          );
+        })()}
       </View>
     );
   };
@@ -1279,6 +1327,9 @@ export default function HomeScreen() {
       <FlatList
         ref={homeListRef}
         data={homeSections}
+        onScrollToIndexFailed={({ index }) => {
+          homeListRef.current?.scrollToOffset({ offset: Math.max(0, index * 320), animated: true });
+        }}
         keyExtractor={(item) => item.key}
         renderItem={renderHomeSection}
         ListHeaderComponent={

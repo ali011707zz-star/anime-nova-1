@@ -4,7 +4,7 @@ import { FlatList, StyleSheet, Text, View } from "react-native";
 import { CatalogPageHeader, CatalogTabs } from "@/components/CatalogPageHeader";
 import { MediaCatalogGrid } from "@/components/MediaCatalogGrid";
 import { useColors } from "@/hooks/useColors";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 
 const FIRST_SEASON_YEAR = 1990;
 const SEASONS = [
@@ -55,7 +55,7 @@ export default function SeasonsScreen() {
       ? shiftSeason(current, -1)
       : current;
   const shownSeason = selectedSeason || (activeTab === "all" ? null : relativeSeason);
-  const tvMode = isTvDevice();
+  const { tv: tvMode } = useTvMetrics();
 
   const seasonRows = useMemo(() => {
     const now = new Date();

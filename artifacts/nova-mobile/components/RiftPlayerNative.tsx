@@ -1194,11 +1194,21 @@ export function RiftPlayer({
         <Ionicons name="alert-circle-outline" size={42} color="#f87171" />
         <Text style={styles.message}>تعذّر تحميل مصدر الفيديو</Text>
         {playableSources.length > 1 && (
-          <Pressable onPress={() => changeSource((sourceIndex + 1) % playableSources.length)} style={styles.action}>
+          <Pressable
+            onPress={() => changeSource((sourceIndex + 1) % playableSources.length)}
+            focusable={tvMode}
+            hasTVPreferredFocus={tvMode}
+            style={({ focused }) => [styles.action, tvMode && tvFocusStyle(focused)]}
+          >
             <Text style={styles.actionText}>جرّب المصدر التالي</Text>
           </Pressable>
         )}
-        <Pressable onPress={onBack} style={styles.secondaryAction}>
+        <Pressable
+          onPress={onBack}
+          focusable={tvMode}
+          hasTVPreferredFocus={tvMode && playableSources.length <= 1}
+          style={({ focused }) => [styles.secondaryAction, tvMode && tvFocusStyle(focused)]}
+        >
           <Text style={styles.secondaryText}>العودة</Text>
         </Pressable>
       </View>
@@ -1495,7 +1505,12 @@ export function RiftPlayer({
               <View style={styles.ended}>
                 <Text style={styles.endedText}>انتهت الحلقة</Text>
                 {canNext && autoPlayNext && (
-                  <Pressable onPress={onNextEpisode} style={styles.action}>
+                  <Pressable
+                    onPress={onNextEpisode}
+                    focusable={tvMode}
+                    hasTVPreferredFocus={tvMode}
+                    style={({ focused }) => [styles.action, tvMode && tvFocusStyle(focused)]}
+                  >
                     <Text style={styles.actionText}>الحلقة التالية</Text>
                   </Pressable>
                 )}
@@ -1508,6 +1523,8 @@ export function RiftPlayer({
         <View style={styles.tvSettingsLayer} pointerEvents="box-none">
           <Pressable
             accessibilityLabel="إغلاق إعدادات الترجمة"
+            focusable={false}
+            accessible={false}
             style={styles.tvSettingsBackdrop}
             onPress={() => setShowSubtitleSettings(false)}
           />

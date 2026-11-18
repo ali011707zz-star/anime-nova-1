@@ -16,7 +16,7 @@ import {
 } from "@/utils/downloadManager";
 import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
 import * as FileSystem from "expo-file-system";
-import { isTvDevice, setTvFullScreenOverlayActive, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
+import { setTvFullScreenOverlayActive, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
 import type { ThemePalette } from "@/constants/colors";
 
@@ -110,7 +110,7 @@ function ActiveDownloadCard({
   onResume: () => void;
 }) {
   const { colors, s } = useDownloadsTheme();
-  const tvMode = isTvDevice();
+  const { tv: tvMode } = useTvMetrics();
   const pct = Math.round(item.progress * 100);
   const isPaused = item.status === "paused";
   const isError = item.status === "error";
@@ -216,7 +216,7 @@ function DownloadCard({
   savingToGallery: boolean;
 }) {
   const { colors, s } = useDownloadsTheme();
-  const tvMode = isTvDevice();
+  const { tv: tvMode } = useTvMetrics();
   const q = item.quality?.toLowerCase() ?? "";
   const dotColor = q.includes("1080") ? colors.accent : q.includes("720") ? colors.success : colors.textMuted;
 
@@ -345,7 +345,7 @@ function DownloadWorkCard({
   onOpen: () => void;
 }) {
   const { colors, s } = useDownloadsTheme();
-  const tvMode = isTvDevice();
+  const { tv: tvMode } = useTvMetrics();
 
   return (
     <Pressable
@@ -468,7 +468,7 @@ export default function DownloadsScreen() {
   const insets = useSafeAreaInsets();
   const topPad = Platform.OS === "web" ? 0 : Math.max(insets.top, 0);
   const router = useRouter();
-  const tvMode = isTvDevice();
+  const { tv: tvMode } = useTvMetrics();
   const { width: windowWidth } = useWindowDimensions();
   const [downloads, setDownloads] = useState<DownloadItem[]>([]);
   const [activeDownloads, setActiveDownloads] = useState<ActiveDownload[]>(getActiveDownloadsSnapshot);
@@ -779,6 +779,7 @@ export default function DownloadsScreen() {
       </View>
 
       <ScrollView
+        focusable={false}
         ref={scrollRef}
         contentContainerStyle={[s.scrollContent, { paddingBottom: insets.bottom + 96 }]}
         showsVerticalScrollIndicator={false}

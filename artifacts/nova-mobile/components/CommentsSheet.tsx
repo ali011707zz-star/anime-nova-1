@@ -8,7 +8,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch } from "@/utils/secureApi";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
 
 const AUTH_KEY = "nova-mobile-user";
@@ -88,7 +88,7 @@ function Avatar({ username, avatarUrl, size = 36 }: { username: string; avatarUr
 export function CommentsSheet({ visible, onClose, animeId, tmdbId, episodeNumber, title }: Props) {
   const insets = useSafeAreaInsets();
   const colors = useColors();
-  const tvMode = isTvDevice();
+  const { tv: tvMode } = useTvMetrics();
   const [comments, setComments] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(false);
   const [posting, setPosting] = useState(false);

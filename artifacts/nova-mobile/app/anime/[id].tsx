@@ -18,7 +18,7 @@ import { getBaseUrl } from "@/utils/api";
 import { secureFetch } from "@/utils/secureApi";
 import { getYoutubeEmbedUrl, getYoutubeReferer } from "@/utils/youtube";
 import { YoutubeTrailerModal } from "@/components/YoutubeTrailerModal";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { useTvFocusMemory } from "@/utils/tvFocus";
 import { useColors } from "@/hooks/useColors";
 import type { ThemePalette } from "@/constants/colors";
@@ -223,7 +223,7 @@ export default function AnimeDetailScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { width, height } = useWindowDimensions();
-  const tvMode = isTvDevice(width, height);
+  const { tv: tvMode } = useTvMetrics();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
   const { isFavorite, toggleFavorite } = useApp();
   const { rememberFocus } = useTvFocusMemory(`detail:${id || "unknown"}`);

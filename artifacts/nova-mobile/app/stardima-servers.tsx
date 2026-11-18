@@ -13,7 +13,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
-import { TvPressable, isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { TvPressable, isTvDevice, tvFocusStyle, useTvMetrics } from "@/utils/tv";
 import { getBaseUrl } from "@/utils/api";
 import { getAuthToken, getDownloadToken } from "@/utils/secureApi";
 import { ensureWatchAccess } from "@/utils/adPolicy";
@@ -58,7 +58,7 @@ export default function StardimaServersScreen() {
   const colors = useColors();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const tvMode = isTvDevice();
+  const { tv: tvMode } = useTvMetrics();
   const params = useLocalSearchParams<{
     providerTitleId?: string | string[];
     episodeId?: string | string[];
@@ -444,7 +444,7 @@ export default function StardimaServersScreen() {
           </TvPressable>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 20) + 28 }]}>
+        <ScrollView focusable={false} contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 20) + 28 }]}>
           <View style={[styles.infoCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <View style={styles.infoPosterWrap}>
               <View style={[styles.infoPosterGlow, { backgroundColor: colors.accentSurface }]} />

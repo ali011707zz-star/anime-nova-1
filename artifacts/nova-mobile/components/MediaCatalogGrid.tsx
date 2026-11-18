@@ -16,7 +16,7 @@ import { getBaseUrl } from "@/utils/api";
 import { translateMangaGenre } from "@/utils/mangaLocalization";
 import { getKnownArabicAnimeTitle } from "@/utils/arabicAnimeTitles";
 import { useColors } from "@/hooks/useColors";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 
 export type CatalogMedia = {
   id: number | string;
@@ -176,7 +176,7 @@ export function MediaCatalogGrid({
   const colors = useColors();
   const router = useRouter();
   const { width, height } = useWindowDimensions();
-  const tvMode = isTvDevice(width, height);
+  const { tv: tvMode } = useTvMetrics();
   const columns = width >= 1200 ? 6 : width >= 900 ? 5 : width >= 560 ? 4 : 3;
   const gridWidth = Math.max(0, width - 32);
   const cardGap = 12;
@@ -191,6 +191,8 @@ export function MediaCatalogGrid({
   const [hasMore, setHasMore] = useState(true);
   const requestSequence = useRef(0);
   const controllerRef = useRef<AbortController | null>(null);
+  const flatListRef = useRef<FlatList<CatalogMedia>>(null);
+  const rowStep = posterHeight + 82;
 
   const cacheKey = `${mediaType}_${variant}_${countryOfOrigin || ""}_${status || ""}_${format || ""}_${search || ""}_${sort}`;
 
@@ -383,6 +385,15 @@ export function MediaCatalogGrid({
         testID={tvMode && index === 0 ? "nova-tv-preferred-focus" : `catalog-item-${item.id}`}
         hasTVPreferredFocus={tvMode && index === 0}
         onPress={() => openMedia(item)}
+        onFocus={() => {
+          if (!tvMode) return;
+          const rowIdx = Math.floor(index / columns);
+          try {
+            flatListRef.current?.scrollToIndex({ index: rowIdx, animated: true, viewPosition: 0.35 });
+          } catch {
+            flatListRef.current?.scrollToOffset({ offset: Math.max(0, rowIdx * rowStep - 80), animated: true });
+          }
+        }}
         focusable={tvMode}
         style={({ focused }) => [
           styles.card,
@@ -495,7 +506,11 @@ export function MediaCatalogGrid({
 
   return (
     <FlatList
+      ref={flatListRef}
       key={`catalog-${columns}`}
+      onScrollToIndexFailed={({ index: rowIdx }) => {
+        flatListRef.current?.scrollToOffset({ offset: Math.max(0, rowIdx * rowStep - 80), animated: true });
+      }}
       data={items}
       numColumns={columns}
       keyExtractor={(item) => String(item.id)}

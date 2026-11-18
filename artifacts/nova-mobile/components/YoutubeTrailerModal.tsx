@@ -14,7 +14,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { WebView } from "react-native-webview";
 import { getYoutubeEmbedUrl, getYoutubeReferer } from "@/utils/youtube";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
+import { tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 
 const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
 
@@ -74,7 +74,8 @@ export function YoutubeTrailerModal({
   onClose,
   tvMode = false,
 }: Props) {
-  const isTv = tvMode || isTvDevice();
+  const { tv: detectedTv } = useTvMetrics();
+  const isTv = tvMode || detectedTv;
   const { width: winW, height: winH } = useWindowDimensions();
   const [stage, setStage] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
   const webViewRef = useRef<WebView>(null);

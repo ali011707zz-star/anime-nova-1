@@ -10,7 +10,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
-import { isTvDevice, TvPressable as Pressable } from "@/utils/tv";
+import { isTvDevice, useTvMetrics, TvPressable as Pressable } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
 import type { ThemePalette } from "@/constants/colors";
 
@@ -83,7 +83,7 @@ export default function AnimationsScreen() {
   const router = useRouter();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
   // Keep TV cards readable without decoding a large poster batch at once.
-  const tvMode = isTvDevice(width, height);
+  const { tv: tvMode } = useTvMetrics();
   const gridColumns = tvMode ? 4 : 3;
   const gridWidth = Math.min(Math.max(width - 24, 0), tvMode ? 1100 : 900);
 
@@ -319,7 +319,7 @@ export default function AnimationsScreen() {
         {showFilters && (
           <View style={[s.filterPanel, tvMode && s.tvFilterPanel]}>
             <Text style={[s.filterLabel, tvMode && s.tvFilterLabel]}>ترتيب حسب</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <ScrollView focusable={false} horizontal showsHorizontalScrollIndicator={false}>
               <View style={{ flexDirection: "row", gap: 8 }}>
                 {sortOptions.map(opt => (
                   <Pressable key={opt.value} onPress={() => setSort(opt.value)}
@@ -331,7 +331,7 @@ export default function AnimationsScreen() {
             </ScrollView>
 
              <Text style={[s.filterLabel, tvMode && s.tvFilterLabel, { marginTop: 10 }]}>السنة</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <ScrollView focusable={false} horizontal showsHorizontalScrollIndicator={false}>
               <View style={{ flexDirection: "row", gap: 8 }}>
                 {YEARS.map(y => {
                   const val = y === "الكل" ? "" : y;

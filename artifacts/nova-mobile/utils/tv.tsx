@@ -5,6 +5,7 @@ import {
   Dimensions,
   Platform,
   Pressable,
+  StyleSheet,
   View,
   useWindowDimensions,
 } from "react-native";
@@ -232,10 +233,12 @@ export function tvFocusStyle(focused: boolean, isWhite?: boolean): ViewStyle {
   const white = typeof isWhite === "boolean" ? isWhite : activeThemeIsWhite;
   if (white) {
     return {
+      borderWidth: 2.5,
       borderColor: "#EA580C",
     };
   }
   return {
+    borderWidth: 2.5,
     borderColor: "#FACC15",
   };
 }
@@ -299,6 +302,10 @@ type TvPressableState = PressableStateCallbackType & { focused: boolean };
 type TvPressableProps = Omit<PressableProps, "style"> & {
   style?: StyleProp<ViewStyle> | ((state: TvPressableState) => StyleProp<ViewStyle>);
   onKeyDown?: (event: any) => void;
+  nextFocusUp?: number;
+  nextFocusDown?: number;
+  nextFocusLeft?: number;
+  nextFocusRight?: number;
 };
 
 export const TvPressable = React.forwardRef<View, TvPressableProps>(function TvPressable(
@@ -348,15 +355,25 @@ export const TvPressable = React.forwardRef<View, TvPressableProps>(function TvP
 
   const isDisabled = Boolean(props.disabled);
 
+  const focusedRef = React.useRef(false);
+  React.useEffect(() => {
+    focusedRef.current = focused;
+  }, [focused]);
   React.useEffect(() => {
     if (!tv || !hasTVPreferredFocus || isDisabled) return;
-    const t1 = setTimeout(() => {
+    const tryFocus = () => {
+      if (focusedRef.current) return;
       try {
         (innerRef.current as any)?.focus?.();
       } catch {}
-    }, 45);
+    };
+    const raf = requestAnimationFrame(tryFocus);
+    const t1 = setTimeout(tryFocus, 55);
+    const t2 = setTimeout(tryFocus, 160);
     return () => {
+      cancelAnimationFrame(raf);
       clearTimeout(t1);
+      clearTimeout(t2);
     };
   }, [tv, hasTVPreferredFocus, isDisabled]);
 
@@ -383,17 +400,56 @@ export const TvPressable = React.forwardRef<View, TvPressableProps>(function TvP
         onBlur?.(event);
       }}
       style={(state: PressableStateCallbackType) => {
+        if (!tv) {
+          const baseStyle = typeof style === "function" ? style({ ...state, focused: false } as any) : style;
+          return state.pressed ? [baseStyle, { opacity: 0.85 }] : baseStyle;
+        }
         const isFocused = Boolean(focused || (state as any)?.focused);
         const baseStyle = typeof style === "function" ? style({ ...state, focused: isFocused }) : style;
         return [
-          tv && { borderWidth: 1.5, borderColor: "transparent" },
+          { borderWidth: 1.5, borderColor: "transparent" },
           baseStyle,
-          tv && isFocused && tvFocusStyle(true),
+          isFocused && tvFocusStyle(true),
           state.pressed && { opacity: 0.85 },
         ];
       }}
     >
-      {children}
+      {(state: PressableStateCallbackType) => {
+        if (!tv) {
+          return typeof children === "function"
+            ? (children as any)({ ...state, focused: false })
+            : children;
+        }
+        const isFocused = Boolean(focused || (state as any)?.focused);
+        const resolvedChildren =
+          typeof children === "function"
+            ? (children as any)({ ...state, focused: isFocused })
+            : children;
+        if (!isFocused) return resolvedChildren;
+        const baseStyle = typeof style === "function" ? style({ ...state, focused: true }) : style;
+        const flat = StyleSheet.flatten(baseStyle) as ViewStyle | undefined;
+        if (flat?.overflow !== "hidden") return resolvedChildren;
+        const radius = typeof flat?.borderRadius === "number" ? flat.borderRadius : 12;
+        return (
+          <>
+            {resolvedChildren}
+            <View
+              pointerEvents="none"
+              style={{
+                position: "absolute",
+                top: 0,
+                right: 0,
+                bottom: 0,
+                left: 0,
+                borderRadius: radius,
+                borderWidth: 2.5,
+                borderColor: activeThemeIsWhite ? "#EA580C" : "#FACC15",
+                zIndex: 999,
+              }}
+            />
+          </>
+        );
+      }}
     </Pressable>
   );
 });

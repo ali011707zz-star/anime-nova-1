@@ -19,7 +19,7 @@ import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { getBaseUrl } from "@/utils/baseUrl";
 import { secureFetch, setUserAuthToken } from "@/utils/secureApi";
-import { isTvDevice, tvFocusStyle, TvPressable, useTvModeOverride } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable, useTvModeOverride, useTvMetrics } from "@/utils/tv";
 const Pressable = TvPressable;
 
 const AUTH_KEY = "nova-mobile-user";
@@ -71,7 +71,7 @@ export default function TvLinkScreen() {
   const router = useRouter();
   const { setCurrentUser } = useApp();
   useTvModeOverride();
-  const tvMode = isTvDevice();
+  const { tv: tvMode } = useTvMetrics();
   const goBack = () => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any);
 
   const [mode, setMode] = useState<"qr" | "manual">("qr");
@@ -317,6 +317,7 @@ export default function TvLinkScreen() {
       </Pressable>
 
       <ScrollView
+        focusable={false}
         contentContainerStyle={[
           styles.scrollContent,
           { paddingBottom: Math.max(insets.bottom, 24) },

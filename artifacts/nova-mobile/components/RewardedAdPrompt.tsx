@@ -13,7 +13,7 @@ import { useRouter } from "expo-router";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { subscribeRewardPrompt } from "@/utils/adPolicy";
 import type { RewardKind } from "@/utils/adPolicy";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
+import { tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
 
 type PendingPrompt = {
@@ -47,7 +47,7 @@ export function RewardedAdPrompt() {
   const [busy, setBusy] = useState(false);
   const [adError, setAdError] = useState("");
   const router = useRouter();
-  const tvMode = isTvDevice();
+  const { tv: tvMode } = useTvMetrics();
 
   useEffect(() => {
     return subscribeRewardPrompt((kind, confirm, resolve) => {

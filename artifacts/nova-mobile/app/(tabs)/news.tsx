@@ -10,7 +10,7 @@ import { useColors } from "@/hooks/useColors";
 import { getKnownArabicAnimeTitle } from "@/utils/arabicAnimeTitles";
 import { CommentsSheet } from "@/components/CommentsSheet";
 import { getBaseUrl } from "@/utils/api";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
+import { isTvDevice, useTvMetrics, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 
 /* ═══════════════════════════════════════════════════════
    AniList GraphQL queries
@@ -115,7 +115,7 @@ export default function NewsScreen() {
   const colors  = useColors();
   const insets  = useSafeAreaInsets();
   const router  = useRouter();
-  const tvMode  = isTvDevice();
+  const { tv: tvMode } = useTvMetrics();
 
   /* AniList state */
   const [tab, setTab]         = useState<Tab>("latestnews");

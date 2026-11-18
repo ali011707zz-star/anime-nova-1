@@ -19,7 +19,7 @@ function useBrowseTheme() {
   const colors = useColors();
   const { deviceScale } = useTvMetrics();
   const { width, height } = useWindowDimensions();
-  const tvMode = isTvDevice(width, height);
+  const { tv: tvMode } = useTvMetrics();
   const g = useMemo(() => createBrowseStyles(colors, deviceScale, tvMode), [colors, deviceScale, tvMode]);
   return { colors, g, deviceScale };
 }
@@ -127,7 +127,7 @@ function GenreCard({
 }) {
   const { g } = useBrowseTheme();
   const { width, height } = useWindowDimensions();
-  const tvMode = isTvDevice(width, height);
+  const { tv: tvMode } = useTvMetrics();
   const [imgErr, setImgErr] = useState(false);
 
   return (
@@ -195,7 +195,7 @@ function AnimeCard({
 }) {
   const { g } = useBrowseTheme();
   const { width, height } = useWindowDimensions();
-  const tvMode = isTvDevice(width, height);
+  const { tv: tvMode } = useTvMetrics();
   const gridW = Math.min(Math.max(width - 24, 280), tvMode ? 1100 : 900);
   const cardW = Math.max(88, Math.floor((gridW - 24 - 10 * (columns - 1)) / columns));
   const cardH = Math.round(cardW * 1.44);
@@ -334,7 +334,7 @@ export default function BrowseScreen() {
   const topPad = Platform.OS === "web" ? 0 : insets.top;
   // TV gets a wider, remote-friendly grid without decoding an excessive
   // number of posters at once.
-  const tvMode = isTvDevice(width, height);
+  const { tv: tvMode } = useTvMetrics();
   const gridColumns = getGridColumnCount(width, height);
   const genreColumns = tvMode ? 3 : 2;
   const gridWidth = Math.min(Math.max(width - 24, 0), tvMode ? 1100 : 900);
@@ -587,6 +587,7 @@ export default function BrowseScreen() {
         </Pressable>
 
         <ScrollView
+        focusable={false}
           horizontal
           showsHorizontalScrollIndicator={false}
           style={g.mobileGenreRail}

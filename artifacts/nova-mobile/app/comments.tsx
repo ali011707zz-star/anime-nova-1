@@ -9,7 +9,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch } from "@/utils/secureApi";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
 import type { ThemePalette } from "@/constants/colors";
 
@@ -69,7 +69,7 @@ export default function CommentsPage() {
   const insets = useSafeAreaInsets();
   const colors = useColors();
   const s = useMemo(() => createCommentStyles(colors), [colors]);
-  const tvMode = isTvDevice();
+  const { tv: tvMode } = useTvMetrics();
   const params = useLocalSearchParams<{ animeId?: string; tmdbId?: string; ep?: string; title?: string; type?: string; highlightId?: string; commentId?: string }>();
 
   const animeId = params.animeId ? parseInt(params.animeId) : undefined;

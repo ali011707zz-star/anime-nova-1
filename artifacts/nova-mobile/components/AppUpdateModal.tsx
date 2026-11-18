@@ -25,7 +25,7 @@ import {
   openInstallPermissionSettingsNative,
 } from "expo-nova-download";
 import { useApp } from "@/context/AppContext";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 
 const DISMISSED_VERSION_KEY = "nova-dismissed-update-version";
 const UPDATE_JOB_ID = "nova-self-update-apk";
@@ -78,7 +78,7 @@ const DEFAULT_CHANGELOG = [
 export function AppUpdateModal() {
   const { remoteConfig, refreshConfig } = useApp();
   const { width, height } = useWindowDimensions();
-  const tvMode = isTvDevice(width, height);
+  const { tv: tvMode } = useTvMetrics();
 
   const [visible, setVisible] = useState(false);
   const [manualCheckMode, setManualCheckMode] = useState(false);

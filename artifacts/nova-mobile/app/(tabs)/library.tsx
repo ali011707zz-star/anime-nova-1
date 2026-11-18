@@ -11,7 +11,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useColors } from "@/hooks/useColors";
 import { historyRoute, useApp } from "@/context/AppContext";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvModeOverride } from "@/utils/tv";
+import { tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { getGridColumnCount, getRailCardWidth } from "@/components/AnimeCard";
 import { getKnownArabicAnimeTitle } from "@/utils/arabicAnimeTitles";
 
@@ -63,10 +63,8 @@ const LIBRARY_YEARS = ["", "2026", "2025", "2024", "2023", "2022", "2021", "2020
 export default function LibraryScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  useTvModeOverride();
-  const { width, height } = useWindowDimensions();
+  const { width, height, tv: tvMode } = useTvMetrics();
   const topPad = Platform.OS === "web" ? 0 : Math.max(insets.top, 0);
-  const tvMode = isTvDevice(width, height);
   const visibleTabs = TABS;
   const gridColumns = getGridColumnCount(width, height);
   const tvPosterWidth = getRailCardWidth(width, gridColumns, 8);
@@ -154,7 +152,6 @@ export default function LibraryScreen() {
   const filteredFavs = useMemo(() => {
     const sq = search.toLowerCase();
     return favorites.filter(f => {
-      if (tvMode && f.mangaId) return false;
       const ar = f.titleAr || (!f.mangaId ? getKnownArabicAnimeTitle(f.id, f.english, f.title) : null);
       const matchesSearch = !sq || [ar, f.english, f.title].some(v => (v || "").toLowerCase().includes(sq));
       const matchesYear = !year || String(f.startYear || new Date(f.addedAt).getFullYear()) === year;
@@ -271,6 +268,7 @@ export default function LibraryScreen() {
       {/* ── Tabs ── */}
       <ScrollView
         horizontal
+        focusable={false}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={s.tabsRow}
         style={s.tabsScroll}
@@ -327,7 +325,7 @@ export default function LibraryScreen() {
       </View>
       {activeTab === 2 && (
         <View style={s.libraryFilters}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.filterChips}>
+          <ScrollView horizontal focusable={false} showsHorizontalScrollIndicator={false} contentContainerStyle={s.filterChips}>
             {LIBRARY_YEARS.map(y => (
               <Pressable key={y || "all-years"} onPress={() => setYear(y)} focusable={tvMode}
                 style={({ focused }) => [
@@ -349,7 +347,7 @@ export default function LibraryScreen() {
               </Pressable>
             ))}
           </ScrollView>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.filterChips}>
+          <ScrollView horizontal focusable={false} showsHorizontalScrollIndicator={false} contentContainerStyle={s.filterChips}>
             {["", "Action", "Adventure", "Comedy", "Drama", "Fantasy", "Romance", "Mystery", "Sports"].map(g => (
               <Pressable key={g || "all-genres"} onPress={() => setGenre(g)} focusable={tvMode}
                 style={({ focused }) => [s.filterChip, tvMode && s.tvFilterChip, genre === g && s.filterChipActive, tvMode && tvFocusStyle(focused)]}>

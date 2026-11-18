@@ -241,7 +241,7 @@ function filterSafe(list: AnimeResult[]): AnimeResult[] {
 function AnimeCard({ anime, onPress, columns }: { anime: AnimeResult; onPress: () => void; columns: number }) {
   const { s } = useSearchTheme();
   const { width, height } = useWindowDimensions();
-  const tvMode = isTvDevice(width, height);
+  const { tv: tvMode } = useTvMetrics();
   const fmt = anime.format ? FORMAT_AR[anime.format] || anime.format : null;
   const isFilm = anime.format === "MOVIE";
   return (
@@ -309,7 +309,7 @@ export default function SearchScreen() {
   const topPad = Platform.OS === "web" ? 0 : insets.top;
   // Four TV columns remain readable while avoiding an oversized decode batch
   // on lower-powered Android TV hardware.
-  const tvMode = isTvDevice(width, height);
+  const { tv: tvMode } = useTvMetrics();
   const gridColumns = getGridColumnCount(width, height);
   const gridWidth = Math.min(Math.max(width - 24, 0), tvMode ? 1100 : 900);
 
@@ -569,7 +569,7 @@ export default function SearchScreen() {
 
         {/* ── Search history (idle state) ── */}
         {!loading && showEmpty && (
-          <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 14, paddingBottom: 40 }}>
+          <ScrollView focusable={false} contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 14, paddingBottom: 40 }}>
             {history.length > 0 && (
               <View style={{ marginBottom: 20 }}>
                 <View style={s.historyHeader}>
@@ -734,7 +734,7 @@ export default function SearchScreen() {
 
             {/* Results */}
             {traceResults.length > 0 && !traceLoading && (
-              <ScrollView style={{ maxHeight: 340 }} showsVerticalScrollIndicator={false}>
+              <ScrollView focusable={false} style={{ maxHeight: 340 }} showsVerticalScrollIndicator={false}>
                 <Text style={sm.resTitle}>{traceResults.length} نتيجة — انقر للمشاهدة</Text>
                 {traceResults.map((r, i) => (
                   <Pressable key={i} style={sm.resCard}

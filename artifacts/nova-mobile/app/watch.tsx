@@ -15,7 +15,7 @@ import { HiddenResolverWebView, ResolvedStream } from "@/components/HiddenResolv
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getWatchContentId, useApp } from "@/context/AppContext";
-import { isTvDevice, tvFocusStyle, TvFocusGuideView, TvPressable } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvFocusGuideView, TvPressable, useTvMetrics } from "@/utils/tv";
 const Pressable = TvPressable;
 import { useTvFocusMemory } from "@/utils/tvFocus";
 import { getBaseUrl } from "@/utils/api";
@@ -820,7 +820,7 @@ function SrcRow({ src, idx, onPlay }: { src: Src; idx: number; onPlay: (s: Src) 
   const q = getSrcQuality(src);
   const qs = QUALITY_STYLE[q];
   const tag = getSiteTag(src.site || "");
-  const tvMode = isTvDevice();
+  const { tv: tvMode } = useTvMetrics();
   return (
     <Pressable onPress={() => onPlay(src)} focusable={tvMode}
       style={({ focused }) => [d.srcRow, tvMode && tvFocusStyle(focused)]}>
@@ -870,7 +870,7 @@ export default function WatchScreen() {
   const router   = useRouter();
   const { addToHistory, watchHistory } = useApp();
   const { colors, d } = useWatchStyles();
-  const tvMode   = isTvDevice();
+  const { tv: tvMode } = useTvMetrics();
   const topPad   = insets.top > 0 ? insets.top : (Platform.OS === "ios" ? 44 : 24);
 
   const titleStr    = safeDecodeURIComponent(title);
@@ -2841,6 +2841,7 @@ export default function WatchScreen() {
 
       <TvFocusGuideView autoFocus={false} style={d.tvFocusGuide}>
         <ScrollView
+        focusable={false}
           showsVerticalScrollIndicator={false}
           removeClippedSubviews={false}
           keyboardShouldPersistTaps="handled"

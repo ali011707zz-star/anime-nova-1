@@ -24,6 +24,7 @@ import { getWatchContentId, useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import type { ThemePalette } from "@/constants/colors";
 import { getBaseUrl } from "@/utils/api";
+import { proxyPosterUrl } from "@/utils/media";
 import { getKnownArabicAnimeTitle } from "@/utils/arabicAnimeTitles";
 import { tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { useTvFocusMemory } from "@/utils/tvFocus";
@@ -453,7 +454,11 @@ export default function DubbedAnimeDetailScreen() {
       fetchedOnceRef.current = true;
       setDetail(json);
       const prev = _azDetailMemoryCache.get(slug);
-      _azDetailMemoryCache.set(slug, { detail: json, descAr: prev?.descAr });
+      if (json?.anilist) {
+        _azDetailMemoryCache.set(slug, { detail: json, descAr: prev?.descAr });
+      } else {
+        _azDetailMemoryCache.delete(slug);
+      }
     } catch {
       if (!fetchedOnceRef.current) {
         setError("تعذّر تحميل تفاصيل الأنمي المدبلج — تحقق من الاتصال وأعد المحاولة");
@@ -503,7 +508,8 @@ export default function DubbedAnimeDetailScreen() {
   const anilist = detail?.anilist ?? null;
   const displayTitle = detail?.titleAr || initialTitle || "أنمي مدبلج";
   const englishTitle = detail?.englishTitle || anilist?.title?.english || anilist?.title?.romaji || "";
-  const posterUri = detail?.poster || anilist?.coverImage?.extraLarge || anilist?.coverImage?.large || initialPoster;
+  const rawPosterUri = detail?.poster || anilist?.coverImage?.extraLarge || anilist?.coverImage?.large || initialPoster;
+  const posterUri = proxyPosterUrl(rawPosterUri) || rawPosterUri;
   const bannerUri = anilist?.bannerImage || posterUri;
   const rawScore = anilist?.meanScore || anilist?.averageScore || null;
   const score = rawScore ? (rawScore / 10).toFixed(1) : null;

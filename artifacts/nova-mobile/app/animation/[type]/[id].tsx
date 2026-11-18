@@ -12,7 +12,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
 import { getYoutubeEmbedUrl, getYoutubeReferer } from "@/utils/youtube";
 import { YoutubeTrailerModal } from "@/components/YoutubeTrailerModal";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
 
 const { width: W } = Dimensions.get("window");
@@ -60,7 +60,7 @@ export default function AnimationDetailScreen() {
   const { type, id } = useLocalSearchParams<{ type: string; id: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const tvMode = isTvDevice();
+  const { tv: tvMode } = useTvMetrics();
 
   const [detail, setDetail] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -217,7 +217,7 @@ export default function AnimationDetailScreen() {
 
   return (
   <View style={{ flex: 1, backgroundColor: colors.background }}>
-    <ScrollView style={s.container} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
+    <ScrollView focusable={false} style={s.container} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
 
       {/* ── Hero Banner ── */}
       <View style={{ height: 240, width: "100%" }}>

@@ -8,11 +8,11 @@ import { LinearGradient } from "expo-linear-gradient";
 import * as ImagePicker from "expo-image-picker";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
-  Alert, KeyboardAvoidingView, Linking, Modal as RNModal, BackHandler, Platform, Pressable as NativePressable, ScrollView,
+  Alert, KeyboardAvoidingView, Linking, Modal as RNModal, BackHandler, Platform, ScrollView,
   Image, Share, StyleSheet, Switch, Text, TextInput, View, ActivityIndicator, I18nManager,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { isTvDevice, TvPressable, tvFocusStyle, useTvModeOverride, type TvModeOverride } from "@/utils/tv";
+import { isTvDevice, TvPressable, tvFocusStyle, useTvMetrics, useTvModeOverride, type TvModeOverride } from "@/utils/tv";
 
 const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -37,10 +37,7 @@ const THEMES: { label: string; value: string; dot: string; desc: string }[] = [
 type SettingsPressableProps = React.ComponentProps<typeof TvPressable>;
 
 function Pressable(props: SettingsPressableProps) {
-  if (isTvDevice()) {
-    return <TvPressable {...props} />;
-  }
-  return <NativePressable {...(props as React.ComponentProps<typeof NativePressable>)} />;
+  return <TvPressable {...props} />;
 }
 
 function Modal({
@@ -49,7 +46,7 @@ function Modal({
   children,
   ...rest
 }: React.ComponentProps<typeof RNModal>) {
-  const tvMode = isTvDevice();
+  const { tv: tvMode } = useTvMetrics();
   useEffect(() => {
     if (!tvMode || !visible || !onRequestClose) return;
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
@@ -114,6 +111,7 @@ function ConfirmSheet({ open, title, desc, confirmLabel = "تأكيد", danger =
   open: boolean; title: string; desc?: string; confirmLabel?: string;
   danger?: boolean; onConfirm: () => void; onCancel: () => void;
 }) {
+  const { tv: tvMode } = useTvMetrics();
   if (!open) return null;
   return (
     <Modal transparent animationType="slide" onRequestClose={onCancel}>
@@ -133,7 +131,7 @@ function ConfirmSheet({ open, title, desc, confirmLabel = "تأكيد", danger =
           </Pressable>
           <Pressable
             testID="nova-tv-preferred-focus"
-            hasTVPreferredFocus={isTvDevice() && open}
+            hasTVPreferredFocus={tvMode && open}
             onPress={() => { onConfirm(); onCancel(); }}
             style={[ts.sheetConfirmBtn, danger && ts.sheetConfirmDanger]}
           >
@@ -195,7 +193,7 @@ function ReportSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
           </View>
           <View style={{ width: 36 }} />
         </View>
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 20 }} showsVerticalScrollIndicator={false}>
+        <ScrollView focusable={false} style={{ flex: 1 }} contentContainerStyle={{ padding: 20 }} showsVerticalScrollIndicator={false}>
           {status === "ok" ? (
             <View style={{ alignItems: "center", gap: 16, paddingVertical: 32 }}>
               <View style={ts.successIcon}>
@@ -581,7 +579,7 @@ function AuthSheetInner({ open, onClose, onLogin, onLinkDevice }: {
       });
   }, [exchangeGoogleCode, googleResponse, saveGoogleUser]);
 
-  const tvMode = isTvDevice();
+  const { tv: tvMode } = useTvMetrics();
 
   const handleGoogleLogin = async () => {
     if (tvMode) {
@@ -732,6 +730,7 @@ function AuthSheetInner({ open, onClose, onLogin, onLinkDevice }: {
         <View style={[ts.sheetHandle, isWhite && { backgroundColor: "rgba(0,0,0,0.14)" }]} />
 
         <ScrollView
+        focusable={false}
           style={{ flex: 1 }}
           contentContainerStyle={{ paddingHorizontal: 22, paddingTop: 6, paddingBottom: 40 }}
           keyboardShouldPersistTaps="handled"
@@ -1213,7 +1212,7 @@ function PremiumSheet({ open, onClose, user }: {
           </View>
         </View>
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 44 }}>
+        <ScrollView focusable={false} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 44 }}>
           {/* Hero */}
           <View style={ts.premiumHeroCard}>
             <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 12 }}>
@@ -1495,7 +1494,7 @@ function ProfileSheet({ open, onClose, user, onUpdate, onLogout, onLinkTv }: {
             <Text style={{ fontSize: 11, fontFamily: "Cairo_400Regular", color: colors.textMuted }}>{user.email}</Text>
           </View>
 
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 20, paddingBottom: 48 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <ScrollView focusable={false} style={{ flex: 1 }} contentContainerStyle={{ padding: 20, paddingBottom: 48 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
 
             {/* Error / Success */}
             {!!error && (
@@ -1574,7 +1573,7 @@ function ProfileSheet({ open, onClose, user, onUpdate, onLogout, onLinkTv }: {
 function TvLinkSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const colors = useColors();
   const base = getBaseUrl();
-  const tvMode = isTvDevice();
+  const { tv: tvMode } = useTvMetrics();
   const [code, setCode] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
   const [devices, setDevices] = useState<Array<{ id: string; name: string; platform: string; lastSeenAt?: string }>>([]);
@@ -1687,7 +1686,7 @@ function TvLinkSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
             </View>
           </View>
 
-          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 38 }} showsVerticalScrollIndicator={false}>
+          <ScrollView focusable={false} contentContainerStyle={{ padding: 20, paddingBottom: 38 }} showsVerticalScrollIndicator={false}>
             {!tvMode && (
               <View style={{ borderRadius: 20, padding: 18, marginBottom: 16, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border }}>
                 <Text style={{ fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, textAlign: "right" }}>
@@ -1887,7 +1886,7 @@ export default function SettingsScreen() {
   const colors = useColors();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
   const [tvOverride, updateTvOverride] = useTvModeOverride();
-  const tvMode = isTvDevice();
+  const { tv: tvMode } = useTvMetrics();
 
   const { toast, show: showToast } = useToast();
   const [notifs, setNotifs] = useState(true);
@@ -2158,7 +2157,7 @@ export default function SettingsScreen() {
         </View>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 60 }}>
+      <ScrollView focusable={false} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 60 }}>
 
         {/* ── Profile / Login card ── */}
         <View style={{ paddingHorizontal: 16, marginTop: 20 }}>
@@ -2586,7 +2585,7 @@ export default function SettingsScreen() {
               </Text>
               <View style={{ width: 36 }} />
             </View>
-            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 10 }}>
+            <ScrollView focusable={false} style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 10 }}>
               {crashEntries.length === 0 ? (
                 <View style={{ alignItems: "center", paddingVertical: 40, gap: 12 }}>
                   <Ionicons name="checkmark-circle" size={40} color="#34d399" />

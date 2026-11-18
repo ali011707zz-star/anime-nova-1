@@ -3875,6 +3875,7 @@ function ExpoRiftPlayer({
               <View style={s.subPanelDivider} />
 
               <ScrollView
+        focusable={false}
                 style={{ flex: 1 }}
                 nestedScrollEnabled={true}
                 showsVerticalScrollIndicator={true}

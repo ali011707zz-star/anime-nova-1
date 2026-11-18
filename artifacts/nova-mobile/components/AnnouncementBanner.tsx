@@ -3,13 +3,12 @@ import React, { useState } from "react";
 import { Linking, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
+import { tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 
 export function AnnouncementBanner() {
   const colors = useColors();
   const { remoteConfig } = useApp();
-  const { width, height } = useWindowDimensions();
-  const tvMode = isTvDevice(width, height);
+  const { tv: tvMode } = useTvMetrics();
   const [dismissed, setDismissed] = useState<string[]>([]);
 
   const visible = (remoteConfig.announcements || []).filter((a) => !dismissed.includes(a.id));

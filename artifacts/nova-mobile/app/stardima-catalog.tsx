@@ -19,7 +19,7 @@ import { useRouter } from "expo-router";
 import { useColors } from "@/hooks/useColors";
 import type { ThemePalette } from "@/constants/colors";
 import { getBaseUrl } from "@/utils/api";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 
 type Facet = { name: string; titleCount: number };
 type Classification = {
@@ -358,7 +358,7 @@ export default function StarDimaCatalogScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { width, height } = useWindowDimensions();
-  const tvMode = isTvDevice(width, height);
+  const { tv: tvMode } = useTvMetrics();
   const columns = tvMode || width >= 720 ? 4 : 3;
   const contentWidth = Math.min(Math.max(width - 24, 0), tvMode ? 1100 : 900);
   const cardGap = 9;
@@ -647,7 +647,7 @@ export default function StarDimaCatalogScreen() {
       </View>
 
       <Text style={[styles.sectionLabel, tvMode && { fontSize: 16 }]}>نوع المحتوى</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRail}>
+      <ScrollView focusable={false} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRail}>
         {TYPE_FILTERS.map((option) => renderChip(
           option.label,
           null,
@@ -678,7 +678,7 @@ export default function StarDimaCatalogScreen() {
           <Text style={[styles.stateText, { color: colors.accent }]}>إعادة المحاولة</Text>
         </Pressable>
       ) : (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRail}>
+        <ScrollView focusable={false} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRail}>
           {renderChip("كل التصنيفات", facets?.classifiedTitles ?? null, !category, () => setCategory(""), "category-all")}
           {(facets?.categories || []).map((facet) => renderChip(
             facet.name,
@@ -693,7 +693,7 @@ export default function StarDimaCatalogScreen() {
       {(facets?.localizationLabels || []).length > 0 ? (
         <>
           <Text style={[styles.sectionLabel, tvMode && { fontSize: 16 }]}>الصوت والترجمة</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRail}>
+          <ScrollView focusable={false} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRail}>
             {renderChip("كل الوسوم", null, !localization, () => setLocalization(""), "localization-all")}
             {facets!.localizationLabels.map((facet) => renderChip(
               facet.name,
@@ -860,7 +860,7 @@ export default function StarDimaCatalogScreen() {
                   <Ionicons name="close" size={22} color={colors.textPrimary} />
                 </Pressable>
               </View>
-              <ScrollView showsVerticalScrollIndicator={false}>
+              <ScrollView focusable={false} showsVerticalScrollIndicator={false}>
                 <Text style={[styles.modalStatus, tvMode && { fontSize: 15, lineHeight: 24 }]}>
                   {selectedTitle.media_type === "movie" ? "فيلم" : "مسلسل"}
                   {selectedTitle.release_year ? ` · ${selectedTitle.release_year}` : ""}

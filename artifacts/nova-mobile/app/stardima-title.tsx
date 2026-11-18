@@ -14,7 +14,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { TvFocusGuideView, TvPressable, isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { TvFocusGuideView, TvPressable, isTvDevice, tvFocusStyle, useTvMetrics } from "@/utils/tv";
 import { getBaseUrl } from "@/utils/api";
 import { useColors } from "@/hooks/useColors";
 import { RewardedAdPrompt } from "@/components/RewardedAdPrompt";
@@ -80,7 +80,7 @@ export default function StardimaTitleScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const tvMode = isTvDevice();
+  const { tv: tvMode } = useTvMetrics();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
   const params = useLocalSearchParams<{ providerTitleId?: string }>();
   const providerTitleId = readParam(params.providerTitleId);
@@ -532,7 +532,7 @@ export default function StardimaTitleScreen() {
                   </View>
                 </View>
                 {seasons.length > 1 ? (
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.seasonRail}>
+                  <ScrollView focusable={false} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.seasonRail}>
                     {seasons.map((season) => {
                       const selected = season === selectedSeason;
                       return (

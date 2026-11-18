@@ -28,7 +28,7 @@ import { getBaseUrl } from "@/utils/api";
 import { translateMangaGenre } from "@/utils/mangaLocalization";
 import { getYoutubeEmbedUrl, getYoutubeReferer } from "@/utils/youtube";
 import { YoutubeTrailerModal } from "@/components/YoutubeTrailerModal";
-import { TvPressable as Pressable } from "@/utils/tv";
+import { TvPressable as Pressable, tvFocusStyle, useTvListFocusScroll, useTvMetrics } from "@/utils/tv";
 
 const IS_RTL = I18nManager.isRTL;
 const ROW_RTL = (IS_RTL ? "row" : "row-reverse") as "row" | "row-reverse";
@@ -515,7 +515,9 @@ export default function MangaDetailScreen() {
   const [pagesError, setPagesError] = useState<string | null>(null);
 
   const readerWebViewRef = useRef<WebView>(null);
+  const { tv: tvMode } = useTvMetrics();
   const chaptersFlatListRef = useRef<FlatList<MangaChapter>>(null);
+  const { scrollToFocusedIndex: scrollChapterIntoView } = useTvListFocusScroll(chaptersFlatListRef, 0.35);
 
   // Lock Trailer Modal to Horizontal / Landscape orientation automatically
   useEffect(() => {
@@ -1036,6 +1038,7 @@ export default function MangaDetailScreen() {
         <View style={styles.ctaWrap}>
           <Pressable
             onPress={() => setChaptersPageOpen(true)}
+            hasTVPreferredFocus={tvMode}
             style={[
               styles.chaptersCtaBtn,
               { backgroundColor: colors.homeAccent || "#0EA5E9" },
@@ -1396,9 +1399,11 @@ export default function MangaDetailScreen() {
             <View style={styles.chaptersScreenHeaderRight}>
               <Pressable
                 onPress={() => setChaptersPageOpen(false)}
-                style={[
+                hasTVPreferredFocus={tvMode}
+                style={({ focused }) => [
                   styles.chaptersBackBtn,
                   { backgroundColor: colors.background, borderColor: colors.border },
+                  tvMode && tvFocusStyle(focused),
                 ]}
               >
                 <Ionicons name="arrow-forward" size={20} color={colors.textPrimary} />
@@ -1507,6 +1512,7 @@ export default function MangaDetailScreen() {
               <View style={styles.paginationWrap}>
                 <ScrollView
                   horizontal
+                  focusable={false}
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.paginationScroll}
                 >
@@ -1743,6 +1749,8 @@ export default function MangaDetailScreen() {
         <View style={styles.modalBackdrop}>
           <Pressable
             style={StyleSheet.absoluteFill}
+            focusable={false}
+            accessible={false}
             onPress={() => setChapterPickerVisible(false)}
           />
           <View
@@ -1766,7 +1774,8 @@ export default function MangaDetailScreen() {
               </View>
               <Pressable
                 onPress={() => setChapterPickerVisible(false)}
-                style={styles.modalCloseBtn}
+                hasTVPreferredFocus={tvMode}
+                style={({ focused }) => [styles.modalCloseBtn, tvMode && tvFocusStyle(focused)]}
               >
                 <Ionicons name="close" size={18} color="#9ca3af" />
               </Pressable>
@@ -1878,7 +1887,7 @@ export default function MangaDetailScreen() {
             ]}
           >
             <View style={styles.readerHeaderRight}>
-              <Pressable onPress={() => setReaderOpen(false)} style={styles.readerBackBtn}>
+              <Pressable onPress={() => setReaderOpen(false)} hasTVPreferredFocus={tvMode} style={({ focused }) => [styles.readerBackBtn, tvMode && tvFocusStyle(focused)]}>
                 <Ionicons name="arrow-forward" size={20} color="#fff" />
               </Pressable>
 
@@ -1977,13 +1986,15 @@ export default function MangaDetailScreen() {
           >
             <Pressable
               disabled={!prevChapter}
+              focusable={tvMode}
               onPress={() => {
                 if (prevChapter) openChapterInApp(prevChapter);
               }}
-              style={[
+              style={({ focused }) => [
                 styles.readerNavBtn,
                 styles.readerPrevBtn,
                 { opacity: prevChapter ? 1 : 0.35 },
+                tvMode && tvFocusStyle(focused),
               ]}
             >
               <Ionicons name="chevron-forward" size={16} color="#fff" />
@@ -1992,9 +2003,36 @@ export default function MangaDetailScreen() {
               </Text>
             </Pressable>
 
+            {tvMode && !pagesLoading && !pagesError && (
+              <>
+                <Pressable
+                  focusable={true}
+                  accessibilityLabel="تمرير الصفحة لأعلى"
+                  onPress={() => {
+                    readerWebViewRef.current?.injectJavaScript("window.scrollBy({ top: -540, behavior: \"smooth\" }); true;");
+                  }}
+                  style={({ focused }) => [styles.readerChapterSelectBtn, tvFocusStyle(focused)]}
+                >
+                  <Ionicons name="chevron-up" size={17} color="#FBBF24" />
+                </Pressable>
+                <Pressable
+                  focusable={true}
+                  hasTVPreferredFocus={!nextChapter}
+                  accessibilityLabel="تمرير الصفحة لأسفل"
+                  onPress={() => {
+                    readerWebViewRef.current?.injectJavaScript("window.scrollBy({ top: 540, behavior: \"smooth\" }); true;");
+                  }}
+                  style={({ focused }) => [styles.readerChapterSelectBtn, tvFocusStyle(focused)]}
+                >
+                  <Ionicons name="chevron-down" size={17} color="#FBBF24" />
+                </Pressable>
+              </>
+            )}
+
             <Pressable
+              focusable={tvMode}
               onPress={() => setChapterPickerVisible(true)}
-              style={styles.readerChapterSelectBtn}
+              style={({ focused }) => [styles.readerChapterSelectBtn, tvMode && tvFocusStyle(focused)]}
             >
               <Ionicons name="albums-outline" size={15} color="#FBBF24" />
               <Text style={styles.readerChapterSelectText}>
@@ -2004,13 +2042,15 @@ export default function MangaDetailScreen() {
 
             <Pressable
               disabled={!nextChapter}
+              focusable={tvMode}
               onPress={() => {
                 if (nextChapter) openChapterInApp(nextChapter);
               }}
-              style={[
+              style={({ focused }) => [
                 styles.readerNavBtn,
                 styles.readerNextBtn,
                 { opacity: nextChapter ? 1 : 0.35 },
+                tvMode && tvFocusStyle(focused),
               ]}
             >
               <Text style={[styles.readerNavBtnText, { color: "#09090B" }]}>

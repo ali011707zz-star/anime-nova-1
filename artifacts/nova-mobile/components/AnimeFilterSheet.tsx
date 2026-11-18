@@ -12,7 +12,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
-import { TvPressable as Pressable, isTvDevice, tvFocusStyle } from "@/utils/tv";
+import { TvPressable as Pressable, isTvDevice, tvFocusStyle, useTvMetrics } from "@/utils/tv";
 import type { ThemePalette } from "@/constants/colors";
 
 export type AnimeFilterOption = { label: string; value: string };
@@ -69,7 +69,7 @@ export function AnimeFilterSheet({
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { height, width } = useWindowDimensions();
-  const tvMode = isTvDevice(width, height);
+  const { tv: tvMode } = useTvMetrics();
   const styles = createStyles(colors);
   const numberedYears = years.filter((item) => /^\d{4}$/.test(item));
 

@@ -11,7 +11,7 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "../utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "../utils/tv";
 import { useColors } from "../hooks/useColors";
 import { useApp } from "../context/AppContext";
 
@@ -61,7 +61,7 @@ export function TelegramAnnouncementModal({
   const colors = useColors();
   const { theme } = useApp();
   const isWhiteTheme = theme === "white";
-  const tvMode = isTvDevice(width, height);
+  const { tv: tvMode } = useTvMetrics();
   const openingTelegramRef = useRef(false);
 
   useEffect(() => {

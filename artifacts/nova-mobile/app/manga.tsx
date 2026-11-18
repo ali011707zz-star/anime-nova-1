@@ -5,7 +5,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { CatalogPageHeader, CatalogTabs } from "@/components/CatalogPageHeader";
 import { MediaCatalogGrid } from "@/components/MediaCatalogGrid";
 import { useColors } from "@/hooks/useColors";
-import { isTvDevice, TvPressable as Pressable, useTvModeOverride } from "@/utils/tv";
+import { tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 
 const IS_RTL = I18nManager.isRTL;
 
@@ -19,8 +19,7 @@ const TABS = [
 export default function MangaScreen() {
   const colors = useColors();
   const router = useRouter();
-  useTvModeOverride();
-  const tvMode = isTvDevice();
+  const { tv: tvMode } = useTvMetrics();
   const params = useLocalSearchParams<{ tab?: string }>();
   const [activeTab, setActiveTab] = useState<string>(
     params.tab && TABS.some((t) => t.id === params.tab) ? params.tab : "all"
@@ -30,12 +29,6 @@ export default function MangaScreen() {
   );
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-
-  useEffect(() => {
-    if (tvMode) {
-      router.replace("/(tabs)" as any);
-    }
-  }, [tvMode, router]);
 
   useEffect(() => {
     if (params.tab && TABS.some((t) => t.id === params.tab)) {
@@ -52,8 +45,6 @@ export default function MangaScreen() {
     }, 350);
     return () => clearTimeout(timer);
   }, [searchInput]);
-
-  if (tvMode) return null;
 
   const handleSelectTab = (tabId: string) => {
     setActiveTab(tabId);
@@ -80,7 +71,7 @@ export default function MangaScreen() {
             returnKeyType="search"
           />
           {searchInput.length > 0 && (
-            <Pressable onPress={() => setSearchInput("")} style={styles.clearBtn}>
+            <Pressable onPress={() => setSearchInput("")} focusable={tvMode} style={({ focused }) => [styles.clearBtn, tvMode && tvFocusStyle(focused)]}>
               <Ionicons name="close-circle" size={18} color={colors.textMuted} />
             </Pressable>
           )}

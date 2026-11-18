@@ -11,7 +11,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { anilistQuery, SCHEDULE_QUERY } from "@/utils/anilist";
 import { getKnownArabicAnimeTitle } from "@/utils/arabicAnimeTitles";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 
 const DAYS_AR = ["الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
 
@@ -54,7 +54,7 @@ export default function ScheduleScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const tvMode = isTvDevice();
+  const { tv: tvMode } = useTvMetrics();
   const topPad = Platform.OS === "web" ? 0 : Math.max(insets.top, Platform.OS === "android" ? 28 : 44);
 
   const now = new Date();
@@ -131,6 +131,7 @@ export default function ScheduleScreen() {
       {/* ── Horizontal Days Selector ── */}
       <View style={styles.daysWrapper}>
         <ScrollView
+        focusable={false}
           horizontal
           showsHorizontalScrollIndicator={false}
           style={styles.daysScroll}
@@ -184,6 +185,7 @@ export default function ScheduleScreen() {
         </View>
       ) : (
         <ScrollView
+        focusable={false}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scheduleList}
         >

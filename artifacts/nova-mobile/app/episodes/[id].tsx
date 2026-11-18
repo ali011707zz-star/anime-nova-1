@@ -11,7 +11,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch } from "@/utils/secureApi";
-import { isTvDevice, tvFocusStyle, TvFocusGuideView, TvPressable, useTvListFocusScroll } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvFocusGuideView, TvPressable, useTvListFocusScroll, useTvMetrics } from "@/utils/tv";
 const Pressable = TvPressable;
 import { useTvFocusMemory } from "@/utils/tvFocus";
 import { useColors } from "@/hooks/useColors";
@@ -289,7 +289,7 @@ function EpisodeRow({
   const colors = useColors();
   const ep_s = useMemo(() => createEpStyles(colors), [colors]);
   const { width, height } = useWindowDimensions();
-  const tvMode = isTvDevice(width, height);
+  const { tv: tvMode } = useTvMetrics();
   const ep = epByNumber.get(n);
   const isFiller = ep?.filler === true;
   const thumb = ep?.images?.jpg?.image_url || anime?.bannerImage || anime?.coverImage?.large;
@@ -413,7 +413,7 @@ export default function EpisodeListScreen() {
   const router = useRouter();
   const { width, height } = useWindowDimensions();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
-  const tvMode = isTvDevice(width, height);
+  const { tv: tvMode } = useTvMetrics();
 
   const [anime, setAnime] = useState<any>(null);
   const [seasons, setSeasons] = useState<any[]>([]);
@@ -1051,6 +1051,7 @@ export default function EpisodeListScreen() {
             {seasons.length > 0 && (
               <View style={ep_s.seasonSection}>
                 <ScrollView
+        focusable={false}
                   horizontal
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={ep_s.seasonTabs}
@@ -1152,6 +1153,7 @@ export default function EpisodeListScreen() {
             </View>
             {total > 12 ? (
               <ScrollView
+        focusable={false}
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={ep_s.rangeChips}

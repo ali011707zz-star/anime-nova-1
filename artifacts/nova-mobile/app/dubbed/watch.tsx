@@ -13,7 +13,7 @@ import { getWatchContentId, useApp } from "@/context/AppContext";
 import { ensureWatchAccess } from "@/utils/adPolicy";
 import { startMobileWatchAnalytics } from "@/utils/analytics";
 import { RewardedAdPrompt } from "@/components/RewardedAdPrompt";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
 import { useWatchPlayerOrientation } from "@/utils/watchOrientation";
 import { createPlaybackTraceId, withPlaybackTrace } from "@/utils/playbackTrace";
@@ -60,7 +60,7 @@ export default function DubbedWatchScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router  = useRouter();
-  const tvMode  = isTvDevice();
+  const { tv: tvMode } = useTvMetrics();
   const topPad  = Platform.OS === "web" ? 0 : insets.top;
 
   const {
@@ -95,7 +95,12 @@ export default function DubbedWatchScreen() {
   const [screen, setScreen] = useState<"picker" | "player">("picker");
   const [sources, setSources] = useState<PlayerSource[]>([]);
   const [selectedSlotKey, setSelectedSlotKey] = useState<string | null>(null);
+  const slotsRef = useRef<DubbedServerSlot[]>([]);
+  const selectedSlotKeyRef = useRef<string | null>(null);
+  selectedSlotKeyRef.current = selectedSlotKey;
+  const failedSlotKeysRef = useRef<Set<string>>(new Set());
   const [slots, setSlots] = useState<DubbedServerSlot[]>([]);
+  slotsRef.current = slots;
   const [checkingAvailability, setCheckingAvailability] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [resumeTime, setResumeTime] = useState(0);
@@ -516,8 +521,8 @@ export default function DubbedWatchScreen() {
           key: "AZ_AUTO_1080p",
           site: "dubbed_az_1",
           shortName: "1",
-          label: "السيرفر 1 · Uqload",
-          quality: "1080p",
+          label: "السيرفر 1 · MegaMax",
+          quality: "720p",
           mode: "api",
           state: "checking",
         },
@@ -525,7 +530,7 @@ export default function DubbedWatchScreen() {
           key: "AZ_MEGAMAX_1080p",
           site: "dubbed_az_2",
           shortName: "2",
-          label: "السيرفر 2 · MegaMax",
+          label: "السيرفر 2 · Uqload",
           quality: "1080p",
           mode: "api",
           state: "checking",
@@ -548,7 +553,7 @@ export default function DubbedWatchScreen() {
                   site: `dubbed_az_${numName}`,
                   shortName: numName,
                   label: `السيرفر ${numName} · ${srv.provider || "مباشر"}`,
-                  quality: idx === 0 ? "1080p" : "720p",
+                  quality: srv.quality === "1080p" ? "1080p" : "720p",
                   mode: "api",
                   state: "available",
                   serverId: String(srv.id),
@@ -715,6 +720,7 @@ export default function DubbedWatchScreen() {
     setScreen("picker");
     setSources([]);
     setSelectedSlotKey(null);
+    failedSlotKeysRef.current.clear();
     void runAvailabilityQuery();
     return () => {
       mountedRef.current = false;
@@ -886,7 +892,10 @@ export default function DubbedWatchScreen() {
     const ctrl = new AbortController();
     ctrlRef.current = ctrl;
 
+    failedSlotKeysRef.current.clear();
+    autoRetryCountRef.current = 0;
     setSelectedSlotKey(slot.key);
+    selectedSlotKeyRef.current = slot.key;
     setError(null);
     setSlots((prev) =>
       prev.map((s) => (s.key === slot.key ? { ...s, state: "fetching" } : s)),
@@ -905,6 +914,7 @@ export default function DubbedWatchScreen() {
     if (ctrl.signal.aborted || !mountedRef.current) return;
 
     if (!extracted) {
+      failedSlotKeysRef.current.add(slot.key);
       setSlots((prev) =>
         prev.map((s) => (s.key === slot.key ? { ...s, state: "failed" } : s)),
       );
@@ -924,7 +934,33 @@ export default function DubbedWatchScreen() {
       },
     ]);
     setScreen("player");
-  }, [extractPlayableSource]);
+
+    // Pre-resolve the next backup server in background so RiftPlayer fails over seamlessly if needed
+    const backupSlots = slotsRef.current.filter((s) => s.key !== slot.key && s.serverId).slice(0, 2);
+    if (backupSlots.length > 0) {
+      void (async () => {
+        for (const alt of backupSlots) {
+          if (ctrl.signal.aborted || !mountedRef.current) return;
+          const altRes = await extractPlayableSource(alt.mode, ctrl.signal, true, alt.serverId, isSd2Source);
+          if (altRes && !ctrl.signal.aborted && mountedRef.current) {
+            setSources((prev) => {
+              if (prev.some((x) => x.url === altRes.url)) return prev;
+              return [
+                ...prev,
+                {
+                  url: altRes.url,
+                  contentType: altRes.contentType,
+                  label: alt.label,
+                  quality: alt.quality === "1080p" ? "1080p FHD" : "720p HD",
+                },
+              ];
+            });
+            break;
+          }
+        }
+      })();
+    }
+  }, [extractPlayableSource, ensureWatchAccess, isSd2Source]);
 
   const [activeEpisodeDownloads, setActiveEpisodeDownloads] = useState<ActiveDownload[]>([]);
 
@@ -1025,10 +1061,14 @@ export default function DubbedWatchScreen() {
 
   const retryAfterPlaybackError = useCallback(() => {
     if (!mountedRef.current) return;
-    if (autoRetryCountRef.current >= 2) {
+    if (selectedSlotKeyRef.current) {
+      failedSlotKeysRef.current.add(selectedSlotKeyRef.current);
+    }
+    const nextSlot = slotsRef.current.find((s) => !failedSlotKeysRef.current.has(s.key));
+    if (autoRetryCountRef.current >= 3 || (!nextSlot && autoRetryCountRef.current >= 1)) {
       setSources([]);
       setScreen("picker");
-      setError("تعذّر تشغيل الحلقة بعد عدة محاولات — اختر سيرفر آخر أو أعد المحاولة");
+      setError("تعذّر تشغيل الحلقة على السيرفر المختار — جرب سيرفر آخر");
       return;
     }
 
@@ -1041,22 +1081,33 @@ export default function DubbedWatchScreen() {
       if (!mountedRef.current) return;
       const ctrl = new AbortController();
       ctrlRef.current = ctrl;
-      const fresh = await extractPlayableSource("api", ctrl.signal, true);
+      const candidate = nextSlot ?? slotsRef.current[0];
+      if (candidate) {
+        setSelectedSlotKey(candidate.key);
+        selectedSlotKeyRef.current = candidate.key;
+      }
+      const fresh = await extractPlayableSource(
+        candidate?.mode || "api",
+        ctrl.signal,
+        true,
+        candidate?.serverId,
+        isSd2Source,
+      );
       if (fresh && mountedRef.current) {
         setSources([
           {
             url: fresh.url,
             contentType: fresh.contentType,
-            label: "مدبلج عربي عبر الخادم",
-            quality: "720p HD",
+            label: candidate?.label || "مدبلج عربي عبر الخادم",
+            quality: candidate?.quality === "1080p" ? "1080p FHD" : "720p HD",
           },
         ]);
       } else if (mountedRef.current) {
         setScreen("picker");
-        setError("تعذّر تشغيل الحلقة — اختر السيرفر مجدداً");
+        setError("تعذّر تشغيل الحلقة — اختر سيرفر آخر");
       }
-    }, 800);
-  }, [extractPlayableSource]);
+    }, 500);
+  }, [extractPlayableSource, isSd2Source]);
 
   const saveProgress = useCallback(async () => {
     const position = lastTimeRef.current;
@@ -1238,6 +1289,7 @@ export default function DubbedWatchScreen() {
       </View>
 
       <ScrollView
+        focusable={false}
         contentContainerStyle={styles.pickerContent}
         showsVerticalScrollIndicator={false}
         removeClippedSubviews={false}

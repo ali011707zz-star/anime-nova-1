@@ -19,7 +19,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
+import { tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
 import {
   catalogBadge,
@@ -206,6 +206,9 @@ function posterRequestUri(uri: string | null): string | null {
   if (/^https?:\/\/(?:(?:www\.)?carateen\.tv|cdn\.spacetoongo\.com)\//i.test(uri)) {
     return `${base}/api/dubbed/carateen/poster?url=${encodeURIComponent(uri)}`;
   }
+  if (/^https?:\/\/(?:www\.)?animezid\.org\/uploads\//i.test(uri)) {
+    return `${base}/api/dubbed/animezid/poster?url=${encodeURIComponent(uri)}`;
+  }
   return uri;
 }
 
@@ -245,15 +248,14 @@ function normalizeAwSeries(item: any): AwSeries | null {
     seasons: seasons.length ? seasons : [{ label: "الحلقات", animeId: key }],
   };
 }
-function gridColumnsForWidth(width: number, tvMode = isTvDevice()) {
+function gridColumnsForWidth(width: number, tvMode = false) {
   if (tvMode) return width >= 750 ? 5 : 4;
   if (width >= 900) return 5;
   if (width >= 600) return 4;
   return 3;
 }
 
-function getGridMetrics(width: number) {
-  const tvMode = isTvDevice();
+function getGridMetrics(width: number, tvMode = false) {
   const columns = gridColumnsForWidth(width, tvMode);
   const gridWidth = tvMode
     ? Math.min(Math.max(width - 40, 320), 1380)
@@ -268,19 +270,23 @@ function getGridMetrics(width: number) {
 // Shared card helpers
 // ─────────────────────────────────────────────────────────
 
-function PosterCard({ uri, title, seasons, tint, badge, badgeTint, sourceBadge, meta, testID, onPress, retryToken, retryDelayMs, cardWidth, cardHeight }: {
+const PosterCard = React.memo(function PosterCard({ uri, title, seasons, tint, badge, badgeTint, sourceBadge, meta, testID, onPress, onSelectItem, itemPayload, retryToken, retryDelayMs, cardWidth, cardHeight, tvMode: tvModeProp, onFocus }: {
   uri: string | null; title: string; seasons: number;
   tint: string; badge?: string; badgeTint?: string; sourceBadge?: string;
-  meta?: string; testID?: string; onPress: () => void;
+  meta?: string; testID?: string; onPress?: () => void;
+  onSelectItem?: (item: any) => void; itemPayload?: any;
   retryToken?: number; retryDelayMs?: number;
   cardWidth?: number; cardHeight?: number;
+  tvMode?: boolean;
+  onFocus?: () => void;
 }) {
   const colors = useColors();
   const [failedUri, setFailedUri] = useState<string | null>(null);
   const [imageRetry, setImageRetry] = useState(0);
   const imageRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastRetryTokenRef = useRef(retryToken ?? 0);
-  const { tv: tvMode } = useTvMetrics();
+  const { tv: reactiveTv } = useTvMetrics();
+  const tvMode = tvModeProp ?? reactiveTv;
   const imageUri = posterRequestUri(uri);
   const show = !!imageUri && failedUri !== uri;
 
@@ -314,9 +320,18 @@ function PosterCard({ uri, title, seasons, tint, badge, badgeTint, sourceBadge, 
     };
   }, [failedUri, retryDelayMs, retryToken, uri]);
 
+  const handleCardPress = useCallback(() => {
+    if (onSelectItem && itemPayload !== undefined) {
+      onSelectItem(itemPayload);
+    } else {
+      onPress?.();
+    }
+  }, [onSelectItem, itemPayload, onPress]);
+
   return (
     <Pressable
-      onPress={onPress}
+      onPress={handleCardPress}
+      onFocus={onFocus}
       testID={testID}
       focusable={tvMode}
       style={({ pressed, focused }) => [
@@ -335,10 +350,11 @@ function PosterCard({ uri, title, seasons, tint, badge, badgeTint, sourceBadge, 
       >
         {show ? (
           <Image
-            key={`${imageUri}:${imageRetry}`}
+            key={imageRetry > 0 ? `${imageUri}:${imageRetry}` : imageUri!}
             source={{ uri: imageUri! }}
             style={{ width: "100%", height: "100%" }}
             resizeMode="cover"
+            resizeMethod="resize"
             fadeDuration={0}
             onError={() => {
               if (imageRetry < 2) {
@@ -357,8 +373,8 @@ function PosterCard({ uri, title, seasons, tint, badge, badgeTint, sourceBadge, 
             <Text style={{ fontSize: 22 }}>🎬</Text>
           </View>
         )}
-        <LinearGradient colors={["transparent", "rgba(0,0,0,0.88)"]}
-          style={StyleSheet.absoluteFill} pointerEvents="none" />
+        <View style={card.scrimTop} pointerEvents="none" />
+        <View style={card.scrimBottom} pointerEvents="none" />
         {badge ? (
           <View style={[card.badge, { backgroundColor: badgeTint || "#35B955" }]}>
             <Text style={card.badgeText} numberOfLines={1}>{badge}</Text>
@@ -371,16 +387,14 @@ function PosterCard({ uri, title, seasons, tint, badge, badgeTint, sourceBadge, 
         ) : null}
         <View style={card.label}>
           <Text style={card.title} numberOfLines={2}>{title}</Text>
-          {meta ? (
-            <Text style={card.seasons} numberOfLines={1}>{meta}</Text>
-          ) : seasons > 1 ? (
-            <Text style={[card.seasons, { color: `${tint}99` }]}>{seasons} مواسم</Text>
-          ) : null}
+          <Text style={[card.seasons, { color: tint }]} numberOfLines={1}>
+            {meta ? meta : seasons > 1 ? `${seasons} مواسم` : "مدبلج عربي"}
+          </Text>
         </View>
       </View>
     </Pressable>
   );
-}
+});
 
 // ─────────────────────────────────────────────────────────
 // أنيميشن مدبلج list
@@ -389,7 +403,15 @@ function PosterCard({ uri, title, seasons, tint, badge, badgeTint, sourceBadge, 
 function AnimationList({ searchQ }: { searchQ: string }) {
   const colors = useColors();
   const { width } = useWindowDimensions();
-  const { gridWidth, columns, gap, cardWidth, cardHeight } = getGridMetrics(width);
+  const { tv: tvMode } = useTvMetrics();
+  const { gridWidth, columns, gap, cardWidth, cardHeight } = getGridMetrics(width, tvMode);
+  const listRef = useRef<FlatList<any>>(null);
+  const scrollRow = useCallback((idx: number) => {
+    if (!tvMode) return;
+    const row = Math.floor(idx / columns);
+    try { listRef.current?.scrollToIndex({ index: row, animated: true, viewPosition: 0.35 }); }
+    catch { listRef.current?.scrollToOffset({ offset: Math.max(0, row * (cardHeight + gap)), animated: true }); }
+  }, [tvMode, columns, cardHeight, gap]);
   const router = useRouter();
   const BASE = getBaseUrl();
   const catalog = useDubbedCatalogFeed("animation", searchQ);
@@ -507,22 +529,30 @@ function AnimationList({ searchQ }: { searchQ: string }) {
 
   return (
     <FlatList
+      ref={listRef}
       data={rows}
       style={{ width: gridWidth, alignSelf: "center" }}
       key={`aw-animation-grid-${columns}`}
+      onScrollToIndexFailed={({ index: r }) => listRef.current?.scrollToOffset({ offset: Math.max(0, r * (cardHeight + gap)), animated: true })}
       keyExtractor={row => row.kind === "aw" ? `aw:${row.item.key}` : `catalog:${row.item.provider_title_id}`}
       numColumns={columns}
       contentContainerStyle={shared.grid}
       columnWrapperStyle={{ gap }}
-      initialNumToRender={10}
+      getItemLayout={(_data, rowIndex) => ({
+        length: cardHeight + gap,
+        offset: (cardHeight + gap) * rowIndex,
+        index: rowIndex,
+      })}
+      initialNumToRender={9}
       maxToRenderPerBatch={6}
-      updateCellsBatchingPeriod={50}
-      windowSize={7}
+      updateCellsBatchingPeriod={40}
+      windowSize={tvMode ? 7 : 5}
       removeClippedSubviews={false}
-      renderItem={({ item: row }) => (
+      renderItem={({ item: row, index: rowIdx }) => (
         <View style={{ width: cardWidth }}>
           {row.kind === "aw" ? (
             <PosterCard
+              onFocus={() => scrollRow(rowIdx)}
               uri={row.item.poster || null}
               title={row.item.titleAr || row.item.title}
               seasons={row.item.seasons.length}
@@ -531,10 +561,12 @@ function AnimationList({ searchQ }: { searchQ: string }) {
               badgeTint="#35B955"
               cardWidth={cardWidth}
               cardHeight={cardHeight}
+            tvMode={tvMode}
               onPress={() => openDetail(row.item)}
             />
           ) : (
             <PosterCard
+              onFocus={() => scrollRow(rowIdx)}
               uri={row.item.poster_url || row.item.backdrop_url || null}
               title={row.item.title_ar || row.item.title || row.item.title_en || "عنوان"}
               seasons={0}
@@ -545,6 +577,7 @@ function AnimationList({ searchQ }: { searchQ: string }) {
               meta={`${row.item.media_type === "movie" ? "فيلم" : "مسلسل"}${row.item.episode_count ? ` · ${row.item.episode_count} حلقة` : ""}${row.item.release_year ? ` · ${row.item.release_year}` : ""}`}
               cardWidth={cardWidth}
               cardHeight={cardHeight}
+            tvMode={tvMode}
               onPress={() => openCatalogDetail(row.item)}
             />
           )}
@@ -558,7 +591,8 @@ function AnimationList({ searchQ }: { searchQ: string }) {
        ListFooterComponent={loadingMore || catalog.loadingMore ? (
          <ActivityIndicator color={colors.accent} style={{ marginVertical: 16 }} />
        ) : catalog.error ? (
-         <Pressable onPress={catalog.retry} style={shared.retryBtn}>
+         <Pressable onPress={catalog.retry} focusable={tvMode}
+            style={({ focused }) => [shared.retryBtn, tvMode && tvFocusStyle(focused)]}>
            <Ionicons name="refresh" size={15} color="#A78BFA" />
            <Text style={[shared.retryText, { color: colors.buttonText }]}>إعادة تحميل القائمة</Text>
          </Pressable>
@@ -593,7 +627,15 @@ function dubbedImgUri(s: DubbedSeries, base: string): string | null {
 function CartoonList({ searchQ }: { searchQ: string }) {
   const colors = useColors();
   const { width } = useWindowDimensions();
-  const { gridWidth, columns, gap, cardWidth, cardHeight } = getGridMetrics(width);
+  const { tv: tvMode } = useTvMetrics();
+  const { gridWidth, columns, gap, cardWidth, cardHeight } = getGridMetrics(width, tvMode);
+  const listRef = useRef<FlatList<any>>(null);
+  const scrollRow = useCallback((idx: number) => {
+    if (!tvMode) return;
+    const row = Math.floor(idx / columns);
+    try { listRef.current?.scrollToIndex({ index: row, animated: true, viewPosition: 0.35 }); }
+    catch { listRef.current?.scrollToOffset({ offset: Math.max(0, row * (cardHeight + gap)), animated: true }); }
+  }, [tvMode, columns, cardHeight, gap]);
   const router = useRouter();
   const BASE = getBaseUrl();
   const catalog = useDubbedCatalogFeed("cartoon", searchQ);
@@ -775,7 +817,8 @@ function CartoonList({ searchQ }: { searchQ: string }) {
       <Pressable onPress={() => {
         void loadPage(1, true);
         catalog.retry();
-      }} style={shared.retryBtn}>
+      }} focusable={tvMode}
+            style={({ focused }) => [shared.retryBtn, tvMode && tvFocusStyle(focused)]}>
         <Ionicons name="refresh" size={15} color="#A78BFA" />
         <Text style={[shared.retryText, { color: colors.buttonText }]}>إعادة المحاولة</Text>
       </Pressable>
@@ -791,15 +834,21 @@ function CartoonList({ searchQ }: { searchQ: string }) {
       numColumns={columns}
       contentContainerStyle={shared.grid}
       columnWrapperStyle={{ gap }}
-      initialNumToRender={10}
+      getItemLayout={(_data, rowIndex) => ({
+        length: cardHeight + gap,
+        offset: (cardHeight + gap) * rowIndex,
+        index: rowIndex,
+      })}
+      initialNumToRender={9}
       maxToRenderPerBatch={6}
-      updateCellsBatchingPeriod={50}
-      windowSize={7}
+      updateCellsBatchingPeriod={40}
+      windowSize={tvMode ? 7 : 5}
       removeClippedSubviews={false}
-      renderItem={({ item: row }) => (
+      renderItem={({ item: row, index: rowIdx }) => (
         <View style={{ width: cardWidth }}>
           {row.kind === "dubbed" ? (
             <PosterCard
+              onFocus={() => scrollRow(rowIdx)}
               uri={dubbedImgUri(row.item, BASE)}
               title={row.item.title}
               seasons={row.item.seasons.length}
@@ -808,10 +857,12 @@ function CartoonList({ searchQ }: { searchQ: string }) {
               badgeTint="#35B955"
               cardWidth={cardWidth}
               cardHeight={cardHeight}
+            tvMode={tvMode}
               onPress={() => openDetail(row.item)}
             />
           ) : (
             <PosterCard
+              onFocus={() => scrollRow(rowIdx)}
               uri={row.item.poster_url || row.item.backdrop_url || null}
               title={row.item.title_ar || row.item.title || row.item.title_en || "عنوان"}
               seasons={0}
@@ -822,6 +873,7 @@ function CartoonList({ searchQ }: { searchQ: string }) {
               meta={`${row.item.media_type === "movie" ? "فيلم" : "مسلسل"}${row.item.episode_count ? ` · ${row.item.episode_count} حلقة` : ""}${row.item.release_year ? ` · ${row.item.release_year}` : ""}`}
               cardWidth={cardWidth}
               cardHeight={cardHeight}
+            tvMode={tvMode}
               onPress={() => openCatalogDetail(row.item)}
             />
           )}
@@ -835,7 +887,8 @@ function CartoonList({ searchQ }: { searchQ: string }) {
       ListFooterComponent={loadingMore || catalog.loadingMore ? (
         <ActivityIndicator color={colors.accent} style={{ marginVertical: 16 }} />
       ) : catalog.error ? (
-        <Pressable onPress={catalog.retry} style={shared.retryBtn}>
+        <Pressable onPress={catalog.retry} focusable={tvMode}
+            style={({ focused }) => [shared.retryBtn, tvMode && tvFocusStyle(focused)]}>
           <Ionicons name="refresh" size={15} color="#A78BFA" />
           <Text style={[shared.retryText, { color: colors.buttonText }]}>إعادة تحميل القائمة</Text>
         </Pressable>
@@ -867,7 +920,15 @@ function isSpacetoonSeries(item: unknown): item is SpacetoonSeries {
 function SpacetoonList({ searchQ }: { searchQ: string }) {
   const colors = useColors();
   const { width } = useWindowDimensions();
-  const { gridWidth, columns, gap, cardWidth, cardHeight, tvMode } = getGridMetrics(width);
+  const { tv: tvMode } = useTvMetrics();
+  const { gridWidth, columns, gap, cardWidth, cardHeight } = getGridMetrics(width, tvMode);
+  const listRef = useRef<FlatList<any>>(null);
+  const scrollRow = useCallback((idx: number) => {
+    if (!tvMode) return;
+    const row = Math.floor(idx / columns);
+    try { listRef.current?.scrollToIndex({ index: row, animated: true, viewPosition: 0.35 }); }
+    catch { listRef.current?.scrollToOffset({ offset: Math.max(0, row * (cardHeight + gap)), animated: true }); }
+  }, [tvMode, columns, cardHeight, gap]);
   const router = useRouter();
   const [posterRetryToken, setPosterRetryToken] = useState(0);
   useFocusEffect(useCallback(() => {
@@ -1013,21 +1074,29 @@ function SpacetoonList({ searchQ }: { searchQ: string }) {
 
   return (
     <FlatList
+      ref={listRef}
       data={series}
       style={{ width: gridWidth, alignSelf: "center" }}
       key={`spacetoon-grid-${columns}`}
+      onScrollToIndexFailed={({ index: r }) => listRef.current?.scrollToOffset({ offset: Math.max(0, r * (cardHeight + gap)), animated: true })}
       keyExtractor={item => `sp:${item.id}`}
       numColumns={columns}
       contentContainerStyle={shared.grid}
       columnWrapperStyle={{ gap }}
-      initialNumToRender={10}
+      getItemLayout={(_data, rowIndex) => ({
+        length: cardHeight + gap,
+        offset: (cardHeight + gap) * rowIndex,
+        index: rowIndex,
+      })}
+      initialNumToRender={9}
       maxToRenderPerBatch={6}
-      updateCellsBatchingPeriod={50}
-      windowSize={tvMode ? 9 : 7}
+      updateCellsBatchingPeriod={40}
+      windowSize={tvMode ? 7 : 5}
       removeClippedSubviews={false}
-      renderItem={({ item }) => (
+      renderItem={({ item, index: rowIdx }) => (
         <View style={{ width: cardWidth }}>
           <PosterCard
+            onFocus={() => scrollRow(rowIdx)}
             uri={item.image || null}
             title={item.title}
             seasons={0}
@@ -1038,7 +1107,9 @@ function SpacetoonList({ searchQ }: { searchQ: string }) {
             testID={`spacetoon-title-${item.id}`}
             cardWidth={cardWidth}
             cardHeight={cardHeight}
-            onPress={() => openDetail(item)}
+            tvMode={tvMode}
+            itemPayload={item}
+            onSelectItem={openDetail}
           />
         </View>
       )}
@@ -1054,7 +1125,8 @@ function SpacetoonList({ searchQ }: { searchQ: string }) {
             const retryPage = failedPage ?? page + 1;
             void loadPage(retryPage, retryPage === 1);
           }}
-          style={shared.retryBtn}
+          focusable={tvMode}
+            style={({ focused }) => [shared.retryBtn, tvMode && tvFocusStyle(focused)]}
         >
           <Ionicons name="refresh" size={15} color="#22D3EE" />
           <Text style={[shared.retryText, { color: colors.buttonText }]}>تعذّر تحميل المزيد — أعد المحاولة</Text>
@@ -1066,7 +1138,8 @@ function SpacetoonList({ searchQ }: { searchQ: string }) {
           {loadError && !loading ? (
             <>
               <Text style={[shared.emptyText, { color: colors.textMuted }]}>تعذّر تحميل مسلسلات سبيستون</Text>
-              <Pressable onPress={() => { void loadPage(1, true); }} style={shared.retryBtn}>
+              <Pressable onPress={() => { void loadPage(1, true); }} focusable={tvMode}
+            style={({ focused }) => [shared.retryBtn, tvMode && tvFocusStyle(focused)]}>
                 <Ionicons name="refresh" size={15} color="#22D3EE" />
                 <Text style={[shared.retryText, { color: colors.buttonText }]}>إعادة المحاولة</Text>
               </Pressable>
@@ -1095,7 +1168,15 @@ function isCartoon2Item(item: unknown): item is Cartoon2Item {
 function Cartoon2List({ searchQ }: { searchQ: string }) {
   const colors = useColors();
   const { width } = useWindowDimensions();
-  const { gridWidth, columns, gap, cardWidth, cardHeight, tvMode } = getGridMetrics(width);
+  const { tv: tvMode } = useTvMetrics();
+  const { gridWidth, columns, gap, cardWidth, cardHeight } = getGridMetrics(width, tvMode);
+  const listRef = useRef<FlatList<any>>(null);
+  const scrollRow = useCallback((idx: number) => {
+    if (!tvMode) return;
+    const row = Math.floor(idx / columns);
+    try { listRef.current?.scrollToIndex({ index: row, animated: true, viewPosition: 0.35 }); }
+    catch { listRef.current?.scrollToOffset({ offset: Math.max(0, row * (cardHeight + gap)), animated: true }); }
+  }, [tvMode, columns, cardHeight, gap]);
   const router = useRouter();
   const [posterRetryToken, setPosterRetryToken] = useState(0);
   useFocusEffect(useCallback(() => {
@@ -1299,9 +1380,11 @@ function Cartoon2List({ searchQ }: { searchQ: string }) {
       </View>
 
       <FlatList
+        ref={listRef}
         data={items}
         style={{ width: gridWidth, alignSelf: "center" }}
         key={`cartoon2-grid-${columns}`}
+        onScrollToIndexFailed={({ index: r }) => listRef.current?.scrollToOffset({ offset: Math.max(0, r * (cardHeight + gap)), animated: true })}
         keyExtractor={item => `sd2:${item.mediaType}:${item.slug}`}
         numColumns={columns}
         contentContainerStyle={shared.grid}
@@ -1311,9 +1394,10 @@ function Cartoon2List({ searchQ }: { searchQ: string }) {
         updateCellsBatchingPeriod={50}
         windowSize={tvMode ? 9 : 7}
         removeClippedSubviews={false}
-        renderItem={({ item }) => (
+        renderItem={({ item, index: rowIdx }) => (
           <View style={{ width: cardWidth }}>
             <PosterCard
+              onFocus={() => scrollRow(rowIdx)}
               uri={item.image || null}
               title={item.title}
               seasons={0}
@@ -1326,7 +1410,9 @@ function Cartoon2List({ searchQ }: { searchQ: string }) {
               testID={`cartoon2-title-${item.slug}`}
               cardWidth={cardWidth}
               cardHeight={cardHeight}
-              onPress={() => openDetail(item)}
+            tvMode={tvMode}
+              itemPayload={item}
+              onSelectItem={openDetail}
             />
           </View>
         )}
@@ -1342,7 +1428,8 @@ function Cartoon2List({ searchQ }: { searchQ: string }) {
               const retryPage = failedPage ?? page + 1;
               void loadPage(retryPage, retryPage === 1);
             }}
-            style={shared.retryBtn}
+            focusable={tvMode}
+            style={({ focused }) => [shared.retryBtn, tvMode && tvFocusStyle(focused)]}
           >
             <Ionicons name="refresh" size={15} color="#FBBF24" />
             <Text style={[shared.retryText, { color: colors.buttonText }]}>تعذّر تحميل المزيد — أعد المحاولة</Text>
@@ -1354,7 +1441,8 @@ function Cartoon2List({ searchQ }: { searchQ: string }) {
             {loadError && !loading ? (
               <>
                 <Text style={[shared.emptyText, { color: colors.textMuted }]}>تعذّر تحميل كرتون مدبلج 2</Text>
-                <Pressable onPress={() => { void loadPage(1, true); }} style={shared.retryBtn}>
+                <Pressable onPress={() => { void loadPage(1, true); }} focusable={tvMode}
+            style={({ focused }) => [shared.retryBtn, tvMode && tvFocusStyle(focused)]}>
                   <Ionicons name="refresh" size={15} color="#FBBF24" />
                   <Text style={[shared.retryText, { color: colors.buttonText }]}>إعادة المحاولة</Text>
                 </Pressable>
@@ -1425,7 +1513,15 @@ async function hydrateAnimeZidCatalog(): Promise<void> {
 function DubbedAnimeList({ searchQ }: { searchQ: string }) {
   const colors = useColors();
   const { width } = useWindowDimensions();
-  const { gridWidth, columns, gap, cardWidth, cardHeight, tvMode } = getGridMetrics(width);
+  const { tv: tvMode } = useTvMetrics();
+  const { gridWidth, columns, gap, cardWidth, cardHeight } = getGridMetrics(width, tvMode);
+  const listRef = useRef<FlatList<any>>(null);
+  const scrollRow = useCallback((idx: number) => {
+    if (!tvMode) return;
+    const row = Math.floor(idx / columns);
+    try { listRef.current?.scrollToIndex({ index: row, animated: true, viewPosition: 0.35 }); }
+    catch { listRef.current?.scrollToOffset({ offset: Math.max(0, row * (cardHeight + gap)), animated: true }); }
+  }, [tvMode, columns, cardHeight, gap]);
   const router = useRouter();
   const [posterRetryToken, setPosterRetryToken] = useState(0);
   useFocusEffect(useCallback(() => {
@@ -1564,7 +1660,7 @@ function DubbedAnimeList({ searchQ }: { searchQ: string }) {
     loadingMoreRef.current = false;
   }, []);
 
-  const openDetail = (item: AnimeZidItem) => {
+  const openDetail = useCallback((item: AnimeZidItem) => {
     router.push({
       pathname: "/dubbed-anime/[slug]" as any,
       params: {
@@ -1573,7 +1669,7 @@ function DubbedAnimeList({ searchQ }: { searchQ: string }) {
         poster: item.poster || "",
       },
     });
-  };
+  }, [router]);
 
   const sortOptions: { key: AnimeZidSortFilter; label: string }[] = [
     { key: "newest", label: "الأحدث" },
@@ -1610,9 +1706,11 @@ function DubbedAnimeList({ searchQ }: { searchQ: string }) {
       </View>
 
       <FlatList
+        ref={listRef}
         data={items}
         style={{ width: gridWidth, alignSelf: "center" }}
         key={`animezid-grid-${columns}`}
+        onScrollToIndexFailed={({ index: r }) => listRef.current?.scrollToOffset({ offset: Math.max(0, r * (cardHeight + gap)), animated: true })}
         keyExtractor={item => `az:${item.slug}`}
         numColumns={columns}
         contentContainerStyle={shared.grid}
@@ -1630,6 +1728,7 @@ function DubbedAnimeList({ searchQ }: { searchQ: string }) {
           return (
             <View style={{ width: cardWidth }}>
               <PosterCard
+                onFocus={() => scrollRow(index)}
                 uri={item.poster || null}
                 title={item.title}
                 seasons={item.seasonsCount}
@@ -1642,7 +1741,9 @@ function DubbedAnimeList({ searchQ }: { searchQ: string }) {
                 testID={`animezid-title-${item.slug}`}
                 cardWidth={cardWidth}
                 cardHeight={cardHeight}
-                onPress={() => openDetail(item)}
+                tvMode={tvMode}
+                itemPayload={item}
+                onSelectItem={openDetail}
               />
             </View>
           );
@@ -1659,7 +1760,8 @@ function DubbedAnimeList({ searchQ }: { searchQ: string }) {
               const retryPage = failedPage ?? page + 1;
               void loadPage(retryPage, retryPage === 1);
             }}
-            style={shared.retryBtn}
+            focusable={tvMode}
+            style={({ focused }) => [shared.retryBtn, tvMode && tvFocusStyle(focused)]}
           >
             <Ionicons name="refresh" size={15} color="#22D3EE" />
             <Text style={[shared.retryText, { color: colors.buttonText }]}>تعذّر تحميل المزيد — أعد المحاولة</Text>
@@ -1671,7 +1773,8 @@ function DubbedAnimeList({ searchQ }: { searchQ: string }) {
             {loadError && !loading ? (
               <>
                 <Text style={[shared.emptyText, { color: colors.textMuted }]}>تعذّر تحميل الأنمي المدبلج</Text>
-                <Pressable onPress={() => { void loadPage(1, true); }} style={shared.retryBtn}>
+                <Pressable onPress={() => { void loadPage(1, true); }} focusable={tvMode}
+            style={({ focused }) => [shared.retryBtn, tvMode && tvFocusStyle(focused)]}>
                   <Ionicons name="refresh" size={15} color="#22D3EE" />
                   <Text style={[shared.retryText, { color: colors.buttonText }]}>إعادة المحاولة</Text>
                 </Pressable>
@@ -1789,6 +1892,7 @@ export default function DubbedTabScreen() {
       {/* ── Inner tabs (horizontal ScrollView — full section names without shrinking) ── */}
       <View style={[s.tabsWrap, { borderBottomColor: colors.border }]}>
         <ScrollView
+        focusable={false}
           ref={tabsScrollRef}
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -1977,6 +2081,8 @@ const card = StyleSheet.create({
     borderWidth: 1, borderColor: "rgba(167,139,250,0.58)",
   },
   sourceBadgeText: { color: "#DDD0FF", fontSize: 8, fontFamily: "Cairo_700Bold" },
+  scrimTop:    { position: "absolute", bottom: 42, left: 0, right: 0, height: 34, backgroundColor: "rgba(0,0,0,0.22)" },
+  scrimBottom: { position: "absolute", bottom: 0, left: 0, right: 0, height: 42, backgroundColor: "rgba(0,0,0,0.72)" },
   label:       { position: "absolute", bottom: 0, left: 0, right: 0, padding: 6 },
   title:       { color: "#fff", fontSize: 10, fontFamily: "Cairo_700Bold", lineHeight: 14 },
   seasons:     { fontSize: 9, fontFamily: "Cairo_400Regular" },
