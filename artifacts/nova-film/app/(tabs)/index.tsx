@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useRouter } from "expo-router";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -22,7 +22,7 @@ import { FilmHeroSection } from "@/components/FilmHeroSection";
 import { FilmPosterCard, getFilmRailCardWidth } from "@/components/FilmPosterCard";
 import { FilmSectionHeader } from "@/components/FilmSectionHeader";
 import { useColors } from "@/hooks/useColors";
-import { fetchFilmHome } from "@/utils/filmApi";
+import { fetchFilmHome, getMemoryFilmHome, loadCachedFilmHome, type FilmHomeFeed } from "@/utils/filmApi";
 import {
   getImageSource,
   loadAllPlaybackProgress,
@@ -52,6 +52,15 @@ export default function NovaFilmHomeScreen() {
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [watchedMap, setWatchedMap] = useState<Record<string, boolean>>({});
   const [playbackHistory, setPlaybackHistory] = useState<FilmPlaybackRecord[]>([]);
+  const [diskCachedHome, setDiskCachedHome] = useState<FilmHomeFeed | undefined>(() => getMemoryFilmHome());
+
+  useEffect(() => {
+    if (!diskCachedHome) {
+      loadCachedFilmHome().then((cached) => {
+        if (cached) setDiskCachedHome(cached);
+      }).catch(() => {});
+    }
+  }, [diskCachedHome]);
 
   const {
     data: homeData,
@@ -62,9 +71,12 @@ export default function NovaFilmHomeScreen() {
   } = useQuery({
     queryKey: ["nova-film-home"],
     queryFn: fetchFilmHome,
+    initialData: () => getMemoryFilmHome(),
     staleTime: 5 * 60_000,
     retry: 2,
   });
+
+  const effectiveHome = homeData ?? diskCachedHome;
 
   const reloadProgress = useCallback(async () => {
     try {
@@ -88,13 +100,13 @@ export default function NovaFilmHomeScreen() {
   const railCardWidth = getFilmRailCardWidth(width, 3, 10);
   const historyCardWidth = Math.max(152, Math.min(205, Math.floor((width - 40) / 2.15)));
 
-  const heroItems = homeData?.hero || [];
-  const trendingMovies = homeData?.trendingMovies || [];
-  const latestMovies = homeData?.latestMovies || [];
-  const asianMovies = homeData?.asianMovies || [];
-  const popularSeries = homeData?.popularSeries || [];
-  const topRatedItems = homeData?.topRated || [];
-  const animationList = homeData?.animations || [];
+  const heroItems = effectiveHome?.hero || [];
+  const trendingMovies = effectiveHome?.trendingMovies || [];
+  const latestMovies = effectiveHome?.latestMovies || [];
+  const asianMovies = effectiveHome?.asianMovies || [];
+  const popularSeries = effectiveHome?.popularSeries || [];
+  const topRatedItems = effectiveHome?.topRated || [];
+  const animationList = effectiveHome?.animations || [];
 
   const allPool = useMemo(() => {
     const map = new Map<string, FilmSummary>();
@@ -140,6 +152,10 @@ export default function NovaFilmHomeScreen() {
           horizontal
           keyExtractor={(item) => `${browseType}-${item.tmdbType}-${item.id}`}
           showsHorizontalScrollIndicator={false}
+          initialNumToRender={5}
+          maxToRenderPerBatch={5}
+          windowSize={3}
+          removeClippedSubviews={Platform.OS === "android"}
           contentContainerStyle={{ paddingHorizontal: 14, gap: 11 }}
           renderItem={({ item }) => {
             const watchedKey = makeEpisodeKey(item.id, 1, 1, item.tmdbType);
@@ -223,14 +239,42 @@ export default function NovaFilmHomeScreen() {
           </View>
         </View>
 
-        {isLoading && !homeData ? (
-          <View style={s.loadingWrap}>
-            <ActivityIndicator size="large" color="#0EA5E9" />
-            <Text style={[s.loadingText, { color: colors.textSecondary }]}>
-              جارٍ تحميل مكتبة الأفلام والمسلسلات من الخادم...
-            </Text>
+        {isLoading && !effectiveHome ? (
+          <View style={s.skeletonWrap}>
+            <View style={[s.skeletonHero, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <ActivityIndicator size="small" color="#0EA5E9" />
+              <Text style={[s.loadingText, { color: colors.textSecondary }]}>
+                جارٍ تجهيز الواجهة...
+              </Text>
+            </View>
+            <View style={s.skeletonPillsRow}>
+              {[1, 2, 3, 4].map((k) => (
+                <View key={k} style={[s.skeletonPill, { backgroundColor: colors.card, borderColor: colors.border }]} />
+              ))}
+            </View>
+            {[1, 2].map((row) => (
+              <View key={row} style={{ marginTop: 18 }}>
+                <View style={[s.skeletonTitle, { backgroundColor: colors.card }]} />
+                <View style={s.skeletonCardsRow}>
+                  {[1, 2, 3].map((c) => (
+                    <View
+                      key={c}
+                      style={[
+                        s.skeletonCard,
+                        {
+                          width: railCardWidth,
+                          height: Math.round(railCardWidth * 1.46),
+                          backgroundColor: colors.card,
+                          borderColor: colors.border,
+                        },
+                      ]}
+                    />
+                  ))}
+                </View>
+              </View>
+            ))}
           </View>
-        ) : error && !homeData ? (
+        ) : error && !effectiveHome ? (
           <View style={s.loadingWrap}>
             <Ionicons name="cloud-offline-outline" size={44} color="#F87171" />
             <Text style={[s.loadingText, { color: colors.textPrimary }]}>
@@ -471,6 +515,44 @@ const s = StyleSheet.create({
     fontFamily: "Cairo_800ExtraBold",
     letterSpacing: 0.4,
     includeFontPadding: true,
+  },
+  skeletonWrap: {
+    paddingHorizontal: 14,
+    paddingTop: 6,
+  },
+  skeletonHero: {
+    height: 256,
+    borderRadius: 20,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+  },
+  skeletonPillsRow: {
+    flexDirection: "row",
+    gap: 9,
+    marginTop: 14,
+  },
+  skeletonPill: {
+    width: 82,
+    height: 36,
+    borderRadius: 13,
+    borderWidth: 1,
+  },
+  skeletonTitle: {
+    width: 150,
+    height: 18,
+    borderRadius: 6,
+    alignSelf: "flex-end",
+    marginBottom: 10,
+  },
+  skeletonCardsRow: {
+    flexDirection: "row",
+    gap: 11,
+  },
+  skeletonCard: {
+    borderRadius: 14,
+    borderWidth: 1,
   },
   loadingWrap: {
     paddingVertical: 110,

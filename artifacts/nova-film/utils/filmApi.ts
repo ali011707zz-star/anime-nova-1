@@ -36,6 +36,58 @@ function resolveAbsUrl(url: string | undefined, base: string): string {
   return `${base}${url.startsWith("/") ? url : `/${url}`}`;
 }
 
+export const FILM_HOME_CACHE_KEY = "nova_film_home_cache_v1";
+let _memHomeFeed: FilmHomeFeed | undefined = undefined;
+
+function normalizeHomeFeed(raw: any): FilmHomeFeed {
+  return {
+    hero: Array.isArray(raw?.hero) ? raw.hero.map(normalizeFilmSummary) : [],
+    trendingMovies: Array.isArray(raw?.trendingMovies) ? raw.trendingMovies.map(normalizeFilmSummary) : [],
+    latestMovies: Array.isArray(raw?.latestMovies) ? raw.latestMovies.map(normalizeFilmSummary) : [],
+    asianMovies: Array.isArray(raw?.asianMovies) ? raw.asianMovies.map(normalizeFilmSummary) : [],
+    popularSeries: Array.isArray(raw?.popularSeries) ? raw.popularSeries.map(normalizeFilmSummary) : [],
+    topRated: Array.isArray(raw?.topRated) ? raw.topRated.map(normalizeFilmSummary) : [],
+    animations: Array.isArray(raw?.animations) ? raw.animations.map(normalizeFilmSummary) : [],
+  };
+}
+
+function hasHomeContent(feed?: FilmHomeFeed | null): feed is FilmHomeFeed {
+  if (!feed) return false;
+  return Boolean(
+    feed.hero.length ||
+      feed.trendingMovies.length ||
+      feed.latestMovies.length ||
+      feed.popularSeries.length ||
+      feed.animations.length,
+  );
+}
+
+export function getMemoryFilmHome(): FilmHomeFeed | undefined {
+  return _memHomeFeed;
+}
+
+export function primeMemoryFilmHomeFromJson(rawJson: string | null | undefined): FilmHomeFeed | undefined {
+  if (!rawJson) return _memHomeFeed;
+  try {
+    const parsed = normalizeHomeFeed(JSON.parse(rawJson));
+    if (hasHomeContent(parsed)) {
+      _memHomeFeed = parsed;
+      return parsed;
+    }
+  } catch {}
+  return _memHomeFeed;
+}
+
+export async function loadCachedFilmHome(): Promise<FilmHomeFeed | undefined> {
+  if (_memHomeFeed) return _memHomeFeed;
+  try {
+    const raw = await AsyncStorage.getItem(FILM_HOME_CACHE_KEY);
+    return primeMemoryFilmHomeFromJson(raw);
+  } catch {
+    return undefined;
+  }
+}
+
 export async function fetchFilmHome(): Promise<FilmHomeFeed> {
   const base = getBaseUrl();
   const res = await secureFetch(`${base}/api/film/home`, {
@@ -43,15 +95,12 @@ export async function fetchFilmHome(): Promise<FilmHomeFeed> {
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const raw = (await res.json()) as FilmHomeFeed;
-  return {
-    hero: (raw.hero || []).map(normalizeFilmSummary),
-    trendingMovies: (raw.trendingMovies || []).map(normalizeFilmSummary),
-    latestMovies: (raw.latestMovies || []).map(normalizeFilmSummary),
-    asianMovies: (raw.asianMovies || []).map(normalizeFilmSummary),
-    popularSeries: (raw.popularSeries || []).map(normalizeFilmSummary),
-    topRated: (raw.topRated || []).map(normalizeFilmSummary),
-    animations: (raw.animations || []).map(normalizeFilmSummary),
-  };
+  const normalized = normalizeHomeFeed(raw);
+  if (hasHomeContent(normalized)) {
+    _memHomeFeed = normalized;
+    AsyncStorage.setItem(FILM_HOME_CACHE_KEY, JSON.stringify(normalized)).catch(() => {});
+  }
+  return normalized;
 }
 
 export async function fetchFilmBrowse(params: {

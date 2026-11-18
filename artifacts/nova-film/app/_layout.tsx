@@ -21,6 +21,7 @@ import { AppUpdateModal } from "@/components/AppUpdateModal";
 import { AppProvider, useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { loadRuntimeApiUrl } from "@/utils/baseUrl";
+import { loadCachedFilmHome } from "@/utils/filmApi";
 import { installGlobalCrashHandlers } from "@/utils/crashLogger";
 import { getRuntimeIntegrity, runtimeIntegrityMessage } from "@/utils/runtimeIntegrity";
 import { isTvDevice, useTvMetrics } from "@/utils/tv";
@@ -78,6 +79,7 @@ if (SENTRY_DSN && RUNTIME_INTEGRITY.trusted) {
 // تحميل عنوان API المخصص من AsyncStorage قبل أي طلب شبكي
 if (RUNTIME_INTEGRITY.trusted) {
   loadRuntimeApiUrl().catch(() => {});
+  loadCachedFilmHome().catch(() => {});
 }
 
 // تثبيت معالجات الأعطال العالمية — فوراً عند بدء التشغيل
@@ -256,7 +258,7 @@ function RootLayout() {
           .then((m) => m.restoreInterruptedDownloads())
           .catch(() => {});
       }
-    }, 2400);
+    }, 5500);
     const interval = setInterval(() => {
       if (AppState.currentState === "active") {
         pingMobileAppPresence();
@@ -277,7 +279,7 @@ function RootLayout() {
     const t = setTimeout(() => {
       setBrandSplashVisible(false);
       SplashScreen.hideAsync().catch(() => {});
-    }, 1500);
+    }, 850);
     return () => clearTimeout(t);
   }, []);
 
@@ -286,7 +288,7 @@ function RootLayout() {
       const t = setTimeout(() => {
         setBrandSplashVisible(false);
         SplashScreen.hideAsync().catch(() => {});
-      }, tvMode ? 120 : 180);
+      }, tvMode ? 50 : 70);
       return () => clearTimeout(t);
     }
   }, [fontsLoaded, fontError, tvMode]);

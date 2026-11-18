@@ -485,3 +485,15 @@ export async function saveUserRating(tmdbType: TmdbMediaType, titleId: number, r
     await AsyncStorage.setItem(RATING_KEY, JSON.stringify(map));
   } catch {}
 }
+
+export async function clearAllFilmHistory(): Promise<void> {
+  try {
+    await AsyncStorage.multiRemove([WATCHED_KEY, PLAYBACK_KEY]);
+  } catch {}
+}
+
+export async function clearAllFilmFavorites(): Promise<void> {
+  try {
+    await AsyncStorage.multiRemove([FAVORITES_KEY, FAVORITE_IDS_KEY]);
+  } catch {}
+}

@@ -21,6 +21,13 @@ import paletteColors from "@/constants/colors";
 import { useApp } from "@/context/AppContext";
 import type { MobileUser } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/baseUrl";
+import {
+  clearAllFilmFavorites,
+  clearAllFilmHistory,
+  loadAllFilmPlaybackProgress,
+  loadFavoriteFilms,
+  loadWatchedMap,
+} from "@/utils/filmCatalog";
 import { secureFetch, setUserAuthToken } from "@/utils/secureApi";
 import { CrashEntry, getCrashLog } from "@/utils/crashLogger";
 import {
@@ -2023,22 +2030,31 @@ export default function SettingsScreen() {
   const [histCount, setHistCount] = useState(0);
   const [savedCount, setSavedCount] = useState(0);
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const keys = await AsyncStorage.getAllKeys();
-        let total = 0;
-        for (const k of keys) {
-          const v = await AsyncStorage.getItem(k);
-          total += k.length + (v?.length || 0);
-        }
-        setCacheKb(Math.round(total / 1024));
-        setHistCount(watchHistory.length);
-        setSavedCount(favorites.length);
-      } catch {}
-    };
-    load();
-  }, [watchHistory, favorites]);
+  const loadFilmStats = useCallback(async () => {
+    try {
+      const [keys, progressList, watchedMap, favFilms] = await Promise.all([
+        AsyncStorage.getAllKeys(),
+        loadAllFilmPlaybackProgress(),
+        loadWatchedMap(),
+        loadFavoriteFilms(),
+      ]);
+      const pairs = keys.length ? await AsyncStorage.multiGet(keys) : [];
+      let total = 0;
+      for (const [k, v] of pairs) {
+        total += k.length + (v?.length || 0);
+      }
+      const watchedCount = Object.values(watchedMap).filter(Boolean).length;
+      setCacheKb(Math.round(total / 1024));
+      setHistCount(Math.max(progressList.length, watchedCount));
+      setSavedCount(favFilms.length);
+    } catch {}
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadFilmStats();
+    }, [loadFilmStats]),
+  );
 
   const openConfirm = useCallback((opts: typeof confirm) => setConfirm(opts), []);
   const closeConfirm = () => setConfirm(p => ({ ...p, open: false }));
@@ -2096,7 +2112,7 @@ export default function SettingsScreen() {
     confirmLabel: "امسح السجل",
     danger: true,
     onConfirm: async () => {
-      await clearHistory();
+      await Promise.all([clearHistory(), clearAllFilmHistory()]);
       setHistCount(0);
       showToast("تم مسح سجل المشاهدة");
     },
@@ -2109,7 +2125,7 @@ export default function SettingsScreen() {
     confirmLabel: "امسح المفضّلة",
     danger: true,
     onConfirm: async () => {
-      await clearFavorites();
+      await Promise.all([clearFavorites(), clearAllFilmFavorites()]);
       setSavedCount(0);
       showToast("تم مسح قائمة المحفوظات");
     },
@@ -2154,7 +2170,7 @@ export default function SettingsScreen() {
         </View>
         <View style={[ts.headerBadge, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
           <View style={ts.headerDot} />
-          <Text style={[ts.headerBadgeText, { color: colors.textMuted }]}>NOVA FILM · v2.4</Text>
+          <Text style={[ts.headerBadgeText, { color: colors.textMuted }]}>NOVA FILM · v{CURRENT_APP_VERSION}</Text>
         </View>
       </View>
 
@@ -2550,7 +2566,7 @@ export default function SettingsScreen() {
         <View style={ts.footer}>
           <View style={ts.footerLogo}>
             <Text style={[ts.footerLogoText, { color: colors.textPrimary }]}>NOVA </Text>
-            <Text style={[ts.footerLogoText, { color: colors.accent }]}>NOVA</Text>
+            <Text style={[ts.footerLogoText, { color: colors.accent }]}>FILM</Text>
           </View>
           <Text style={[ts.footerSub, { color: colors.textMuted }]}>v{CURRENT_APP_VERSION} · مجاني للجميع · 2025</Text>
         </View>

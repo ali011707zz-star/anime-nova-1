@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { DEFAULT_CONFIG, fetchRemoteConfig, getBaseUrl, RemoteConfig } from "@/utils/api";
+import { FILM_HOME_CACHE_KEY, primeMemoryFilmHomeFromJson } from "@/utils/filmApi";
 import { getAuthToken, secureFetch, setUserAuthToken } from "@/utils/secureApi";
 import { setActiveThemeIsWhite } from "@/utils/tv";
 
@@ -286,11 +287,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    loadAll();
-    refreshConfig();
-    // Pre-warm the auth token so first API call is instant
+    void loadAll();
+    // Warm auth token right away for Home catalog, while deferring secondary
+    // config/account checks slightly so initial Home feed & images go first.
     getAuthToken().catch(() => {});
-    void restoreAuth();
+    const t = setTimeout(() => {
+      void refreshConfig();
+      void restoreAuth();
+    }, 350);
+    return () => clearTimeout(t);
   }, [restoreAuth]);
 
   const accountUrl = useCallback((path: string) => `${getBaseUrl()}/api${path}`, []);
@@ -497,67 +502,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [accountUrl, postFavorite, postHistory, readDeletedIds]);
 
   useEffect(() => {
+    // NOVA FILM keeps its own local film history/favorites via filmCatalog.ts
+    // and intentionally never syncs Anime NOVA's /api/user/* history or favorites.
     if (!authReady || !historyHydrated || !favoritesHydrated) return;
-
-    let cancelled = false;
-    const userId = currentUser?.id || null;
-    dataOwnerRef.current = "loading";
-
-    const parseArray = <T,>(raw: string | null): T[] => {
-      if (!raw) return [];
-      try {
-        const parsed = JSON.parse(raw);
-        return Array.isArray(parsed) ? parsed : [];
-      } catch {
-        return [];
-      }
-    };
-
-    if (!userId) {
-      // Logout only removes the local identity. Restore the anonymous local
-      // collection without touching any account rows on the backend.
-      void Promise.all([
-        AsyncStorage.getItem(ANONYMOUS_HISTORY_KEY),
-        AsyncStorage.getItem(ANONYMOUS_FAVORITES_KEY),
-      ]).then(([historyRaw, favoritesRaw]) => {
-        if (cancelled || currentUserRef.current) return;
-        dataOwnerRef.current = null;
-        setWatchHistory(parseArray<WatchProgress>(historyRaw));
-        setFavorites(parseArray<FavoriteAnime>(favoritesRaw));
-      });
-      return () => { cancelled = true; };
-    }
-
-    void (async () => {
-      const [historyRaw, favoritesRaw] = await Promise.all([
-        AsyncStorage.getItem(ACCOUNT_HISTORY_KEY(userId)).catch(() => null),
-        AsyncStorage.getItem(ACCOUNT_FAVORITES_KEY(userId)).catch(() => null),
-      ]);
-      if (cancelled || currentUserRef.current?.id !== userId) return;
-
-      const localHistory = parseArray<WatchProgress>(historyRaw);
-      const localFavorites = parseArray<FavoriteAnime>(favoritesRaw);
-      dataOwnerRef.current = userId;
-      setWatchHistory(localHistory);
-      setFavorites(localFavorites);
-
-      // Supabase is authoritative for account-owned data. The account-scoped
-      // cache is only an offline queue/cache and is never mixed with anonymous
-      // data or another user's collection.
-      await syncAccountData(userId, localHistory, localFavorites);
-      if (!cancelled && currentUserRef.current?.id === userId) {
-        dataOwnerRef.current = userId;
-      }
-    })();
-
-    return () => { cancelled = true; };
-  }, [
-    authReady,
-    currentUser?.id,
-    favoritesHydrated,
-    historyHydrated,
-    syncAccountData,
-  ]);
+    dataOwnerRef.current = currentUser?.id || null;
+  }, [authReady, currentUser?.id, favoritesHydrated, historyHydrated]);
 
   /** حذف مفاتيح الكاش القديمة عند الإطلاق — يمنع امتلاء AsyncStorage (6MB Android limit) */
   const cleanOldCacheKeys = async () => {
@@ -587,52 +536,33 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   const loadAll = async () => {
-    // نظّف الكاش القديم أولاً في الخلفية
-    cleanOldCacheKeys().catch(() => {});
+    const entries = await AsyncStorage.multiGet(["nova-theme", FILM_HOME_CACHE_KEY]).catch(
+      () => [] as [string, string | null][],
+    );
+    const kv = new Map(entries);
+    const themeVal = kv.get("nova-theme") ?? null;
+    const homeCacheVal = kv.get(FILM_HOME_CACHE_KEY) ?? null;
+    primeMemoryFilmHomeFromJson(homeCacheVal);
 
-    const [themeVal, historyVal, favVal] = await Promise.all([
-      AsyncStorage.getItem("nova-theme").catch(() => null),
-      AsyncStorage.getItem(ANONYMOUS_HISTORY_KEY).catch(() => null),
-      AsyncStorage.getItem(ANONYMOUS_FAVORITES_KEY).catch(() => null),
-    ]);
     if (themeVal) {
       const nextTheme: Theme =
         themeVal === "white" || themeVal === "light" ? "white" : "black";
       setThemeState(nextTheme);
       setActiveThemeIsWhite(nextTheme === "white");
       if (themeVal !== nextTheme) {
-        await AsyncStorage.setItem("nova-theme", nextTheme).catch(() => {});
+        AsyncStorage.setItem("nova-theme", nextTheme).catch(() => {});
       }
     } else {
       setActiveThemeIsWhite(true);
     }
     setThemeHydrated(true);
-    if (historyVal) {
-      try {
-        const parsed = JSON.parse(historyVal);
-        if (Array.isArray(parsed)) {
-          setWatchHistory(parsed);
-        } else {
-          await AsyncStorage.removeItem("nova-history").catch(() => {});
-        }
-      } catch {
-        await AsyncStorage.removeItem("nova-history").catch(() => {});
-      }
-    }
-    if (favVal) {
-      try {
-        const parsed = JSON.parse(favVal);
-        if (Array.isArray(parsed)) {
-          setFavorites(parsed);
-        } else {
-          await AsyncStorage.removeItem("nova-favorites").catch(() => {});
-        }
-      } catch {
-        await AsyncStorage.removeItem("nova-favorites").catch(() => {});
-      }
-    }
     setHistoryHydrated(true);
     setFavoritesHydrated(true);
+
+    // Defer key scanning cleanup well past startup render.
+    setTimeout(() => {
+      cleanOldCacheKeys().catch(() => {});
+    }, 8000);
   };
 
   const refreshConfig = useCallback(async () => {

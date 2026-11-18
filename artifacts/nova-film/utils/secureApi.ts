@@ -65,11 +65,43 @@ async function secureDelete(key: string): Promise<void> {
   } catch {}
 }
 
+async function fastGet(key: string): Promise<string | null> {
+  try {
+    const val = await AsyncStorage.getItem(key);
+    if (val !== null) return val;
+    if (Platform.OS !== "web") {
+      const legacy = await secureGet(key);
+      if (legacy !== null) {
+        AsyncStorage.setItem(key, legacy).catch(() => {});
+      }
+      return legacy;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function fastSet(key: string, value: string): Promise<void> {
+  try {
+    await AsyncStorage.setItem(key, value);
+  } catch {}
+}
+
+async function fastDelete(key: string): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(key);
+  } catch {}
+  if (Platform.OS !== "web") {
+    secureDelete(key).catch(() => {});
+  }
+}
+
 async function getStoredToken(): Promise<string | null> {
-  const [token, expStr] = await Promise.all([
-    secureGet(TOKEN_KEY),
-    secureGet(TOKEN_EXP_KEY),
-  ]);
+  const entries = await AsyncStorage.multiGet([TOKEN_KEY, TOKEN_EXP_KEY]).catch(() => [] as [string, string | null][]);
+  const map = new Map(entries);
+  const token = map.get(TOKEN_KEY) ?? (await fastGet(TOKEN_KEY));
+  const expStr = map.get(TOKEN_EXP_KEY) ?? (await fastGet(TOKEN_EXP_KEY));
   if (!token || !expStr) return null;
   const exp = parseInt(expStr, 10);
   if (isNaN(exp) || Date.now() / 1000 > exp - 60) return null;
@@ -86,7 +118,7 @@ async function getUserTokenCached(): Promise<string | null> {
 
 async function doFetchFreshToken(): Promise<string | null> {
   const MAX_RETRIES = 3;
-  const TIMEOUTS = [4000, 7000, 12000];
+  const TIMEOUTS = [3500, 6000, 10000];
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
       const controller = new AbortController();
@@ -109,15 +141,15 @@ async function doFetchFreshToken(): Promise<string | null> {
       _cachedToken = data.token;
       _cachedExp = Number(data.exp);
       void Promise.all([
-        secureSet(TOKEN_KEY, data.token),
-        secureSet(TOKEN_EXP_KEY, data.exp.toString()),
+        fastSet(TOKEN_KEY, data.token),
+        fastSet(TOKEN_EXP_KEY, data.exp.toString()),
       ]);
       if (data.downloadToken && data.downloadExp) {
         _cachedDownloadToken = String(data.downloadToken);
         _cachedDownloadExp = Number(data.downloadExp);
         void Promise.all([
-          secureSet(DOWNLOAD_TOKEN_KEY, _cachedDownloadToken),
-          secureSet(DOWNLOAD_TOKEN_EXP_KEY, _cachedDownloadExp.toString()),
+          fastSet(DOWNLOAD_TOKEN_KEY, _cachedDownloadToken),
+          fastSet(DOWNLOAD_TOKEN_EXP_KEY, _cachedDownloadExp.toString()),
         ]);
       }
       return data.token;
@@ -158,8 +190,8 @@ export async function getDownloadToken(): Promise<string | null> {
     return _cachedDownloadToken;
   }
   const [stored, expStr] = await Promise.all([
-    secureGet(DOWNLOAD_TOKEN_KEY),
-    secureGet(DOWNLOAD_TOKEN_EXP_KEY),
+    fastGet(DOWNLOAD_TOKEN_KEY),
+    fastGet(DOWNLOAD_TOKEN_EXP_KEY),
   ]);
   const exp = Number(expStr);
   if (stored && Number.isFinite(exp) && Date.now() / 1000 < exp - 60) {
@@ -183,10 +215,10 @@ export async function invalidateToken(): Promise<void> {
   _cachedDownloadToken = null;
   _cachedDownloadExp = 0;
   await Promise.all([
-    secureDelete(TOKEN_KEY),
-    secureDelete(TOKEN_EXP_KEY),
-    secureDelete(DOWNLOAD_TOKEN_KEY),
-    secureDelete(DOWNLOAD_TOKEN_EXP_KEY),
+    fastDelete(TOKEN_KEY),
+    fastDelete(TOKEN_EXP_KEY),
+    fastDelete(DOWNLOAD_TOKEN_KEY),
+    fastDelete(DOWNLOAD_TOKEN_EXP_KEY),
   ]);
 }
 
@@ -208,7 +240,11 @@ export async function secureFetch(
   if (!getRuntimeIntegrity().trusted) {
     throw new Error("Untrusted runtime");
   }
-  const [token, userToken] = await Promise.all([getAuthToken(), getUserTokenCached()]);
+  const needsUserAuth = /\/api\/(auth|user|comments|watch-party|profile)/.test(url);
+  const [token, userToken] = await Promise.all([
+    getAuthToken(),
+    needsUserAuth ? getUserTokenCached() : Promise.resolve(_cachedUserToken ?? null),
+  ]);
   const buildHeaders = (tok: string | null): Record<string, string> => {
     const h: Record<string, string> = {
       ...(options.headers as Record<string, string> || {}),

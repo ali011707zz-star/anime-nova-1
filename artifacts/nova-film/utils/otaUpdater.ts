@@ -83,6 +83,13 @@ export async function checkAndApplyOtaUpdate(options: {
       return;
     }
 
+    // Automatic checks run silently in the background so the user is never
+    // interrupted by an unexpected dialog or forced reload right after opening.
+    // The downloaded bundle will activate automatically on the next cold start.
+    if (!manual) {
+      return;
+    }
+
     Alert.alert(
       "تحديث جديد جاهز",
       "تم تنزيل تحديث جديد لتطبيق NOVA FILM. هل تريد إعادة التشغيل الآن لتطبيق التحديث؟",
