@@ -89,8 +89,8 @@ export function DrawerMenu({ visible, onClose }: Props) {
   const { watchHistory, favorites, theme, currentUser } = useApp();
   const colors = useColors();
   const [userData, setUserData] = React.useState<UserData | null>(null);
-  const visibleNavMain = NAV_MAIN;
-  const visibleFavoritesCount = favorites.length;
+  const visibleNavMain = tvMode ? NAV_MAIN.filter((item) => item.route !== "/manga") : NAV_MAIN;
+  const visibleFavoritesCount = tvMode ? favorites.filter((f: any) => !f?.mangaId).length : favorites.length;
 
   React.useEffect(() => {
     if (currentUser) {

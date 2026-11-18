@@ -152,6 +152,7 @@ export default function LibraryScreen() {
   const filteredFavs = useMemo(() => {
     const sq = search.toLowerCase();
     return favorites.filter(f => {
+      if (tvMode && f.mangaId) return false;
       const ar = f.titleAr || (!f.mangaId ? getKnownArabicAnimeTitle(f.id, f.english, f.title) : null);
       const matchesSearch = !sq || [ar, f.english, f.title].some(v => (v || "").toLowerCase().includes(sq));
       const matchesYear = !year || String(f.startYear || new Date(f.addedAt).getFullYear()) === year;

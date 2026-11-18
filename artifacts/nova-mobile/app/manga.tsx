@@ -53,6 +53,12 @@ export default function MangaScreen() {
     }
   };
 
+  useEffect(() => {
+    if (tvMode) router.replace("/(tabs)" as any);
+  }, [router, tvMode]);
+
+  if (tvMode) return null;
+
   const isManhwa = activeTab === "manhwa" || (activeTab !== "all" && lastSourceTab === "manhwa");
 
   return (

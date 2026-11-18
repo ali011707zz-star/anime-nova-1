@@ -892,6 +892,12 @@ export default function MangaDetailScreen() {
 
   const charCardWidth = Math.floor((width - 32 - 20) / 3);
 
+  useEffect(() => {
+    if (tvMode) router.replace("/(tabs)" as any);
+  }, [router, tvMode]);
+
+  if (tvMode) return null;
+
   if (error && !manga && !params.title) {
     return (
       <View style={[styles.center, { backgroundColor: colors.background }]}>

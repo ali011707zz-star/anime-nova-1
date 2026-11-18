@@ -241,7 +241,7 @@ export default function HomeScreen() {
     return () => dubbedReqRef.current?.abort();
   }, [activeDubbedTab, fetchActiveDubbedTab]);
 
-  /* ── Manhwa (Azorafly) & Manga (MangaDar) from Backend (Phone + TV) ── */
+  /* ── Manhwa (Azorafly) & Manga (MangaDar) from Backend (Phone/Tablet only — hidden in TV mode) ── */
   const { data: manhwaData, refetch: refetchManhwa } = useQuery({
     queryKey: ["homeManhwa"],
     queryFn: async () => {
@@ -249,6 +249,7 @@ export default function HomeScreen() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     },
+    enabled: !isTvLayout,
     staleTime: 10 * 60 * 1000,
   });
 
@@ -259,6 +260,7 @@ export default function HomeScreen() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     },
+    enabled: !isTvLayout,
     staleTime: 10 * 60 * 1000,
   });
 
@@ -333,7 +335,7 @@ export default function HomeScreen() {
     heroSampleRef.current = [];
     await Promise.all([
       refetchT(), refetchP(), refetchA(), refetchM(), refetchIsekai(),
-      refetchManhwa(), refetchJpManga(),
+      ...(isTvLayout ? [] : [refetchManhwa(), refetchJpManga()]),
       fetchActiveDubbedTab(activeDubbedTab, true),
     ]);
   };
@@ -350,7 +352,7 @@ export default function HomeScreen() {
     if (recentHistory.length > 0) sections.push({ kind: "continue", key: "continue" });
     if (todayEps.length > 0 || todayChecking) sections.push({ kind: "todayEps", key: "todayEps" });
     sections.push({ kind: "dubbedUnified", key: "dubbedUnified" });
-    if (manhwaItems.length > 0 || mangaItems.length > 0) {
+    if (!isTvLayout && (manhwaItems.length > 0 || mangaItems.length > 0)) {
       sections.push({ kind: "mangaUnified", key: "mangaUnified" });
     }
     if (!isLoading) {
@@ -1150,8 +1152,8 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* ── القسم المدمج للمانجا والمانهوا (الهاتف + التلفاز) ── */}
-        {section.kind === "mangaUnified" && (manhwaItems.length > 0 || mangaItems.length > 0) && (() => {
+        {/* ── القسم المدمج للمانجا والمانهوا (الهاتف فقط — مخفي في وضع التلفاز) ── */}
+        {section.kind === "mangaUnified" && !isTvLayout && (manhwaItems.length > 0 || mangaItems.length > 0) && (() => {
           const activeList = activeMangaTab === "manhwa"
             ? (manhwaItems.length > 0 ? manhwaItems : mangaItems)
             : (mangaItems.length > 0 ? mangaItems : manhwaItems);
