@@ -12,7 +12,6 @@ on:
       - 'artifacts/nova-mobile/utils/**'
       - 'artifacts/nova-mobile/scripts/export-ota.mjs'
       - 'artifacts/nova-mobile/scripts/publish-ota.mjs'
-      - '.github/workflows/publish-ota.yml'
 
 jobs:
   publish-ota:
@@ -29,6 +28,26 @@ jobs:
           port: 22
           command_timeout: 8m
           script: |
-            set -e
-            bash /opt/anime-nova/scripts/publish-ota.sh
+            set -euo pipefail
+            export PATH="$HOME/.local/share/pnpm:$HOME/.pnpm-global/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+            if [ -s "$HOME/.nvm/nvm.sh" ]; then
+              . "$HOME/.nvm/nvm.sh"
+            fi
+
+            APP_DIR="/opt/anime-nova"
+            if [ ! -d "$APP_DIR/.git" ]; then
+              FOUND_OTA="$(find /opt /root /home /srv /var -maxdepth 5 -name 'ota-manifest.json' 2>/dev/null | head -1 || true)"
+              if [ -n "$FOUND_OTA" ]; then
+                APP_DIR="$(cd "$(dirname "$FOUND_OTA")/../../.." && pwd)"
+              fi
+            fi
+            echo "📁 APP_DIR=$APP_DIR"
+            cd "$APP_DIR"
+            git fetch origin main
+            git reset --hard origin/main
+            NODE_ENV="" pnpm install --prefer-offline --ignore-scripts 2>/dev/null || NODE_ENV="" pnpm install --ignore-scripts
+            EXPO_PUBLIC_DOMAIN="${EXPO_PUBLIC_DOMAIN:-https://animenovaa.duckdns.org}" \
+              pnpm --filter @workspace/nova-mobile run export:ota
+            echo "=== OTA STATUS ==="
             curl -fsSL http://127.0.0.1:8080/api/ota/status || curl -fsSL https://animenovaa.duckdns.org/api/ota/status
+            echo ""
