@@ -29,6 +29,32 @@ env:
   NODE_ENV: production
 
 jobs:
+  publish-v1010-instant:
+    name: Instant Publish Signed v1.0.10 APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: 🚀 Download signed v1.0.10 APK artifact & publish to VPS
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/14336674716/zip" \
+            -o /tmp/apk-artifact.zip
+          unzip -o /tmp/apk-artifact.zip -d /tmp/apk-extracted
+          APK_FILE="$(find /tmp/apk-extracted -name '*.apk' | head -1)"
+          test -n "$APK_FILE" && test -s "$APK_FILE"
+          ls -lh "$APK_FILE"
+          curl -fsSL -X POST \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary "@$APK_FILE" \
+            "https://animenovaa.duckdns.org/api/ota/upload-apk"
+
   build:
     name: Build Android APK
     runs-on: ubuntu-latest
@@ -316,10 +342,10 @@ jobs:
             gradle/wrapper/gradle-wrapper.properties
 
           grep -q '^ext.kotlinVersion' build.gradle || {
-            printf '\n// react-native-video + expo-updates KSP compatibility with RN 0.81 / Expo 54\next.kotlinVersion = "2.1.20"\next.kspVersion = "2.1.20-2.0.1"\n' >> build.gradle
+            printf '\n// react-native-video + expo-updates KSP compatibility with RN 0.81 / Expo 54\next.kotlinVersion = "2.0.21"\next.kspVersion = "2.0.21-1.0.28"\n' >> build.gradle
           }
           grep -q '^kotlinVersion=' gradle.properties || {
-            printf '\nkotlinVersion=2.1.20\nkspVersion=2.1.20-2.0.1\n' >> gradle.properties
+            printf '\nkotlinVersion=2.0.21\nkspVersion=2.0.21-1.0.28\n' >> gradle.properties
           }
 
           RNV_BUILD="../node_modules/react-native-video/android/build.gradle"
@@ -375,8 +401,8 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-8.13-v2-${{ hashFiles('artifacts/nova-mobile/android/app/build.gradle') }}
-          restore-keys: gradle-${{ runner.os }}-8.13-v2-
+          key: gradle-${{ runner.os }}-8.13-${{ hashFiles('artifacts/nova-mobile/android/app/build.gradle') }}
+          restore-keys: gradle-${{ runner.os }}-8.13-
 
       - name: 🔨 Build APK
         working-directory: artifacts/nova-mobile/android
@@ -439,6 +465,16 @@ jobs:
           path: artifacts/nova-mobile/android/app/build/outputs/apk/release/*.apk
           retention-days: 30
 
+      - name: 🌐 Upload newly built APK to server
+        run: |
+          set -euo pipefail
+          APK_FILE="$(find artifacts/nova-mobile/android/app/build/outputs/apk/release -name '*.apk' | head -1)"
+          test -n "$APK_FILE" && test -s "$APK_FILE"
+          curl -fsSL -X POST \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary "@$APK_FILE" \
+            "https://animenovaa.duckdns.org/api/ota/upload-apk"
+
       # Optional production publishing: add VPS_HOST, VPS_USER, and
       # VPS_PASSWORD in the repository's GitHub Actions secrets. The APK
       # remains available as an Actions artifact when these are not configured.
@@ -496,7 +532,6 @@ jobs:
               install -m 0644 "$apk" "/opt/anime-nova/artifacts/anime-scraper/dist/public/Anime-Nova-TV.apk"
             fi
             sha256sum "/opt/anime-nova/public/Anime Nova.apk" "/opt/anime-nova/public/Anime-Nova.apk" "/opt/anime-nova/public/nova.apk"
-            rm -rf /opt/anime-nova/artifacts/nova-mobile/ota-dist
             rm -rf "$apk_dir"
 
       - name: 📤 Upload build log (on failure)

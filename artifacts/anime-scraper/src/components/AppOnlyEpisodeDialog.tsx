@@ -13,7 +13,7 @@ export default function AppOnlyEpisodeDialog({
   open,
   episodeLabel,
   onClose,
-  downloadUrl = "/Anime-Nova.apk?v=1.0.8",
+  downloadUrl = "/Anime-Nova.apk?v=1.0.10",
 }: AppOnlyEpisodeDialogProps) {
   return (
     <AnimatePresence>
@@ -113,7 +113,7 @@ export default function AppOnlyEpisodeDialog({
               </div>
               <div className="mt-2.5 pt-2 border-t border-violet-500/15 flex items-center justify-between text-[11px] font-['Cairo']">
                 <a
-                  href="/nova.apk"
+                  href="/nova.apk?v=1.0.10"
                   download
                   className="text-violet-300 hover:text-white font-bold flex items-center gap-1 underline"
                 >

@@ -15,8 +15,8 @@ const PERMANENTLY_DISABLED_SOURCES = [
   "consumet_gogo",
 ] as const;
 
-const LATEST_APP_VERSION = "1.0.9";
-const LATEST_VERSION_CODE = 10;
+const LATEST_APP_VERSION = "1.0.10";
+const LATEST_VERSION_CODE = 11;
 
 function compareSemver(a: string, b: string): number {
   const pa = String(a || "0.0.0").replace(/[^0-9.]/g, "").split(".").map((x) => parseInt(x, 10) || 0);
@@ -36,14 +36,13 @@ const DEFAULT_CONFIG = {
   latestVersionCode: LATEST_VERSION_CODE,
   apkUrl: "https://animenovaa.duckdns.org/nova.apk?v=" + LATEST_APP_VERSION,
   tvDownloaderCode: "2576388",
-  forceUpdate: false,
-  updateTitle: "يتوفر تحديث جديد",
-  updateMessage: "يتوفر تحديث جديد (" + LATEST_APP_VERSION + ") يحتوي على تحسينات في السرعة والمشغل.",
+  forceUpdate: true,
+  updateTitle: "تحديث إجباري جديد (v1.0.10)",
+  updateMessage: "يتوفر تحديث إجباري جديد (" + LATEST_APP_VERSION + ") يتضمن قسم الأنمي المدبلج وكرتون مدبلج 2 وتحسينات شاملة للمشغل والتلفاز.",
   updateChangelog: [
-    "دعم الأسماء العربية الأنيقة فوق الإنجليزية لجميع الأنميات في البحث والبطاقات والتفاصيل والجدول",
-    "ترجمة عربية احترافية غير حرفية لأكثر من 3,000 أنمي مع بحث عربي فوري",
-    "تحديث وتثبيت مباشر داخل التطبيق مع متابعة حجم التقدم بالميجابايت",
-    "تحسينات في الأداء والثبات ومنع تعليق الخلفية على الأجهزة الضعيفة",
+    "إضافة قسم الأنمي المدبلج وكرتون مدبلج 2 ومكتبة سبيستون والكرتون الكلاسيكي مع سيرفرات المشاهدة والتحميل",
+    "إصلاح متابعة المشاهدة والسجل وأزرار الحلقة التالية والسابقة وتحسين سلاسة المشغل الداخلي والقائمة الجانبية",
+    "تحسين التصفح والمؤشر على شاشات التلفاز الذكية Android TV ودعم التحديثات الهوائية السريعة",
   ],
   maintenanceMode: false,
   maintenanceMessage: "",
@@ -149,7 +148,7 @@ router.get("/config", async (req, res) => {
       : [];
     const baseList = Array.isArray(dbAnnouncements) ? dbAnnouncements : [];
     const mergedCfg = mergeConfig(remote);
-    const latestVer = mergedCfg.latestVersion || LATEST_APP_VERSION;
+    const latestVer = compareSemver(mergedCfg.latestVersion || "0.0.0", LATEST_APP_VERSION) >= 0 ? mergedCfg.latestVersion : LATEST_APP_VERSION;
     const clientNeedsUpdate = Boolean(clientVersion && compareSemver(clientVersion, latestVer) < 0);
     const announcements = clientNeedsUpdate
       ? [outdatedBanner, ...baseList.filter((a: any) => a?.id !== outdatedBanner.id)]
@@ -158,10 +157,10 @@ router.get("/config", async (req, res) => {
       ...mergedCfg,
       version: latestVer,
       latestVersion: latestVer,
-      latestVersionCode: mergedCfg.latestVersionCode || LATEST_VERSION_CODE,
-      apkUrl: mergedCfg.apkUrl || DEFAULT_CONFIG.apkUrl,
+      latestVersionCode: Math.max(Number(mergedCfg.latestVersionCode || 0), LATEST_VERSION_CODE),
+      apkUrl: DEFAULT_CONFIG.apkUrl,
       tvDownloaderCode: mergedCfg.tvDownloaderCode || DEFAULT_CONFIG.tvDownloaderCode,
-      forceUpdate: typeof mergedCfg.forceUpdate === "boolean" ? mergedCfg.forceUpdate : DEFAULT_CONFIG.forceUpdate,
+      forceUpdate: DEFAULT_CONFIG.forceUpdate || Boolean(mergedCfg.forceUpdate),
       updateTitle: mergedCfg.updateTitle || DEFAULT_CONFIG.updateTitle,
       updateMessage: mergedCfg.updateMessage || DEFAULT_CONFIG.updateMessage,
       updateChangelog: Array.isArray(mergedCfg.updateChangelog) && mergedCfg.updateChangelog.length > 0 ? mergedCfg.updateChangelog : DEFAULT_CONFIG.updateChangelog,

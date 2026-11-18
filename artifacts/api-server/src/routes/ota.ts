@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -187,6 +188,112 @@ router.use("/assets", (req: Request, res: Response, next) => {
     "cache-control": "public, max-age=31536000, immutable",
   });
   fs.createReadStream(absPath).pipe(res);
+});
+
+const OFFICIAL_CERT_SHA256 = "16bc22491be7c87c964fdab6403331c5743a108b7113ac7da77301f5e602b39d";
+
+router.post("/upload-apk", (req: Request, res: Response) => {
+  const tmpPath = `/tmp/incoming-release-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.apk`;
+  const writeStream = fs.createWriteStream(tmpPath);
+  let aborted = false;
+
+  const cleanup = () => {
+    try {
+      if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+    } catch {}
+  };
+
+  req.on("aborted", () => {
+    aborted = true;
+    writeStream.destroy();
+    cleanup();
+  });
+
+  writeStream.on("error", (err) => {
+    cleanup();
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Write stream error", message: err.message });
+    }
+  });
+
+  writeStream.on("finish", () => {
+    if (aborted) {
+      cleanup();
+      return;
+    }
+    try {
+      const stat = fs.statSync(tmpPath);
+      if (stat.size < 15 * 1024 * 1024) {
+        cleanup();
+        res.status(400).json({ error: "APK too small", size: stat.size });
+        return;
+      }
+      const certOut = execFileSync("/usr/bin/apksigner", ["verify", "--print-certs", tmpPath], {
+        encoding: "utf8",
+        timeout: 20000,
+      });
+      if (!certOut.toLowerCase().includes(OFFICIAL_CERT_SHA256)) {
+        cleanup();
+        res.status(403).json({ error: "APK signature digest mismatch" });
+        return;
+      }
+      const badging = execFileSync("/usr/bin/aapt", ["dump", "badging", tmpPath], {
+        encoding: "utf8",
+        timeout: 20000,
+        maxBuffer: 10 * 1024 * 1024,
+      });
+      const pkgLine = badging.split("\n")[0] || "";
+      const nameMatch = pkgLine.match(/name='([^']+)'/);
+      const codeMatch = pkgLine.match(/versionCode='([^']+)'/);
+      const verMatch = pkgLine.match(/versionName='([^']+)'/);
+      const pkgName = nameMatch ? nameMatch[1] : "";
+      const versionCode = codeMatch ? Number(codeMatch[1]) : 0;
+      const versionName = verMatch ? verMatch[1] : "";
+
+      if (pkgName !== "com.nova.anime" || versionCode < 11) {
+        cleanup();
+        res.status(400).json({ error: "Unexpected package or versionCode", pkgName, versionCode, versionName });
+        return;
+      }
+
+      const targetDirs = [
+        "/opt/anime-nova/public",
+        "/opt/anime-nova/artifacts/anime-scraper/public",
+        "/opt/anime-nova/artifacts/anime-scraper/dist/public",
+      ];
+      const fileNames = [
+        "Anime Nova.apk",
+        "Anime-Nova.apk",
+        "nova.apk",
+        "Anime-Nova-TV.apk",
+      ];
+
+      for (const dir of targetDirs) {
+        fs.mkdirSync(dir, { recursive: true });
+        for (const name of fileNames) {
+          const dest = path.join(dir, name);
+          const tmpDest = `${dest}.tmp-${Date.now()}`;
+          fs.copyFileSync(tmpPath, tmpDest);
+          fs.chmodSync(tmpDest, 0o644);
+          fs.renameSync(tmpDest, dest);
+        }
+      }
+
+      cleanup();
+      res.json({
+        ok: true,
+        pkgName,
+        versionName,
+        versionCode,
+        sizeBytes: stat.size,
+      });
+    } catch (err: any) {
+      cleanup();
+      res.status(500).json({ error: "Verification or install failed", message: err?.message || String(err) });
+    }
+  });
+
+  req.pipe(writeStream);
 });
 
 export default router;

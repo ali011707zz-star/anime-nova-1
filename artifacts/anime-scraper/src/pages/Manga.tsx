@@ -250,7 +250,7 @@ export default function Manga() {
             </div>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
               <a
-                href="/Anime-Nova.apk?v=1.0.8"
+                href="/Anime-Nova.apk?v=1.0.10"
                 download
                 className="w-full sm:w-auto px-6 py-3 rounded-2xl text-xs sm:text-sm font-black text-white bg-gradient-to-l from-cyan-600 to-cyan-500 flex items-center justify-center gap-2 shadow-lg shadow-cyan-900/30 active:scale-95 transition-transform font-['Cairo']"
               >
@@ -258,7 +258,7 @@ export default function Manga() {
                 تحميل تطبيق الهاتف (Android)
               </a>
               <a
-                href="/nova.apk"
+                href="/nova.apk?v=1.0.10"
                 download
                 className="w-full sm:w-auto px-6 py-3 rounded-2xl text-xs sm:text-sm font-black text-white bg-white/10 hover:bg-white/15 border border-white/15 flex items-center justify-center gap-2 active:scale-95 transition-transform font-['Cairo']"
               >

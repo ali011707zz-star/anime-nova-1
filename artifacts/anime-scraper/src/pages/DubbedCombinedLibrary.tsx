@@ -796,11 +796,11 @@ export default function DubbedCombinedLibrary() {
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
-            <a href="/Anime-Nova.apk?v=1.0.8" download
+            <a href="/Anime-Nova.apk?v=1.0.10" download
               className="flex-1 sm:flex-initial px-3.5 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold font-['Cairo'] text-center">
               تطبيق الهاتف
             </a>
-            <a href="/nova.apk" download
+            <a href="/nova.apk?v=1.0.10" download
               className="flex-1 sm:flex-initial px-3.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-xs font-bold font-['Cairo'] text-center">
               تطبيق التلفاز
             </a>

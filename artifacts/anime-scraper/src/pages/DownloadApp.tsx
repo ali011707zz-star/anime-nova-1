@@ -26,7 +26,7 @@ import {
   Globe,
 } from "lucide-react";
 
-const APP_VERSION = "1.0.9";
+const APP_VERSION = "1.0.10";
 const MOBILE_APK_URL = `/Anime-Nova.apk?v=${APP_VERSION}`;
 const TV_APK_URL = `/nova.apk?v=${APP_VERSION}`;
 const DOWNLOADER_CODE = "2576388";
@@ -210,7 +210,7 @@ export default function DownloadApp({ onBack }: { onBack?: () => void }) {
   useEffect(() => {
     const prevTitle = document.title;
     document.title =
-      "تطبيق انمي نوفا (أنمي نوفا APK v1.0.9) | تحميل تطبيق Anime NOVA للأندرويد والتلفاز الذكي";
+      "تطبيق انمي نوفا (أنمي نوفا APK v1.0.10) | تحميل تطبيق Anime NOVA للأندرويد والتلفاز الذكي";
     const canonical = document.querySelector('link[rel="canonical"]') as HTMLLinkElement | null;
     const prevCanonical = canonical?.href;
     if (canonical) {
@@ -264,8 +264,8 @@ export default function DownloadApp({ onBack }: { onBack?: () => void }) {
       }`}
     >
       <SEO
-        title="تطبيق انمي نوفا (أنمي نوفا APK v1.0.9) | تحميل تطبيق Anime NOVA للأندرويد والتلفاز الذكي"
-        description="حمل تطبيق انمي نوفا الرسمي (تطبيق أنمي نوفا Anime NOVA APK v1.0.9) مجاناً لهواتف الأندرويد وشاشات التلفاز الذكية Android TV (كود Downloader: 2576388). مشاهدة وتحميل الأنمي المترجم والمدبلج، قراءة المانجا والمانهوا، ومسلسلات سبيستون بدون إعلانات."
+        title="تطبيق انمي نوفا (أنمي نوفا APK v1.0.10) | تحميل تطبيق Anime NOVA للأندرويد والتلفاز الذكي"
+        description="حمل تطبيق انمي نوفا الرسمي (تطبيق أنمي نوفا Anime NOVA APK v1.0.10) مجاناً لهواتف الأندرويد وشاشات التلفاز الذكية Android TV (كود Downloader: 2576388). مشاهدة وتحميل الأنمي المترجم والمدبلج، قراءة المانجا والمانهوا، ومسلسلات سبيستون بدون إعلانات."
         path="/app"
       />
       {/* ── Standalone Top Bar (Independent from Web App) ── */}
