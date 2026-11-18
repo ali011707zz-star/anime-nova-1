@@ -22,6 +22,12 @@ import {
   isAllowedCarateenStreamUrl,
   type CarateenProvider,
 } from "../lib/carateenSource.js";
+import {
+  getAnimeZidCatalog,
+  getAnimeZidDetail,
+  getAnimeZidServers,
+  resolveAnimeZidWatchSrc,
+} from "../lib/animezidSource.js";
 
 const router = Router();
 
@@ -587,11 +593,28 @@ router.get("/dubbed/carateen/catalog", async (req, res) => {
           ).includes(query),
         )
       : providerRows;
+    const SPACETOON_POSTER_FIXES: Record<number, string> = {
+      1148159749: "https://animenovaa.duckdns.org/api/source-catalog/tmdb-poster/w342/1rqrypnOq4cuwzobGW9gQgarkSr.jpg",
+      969501286: "https://animenovaa.duckdns.org/api/source-catalog/tmdb-poster/w342/3qiBRbIsfpw6O32TfD1FZ81MiKw.jpg",
+      186: "https://animenovaa.duckdns.org/api/source-catalog/tmdb-poster/w342/wzUQbSs3X15xs6GRE0fnPeAFWPs.jpg",
+    };
     const totalPages = Math.max(1, Math.ceil(filtered.length / limit));
     const start = (page - 1) * limit;
+    const pageSlice = filtered.slice(start, start + limit).map((entry) => {
+      const fixedPoster = SPACETOON_POSTER_FIXES[entry.id];
+      if (fixedPoster) return { ...entry, image: fixedPoster };
+      const rawImg = String(entry.image || "").trim();
+      if (/^https?:\/\/(?:(?:www\.)?carateen\.tv|cdn\.spacetoongo\.com)\//i.test(rawImg)) {
+        return {
+          ...entry,
+          image: `https://animenovaa.duckdns.org/api/dubbed/carateen/poster?url=${encodeURIComponent(rawImg)}`,
+        };
+      }
+      return entry;
+    });
     res.setHeader("Cache-Control", req.query.refresh === "1" ? "no-store" : "public, max-age=300");
     res.json({
-      results: filtered.slice(start, start + limit),
+      results: pageSlice,
       page,
       limit,
       totalResults: filtered.length,
@@ -789,6 +812,56 @@ router.get("/dubbed/sd2/servers", async (req, res) => {
     res.status(502).json({ error: error?.message || "تعذر جلب سيرفرات التشغيل" });
   }
 });
+const CARATEEN_POSTER_CACHE_DIR = "/opt/nova-cache/carateen-posters";
+try { fs.mkdirSync(CARATEEN_POSTER_CACHE_DIR, { recursive: true }); } catch {}
+
+router.get("/dubbed/carateen/poster", async (req, res) => {
+  const rawUrl = String(req.query.url || "").trim();
+  if (!rawUrl || !/^https?:\/\/(?:(?:www\.)?carateen\.tv|cdn\.spacetoongo\.com)\//i.test(rawUrl)) {
+    res.status(400).end();
+    return;
+  }
+  const hash = crypto.createHash("sha1").update(rawUrl).digest("hex");
+  const extMatch = rawUrl.match(/\.(webp|jpe?g|png)(?:[?#]|$)/i);
+  const ext = (extMatch ? extMatch[1] : "jpg").toLowerCase();
+  const contentType = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
+  const cacheFile = path.join(CARATEEN_POSTER_CACHE_DIR, hash + "." + ext);
+
+  try {
+    if (fs.existsSync(cacheFile)) {
+      const buf = fs.readFileSync(cacheFile);
+      if (buf.length > 100) {
+        res.setHeader("Content-Type", contentType);
+        res.setHeader("Cache-Control", "public, max-age=2592000, immutable");
+        res.send(buf);
+        return;
+      }
+    }
+    const isSp = /spacetoongo\.com/i.test(rawUrl);
+    const r = await fetch(rawUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        Referer: isSp ? "https://spacetoongo.com/" : "https://carateen.tv/",
+        Accept: "image/jpeg,image/png,image/webp,image/*,*/*;q=0.8",
+      },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!r.ok) {
+      res.status(502).end();
+      return;
+    }
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (buf.length > 100) {
+      try { fs.writeFileSync(cacheFile, buf); } catch {}
+    }
+    res.setHeader("Content-Type", r.headers.get("content-type") || contentType);
+    res.setHeader("Cache-Control", "public, max-age=2592000, immutable");
+    res.send(buf);
+  } catch {
+    res.status(502).end();
+  }
+});
+
 const SD2_POSTER_CACHE_DIR = "/opt/nova-cache/sd2-posters";
 try { fs.mkdirSync(SD2_POSTER_CACHE_DIR, { recursive: true }); } catch {}
 
@@ -1399,7 +1472,7 @@ interface AwSourceTitle {
 let _awCatalog: AwCatalogItem[] | null = null;
 let _awCatalogTs = 0;
 const AW_TTL = 2 * 60 * 60_000; // 2 ساعات
-const AW_DISK_CACHE_FILE = _dcJoin(_DC_DIR, "aw-catalog.json");
+const AW_DISK_CACHE_FILE = _dcJoin(_DC_DIR, "aw-catalog-v2.json");
 const AW_DISK_TTL = 7 * 24 * 60 * 60_000;
 let _awLoadPromise: Promise<AwCatalogItem[]> | null = null;
 let _awPosterHydrationPromise: Promise<void> | null = null;
@@ -1412,20 +1485,36 @@ function awPoster(anilistId: number | null | undefined): string | null {
 // ── Poster caches (عمر الكاش = 24 ساعة مع السيرفر) ──
 const _tmdbPosterCache = new Map<string, string | null>();
 const _tvMazePosterCache = new Map<string, string | null>();
+const _anilistPosterCache = new Map<string, string | null>();
 const TMDB_KEY = "8265bd1679663a7ea12ac168da84d2e8";
-const TMDB_IMG = "https://image.tmdb.org/t/p/w300";
+const TMDB_IMG = "https://animenovaa.duckdns.org/api/source-catalog/tmdb-poster/w342";
+
+function normalizeAwPosterUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  return url.replace(
+    /^https?:\/\/image\.tmdb\.org\/t\/p\/(?:w\d+|original)\//i,
+    `${TMDB_IMG}/`,
+  );
+}
 
 /** احذف لاحقة الموسم/الجزء والوسوم التي لا تدخل في مطابقة العمل الأساسي. */
 function awBaseTitle(title: string): string {
-  return title
+  let s = title
     .replace(/[_-]+/g, " ")
-    .replace(/\s*[\[(]\s*(?:season|saison|الموسم|موسم|part|الجزء|جزء)\s*[-_.#]?\s*\d+\s*[\])]\s*/gi, " ")
+    .replace(/\s*[\[(]\s*(?:season|saison|الموسم|موسم|part|الجزء|جزء|#?special\.?\d*|tv)\s*[-_.#]?\s*\d*\s*[\])]\s*/gi, " ")
     .replace(/\s+(?:season|saison|الموسم|موسم)\s*[-_.#]?\s*\d+\s*(?:dub(?:bed)?|مدبلج)?$/i, "")
+    .replace(/\s+\d+(?:st|nd|rd|th)\s+season(?:\s+picture\s+drama)?\s*(?:dub(?:bed)?|مدبلج)?$/i, "")
     .replace(/\s+(?:part|الجزء|جزء)\s*[-_.#]?\s*\d+\s*$/i, "")
     .replace(/\s+s\s*[-_.#]?\s*\d+\s*$/i, "")
     .replace(/\s+(?:dub(?:bed)?|مدبلج)$/i, "")
     .replace(/\s+/g, " ")
     .trim();
+  // Strip trailing standalone season number (1..15) for multi-season cartoons (e.g. "Regular Show 6", "Sponge Bob 11", "Batman: The Animated Series 1")
+  if (!/(?:movie|ova|special|part|episode|ep|film)\s+\d+$/i.test(s) && !/^\d+\s+lives$/i.test(s)) {
+    s = s.replace(/^(.*[A-Za-z]{3,})\s+(?:[1-9]|1[0-5])$/, "$1").trim();
+  }
+  if (/^sponge\s*bob$/i.test(s)) s = "SpongeBob SquarePants";
+  return s;
 }
 
 // Some older western-animation rows were imported into aw_links with the
@@ -1442,10 +1531,16 @@ function isLegacyAnimationSeries(series: string): boolean {
 function awSeasonLabel(title: string, animeId: string): string {
   const value = `${title} ${animeId}`;
   const season = value.match(/(?:season|saison|الموسم|موسم)\s*[-_.#]?\s*(\d+)/i)
+    || value.match(/\b(\d+)(?:st|nd|rd|th)\s+season\b/i)
     || value.match(/\bs\s*[-_.#]?\s*(\d+)\b/i);
   if (season) return `Season ${season[1]}`;
   const part = value.match(/(?:part|الجزء|جزء)\s*[-_.#]?\s*(\d+)/i);
   if (part) return `Part ${part[1]}`;
+  const cleanTitle = title.replace(/\s+(?:dub(?:bed)?|مدبلج)$/i, "").trim();
+  const trailingNum = cleanTitle.match(/^(.*[A-Za-z]{3,})\s+([1-9]|1[0-5])$/);
+  if (trailingNum && !/(?:movie|ova|special|part|episode|ep|film)$/i.test(trailingNum[1].trim())) {
+    return `Season ${trailingNum[2]}`;
+  }
   return "الحلقات";
 }
 
@@ -1460,51 +1555,116 @@ function awTitleScore(title: string): number {
   return awSeasonLabel(title, "") !== "الحلقات" ? 2 : title.trim() ? 1 : 0;
 }
 
+function buildAwSearchCandidates(title: string): string[] {
+  const base = awBaseTitle(title);
+  const candidates: string[] = [base];
+  const noParen = base.replace(/\s*\([^)]*\)\s*/g, " ").replace(/\s+/g, " ").trim();
+  if (noParen && !candidates.includes(noParen)) candidates.push(noParen);
+  const noMovieNum = noParen
+    .replace(/\b(?:Movie|OVA|Special|SP)\s*\d*\s*[:\-]?\s*/gi, " ")
+    .replace(/\b(?:Movies|Specials|Recap|Picture Drama|Manner Movies)\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (noMovieNum && !candidates.includes(noMovieNum)) candidates.push(noMovieNum);
+  const beforeColon = noParen.split(/[:：]/)[0]
+    .replace(/\b(?:Movie|OVA|Special|SP|Movies|Specials|Recap)\s*\d*$/i, "")
+    .replace(/\s+(?:[1-9]|1[0-5])$/, "")
+    .trim();
+  if (beforeColon && beforeColon.length >= 3 && !candidates.includes(beforeColon)) {
+    candidates.push(beforeColon);
+  }
+  return candidates.filter(Boolean);
+}
+
 /** ابحث عن بوستر في TMDB بالعنوان */
 async function tmdbPosterByTitle(title: string): Promise<string | null> {
   const base = awBaseTitle(title);
   if (_tmdbPosterCache.has(base)) return _tmdbPosterCache.get(base) ?? null;
-  try {
-    const url = `https://api.themoviedb.org/3/search/multi?api_key=${TMDB_KEY}&query=${encodeURIComponent(base)}&language=en-US&page=1`;
-    const r = await fetch(url, { signal: AbortSignal.timeout(6000) });
-    if (!r.ok) { _tmdbPosterCache.set(base, null); return null; }
-    const data = await r.json();
-    const hit = (data.results as any[] || []).find((h: any) =>
-      h.poster_path && (h.media_type === "tv" || h.media_type === "movie")
-    );
-    const poster = hit ? `${TMDB_IMG}${hit.poster_path}` : null;
-    _tmdbPosterCache.set(base, poster);
-    return poster;
-  } catch { _tmdbPosterCache.set(base, null); return null; }
+  for (const q of buildAwSearchCandidates(title)) {
+    try {
+      const url = `https://api.themoviedb.org/3/search/multi?api_key=${TMDB_KEY}&query=${encodeURIComponent(q)}&language=en-US&page=1`;
+      const r = await fetch(url, { signal: AbortSignal.timeout(6000) });
+      if (!r.ok) continue;
+      const data = await r.json();
+      const hit = (data.results as any[] || []).find((h: any) =>
+        h.poster_path && (h.media_type === "tv" || h.media_type === "movie")
+      );
+      if (hit?.poster_path) {
+        const poster = `${TMDB_IMG}${hit.poster_path}`;
+        _tmdbPosterCache.set(base, poster);
+        return poster;
+      }
+    } catch {}
+  }
+  _tmdbPosterCache.set(base, null);
+  return null;
 }
 
 /** TVMaze fallback لا يحتاج مفتاحاً، ويفيد خصوصاً في الأعمال الغربية المدبلجة. */
 async function tvMazePosterByTitle(title: string): Promise<string | null> {
   const base = awBaseTitle(title);
   if (_tvMazePosterCache.has(base)) return _tvMazePosterCache.get(base) ?? null;
-  try {
-    const r = await fetch(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(base)}`, {
-      signal: AbortSignal.timeout(6000),
-    });
-    if (!r.ok) { _tvMazePosterCache.set(base, null); return null; }
-    const data = await r.json();
-    const normalized = base.toLocaleLowerCase("en-US");
-    const ranked = (Array.isArray(data) ? data : [])
-      .filter((row: any) => row?.show?.image?.original || row?.show?.image?.medium)
-      .sort((a: any, b: any) => {
-        const an = String(a?.show?.name || "").toLocaleLowerCase("en-US");
-        const bn = String(b?.show?.name || "").toLocaleLowerCase("en-US");
-        return Number(bn === normalized) - Number(an === normalized);
+  for (const q of buildAwSearchCandidates(title)) {
+    try {
+      const r = await fetch(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(q)}`, {
+        signal: AbortSignal.timeout(6000),
       });
-    const poster = ranked[0]?.show?.image?.original || ranked[0]?.show?.image?.medium || null;
-    _tvMazePosterCache.set(base, poster);
-    return poster;
-  } catch { _tvMazePosterCache.set(base, null); return null; }
+      if (!r.ok) continue;
+      const data = await r.json();
+      const normalized = q.toLocaleLowerCase("en-US");
+      const ranked = (Array.isArray(data) ? data : [])
+        .filter((row: any) => row?.show?.image?.original || row?.show?.image?.medium)
+        .sort((a: any, b: any) => {
+          const an = String(a?.show?.name || "").toLocaleLowerCase("en-US");
+          const bn = String(b?.show?.name || "").toLocaleLowerCase("en-US");
+          return Number(bn === normalized) - Number(an === normalized);
+        });
+      const poster = ranked[0]?.show?.image?.original || ranked[0]?.show?.image?.medium || null;
+      if (poster) {
+        _tvMazePosterCache.set(base, poster);
+        return poster;
+      }
+    } catch {}
+  }
+  _tvMazePosterCache.set(base, null);
+  return null;
+}
+
+/** AniList GraphQL fallback للأعمال اليابانية والـ OVA والأفلام */
+async function anilistPosterByTitle(title: string): Promise<string | null> {
+  const base = awBaseTitle(title);
+  if (_anilistPosterCache.has(base)) return _anilistPosterCache.get(base) ?? null;
+  for (const q of buildAwSearchCandidates(title)) {
+    try {
+      const r = await fetch("https://graphql.anilist.co", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          query: "query ($s: String) { Media(search: $s, type: ANIME) { id coverImage { extraLarge large } } }",
+          variables: { s: q },
+        }),
+        signal: AbortSignal.timeout(6000),
+      });
+      if (!r.ok) continue;
+      const data = await r.json() as any;
+      const media = data?.data?.Media;
+      const poster = (media?.id ? awPoster(Number(media.id)) : null) || media?.coverImage?.extraLarge || media?.coverImage?.large || null;
+      if (poster) {
+        _anilistPosterCache.set(base, poster);
+        return poster;
+      }
+    } catch {}
+  }
+  _anilistPosterCache.set(base, null);
+  return null;
 }
 
 async function posterByTitle(title: string): Promise<string | null> {
   const tmdb = await tmdbPosterByTitle(title);
-  return tmdb || await tvMazePosterByTitle(title);
+  if (tmdb) return tmdb;
+  const tvmaze = await tvMazePosterByTitle(title);
+  if (tvmaze) return tvmaze;
+  return await anilistPosterByTitle(title);
 }
 
 function awFallbackPoster(title: string): string {
@@ -1768,7 +1928,20 @@ async function buildAwCatalog(): Promise<AwCatalogItem[]> {
     }
 
     const label = awSeasonLabel(source.title, source.animeId);
-    if (!group.seasons.some(season => season.animeId === source.animeId)) {
+    const existingLabelSeason = label !== "الحلقات"
+      ? group.seasons.find(season => season.label === label)
+      : group.seasons.find(season =>
+          season.label === "الحلقات" &&
+          season.animeId.replace(/\s+Dub$/i, "").trim().toLowerCase() ===
+            source.animeId.replace(/\s+Dub$/i, "").trim().toLowerCase()
+        );
+    if (existingLabelSeason) {
+      if (source.dubbedConfirmed) existingLabelSeason.dubbedConfirmed = true;
+      // Prefer the canonical non-"Dub" animeId as primary key when both exist
+      if (/\s+Dub$/i.test(existingLabelSeason.animeId) && !/\s+Dub$/i.test(source.animeId)) {
+        existingLabelSeason.animeId = source.animeId;
+      }
+    } else if (!group.seasons.some(season => season.animeId === source.animeId)) {
       group.seasons.push({ label, animeId: source.animeId, dubbedConfirmed: source.dubbedConfirmed });
     }
     if (source.anilistId && Number.isFinite(source.anilistId) && !group.anilistIds.includes(source.anilistId)) {
@@ -1787,6 +1960,19 @@ async function buildAwCatalog(): Promise<AwCatalogItem[]> {
       for (const season of group.seasons) {
         if (season.label === "الحلقات") season.label = "Season 1";
       }
+      const deduped: typeof group.seasons = [];
+      for (const season of group.seasons) {
+        const prev = deduped.find(s => s.label === season.label);
+        if (prev) {
+          if (season.dubbedConfirmed) prev.dubbedConfirmed = true;
+          if (/\s+Dub$/i.test(prev.animeId) && !/\s+Dub$/i.test(season.animeId)) {
+            prev.animeId = season.animeId;
+          }
+        } else {
+          deduped.push(season);
+        }
+      }
+      group.seasons = deduped;
     }
   }
 
@@ -1919,13 +2105,53 @@ router.get("/aw-dubbed/catalog", async (req, res) => {
       }
     }
     const totalPages = Math.max(1, Math.ceil(catalog.length / AW_PAGE_SIZE));
-    const results = catalog.slice((page - 1) * AW_PAGE_SIZE, page * AW_PAGE_SIZE);
+    const results = catalog
+      .slice((page - 1) * AW_PAGE_SIZE, page * AW_PAGE_SIZE)
+      .map(item => ({
+        ...item,
+        poster: normalizeAwPosterUrl(item.poster),
+      }));
     res.setHeader("Cache-Control", "public, max-age=300");
     res.json({ results, page, totalPages, total: catalog.length });
   } catch {
     res.status(502).json({ error: "failed to load catalog" });
   }
 });
+
+function expandAwSeriesVariants(series: string): string[] {
+  const variants = new Set<string>([series]);
+  const noDub = series.replace(/\s+Dub$/i, "");
+  if (noDub) {
+    variants.add(noDub);
+    variants.add(`${noDub} Dub`);
+  }
+  const mSeason = noDub.match(/^(.*?)\s+Season\s+(\d+)$/i);
+  if (mSeason) {
+    const base = mSeason[1].trim();
+    const sNum = mSeason[2];
+    variants.add(`${base} ${sNum}`);
+    if (sNum === "1") {
+      variants.add(base);
+      variants.add(`${base} Dub`);
+    }
+  } else {
+    const mTrailing = noDub.match(/^(.*[A-Za-z]{3,})\s+([1-9]|1[0-5])$/);
+    if (mTrailing) {
+      const base = mTrailing[1].trim();
+      const sNum = mTrailing[2];
+      variants.add(`${base} Season ${sNum}`);
+      variants.add(`${base} Season ${sNum} Dub`);
+      if (sNum === "1") {
+        variants.add(base);
+        variants.add(`${base} Dub`);
+      }
+    } else {
+      variants.add(`${noDub} Season 1`);
+      variants.add(`${noDub} Season 1 Dub`);
+    }
+  }
+  return [...variants].filter(v => v.trim().length > 0);
+}
 
 // ── GET /api/aw-dubbed/episodes?series=anime_id ──
 router.get("/aw-dubbed/episodes", async (req, res) => {
@@ -1939,13 +2165,15 @@ router.get("/aw-dubbed/episodes", async (req, res) => {
   if (!SB_URL || !SB_KEY) { res.json({ episodes: [] }); return; }
 
   try {
-    // جلب من الجدولين بالتوازي — dubbed_anim_links أولاً (أحدث) ثم aw_links كـ fallback
+    const variants = expandAwSeriesVariants(series);
+    const inClause = variants.map(v => `"${v.replace(/"/g, '\"')}"`).join(",");
+    // جلب من الجدولين بالتوازي لكل الصيغ المتطابقة للموسم (مثل Season 1 و Season 1 Dub)
     const [dalR, awR] = await Promise.all([
-      fetch(`${SB_URL}/rest/v1/dubbed_anim_links?select=ep_number&series_id=eq.${encodeURIComponent(series)}&order=ep_number.asc&limit=2000`, {
+      fetch(`${SB_URL}/rest/v1/dubbed_anim_links?select=ep_number&series_id=in.(${encodeURIComponent(inClause)})&order=ep_number.asc&limit=3000`, {
         headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
         signal: AbortSignal.timeout(10000),
       }).then(r => r.ok ? r.json() as Promise<{ ep_number: number }[]> : [] as { ep_number: number }[]).catch(() => [] as { ep_number: number }[]),
-      fetch(`${SB_URL}/rest/v1/aw_links?select=ep_number&anime_id=eq.${encodeURIComponent(series)}${isLegacyAnimationSeries(series) ? "" : "&content_type=eq.dubbed"}&order=ep_number.asc&limit=2000`, {
+      fetch(`${SB_URL}/rest/v1/aw_links?select=ep_number&anime_id=in.(${encodeURIComponent(inClause)})${isLegacyAnimationSeries(series) ? "" : "&content_type=eq.dubbed"}&order=ep_number.asc&limit=3000`, {
         headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
         signal: AbortSignal.timeout(10000),
       }).then(r => r.ok ? r.json() as Promise<{ ep_number: number }[]> : [] as { ep_number: number }[]).catch(() => [] as { ep_number: number }[]),
@@ -2004,12 +2232,14 @@ router.get("/aw-dubbed/watch-src", async (req, res) => {
     // Supabase is the fast cache; Firestore is the source of truth and may
     // contain rows/qualities missing from either Supabase table.
     // ملاحظة: order=quality.desc يفرز نصياً (720p > 480p > 1080p) — نفرز بعدها رقمياً في الكود
+    const variants = expandAwSeriesVariants(series);
+    const inClause = variants.map(v => `"${v.replace(/"/g, '\"')}"`).join(",");
     const [dalRows, awRows, firestoreRows] = await Promise.all([
-      fetch(`${SB_URL}/rest/v1/dubbed_anim_links?select=server,quality,link&series_id=eq.${encodeURIComponent(series)}&ep_number=eq.${ep}&limit=30`, {
+      fetch(`${SB_URL}/rest/v1/dubbed_anim_links?select=server,quality,link&series_id=in.(${encodeURIComponent(inClause)})&ep_number=eq.${ep}&limit=50`, {
         headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
         signal: AbortSignal.timeout(10000),
       }).then(r => r.ok ? r.json() as Promise<{ server: string; quality: string; link: string }[]> : [] as { server: string; quality: string; link: string }[]).catch(() => [] as { server: string; quality: string; link: string }[]),
-      fetch(`${SB_URL}/rest/v1/aw_links?select=server,quality,link&anime_id=eq.${encodeURIComponent(series)}&ep_number=eq.${ep}${isLegacyAnimationSeries(series) ? "" : "&content_type=eq.dubbed"}&limit=30`, {
+      fetch(`${SB_URL}/rest/v1/aw_links?select=server,quality,link&anime_id=in.(${encodeURIComponent(inClause)})&ep_number=eq.${ep}${isLegacyAnimationSeries(series) ? "" : "&content_type=eq.dubbed"}&limit=50`, {
         headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
         signal: AbortSignal.timeout(10000),
       }).then(r => r.ok ? r.json() as Promise<{ server: string; quality: string; link: string }[]> : [] as { server: string; quality: string; link: string }[]).catch(() => [] as { server: string; quality: string; link: string }[]),
@@ -2140,6 +2370,75 @@ router.get("/aw-dubbed/mf-stream", async (req, res) => {
     req.on("close", () => nodeStream.destroy());
   } catch (e: any) {
     if (!res.headersSent) res.status(502).json({ error: String(e?.message) });
+  }
+});
+
+
+// ── AnimeZid (أنمي مدبلج) routes ──
+router.get("/dubbed/animezid/catalog", async (req, res) => {
+  const page = Math.max(1, Number.parseInt(String(req.query.page || "1"), 10) || 1);
+  const sort = String(req.query.sort || "newest").trim();
+  const q = String(req.query.q || "").trim();
+  try {
+    const data = await getAnimeZidCatalog({ page, sort, q });
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.json(data);
+  } catch (error) {
+    logger.warn({ err: error }, "dubbed: AnimeZid catalog unavailable");
+    res.status(502).json({ error: "تعذر تحميل قائمة الأنمي المدبلج" });
+  }
+});
+
+router.get("/dubbed/animezid/detail", async (req, res) => {
+  const slug = String(req.query.slug || req.query.id || "").trim();
+  const season = Number.parseInt(String(req.query.season || "0"), 10) || undefined;
+  if (!slug) {
+    res.status(400).json({ error: "slug is required" });
+    return;
+  }
+  try {
+    const detail = await getAnimeZidDetail(slug, season);
+    res.setHeader("Cache-Control", "public, max-age=900");
+    res.json(detail);
+  } catch (error: any) {
+    logger.warn({ err: error, slug }, "dubbed: AnimeZid detail unavailable");
+    res.status(502).json({ error: error?.message || "تعذر تحميل تفاصيل الأنمي المدبلج" });
+  }
+});
+
+router.get("/dubbed/animezid/servers", async (req, res) => {
+  const vid = String(req.query.vid || "").trim();
+  if (!vid) {
+    res.status(400).json({ error: "vid is required" });
+    return;
+  }
+  try {
+    const data = await getAnimeZidServers(vid);
+    res.setHeader("Cache-Control", "private, max-age=180");
+    res.json(data);
+  } catch (error: any) {
+    logger.warn({ err: error, vid }, "dubbed: AnimeZid servers unavailable");
+    res.status(502).json({ error: error?.message || "تعذر جلب سيرفرات الحلقة" });
+  }
+});
+
+router.get("/dubbed/animezid/watch-src", async (req, res) => {
+  const vid = String(req.query.vid || "").trim();
+  const sourceId = String(req.query.sourceId || "").trim() || undefined;
+  const trace = readPlaybackTrace(req.query.trace);
+  const startedAt = Date.now();
+  if (!vid) {
+    res.status(400).json({ error: "vid is required" });
+    return;
+  }
+  traceDubbedResponse(res, trace, "animezid-watch-src", "animezid.org", startedAt);
+  try {
+    const resolved = await resolveAnimeZidWatchSrc(vid, sourceId);
+    res.setHeader("Cache-Control", "no-store");
+    res.json(resolved);
+  } catch (error: any) {
+    logger.warn({ err: error, vid, sourceId }, "dubbed: AnimeZid stream unavailable");
+    res.status(502).json({ error: error?.message || "تعذر استخراج رابط التشغيل" });
   }
 });
 

@@ -18995,6 +18995,7 @@ router.get("/anime/download-mp4", async (req, res) => {
     "spacetoon",
     "carateen",
     "ct",
+    "sd2",
     "dubbed",
     "dubbed_sp_1080",
     "dubbed_sp_720",
@@ -19004,7 +19005,7 @@ router.get("/anime/download-mp4", async (req, res) => {
     "dubbed_at_1080",
     "dubbed_at_720",
   ]);
-  const isDubbedSite = site.startsWith("dubbed") || site === "sp" || site === "spacetoon" || site === "carateen" || site === "ct";
+  const isDubbedSite = site.startsWith("dubbed") || site.startsWith("sd2") || site === "sp" || site === "spacetoon" || site === "carateen" || site === "ct";
   if (!site || (!DOWNLOAD_SOURCE_SITES.has(site) && !isDubbedSite)) {
     res.status(403).send("downloads are available only from approved sources");
     return;

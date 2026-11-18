@@ -125,6 +125,8 @@ type RuntimeDownload = ActiveDownload & {
   resumeState?: ResumeState;
   notificationAt: number;
   notificationPromise?: Promise<void>;
+  startedAt: number;
+  progressTicker?: ReturnType<typeof setInterval>;
 };
 
 const active = new Map<string, RuntimeDownload>();
@@ -547,6 +549,7 @@ export async function pauseActiveDownload(id: string): Promise<void> {
   const entry = active.get(id);
   if (!entry || entry.nativeJobId != null || entry.status !== "downloading") return;
 
+  stopProgressTicker(entry);
   entry.status = "paused";
   notifyListeners();
   try {
@@ -738,26 +741,32 @@ async function pollNativeDownload(entry: RuntimeDownload): Promise<void> {
     }
 
     entry.localPath = record.localPath || entry.localPath;
-    entry.bytesWritten = Math.max(0, record.bytesWritten || 0);
+    entry.bytesWritten = Math.max(entry.bytesWritten, Math.max(0, record.bytesWritten || 0));
     entry.totalBytes = Math.max(0, record.totalBytes || 0);
-    entry.progress = entry.totalBytes > 0
-      ? Math.min(entry.bytesWritten / entry.totalBytes, 1)
-      : 0;
+    if (entry.totalBytes > 0) {
+      entry.progress = Math.min(entry.bytesWritten / entry.totalBytes, 1);
+    } else {
+      entry.progress = Math.max(entry.progress, estimateActiveProgress(entry));
+    }
 
     if (record.status === "successful") {
+      stopProgressTicker(entry);
       entry.status = "downloading";
       await saveCompleted(entry);
       active.delete(entry.id);
       entry.nativePollTimer = undefined;
       await forgetNativeDownload(entry.id);
+      completeNotification(entry);
       notifyListeners();
       return;
     }
 
     if (record.status === "failed" || record.status === "unknown") {
+      stopProgressTicker(entry);
       entry.status = "error";
       entry.errorMessage = nativeFailureReason(record);
       entry.nativePollTimer = undefined;
+      completeNotification(entry, true);
       notifyListeners();
       return;
     }
@@ -765,6 +774,7 @@ async function pollNativeDownload(entry: RuntimeDownload): Promise<void> {
     entry.errorMessage = undefined;
     entry.status = record.status === "paused" ? "paused" : "downloading";
     notifyProgressListeners();
+    updateDownloadNotification(entry);
     if (isAppActive()) {
       entry.nativePollTimer = setTimeout(() => {
         void pollNativeDownload(entry);
@@ -804,6 +814,7 @@ async function beginNativeDownload(entry: RuntimeDownload): Promise<void> {
     entry.localPath = result.localPath;
     entry.pauseSupported = false;
     entry.resumeState = undefined;
+    startProgressTicker(entry);
     notifyListeners();
     void pollNativeDownload(entry);
   } catch {
@@ -963,6 +974,58 @@ async function saveCompleted(entry: RuntimeDownload): Promise<void> {
   void recordSuccessfulDownload(entry.animeId, entry.ep);
 }
 
+function estimateActiveProgress(entry: RuntimeDownload): number {
+  if (entry.totalBytes > 0) {
+    return Math.max(0.02, Math.min(entry.bytesWritten / entry.totalBytes, 1));
+  }
+  if (entry.bytesWritten > 0) {
+    const byBytes = 1 - 0.82 * Math.exp(-entry.bytesWritten / (28 * 1024 * 1024));
+    return Math.max(0.18, Math.min(0.94, byBytes));
+  }
+  const elapsedSec = Math.max(0, (Date.now() - entry.startedAt) / 1000);
+  const preparing = 0.03 + 0.35 * (1 - Math.exp(-elapsedSec / 18));
+  return Math.max(0.03, Math.min(0.38, preparing));
+}
+
+function stopProgressTicker(entry: RuntimeDownload): void {
+  if (entry.progressTicker) {
+    clearInterval(entry.progressTicker);
+    entry.progressTicker = undefined;
+  }
+}
+
+function startProgressTicker(entry: RuntimeDownload): void {
+  stopProgressTicker(entry);
+  if (!entry.startedAt) entry.startedAt = Date.now();
+  if (entry.progress <= 0) {
+    entry.progress = 0.03;
+  }
+  entry.progressTicker = setInterval(() => {
+    if (!active.has(entry.id) || entry.status !== "downloading") {
+      stopProgressTicker(entry);
+      return;
+    }
+    void (async () => {
+      if (entry.localPath) {
+        try {
+          const info = await FileSystem.getInfoAsync(localFileUri(entry.localPath), { size: true });
+          const diskBytes = (info as { size?: number }).size ?? 0;
+          if (info.exists && diskBytes > entry.bytesWritten) {
+            entry.bytesWritten = diskBytes;
+          }
+        } catch {}
+      }
+      if (entry.totalBytes > 0) {
+        entry.progress = Math.min(entry.bytesWritten / entry.totalBytes, 1);
+      } else {
+        entry.progress = Math.max(entry.progress, estimateActiveProgress(entry));
+      }
+      notifyProgressListeners();
+      updateDownloadNotification(entry);
+    })();
+  }, 900);
+}
+
 function makeResumable(
   entry: RuntimeDownload,
   resumeState?: ResumeState,
@@ -981,11 +1044,11 @@ function makeResumable(
     state?.fileUri ?? entry.localPath,
     options,
     (progress) => {
-      entry.bytesWritten = Math.max(0, progress.totalBytesWritten);
+      entry.bytesWritten = Math.max(entry.bytesWritten, Math.max(0, progress.totalBytesWritten));
       entry.totalBytes = progress.totalBytesExpectedToWrite;
       entry.progress = progress.totalBytesExpectedToWrite > 0
-        ? Math.min(progress.totalBytesWritten / progress.totalBytesExpectedToWrite, 1)
-        : 0;
+        ? Math.min(entry.bytesWritten / progress.totalBytesExpectedToWrite, 1)
+        : Math.max(entry.progress, estimateActiveProgress(entry));
       /* Android's resumable API represents resumeData as the byte offset.
          Persist it on every callback so a process restart can append to the
          partial file even when the native task could not produce pause data. */
@@ -1016,11 +1079,13 @@ async function runDownload(entry: RuntimeDownload): Promise<void> {
     entry.retryCount = attempt;
     entry.resumable = makeResumable(entry, resumeState);
     entry.resumeState = entry.resumable.savable();
+    startProgressTicker(entry);
     notifyListeners();
     updateDownloadNotification(entry, true);
 
     try {
       const result = await entry.resumable.downloadAsync();
+      stopProgressTicker(entry);
       if (!active.has(entry.id)) return;
       if (!result || result.status < 200 || result.status >= 300) {
         throw new Error(`HTTP ${result?.status ?? "?"}`);
@@ -1031,6 +1096,7 @@ async function runDownload(entry: RuntimeDownload): Promise<void> {
       notifyListeners();
       return;
     } catch (error) {
+      stopProgressTicker(entry);
       if (!active.has(entry.id)) return;
       /* A user pause also interrupts downloadAsync on some Android versions.
          Do not treat that intentional interruption as a failed retry. */
@@ -1093,7 +1159,9 @@ function enqueueDownload(
     localPath: localPath ?? localPathFor(params),
     resumeState,
     notificationAt: 0,
+    startedAt: Date.now(),
     cancelFn: () => {
+      stopProgressTicker(entry);
       if (entry.nativePollTimer) clearTimeout(entry.nativePollTimer);
       if (entry.nativeJobId != null) {
         void removeNativeDownload(entry.id);
@@ -1267,6 +1335,7 @@ async function restoreNativeDownloads(): Promise<void> {
         localPath: record.localPath,
         nativeJobId: record.jobId,
         notificationAt: 0,
+        startedAt: Date.now(),
         cancelFn: () => { void removeNativeDownload(id); },
       };
       try {

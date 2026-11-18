@@ -1,3 +1,5 @@
+import { getBaseUrl } from "./baseUrl";
+
 export type MediaWithImages = {
   poster?: unknown;
   image?: unknown;
@@ -7,8 +9,32 @@ export type MediaWithImages = {
   images?: { jpg?: { large_image_url?: unknown; image_url?: unknown } };
 };
 
+export function proxyPosterUrl(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  const base = getBaseUrl().replace(/\/+$/, "");
+  if (trimmed.startsWith("/api/")) return `${base}${trimmed}`;
+  if (!/^https?:\/\//i.test(trimmed)) return "";
+
+  const tmdbMatch = trimmed.match(
+    /^https?:\/\/image\.tmdb\.org\/t\/p\/(w\d+|original)\/([A-Za-z0-9_-]+\.(?:jpe?g|png|webp))(?:\?[^#]*)?(?:#.*)?$/i,
+  );
+  if (tmdbMatch) {
+    const size = tmdbMatch[1] === "w500" || tmdbMatch[1] === "w300" ? "w342" : tmdbMatch[1];
+    return `${base}/api/source-catalog/tmdb-poster/${size}/${tmdbMatch[2]}`;
+  }
+  if (/^https?:\/\/watch-\d+\.stardima\.com\.im\/storage\//i.test(trimmed)) {
+    return `${base}/api/dubbed/sd2/poster?url=${encodeURIComponent(trimmed)}`;
+  }
+  if (/^https?:\/\/(?:(?:www\.)?carateen\.tv|cdn\.spacetoongo\.com)\//i.test(trimmed)) {
+    return `${base}/api/dubbed/carateen/poster?url=${encodeURIComponent(trimmed)}`;
+  }
+  return trimmed;
+}
+
 function asUrl(value: unknown): string {
-  return typeof value === "string" && /^https?:\/\//i.test(value.trim()) ? value.trim() : "";
+  return proxyPosterUrl(value);
 }
 
 /** Keep poster selection consistent across AniList and source catalogs. */
@@ -27,10 +53,7 @@ export function getPosterUri(item: MediaWithImages | null | undefined, fallback?
   return candidates.map(asUrl).find(Boolean) || "";
 }
 
-/** Prefer the smaller AniList image on ten-foot screens.
- * The TV rails are much wider than phone rails, but do not need the
- * extraLarge asset for a row of posters. Keep the original helper untouched
- * so the phone image selection remains exactly the same. */
+/** Prefer the smaller AniList image on ten-foot screens. */
 export function getTvPosterUri(item: MediaWithImages | null | undefined, fallback?: string): string {
   const candidates = [
     item?.poster,

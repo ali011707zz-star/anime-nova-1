@@ -43,6 +43,9 @@ function thumbSrc(t?: string): string | null {
     if (/^https?:\/\/watch-\d+\.stardima\.com\.im\/storage\//i.test(t)) {
       return `${base}/api/dubbed/sd2/poster?url=${encodeURIComponent(t)}`;
     }
+    if (/^https?:\/\/(?:(?:www\.)?carateen\.tv|cdn\.spacetoongo\.com)\//i.test(t)) {
+      return `${base}/api/dubbed/carateen/poster?url=${encodeURIComponent(t)}`;
+    }
     try {
       const url = new URL(t);
       const host = url.hostname.toLowerCase();
@@ -462,50 +465,50 @@ const styles = StyleSheet.create({
   tvFocusGuide: { flex: 1 },
   tvListContent: { paddingHorizontal: 56, paddingBottom: 140 },
   header: {
-    flexDirection: ROW_RTL, alignItems: "center", gap: 10,
-    paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12,
+    flexDirection: ROW_RTL, alignItems: "center", gap: 8,
+    paddingHorizontal: 12, paddingTop: 7, paddingBottom: 7,
     borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)",
   },
   backBtn: {
-    width: 36, height: 36, borderRadius: 10,
+    width: 32, height: 32, borderRadius: 9,
     backgroundColor: "rgba(255,255,255,0.05)",
     borderWidth: 1, borderColor: "rgba(255,255,255,0.08)",
     alignItems: "center", justifyContent: "center",
   },
   headerTitle: {
-    flex: 1, color: "#fff", fontSize: 15,
+    flex: 1, color: "#fff", fontSize: 14,
     fontWeight: "800", fontFamily: "Cairo_700Bold",
     textAlign: "right", writingDirection: "rtl",
   },
-  heroRow: { flexDirection: ROW_RTL, gap: 14, padding: 16, alignItems: "center" },
+  heroRow: { flexDirection: ROW_RTL, gap: 10, paddingHorizontal: 14, paddingVertical: 8, alignItems: "center" },
   poster: {
-    width: 92, aspectRatio: 2 / 3, borderRadius: 14,
+    width: 68, aspectRatio: 2 / 3, borderRadius: 10,
     backgroundColor: "rgba(255,255,255,0.05)",
     overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)",
   },
   posterPlaceholder: { flex: 1, alignItems: "center", justifyContent: "center" },
-  heroInfo: { flex: 1, alignItems: ALIGN_RIGHT, gap: 8 },
-  heroTitle: { color: "#fff", fontSize: 17, fontWeight: "900", fontFamily: "Cairo_700Bold", textAlign: "right", writingDirection: "rtl" },
+  heroInfo: { flex: 1, alignItems: ALIGN_RIGHT, gap: 4 },
+  heroTitle: { color: "#fff", fontSize: 15, lineHeight: 21, fontWeight: "900", fontFamily: "Cairo_700Bold", textAlign: "right", writingDirection: "rtl" },
   badge: {
     flexDirection: ROW_RTL,
     alignItems: "center",
-    gap: 5,
-    paddingHorizontal: 10, paddingVertical: 4,
+    gap: 4,
+    paddingHorizontal: 8, paddingVertical: 2,
     backgroundColor: "rgba(16,185,129,0.16)",
-    borderRadius: 12, borderWidth: 1, borderColor: "rgba(16,185,129,0.35)",
+    borderRadius: 10, borderWidth: 1, borderColor: "rgba(16,185,129,0.35)",
   },
-  badgeText: { color: "#10B981", fontSize: 11, fontFamily: "Cairo_700Bold" },
-  epCount: { color: "rgba(255,255,255,0.5)", fontSize: 12, fontFamily: "Cairo_600SemiBold" },
+  badgeText: { color: "#10B981", fontSize: 10, fontFamily: "Cairo_700Bold" },
+  epCount: { color: "rgba(255,255,255,0.5)", fontSize: 11, fontFamily: "Cairo_600SemiBold" },
   seasonTabsRow: {
     paddingHorizontal: 14,
-    paddingBottom: 10,
-    gap: 8,
+    paddingBottom: 6,
+    gap: 7,
     flexDirection: ROW_RTL,
   },
   seasonPill: {
-    paddingHorizontal: 18,
-    paddingVertical: 8,
-    borderRadius: 22,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 18,
     borderWidth: 1,
   },
   seasonPillActive: {
@@ -513,12 +516,12 @@ const styles = StyleSheet.create({
     borderColor: "#10B981",
   },
   seasonPillText: {
-    fontSize: 13,
+    fontSize: 12,
     fontFamily: "Cairo_700Bold",
   },
   epSectionHeader: {
     flexDirection: ROW_RTL, alignItems: "center", gap: 8,
-    paddingHorizontal: 16, paddingVertical: 8,
+    paddingHorizontal: 14, paddingTop: 4, paddingBottom: 6,
   },
   epSectionTitle: { color: "#fff", fontSize: 14, fontWeight: "900", fontFamily: "Cairo_700Bold", textAlign: "right" },
   epLoadingCenter: { paddingVertical: 24, alignItems: "center" },

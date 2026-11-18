@@ -181,13 +181,14 @@ export function Sidebar({ open, onClose }: SidebarProps) {
               <button
                 onClick={onClose}
                 aria-label="إغلاق القائمة"
-                className="w-[34px] h-[34px] rounded-[10px] flex items-center justify-center active:scale-90 transition-transform"
+                className="w-11 h-11 rounded-xl border flex items-center justify-center active:scale-90 transition-transform"
                 style={{
                   backgroundColor: "var(--bg-card, #14171C)",
-                  color: "var(--text-secondary, #CBD5E1)",
+                  borderColor: "var(--border-subtle, rgba(255,255,255,0.12))",
+                  color: "var(--text-main, #F3F4F6)",
                 }}
               >
-                <X className="w-[18px] h-[18px]" />
+                <X className="w-6 h-6" />
               </button>
             </div>
 
@@ -236,7 +237,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
             </button>
 
             {/* Navigation List matching mobile DrawerMenu.tsx */}
-            <div className="flex-1 overflow-y-auto px-2.5 py-2 space-y-0.5" style={{ scrollbarWidth: "none" }}>
+            <div className="flex-1 overflow-y-auto px-3 py-3 space-y-1.5" style={{ scrollbarWidth: "none" }}>
               {MAIN_ITEMS.map(renderItem)}
 
               <div

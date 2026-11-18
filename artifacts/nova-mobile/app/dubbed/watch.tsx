@@ -19,6 +19,9 @@ import { useWatchPlayerOrientation } from "@/utils/watchOrientation";
 import { createPlaybackTraceId, withPlaybackTrace } from "@/utils/playbackTrace";
 import { parseCarateenEpisodeUrl } from "@/utils/carateenEpisodeRef.mjs";
 import {
+  ActiveDownload,
+  formatFileSize,
+  getActiveDownloadsSnapshot,
   getActiveSiteDownload,
   getDownloads,
   makeDownloadId,
@@ -78,11 +81,12 @@ export default function DubbedWatchScreen() {
   const requestedWatchUrl = Array.isArray(watchUrlParam) ? watchUrlParam[0] : watchUrlParam;
   const isMovieEntry = (Array.isArray(isMovieParam) ? isMovieParam[0] : isMovieParam) === "1";
   const provider =
-    requestedProvider === "sp" || requestedProvider === "carateen" || requestedProvider === "sd2"
+    requestedProvider === "sp" || requestedProvider === "carateen" || requestedProvider === "sd2" || requestedProvider === "az"
       ? requestedProvider
       : parsedEpisodeRef?.provider;
   const showId = requestedShowId || requestedSlug || parsedEpisodeRef?.showId || "";
   const episodeId = requestedEpisodeId || parsedEpisodeRef?.episodeId || "";
+  const isAzSource = provider === "az";
   const isSd2Source = provider === "sd2";
   const isCarateenSource = provider === "sp" || provider === "carateen";
   const playbackTraceId = useMemo(() => createPlaybackTraceId(), [epUrl, episodeId]);
@@ -113,7 +117,7 @@ export default function DubbedWatchScreen() {
 
   const episodeNumber = Math.max(1, parseInt(ep || "1", 10) || 1);
   const totalEpsCount = Math.max(episodeList.length, parseInt(totalEpsParam || "0", 10) || 0);
-  const contentKey = series || (isSd2Source ? `sd2:${showId}` : isCarateenSource ? `carateen:${provider}:${showId}` : epUrl || "");
+  const contentKey = series || (isAzSource ? `az:${showId}` : isSd2Source ? `sd2:${showId}` : isCarateenSource ? `carateen:${provider}:${showId}` : epUrl || "");
   const numericAnimeId = useMemo(() => getWatchContentId("dubbed", contentKey), [contentKey]);
   const posterUrl = (() => {
     if (!poster) return "";
@@ -190,6 +194,29 @@ export default function DubbedWatchScreen() {
             }
           }
           if (!cancelled && flat.length > 0) setEpisodeList(flat);
+        } else if (isAzSource && showId) {
+          const seasonNumMatch = String(season || "").match(/(\d+)/);
+          const seasonParam = seasonNumMatch ? `&season=${encodeURIComponent(seasonNumMatch[1])}` : "";
+          const r = await fetch(
+            `${BASE}/api/dubbed/animezid/detail?slug=${encodeURIComponent(showId)}${seasonParam}`,
+          );
+          if (!r.ok || cancelled) return;
+          const d = await r.json();
+          const flat: DubbedEpRef[] = [];
+          const seasonLbl = season || `الموسم ${d?.activeSeason || 1}`;
+          for (const item of d?.episodes || []) {
+            const vidVal = String(item.vid || "").trim();
+            const numVal = Number(item.number) || flat.length + 1;
+            flat.push({
+              number: numVal,
+              title: item.title || `الحلقة ${numVal}`,
+              url: item.watchUrl || "",
+              seasonLabel: seasonLbl,
+              epId: vidVal || undefined,
+              watchUrl: String(item.watchUrl || ""),
+            });
+          }
+          if (!cancelled && flat.length > 0) setEpisodeList(flat);
         } else if (series && !series.startsWith("carateen:") && !series.startsWith("sd2:")) {
           const r = await fetch(`${BASE}/api/dubbed/episodes?id=${encodeURIComponent(series)}`);
           if (!r.ok || cancelled) return;
@@ -212,7 +239,7 @@ export default function DubbedWatchScreen() {
       } catch {}
     })();
     return () => { cancelled = true; };
-  }, [isSd2Source, isCarateenSource, isMovieEntry, provider, showId, series]);
+  }, [isAzSource, isSd2Source, isCarateenSource, isMovieEntry, provider, showId, series, season]);
 
   const currentEpIndex = useMemo(() => {
     if (!episodeList.length) return -1;
@@ -250,7 +277,14 @@ export default function DubbedWatchScreen() {
         season: target.seasonLabel || season || "الموسم 1",
         poster: posterUrl,
         totalEps: String(totalEpsCount || episodeList.length || ""),
-        ...(isSd2Source || parsedTarget?.provider === "sd2"
+        ...(isAzSource
+          ? {
+              provider: "az",
+              showId: showId || "",
+              episodeId: target.epId || "",
+              watchUrl: target.watchUrl || "",
+            }
+          : isSd2Source || parsedTarget?.provider === "sd2"
           ? {
               provider: "sd2",
               showId: parsedTarget?.showId || showId || "",
@@ -269,7 +303,7 @@ export default function DubbedWatchScreen() {
             : {}),
       },
     });
-  }, [router, series, title, season, posterUrl, totalEpsCount, episodeList.length, isSd2Source, isCarateenSource, isMovieEntry, provider, showId]);
+  }, [router, series, title, season, posterUrl, totalEpsCount, episodeList.length, isAzSource, isSd2Source, isCarateenSource, isMovieEntry, provider, showId]);
 
   /** استخراج رابط الفيديو من HTML — نفس patterns الباكند */
   function extractVideoFromHtml(html: string): string | null {
@@ -438,6 +472,34 @@ export default function DubbedWatchScreen() {
     }
   }, [ensureSd2WatchUrl, playbackTraceId]);
 
+  const resolveAzMedia = useCallback(async (
+    signal: AbortSignal,
+    serverId?: string,
+  ): Promise<{ url: string; contentType: "hls" | "progressive"; rawUrl: string; serverId?: string } | null> => {
+    const BASE = getBaseUrl();
+    const vid = effectiveEpisodeId;
+    if (!vid || signal.aborted) return null;
+    try {
+      const params = new URLSearchParams({ vid });
+      if (serverId) params.set("sourceId", serverId);
+      const res = await fetch(`${BASE}/api/dubbed/animezid/watch-src?${params}`, { signal, cache: "no-store" });
+      if (signal.aborted || !res.ok) return null;
+      const d = await res.json();
+      const proxyUrl = typeof d?.hlsUrl === "string" && d.hlsUrl
+        ? (d.hlsUrl.startsWith("/") ? `${BASE}${d.hlsUrl}` : d.hlsUrl)
+        : null;
+      if (!proxyUrl) return null;
+      return {
+        url: withPlaybackTrace(proxyUrl, playbackTraceId, BASE),
+        contentType: d.type === "hls" ? "hls" : "progressive",
+        rawUrl: proxyUrl,
+        serverId: serverId || undefined,
+      };
+    } catch {
+      return null;
+    }
+  }, [effectiveEpisodeId, playbackTraceId]);
+
   /* ── Stage 1: Availability Query (مرحلة الاستعلام) ── */
   const runAvailabilityQuery = useCallback(async () => {
     checkCtrlRef.current?.abort();
@@ -448,6 +510,70 @@ export default function DubbedWatchScreen() {
     setCheckingAvailability(true);
 
     const BASE = getBaseUrl();
+    if (isAzSource) {
+      const defaultAzSlots: DubbedServerSlot[] = [
+        {
+          key: "AZ_AUTO_1080p",
+          site: "dubbed_az_1",
+          shortName: "1",
+          label: "السيرفر 1 · Uqload",
+          quality: "1080p",
+          mode: "api",
+          state: "checking",
+        },
+        {
+          key: "AZ_MEGAMAX_1080p",
+          site: "dubbed_az_2",
+          shortName: "2",
+          label: "السيرفر 2 · MegaMax",
+          quality: "1080p",
+          mode: "api",
+          state: "checking",
+        },
+      ];
+      setSlots(defaultAzSlots);
+      try {
+        if (effectiveEpisodeId) {
+          const srvRes = await fetch(`${BASE}/api/dubbed/animezid/servers?vid=${encodeURIComponent(effectiveEpisodeId)}`, { signal: ctrl.signal });
+          if (srvRes.ok && !ctrl.signal.aborted && mountedRef.current) {
+            const srvJson = await srvRes.json();
+            const list: any[] = Array.isArray(srvJson?.watchSources) ? srvJson.watchSources : [];
+            const nativeFirst = list.filter((s) => s.supportsNative);
+            const shown = (nativeFirst.length > 0 ? nativeFirst : list).slice(0, 4);
+            if (shown.length > 0) {
+              const dynamicSlots: DubbedServerSlot[] = shown.map((srv, idx) => {
+                const numName = String(idx + 1);
+                return {
+                  key: `AZ_${srv.id}_${idx}`,
+                  site: `dubbed_az_${numName}`,
+                  shortName: numName,
+                  label: `السيرفر ${numName} · ${srv.provider || "مباشر"}`,
+                  quality: idx === 0 ? "1080p" : "720p",
+                  mode: "api",
+                  state: "available",
+                  serverId: String(srv.id),
+                };
+              });
+              setSlots(dynamicSlots);
+              setCheckingAvailability(false);
+              const firstSrvId = dynamicSlots[0]?.serverId;
+              void resolveAzMedia(ctrl.signal, firstSrvId).then((resolved) => {
+                if (resolved && !ctrl.signal.aborted && mountedRef.current) {
+                  preloadedMediaRef.current = resolved;
+                }
+              });
+              return;
+            }
+          }
+        }
+      } catch (e: any) {
+        if (e?.name === "AbortError" || !mountedRef.current) return;
+      }
+      if (!mountedRef.current || ctrl.signal.aborted) return;
+      setSlots((prev) => prev.map((s) => ({ ...s, state: "available" })));
+      setCheckingAvailability(false);
+      return;
+    }
     if (isSd2Source) {
       const defaultSd2Slots: DubbedServerSlot[] = [
         {
@@ -582,7 +708,7 @@ export default function DubbedWatchScreen() {
       })),
     );
     setCheckingAvailability(false);
-  }, [ensureSd2WatchUrl, epUrl, isCarateenSource, isSd2Source, playbackTraceId, provider, resolveCarateenMedia, resolveSd2Media]);
+  }, [effectiveEpisodeId, ensureSd2WatchUrl, epUrl, isAzSource, isCarateenSource, isSd2Source, playbackTraceId, provider, resolveAzMedia, resolveCarateenMedia, resolveSd2Media]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -609,6 +735,27 @@ export default function DubbedWatchScreen() {
     serverId?: string,
     preferMp4 = false,
   ): Promise<{ url: string; contentType: "hls" | "progressive"; rawUrl: string } | null> => {
+    if (isAzSource) {
+      if (
+        !bypassCache &&
+        preloadedMediaRef.current &&
+        (!serverId || !preloadedMediaRef.current.serverId || serverId === preloadedMediaRef.current.serverId)
+      ) {
+        return {
+          url: preloadedMediaRef.current.url,
+          contentType: preloadedMediaRef.current.contentType,
+          rawUrl: preloadedMediaRef.current.rawUrl || preloadedMediaRef.current.url,
+        };
+      }
+      const resolved = await resolveAzMedia(signal, serverId);
+      if (resolved) {
+        if (!serverId || serverId === resolved.serverId) {
+          preloadedMediaRef.current = resolved;
+        }
+        return resolved;
+      }
+      return null;
+    }
     if (isSd2Source) {
       if (
         !bypassCache &&
@@ -722,7 +869,7 @@ export default function DubbedWatchScreen() {
     }
 
     return null;
-  }, [epUrl, isCarateenSource, isSd2Source, playbackTraceId, resolveCarateenMedia, resolveSd2Media]);
+  }, [epUrl, isAzSource, isCarateenSource, isSd2Source, playbackTraceId, resolveAzMedia, resolveCarateenMedia, resolveSd2Media]);
 
   const pickerOpenedAtRef = useRef(Date.now());
   useEffect(() => {
@@ -779,19 +926,40 @@ export default function DubbedWatchScreen() {
     setScreen("player");
   }, [extractPlayableSource]);
 
+  const [activeEpisodeDownloads, setActiveEpisodeDownloads] = useState<ActiveDownload[]>([]);
+
   /* ── Sync Active & Completed Downloads ── */
   useEffect(() => {
     const sync = () => {
-      for (const slot of slots) {
-        const activeDl = getActiveSiteDownload(numericAnimeId, episodeNumber, slot.site);
-        if (activeDl) {
-          setDlStates((p) => ({
-            ...p,
-            [slot.key]: activeDl.status === "error" ? "error" : "downloading",
-          }));
-          setDlProgress((p) => ({ ...p, [slot.key]: Math.round(activeDl.progress * 100) }));
+      const snapshot = getActiveDownloadsSnapshot();
+      const epActive = snapshot.filter(
+        (d) => d.animeId === numericAnimeId && d.ep === episodeNumber,
+      );
+      setActiveEpisodeDownloads(epActive);
+
+      const activeBySite = new Map(epActive.map((d) => [d.site, d]));
+      setDlStates((prev) => {
+        const next = { ...prev };
+        for (const slot of slots) {
+          const activeDl = activeBySite.get(slot.site);
+          if (activeDl) {
+            next[slot.key] = activeDl.status === "error" ? "error" : "downloading";
+          } else if (next[slot.key] === "downloading") {
+            next[slot.key] = "done";
+          }
         }
-      }
+        return next;
+      });
+      setDlProgress((prev) => {
+        const next = { ...prev };
+        for (const slot of slots) {
+          const activeDl = activeBySite.get(slot.site);
+          if (activeDl) {
+            next[slot.key] = Math.round(activeDl.progress * 100);
+          }
+        }
+        return next;
+      });
       getDownloads().then((list) => {
         for (const slot of slots) {
           const dlId = makeDownloadId(numericAnimeId, episodeNumber, slot.site, slot.quality);
@@ -812,7 +980,7 @@ export default function DubbedWatchScreen() {
     setDlStates((p) => ({ ...p, [slot.key]: "fetching" }));
     try {
       const ctrl = new AbortController();
-      const extracted = await extractPlayableSource(slot.mode, ctrl.signal, false, slot.serverId);
+      const extracted = await extractPlayableSource(slot.mode, ctrl.signal, false, slot.serverId, true);
       if (!extracted) {
         setDlStates((p) => ({ ...p, [slot.key]: "error" }));
         return;
@@ -993,8 +1161,8 @@ export default function DubbedWatchScreen() {
   })();
 
   const tierGroups: Array<{ quality: "1080p" | "720p"; label: string; dotColor: string; items: DubbedServerSlot[] }> = [
-    { quality: "1080p", label: "1080P", dotColor: isLightTheme ? "#D97706" : "#fbbf24", items: fhdSlots },
-    { quality: "720p", label: "720P", dotColor: isLightTheme ? "#059669" : "#34d399", items: hdSlots },
+    { quality: "1080p" as const, label: "1080P", dotColor: isLightTheme ? "#D97706" : "#fbbf24", items: fhdSlots },
+    { quality: "720p" as const, label: "720P", dotColor: isLightTheme ? "#059669" : "#34d399", items: hdSlots },
   ].filter(g => g.items.length > 0);
 
   /* ── Unified Server Picker Screen (Matching app/watch.tsx) ── */
@@ -1124,6 +1292,46 @@ export default function DubbedWatchScreen() {
             </View>
           </View>
         </View>
+
+        {activeEpisodeDownloads.length > 0 && (
+          <Pressable
+            onPress={() => router.push("/(tabs)/downloads" as any)}
+            style={[
+              styles.dlActiveBanner,
+              {
+                backgroundColor: isLightTheme ? "rgba(2, 132, 199, 0.10)" : "rgba(6, 182, 212, 0.14)",
+                borderColor: isLightTheme ? "rgba(2, 132, 199, 0.35)" : "rgba(6, 182, 212, 0.40)",
+              },
+            ]}
+          >
+            {activeEpisodeDownloads.map((dl) => {
+              const pct = Math.max(1, Math.round(dl.progress * 100));
+              const sizeText = dl.totalBytes > 0
+                ? `${formatFileSize(dl.bytesWritten)} / ${formatFileSize(dl.totalBytes)}`
+                : dl.bytesWritten > 0
+                  ? `تم تنزيل ${formatFileSize(dl.bytesWritten)}`
+                  : "جارٍ تجهيز وتحويل الحلقة...";
+              return (
+                <View key={dl.id} style={{ gap: 6 }}>
+                  <View style={{ flexDirection: ROW_RTL, alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                    <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 6, flex: 1 }}>
+                      <ActivityIndicator size={14} color={isLightTheme ? "#0284C7" : "#22d3ee"} />
+                      <Text style={{ color: colors.textPrimary, fontSize: 12, fontFamily: "Cairo_800ExtraBold" }} numberOfLines={1}>
+                        جاري تنزيل الحلقة {dl.ep} ({pct}%)
+                      </Text>
+                    </View>
+                    <Text style={{ color: isLightTheme ? "#0284C7" : "#22d3ee", fontSize: 10.5, fontFamily: "Cairo_700Bold" }}>
+                      {sizeText} · تنزيلاتي ←
+                    </Text>
+                  </View>
+                  <View style={{ height: 5, borderRadius: 3, backgroundColor: colors.border, overflow: "hidden" }}>
+                    <View style={{ height: 5, borderRadius: 3, width: `${pct}%` as any, backgroundColor: isLightTheme ? "#0284C7" : "#22d3ee" }} />
+                  </View>
+                </View>
+              );
+            })}
+          </Pressable>
+        )}
 
         <Text style={[styles.noticeText, { color: colors.textSecondary }]}>
           التوفر مؤشر أولي وليس تأكيداً للتشغيل. عند الاختيار يُجلب رابط الحلقة المطلوب، وتُجرّب الروابط الاحتياطية عند فشل التشغيل.
@@ -1295,7 +1503,7 @@ export default function DubbedWatchScreen() {
                           <>
                             <ActivityIndicator size={13} color="#ffffff" />
                             <Text style={styles.dlActionBtnText}>
-                              {dlState === "downloading" && prog > 0 ? `${prog}%` : "جاري..."}
+                              {dlState === "downloading" ? `${Math.max(1, prog)}%` : "جاري..."}
                             </Text>
                           </>
                         ) : dlState === "done" ? (
@@ -1584,6 +1792,12 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
+  },
+  dlActiveBanner: {
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 12,
+    gap: 8,
   },
   dlSection: {
     marginTop: 6,

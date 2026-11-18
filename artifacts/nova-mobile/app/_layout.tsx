@@ -114,6 +114,8 @@ function RootLayoutNav() {
   const tvMode = isTvDevice(Dimensions.get("window").width, Dimensions.get("window").height);
   const watchScreenOptions = {
     headerShown: false,
+    animation: "fade" as const,
+    animationDuration: 180,
     ...(tvMode ? { orientation: "landscape" as const } : {}),
   };
 
@@ -189,6 +191,20 @@ function RootLayoutNav() {
             screens, not the anime-dubbed Supabase screens. Register them in
             the root stack so native builds resolve the detail and watch routes
             reliably. */}
+        <Stack.Screen
+          name="dubbed-anime/[slug]"
+          options={{
+            headerShown: false,
+            animation: "slide_from_bottom",
+          }}
+        />
+        <Stack.Screen
+          name="dubbed-anime/episodes/[slug]"
+          options={{
+            headerShown: false,
+            animation: "slide_from_bottom",
+          }}
+        />
         <Stack.Screen name="dubbed" options={{ headerShown: false }} />
         <Stack.Screen
           name="dubbed/[id]"
@@ -200,10 +216,7 @@ function RootLayoutNav() {
         />
         <Stack.Screen
           name="dubbed/watch"
-          options={{
-            ...watchScreenOptions,
-            ...(Platform.OS === "android" ? { animation: "none" as const } : {}),
-          }}
+          options={watchScreenOptions}
         />
         <Stack.Screen name="+not-found" />
       </Stack>
@@ -337,6 +350,7 @@ function RootLayout() {
         <QueryClientProvider client={queryClient}>
           <AppProvider>
             <RootContent
+              fontsReady={fontsLoaded || Boolean(fontError)}
               brandSplashVisible={brandSplashVisible}
               telegramAnnouncementVisible={telegramAnnouncementVisible && !tvMode}
               onCloseAnnouncement={() => setTelegramAnnouncementVisible(false)}
@@ -349,10 +363,12 @@ function RootLayout() {
 }
 
 function RootContent({
+  fontsReady,
   brandSplashVisible,
   telegramAnnouncementVisible,
   onCloseAnnouncement,
 }: {
+  fontsReady: boolean;
   brandSplashVisible: boolean;
   telegramAnnouncementVisible: boolean;
   onCloseAnnouncement: () => void;
@@ -361,7 +377,7 @@ function RootContent({
   const { themeHydrated } = useApp();
   const { tv: tvMode } = useTvMetrics();
 
-  if (!themeHydrated) {
+  if (!themeHydrated || (!fontsReady && brandSplashVisible)) {
     return <BrandSplash />;
   }
 

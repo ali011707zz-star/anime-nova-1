@@ -8,16 +8,18 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
-  View, Text, TextInput, FlatList, Image,
-  ActivityIndicator, StyleSheet, Platform, Animated, Easing,
+  View, Text, TextInput, FlatList, Image, ScrollView,
+  ActivityIndicator, StyleSheet, Platform, Animated, Easing, I18nManager,
   useWindowDimensions,
 } from "react-native";
+
+const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
 import {
   catalogBadge,
@@ -86,10 +88,34 @@ interface Cartoon2CacheEntry {
   savedAt: number;
 }
 
-type TabKey = "animation" | "spacetoon" | "cartoon" | "cartoon2";
+interface AnimeZidItem {
+  id: string;
+  slug: string;
+  url: string;
+  title: string;
+  poster: string | null;
+  badge: string;
+  year: string;
+  seasonsCount: number;
+  episodesCount: number;
+  mediaType: "series" | "movie";
+}
+
+interface AnimeZidCacheEntry {
+  items: AnimeZidItem[];
+  page: number;
+  totalPages: number;
+  savedAt: number;
+}
+
+type TabKey = "anime" | "animation" | "spacetoon" | "cartoon" | "cartoon2";
+type AnimeZidSortFilter = "newest" | "oldest" | "name";
+const ANIMEZID_CATALOG_CACHE_KEY = "nova:animezid-catalog:v2";
+const animeZidCatalogCache = new Map<string, AnimeZidCacheEntry>();
+let animeZidStorageHydrated = false;
 type Cartoon2TypeFilter = "all" | "series" | "movie";
 type Cartoon2OrderFilter = "newest" | "oldest" | "title";
-const CARTOON2_CATALOG_CACHE_KEY = "nova:cartoon2-catalog:v1";
+const CARTOON2_CATALOG_CACHE_KEY = "nova:cartoon2-catalog:v2";
 const cartoon2CatalogCache = new Map<string, Cartoon2CacheEntry>();
 let cartoon2StorageHydrated = false;
 let cartoon2PrewarmPromise: Promise<void> | null = null;
@@ -157,7 +183,7 @@ async function hydrateAndPrewarmCartoon2Catalog(): Promise<void> {
   })();
   return cartoon2PrewarmPromise;
 }
-const CARTOON_CATALOG_CACHE_KEY = "nova:cartoon-catalog:v2";
+const CARTOON_CATALOG_CACHE_KEY = "nova:cartoon-catalog:v3";
 const CARTOON_CATALOG_CACHE_LIMIT = 60;
 const SPACETOON_CATALOG_CACHE_TTL_MS = 10 * 60_000;
 const SPACETOON_CATALOG_CACHE_LIMIT = 6;
@@ -168,14 +194,17 @@ function posterRequestUri(uri: string | null): string | null {
   const base = getBaseUrl().replace(/\/+$/, "");
   if (uri.startsWith("/api/")) return `${base}${uri}`;
   const match = uri.match(
-    /^https:\/\/image\.tmdb\.org\/t\/p\/(w92|w154|w185|w342|w500|w780|w1280|original)\/([A-Za-z0-9_-]+\.(?:jpe?g|png|webp))(?:\?[^#]*)?(?:#.*)?$/i,
+    /^https?:\/\/image\.tmdb\.org\/t\/p\/(w\d+|original)\/([A-Za-z0-9_-]+\.(?:jpe?g|png|webp))(?:\?[^#]*)?(?:#.*)?$/i,
   );
   if (match) {
-    const size = match[1] === "w500" ? "w342" : match[1];
+    const size = match[1] === "w500" || match[1] === "w300" ? "w342" : match[1];
     return `${base}/api/source-catalog/tmdb-poster/${size}/${match[2]}`;
   }
   if (/^https?:\/\/watch-\d+\.stardima\.com\.im\/storage\//i.test(uri)) {
     return `${base}/api/dubbed/sd2/poster?url=${encodeURIComponent(uri)}`;
+  }
+  if (/^https?:\/\/(?:(?:www\.)?carateen\.tv|cdn\.spacetoongo\.com)\//i.test(uri)) {
+    return `${base}/api/dubbed/carateen/poster?url=${encodeURIComponent(uri)}`;
   }
   return uri;
 }
@@ -251,7 +280,7 @@ function PosterCard({ uri, title, seasons, tint, badge, badgeTint, sourceBadge, 
   const [imageRetry, setImageRetry] = useState(0);
   const imageRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastRetryTokenRef = useRef(retryToken ?? 0);
-  const tvMode = isTvDevice();
+  const { tv: tvMode } = useTvMetrics();
   const imageUri = posterRequestUri(uri);
   const show = !!imageUri && failedUri !== uri;
 
@@ -293,7 +322,6 @@ function PosterCard({ uri, title, seasons, tint, badge, badgeTint, sourceBadge, 
       style={({ pressed, focused }) => [
         card.wrap,
         cardWidth && cardHeight ? { width: cardWidth, height: cardHeight } : undefined,
-        tvMode && { borderWidth: 2.5, borderColor: "transparent", padding: 2 },
         { opacity: pressed ? 0.78 : 1 },
         tvMode && tvFocusStyle(focused),
       ]}
@@ -307,11 +335,10 @@ function PosterCard({ uri, title, seasons, tint, badge, badgeTint, sourceBadge, 
       >
         {show ? (
           <Image
-            key={`${uri}:${imageRetry}`}
-            source={{ uri: imageUri!, cache: imageRetry > 0 ? "reload" : "force-cache" }}
-            style={StyleSheet.absoluteFill}
+            key={`${imageUri}:${imageRetry}`}
+            source={{ uri: imageUri! }}
+            style={{ width: "100%", height: "100%" }}
             resizeMode="cover"
-            resizeMethod="resize"
             fadeDuration={0}
             onError={() => {
               if (imageRetry < 2) {
@@ -1344,6 +1371,323 @@ function Cartoon2List({ searchQ }: { searchQ: string }) {
   );
 }
 
+
+// ─────────────────────────────────────────────────────────
+// أنمي مدبلج list (AnimeZid)
+// ─────────────────────────────────────────────────────────
+
+function isAnimeZidItem(item: unknown): item is AnimeZidItem {
+  if (!item || typeof item !== "object") return false;
+  const row = item as Partial<AnimeZidItem>;
+  return typeof row.slug === "string" && row.slug.length > 0 && typeof row.title === "string";
+}
+
+function rememberAnimeZidCatalog(key: string, entry: AnimeZidCacheEntry): void {
+  animeZidCatalogCache.delete(key);
+  animeZidCatalogCache.set(key, entry);
+  while (animeZidCatalogCache.size > 10) {
+    const oldest = animeZidCatalogCache.keys().next().value;
+    if (oldest === undefined) break;
+    animeZidCatalogCache.delete(oldest);
+  }
+  if (key === "newest|" && entry.items.length > 0) {
+    AsyncStorage.setItem(
+      ANIMEZID_CATALOG_CACHE_KEY,
+      JSON.stringify({
+        items: entry.items.slice(0, 220),
+        page: entry.page,
+        totalPages: entry.totalPages,
+        savedAt: entry.savedAt,
+      }),
+    ).catch(() => {});
+  }
+}
+
+async function hydrateAnimeZidCatalog(): Promise<void> {
+  if (animeZidStorageHydrated) return;
+  animeZidStorageHydrated = true;
+  try {
+    const raw = await AsyncStorage.getItem(ANIMEZID_CATALOG_CACHE_KEY);
+    if (raw && !animeZidCatalogCache.has("newest|")) {
+      const parsed = JSON.parse(raw) as AnimeZidCacheEntry;
+      if (parsed && Array.isArray(parsed.items) && parsed.items.length > 0) {
+        animeZidCatalogCache.set("newest|", {
+          items: parsed.items,
+          page: Number(parsed.page) || 1,
+          totalPages: Math.max(1, Number(parsed.totalPages) || 1),
+          savedAt: Number(parsed.savedAt) || 0,
+        });
+      }
+    }
+  } catch {}
+}
+
+function DubbedAnimeList({ searchQ }: { searchQ: string }) {
+  const colors = useColors();
+  const { width } = useWindowDimensions();
+  const { gridWidth, columns, gap, cardWidth, cardHeight, tvMode } = getGridMetrics(width);
+  const router = useRouter();
+  const [posterRetryToken, setPosterRetryToken] = useState(0);
+  useFocusEffect(useCallback(() => {
+    setPosterRetryToken(token => token + 1);
+  }, []));
+  const BASE = getBaseUrl();
+  const [sortFilter, setSortFilter] = useState<AnimeZidSortFilter>("newest");
+  const queryPart = spacetoonQueryKey(searchQ);
+  const cacheKey = `${sortFilter}|${queryPart}`;
+  const initialCache = animeZidCatalogCache.get(cacheKey);
+  const [items, setItems] = useState<AnimeZidItem[]>(() => initialCache?.items ?? []);
+  const [page, setPage] = useState(() => initialCache?.page ?? 1);
+  const [totalPages, setTotalPages] = useState(() => initialCache?.totalPages ?? 1);
+  const [loading, setLoading] = useState(() => !initialCache?.items.length);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [failedPage, setFailedPage] = useState<number | null>(null);
+  const loadingMoreRef = useRef(false);
+  const requestIdRef = useRef(0);
+
+  const loadPage = useCallback(async (nextPage: number, reset = false) => {
+    if (!reset && loadingMoreRef.current) return;
+    const requestId = ++requestIdRef.current;
+    if (reset) {
+      const cached = animeZidCatalogCache.get(cacheKey);
+      loadingMoreRef.current = false;
+      setLoading(!cached?.items.length);
+      setLoadingMore(false);
+      setLoadError(false);
+      setFailedPage(null);
+      setItems(cached?.items ?? []);
+      setPage(cached?.page ?? 1);
+      setTotalPages(cached?.totalPages ?? 1);
+    } else {
+      loadingMoreRef.current = true;
+      setLoadingMore(true);
+    }
+    try {
+      const query = searchQ.trim().length >= 2 ? searchQ.trim() : "";
+      const params = new URLSearchParams({
+        page: String(nextPage),
+        sort: sortFilter,
+      });
+      if (query) params.set("q", query);
+      const response = await fetch(`${BASE}/api/dubbed/animezid/catalog?${params}`);
+      if (!response.ok) throw new Error(`animezid_catalog_${response.status}`);
+      const data = await response.json();
+      if (requestId !== requestIdRef.current) return;
+      const results = Array.isArray(data.results) ? data.results.filter(isAnimeZidItem) : [];
+      const responsePage = Number(data.page) || nextPage;
+      const responseTotalPages = Math.max(1, Number(data.totalPages) || 1);
+      const cached = animeZidCatalogCache.get(cacheKey);
+      const merged = new Map<string, AnimeZidItem>();
+      if (reset) {
+        for (const item of results) merged.set(item.slug, item);
+        if (!query) {
+          for (const item of cached?.items ?? []) {
+            if (!merged.has(item.slug)) merged.set(item.slug, item);
+          }
+        }
+      } else {
+        for (const item of cached?.items ?? []) merged.set(item.slug, item);
+        for (const item of results) merged.set(item.slug, item);
+      }
+      const nextItems = [...merged.values()];
+      const nextCachedPage = reset && !query && cached?.items.length ? Math.max(responsePage, cached.page) : responsePage;
+      rememberAnimeZidCatalog(cacheKey, {
+        items: nextItems,
+        page: nextCachedPage,
+        totalPages: responseTotalPages,
+        savedAt: Date.now(),
+      });
+      setItems(nextItems);
+      setPage(nextCachedPage);
+      setTotalPages(responseTotalPages);
+      if (nextPage === 1) {
+        for (const it of results.slice(0, 12)) {
+          const pUri = posterRequestUri(it.poster || null);
+          if (pUri) Image.prefetch(pUri).catch(() => {});
+        }
+      }
+      setLoadError(false);
+      setFailedPage(null);
+    } catch {
+      if (requestId === requestIdRef.current) {
+        setLoadError(true);
+        setFailedPage(nextPage);
+      }
+    } finally {
+      if (requestId === requestIdRef.current) {
+        setLoading(false);
+        setLoadingMore(false);
+        loadingMoreRef.current = false;
+      }
+    }
+  }, [BASE, cacheKey, searchQ, sortFilter]);
+
+  useEffect(() => {
+    requestIdRef.current += 1;
+    loadingMoreRef.current = false;
+    const cached = animeZidCatalogCache.get(cacheKey);
+    if (cached) {
+      setItems(cached.items);
+      setPage(cached.page);
+      setTotalPages(cached.totalPages);
+      setLoading(false);
+      setLoadingMore(false);
+      setLoadError(false);
+      setFailedPage(null);
+    } else {
+      setItems([]);
+      setPage(1);
+      setTotalPages(1);
+      setLoading(true);
+      setLoadError(false);
+      setFailedPage(null);
+    }
+    if (cached && Date.now() - cached.savedAt < SPACETOON_CATALOG_CACHE_TTL_MS) return;
+    if (!cached && cacheKey === "newest|") {
+      void hydrateAnimeZidCatalog().then(() => {
+        const hydrated = animeZidCatalogCache.get("newest|");
+        if (hydrated && hydrated.items.length > 0) {
+          setItems(hydrated.items);
+          setPage(hydrated.page);
+          setTotalPages(hydrated.totalPages);
+          setLoading(false);
+        }
+      });
+    }
+    const timer = setTimeout(() => { void loadPage(1, true); }, queryPart ? 300 : 0);
+    return () => clearTimeout(timer);
+  }, [cacheKey, loadPage, queryPart]);
+
+  useEffect(() => () => {
+    requestIdRef.current += 1;
+    loadingMoreRef.current = false;
+  }, []);
+
+  const openDetail = (item: AnimeZidItem) => {
+    router.push({
+      pathname: "/dubbed-anime/[slug]" as any,
+      params: {
+        slug: item.slug,
+        title: item.title,
+        poster: item.poster || "",
+      },
+    });
+  };
+
+  const sortOptions: { key: AnimeZidSortFilter; label: string }[] = [
+    { key: "newest", label: "الأحدث" },
+    { key: "oldest", label: "الأقدم" },
+    { key: "name", label: "بالاسم" },
+  ];
+
+  return (
+    <View style={{ flex: 1 }}>
+      <View style={[s.filterBar, { borderBottomColor: colors.border }]}>
+        <View style={s.filterGroup}>
+          {sortOptions.map(opt => {
+            const active = sortFilter === opt.key;
+            return (
+              <Pressable
+                key={opt.key}
+                onPress={() => setSortFilter(opt.key)}
+                focusable={tvMode}
+                style={({ focused }) => [
+                  s.filterChip,
+                  { backgroundColor: colors.surface, borderColor: colors.border },
+                  active && { backgroundColor: "rgba(6,182,212,0.16)", borderColor: "rgba(6,182,212,0.55)" },
+                  tvMode && tvFocusStyle(focused),
+                ]}
+              >
+                <Text style={[s.filterChipText, { color: active ? "#22D3EE" : colors.textSecondary }]}>{opt.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        <Text style={[s.filterChipText, { color: colors.textMuted }]}>
+          {items.length > 0 ? `${items.length} أنمي مدبلج` : "أنمي مدبلج"}
+        </Text>
+      </View>
+
+      <FlatList
+        data={items}
+        style={{ width: gridWidth, alignSelf: "center" }}
+        key={`animezid-grid-${columns}`}
+        keyExtractor={item => `az:${item.slug}`}
+        numColumns={columns}
+        contentContainerStyle={shared.grid}
+        columnWrapperStyle={{ gap }}
+        initialNumToRender={10}
+        maxToRenderPerBatch={6}
+        updateCellsBatchingPeriod={50}
+        windowSize={tvMode ? 9 : 7}
+        removeClippedSubviews={false}
+        renderItem={({ item, index }) => {
+          const metaParts: string[] = [];
+          if (item.seasonsCount > 1) metaParts.push(`${item.seasonsCount} مواسم`);
+          if (item.episodesCount > 0) metaParts.push(`${item.episodesCount} ح`);
+          if (item.year) metaParts.push(item.year);
+          return (
+            <View style={{ width: cardWidth }}>
+              <PosterCard
+                uri={item.poster || null}
+                title={item.title}
+                seasons={item.seasonsCount}
+                tint="#06B6D4"
+                badge={item.badge || "مدبلج"}
+                badgeTint="#10B981"
+                retryToken={posterRetryToken}
+                retryDelayMs={(index % 5) * 90}
+                meta={metaParts.join(" · ") || "أنمي مدبلج"}
+                testID={`animezid-title-${item.slug}`}
+                cardWidth={cardWidth}
+                cardHeight={cardHeight}
+                onPress={() => openDetail(item)}
+              />
+            </View>
+          );
+        }}
+        onEndReached={() => {
+          if (!loading && !loadingMore && page < totalPages) void loadPage(page + 1);
+        }}
+        onEndReachedThreshold={0.35}
+        ListFooterComponent={loadingMore ? (
+          <ActivityIndicator color="#06B6D4" style={{ marginVertical: 16 }} />
+        ) : loadError && items.length > 0 ? (
+          <Pressable
+            onPress={() => {
+              const retryPage = failedPage ?? page + 1;
+              void loadPage(retryPage, retryPage === 1);
+            }}
+            style={shared.retryBtn}
+          >
+            <Ionicons name="refresh" size={15} color="#22D3EE" />
+            <Text style={[shared.retryText, { color: colors.buttonText }]}>تعذّر تحميل المزيد — أعد المحاولة</Text>
+          </Pressable>
+        ) : null}
+        ListEmptyComponent={
+          <View style={shared.center}>
+            {loading ? <ActivityIndicator color="#06B6D4" /> : null}
+            {loadError && !loading ? (
+              <>
+                <Text style={[shared.emptyText, { color: colors.textMuted }]}>تعذّر تحميل الأنمي المدبلج</Text>
+                <Pressable onPress={() => { void loadPage(1, true); }} style={shared.retryBtn}>
+                  <Ionicons name="refresh" size={15} color="#22D3EE" />
+                  <Text style={[shared.retryText, { color: colors.buttonText }]}>إعادة المحاولة</Text>
+                </Pressable>
+              </>
+            ) : !loading ? (
+              <Text style={[shared.emptyText, { color: colors.textMuted }]}>
+                {searchQ.trim().length >= 2 ? "لا توجد نتائج مطابقة" : "لا توجد أعمال متاحة"}
+              </Text>
+            ) : null}
+          </View>
+        }
+      />
+    </View>
+  );
+}
+
 // ─────────────────────────────────────────────────────────
 // Main Screen
 // ─────────────────────────────────────────────────────────
@@ -1351,7 +1695,8 @@ function Cartoon2List({ searchQ }: { searchQ: string }) {
 export default function DubbedTabScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const tvMode = isTvDevice();
+  const router = useRouter();
+  const { tv: tvMode } = useTvMetrics();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
   const routeParams = useLocalSearchParams<{ tab?: string | string[] }>();
   const routeTab = Array.isArray(routeParams.tab) ? routeParams.tab[0] : routeParams.tab;
@@ -1361,15 +1706,19 @@ export default function DubbedTabScreen() {
       ? "cartoon"
       : routeTab === "spacetoon"
         ? "spacetoon"
-        : "animation";
+        : routeTab === "animation"
+          ? "animation"
+          : "anime";
 
   const [activeTab, setActiveTab] = useState<TabKey>(requestedTab);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQ,    setSearchQ]    = useState("");
   const searchInput = useRef<TextInput>(null);
+  const tabsScrollRef = useRef<ScrollView>(null);
 
   // Tab underline slide animation
-  const tabPosition = (tab: TabKey) => tab === "animation" ? 0 : tab === "spacetoon" ? 1 : tab === "cartoon" ? 2 : 3;
+  const tabPosition = (tab: TabKey) =>
+    tab === "anime" ? 0 : tab === "animation" ? 1 : tab === "spacetoon" ? 2 : tab === "cartoon" ? 3 : 4;
   const slideAnim = useRef(new Animated.Value(tabPosition(requestedTab))).current;
   useEffect(() => {
     void hydrateAndPrewarmCartoon2Catalog();
@@ -1395,16 +1744,31 @@ export default function DubbedTabScreen() {
     <View style={[s.screen, { backgroundColor: colors.background, paddingTop: topPad }]}>
       {/* ── Header ── */}
       <View style={[s.header, { borderBottomColor: colors.border }]}>
-        <View style={{ flex: 1 }}>
-          <Text style={[s.headerTitle, { color: colors.textPrimary }]}>رسوم متحركة مدبلجة ومترجمة</Text>
-          <Text style={[s.headerSub, { color: colors.textSecondary }]}>
-            {activeTab === "animation"
-              ? "أنيميشن مدبلج ومترجم"
-              : activeTab === "spacetoon"
-                ? "مسلسلات سبيستون"
-                : activeTab === "cartoon2"
-                  ? "مكتبة مسلسلات وأفلام كرتون مدبلج 2"
-                  : "كرتون مدبلج أو مترجم للعربية"}
+        <Pressable
+          onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)" as any))}
+          focusable={tvMode}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="رجوع"
+          style={({ focused }) => [
+            s.iconBtn,
+            { backgroundColor: colors.input, borderColor: colors.border },
+            tvMode && tvFocusStyle(focused),
+          ]}
+        >
+          <Ionicons name="chevron-forward" size={18} color={colors.textPrimary} />
+        </Pressable>
+        <View style={{ flex: 1, alignItems: I18nManager.isRTL ? "flex-start" : "flex-end" }}>
+          <Text style={[s.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>
+            {activeTab === "anime"
+              ? "أنمي مدبلج"
+              : activeTab === "animation"
+                ? "أنيميشن مدبلج"
+                : activeTab === "spacetoon"
+                  ? "سبيستون"
+                  : activeTab === "cartoon2"
+                    ? "كرتون مدبلج 2"
+                    : "كرتون مدبلج"}
           </Text>
         </View>
         <Pressable
@@ -1415,38 +1779,63 @@ export default function DubbedTabScreen() {
             else setSearchQ("");
           }}
            focusable={tvMode}
+           hitSlop={8}
            style={({ focused }) => [s.iconBtn, { backgroundColor: colors.input, borderColor: colors.border }, searchOpen && { backgroundColor: colors.accentSurface, borderColor: colors.accentBorder }, tvMode && tvFocusStyle(focused)]}
         >
-          <Ionicons name={searchOpen ? "close" : "search"} size={18} color={colors.textSecondary} />
+          <Ionicons name={searchOpen ? "close" : "search"} size={16} color={colors.textSecondary} />
         </Pressable>
       </View>
 
-      {/* ── Inner tabs ── */}
-      <View style={[s.tabsRow, { borderBottomColor: colors.border }]}>
-        {(["animation", "spacetoon", "cartoon", "cartoon2"] as TabKey[]).map(tab => {
-          const active = activeTab === tab;
-          const color = tab === "animation" ? "#10B981" : tab === "spacetoon" ? "#06B6D4" : tab === "cartoon2" ? "#F59E0B" : "#7C3AED";
-          return (
-              <Pressable key={tab} testID={`dubbed-tab-${tab}`} onPress={() => handleTab(tab)}
-              focusable={tvMode}
-              style={({ focused }) => [
-                s.tabBtn,
-                { backgroundColor: colors.surface, borderColor: colors.border },
-                active && { borderColor: `${color}55`, backgroundColor: `${color}12` },
-                tvMode && tvFocusStyle(focused),
-              ]}>
-              <Text style={[s.tabText, { color: active ? color : colors.textSecondary }]} numberOfLines={2}>
-                {tab === "animation"
+      {/* ── Inner tabs (horizontal ScrollView — full section names without shrinking) ── */}
+      <View style={[s.tabsWrap, { borderBottomColor: colors.border }]}>
+        <ScrollView
+          ref={tabsScrollRef}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={s.tabsRowContent}
+        >
+          {(["anime", "animation", "spacetoon", "cartoon", "cartoon2"] as TabKey[]).map(tab => {
+            const active = activeTab === tab;
+            const color =
+              tab === "anime"
+                ? "#06B6D4"
+                : tab === "animation"
+                  ? "#10B981"
+                  : tab === "spacetoon"
+                    ? "#38BDF8"
+                    : tab === "cartoon2"
+                      ? "#F59E0B"
+                      : "#7C3AED";
+            const label =
+              tab === "anime"
+                ? "أنمي مدبلج"
+                : tab === "animation"
                   ? "أنيميشن مدبلج"
                   : tab === "spacetoon"
                     ? "سبيستون"
                     : tab === "cartoon2"
                       ? "كرتون مدبلج 2"
-                      : "كرتون مدبلج"}
-              </Text>
-            </Pressable>
-          );
-        })}
+                      : "كرتون مدبلج";
+            return (
+              <Pressable
+                key={tab}
+                testID={`dubbed-tab-${tab}`}
+                onPress={() => handleTab(tab)}
+                focusable={tvMode}
+                style={({ focused }) => [
+                  s.tabBtn,
+                  { backgroundColor: colors.surface, borderColor: colors.border },
+                  active && { borderColor: `${color}88`, backgroundColor: `${color}1A` },
+                  tvMode && tvFocusStyle(focused),
+                ]}
+              >
+                <Text style={[s.tabText, { color: active ? color : colors.textSecondary }]}>
+                  {` ${label} `}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
       </View>
 
       {/* ── Search ── */}
@@ -1458,13 +1847,15 @@ export default function DubbedTabScreen() {
             value={searchQ}
             onChangeText={setSearchQ}
             placeholder={
-              activeTab === "animation"
-                ? "ابحث في الأنيميشن المدبلج والمترجم..."
-                : activeTab === "spacetoon"
-                  ? "ابحث في مسلسلات سبيستون..."
-                  : activeTab === "cartoon2"
-                    ? "ابحث في كرتون مدبلج 2..."
-                    : "ابحث في الكرتون المدبلج والمترجم..."
+              activeTab === "anime"
+                ? "ابحث في الأنمي المدبلج..."
+                : activeTab === "animation"
+                  ? "ابحث في الأنيميشن المدبلج..."
+                  : activeTab === "spacetoon"
+                    ? "ابحث في مسلسلات سبيستون..."
+                    : activeTab === "cartoon2"
+                      ? "ابحث في كرتون مدبلج 2..."
+                      : "ابحث في الكرتون المدبلج..."
             }
             placeholderTextColor={colors.textMuted}
             style={[s.searchInput, { color: colors.textPrimary }]}
@@ -1480,7 +1871,9 @@ export default function DubbedTabScreen() {
       )}
 
       {/* ── Content ── */}
-      {activeTab === "animation" ? (
+      {activeTab === "anime" ? (
+        <DubbedAnimeList key="anime" searchQ={searchQ} />
+      ) : activeTab === "animation" ? (
         <AnimationList key="animation" searchQ={searchQ} />
       ) : activeTab === "spacetoon" ? (
         <SpacetoonList key="spacetoon" searchQ={searchQ} />
@@ -1500,46 +1893,55 @@ export default function DubbedTabScreen() {
 const s = StyleSheet.create({
   screen:       { flex: 1, backgroundColor: "#09090B" },
   header:       {
-    flexDirection: "row", alignItems: "center",
-    paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10,
+    flexDirection: ROW_RTL, alignItems: "center", justifyContent: "space-between", gap: 10,
+    paddingHorizontal: 14, paddingTop: 6, paddingBottom: 6,
     borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)",
   },
-  headerTitle:  { color: "#fff", fontSize: 18, fontFamily: "Cairo_800ExtraBold" },
-  headerSub:    { color: "rgba(255,255,255,0.35)", fontSize: 11, fontFamily: "Cairo_400Regular" },
+  headerTitle:  { color: "#fff", fontSize: 15, fontFamily: "Cairo_800ExtraBold" },
+  headerSub:    { color: "rgba(255,255,255,0.35)", fontSize: 10, fontFamily: "Cairo_400Regular" },
   iconBtn:      {
-    width: 36, height: 36, borderRadius: 10,
+    width: 32, height: 32, borderRadius: 9,
     backgroundColor: "rgba(255,255,255,0.05)",
     borderWidth: 1, borderColor: "rgba(255,255,255,0.08)",
     alignItems: "center", justifyContent: "center",
   },
-  tabsRow: {
-    flexDirection: "row", gap: 6,
-    paddingHorizontal: 12, paddingVertical: 10,
+  tabsWrap: {
     borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)",
+  },
+  tabsRowContent: {
+    flexDirection: "row-reverse",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
   filterBar: {
     flexDirection: "row-reverse", alignItems: "center", justifyContent: "space-between",
-    paddingHorizontal: 14, paddingVertical: 8, gap: 8,
+    paddingHorizontal: 12, paddingVertical: 5, gap: 6,
     borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)",
   },
-  filterGroup: { flexDirection: "row-reverse", alignItems: "center", gap: 6 },
+  filterGroup: { flexDirection: "row-reverse", alignItems: "center", gap: 5 },
   filterChip: {
-    paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, borderWidth: 1,
+    paddingHorizontal: 9, paddingVertical: 3.5, borderRadius: 8, borderWidth: 1,
   },
   sortChip: {
     flexDirection: "row", alignItems: "center", gap: 4,
-    paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, borderWidth: 1,
+    paddingHorizontal: 9, paddingVertical: 3.5, borderRadius: 8, borderWidth: 1,
   },
-  filterChipText: { fontSize: 11, fontFamily: "Cairo_700Bold" },
+  filterChipText: { fontSize: 10.5, fontFamily: "Cairo_700Bold" },
   tabBtn: {
-    flex: 1, paddingVertical: 8, borderRadius: 14, alignItems: "center",
+    paddingVertical: 8, paddingHorizontal: 16, borderRadius: 12, alignItems: "center", justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.04)",
     borderWidth: 1, borderColor: "rgba(255,255,255,0.07)",
+    flexShrink: 0,
   },
   tabText: {
-    fontSize: 11, lineHeight: 16, textAlign: "center",
+    fontSize: 13, lineHeight: 20, textAlign: "center",
     fontFamily: "Cairo_700Bold",
-    color: "rgba(255,255,255,0.38)",
+    color: "rgba(255,255,255,0.45)",
+    includeFontPadding: false,
+    paddingHorizontal: 3,
+    flexShrink: 0,
   },
   searchBox: {
     flexDirection: "row", alignItems: "center",
@@ -1555,7 +1957,7 @@ const s = StyleSheet.create({
 });
 
 const shared = StyleSheet.create({
-  grid:       { padding: 12, paddingBottom: 110, gap: 10 },
+  grid:       { paddingHorizontal: 12, paddingTop: 8, paddingBottom: 110, gap: 10 },
   center:     { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 60 },
   emptyText:  { color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular" },
   retryBtn:   { flexDirection: "row", alignItems: "center", gap: 7, marginTop: 10, paddingHorizontal: 16, paddingVertical: 9, borderRadius: 12, backgroundColor: "rgba(124,58,237,0.15)", borderWidth: 1, borderColor: "rgba(124,58,237,0.3)" },
@@ -1564,7 +1966,7 @@ const shared = StyleSheet.create({
 
 const card = StyleSheet.create({
   wrap:        { borderRadius: 12, overflow: "hidden" },
-  poster:      { aspectRatio: 2 / 3, backgroundColor: "rgba(255,255,255,0.05)", borderRadius: 12, overflow: "hidden" },
+  poster:      { backgroundColor: "rgba(255,255,255,0.05)", borderRadius: 12, overflow: "hidden" },
   placeholder: { flex: 1, alignItems: "center", justifyContent: "center" },
   badge:       { position: "absolute", top: 7, right: 7, maxWidth: "88%", paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6 },
   badgeText:   { color: "#FFFFFF", fontSize: 9, fontFamily: "Cairo_700Bold" },

@@ -107,7 +107,7 @@ export function AppUpdateModal() {
       ? remoteConfig.updateChangelog
       : DEFAULT_CHANGELOG;
   const changelog = rawChangelog.slice(0, 3);
-  const isMandatory = Boolean(hasNewerVersion && (remoteConfig.forceUpdate !== false));
+  const isMandatory = Boolean(hasNewerVersion && remoteConfig.forceUpdate === true);
 
   useEffect(() => {
     const handleManualOpen = () => {

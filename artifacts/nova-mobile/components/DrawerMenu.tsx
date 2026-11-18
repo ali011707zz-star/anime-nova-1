@@ -3,9 +3,9 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
-  Animated, BackHandler, Dimensions, Easing, I18nManager, Image, Modal, Platform,
+  Animated, BackHandler, Dimensions, Easing, I18nManager, Image, InteractionManager, Modal, Platform,
   ScrollView, StyleSheet, Text, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -17,7 +17,7 @@ import { isTvDevice, toggleTvMode, tvFocusStyle, TvPressable as Pressable, useTv
 import { useWindowDimensions } from "react-native";
 
 const { width: W } = Dimensions.get("window");
-const DRAWER_W = Math.min(W * 0.80, 320);
+const DRAWER_W = Math.min(W * 0.84, 315);
 const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
 const AUTH_KEY = "nova-mobile-user";
 const PROFILE_OVERRIDE_KEY = "nova-profile-override";
@@ -52,7 +52,7 @@ const NAV_MAIN: NavItem[] = [
   { icon: "book",            label: "المانجا",                route: "/manga",              color: "#10b981" },
   { icon: "stats-chart",     label: "الإحصائيات العالمية",   route: "/stats",              color: "#0ea5e9" },
   { icon: "sparkles",        label: "قادم قريباً",            route: "/upcoming",           color: "#ec4899" },
-  { icon: "tv",              label: "كرتون مدبلج ومترجم",     route: "/aw-dubbed?tab=cartoon", color: "#10b981" },
+  { icon: "tv",              label: "الأنمي والكرتون المدبلج", route: "/aw-dubbed?tab=anime", badge: "جديد", color: "#06b6d4" },
   { icon: "download",        label: "تنزيلاتي",              route: "/(tabs)/downloads",   color: "#8B5CF6" },
   { icon: "calendar",        label: "جدول البث الأسبوعي",    route: "/schedule",           color: "#10b981" },
 ];
@@ -83,10 +83,10 @@ export function DrawerMenu({ visible, onClose }: Props) {
   const { width: winW, height: winH } = useWindowDimensions();
   const tvMode = isTvDevice(winW, winH);
   const drawerWidth = tvMode && winW >= 700
-    ? Math.min(winW * 0.30, 290)
+    ? Math.min(winW * 0.32, 310)
     : winW >= 600
-      ? Math.min(winW * 0.36, 280)
-      : Math.min(winW * 0.72, 265);
+      ? Math.min(winW * 0.40, 310)
+      : Math.min(winW * 0.82, 315);
   const topPad = Platform.OS === "web" ? 0 : insets.top;
   const { watchHistory, favorites, theme, currentUser } = useApp();
   const colors = useColors();
@@ -115,7 +115,8 @@ export function DrawerMenu({ visible, onClose }: Props) {
   React.useEffect(() => {
     if (!visible) return;
     let isMounted = true;
-    const timer = setTimeout(async () => {
+    const task = InteractionManager.runAfterInteractions(() => {
+      void (async () => {
       let localUser: any = null;
       let overrideData: any = null;
       try {
@@ -155,10 +156,11 @@ export function DrawerMenu({ visible, onClose }: Props) {
           }));
         }
       } catch {}
-    }, 220);
+      })();
+    });
     return () => {
       isMounted = false;
-      clearTimeout(timer);
+      task.cancel();
     };
   }, [visible, currentUser]);
 
@@ -172,25 +174,53 @@ export function DrawerMenu({ visible, onClose }: Props) {
       ? "@anime_nova"
       : null;
 
-  const slideX = useRef(new Animated.Value(drawerWidth)).current;
-  const opacity = useRef(new Animated.Value(0)).current;
+  const [mounted, setMounted] = useState(visible);
+  const slideX = useRef(new Animated.Value(visible ? 0 : drawerWidth)).current;
+  const opacity = useRef(new Animated.Value(visible ? 1 : 0)).current;
 
   useEffect(() => {
     if (visible) {
+      setMounted(true);
       slideX.setValue(drawerWidth);
+      opacity.setValue(0);
+      const raf = requestAnimationFrame(() => {
+        Animated.parallel([
+          Animated.spring(slideX, {
+            toValue: 0,
+            damping: 24,
+            stiffness: 260,
+            mass: 0.85,
+            useNativeDriver: true,
+          }),
+          Animated.timing(opacity, {
+            toValue: 1,
+            duration: 210,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true,
+          }),
+        ]).start();
+      });
+      return () => cancelAnimationFrame(raf);
+    }
+    if (mounted) {
       Animated.parallel([
         Animated.timing(slideX, {
-          toValue: 0,
-          duration: 165,
-          easing: Easing.out(Easing.cubic),
+          toValue: drawerWidth,
+          duration: 195,
+          easing: Easing.in(Easing.cubic),
           useNativeDriver: true,
         }),
-        Animated.timing(opacity, { toValue: 1, duration: 130, useNativeDriver: true }),
-      ]).start();
-    } else {
-      opacity.setValue(0);
+        Animated.timing(opacity, {
+          toValue: 0,
+          duration: 170,
+          easing: Easing.in(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]).start(({ finished }) => {
+        if (finished) setMounted(false);
+      });
     }
-  }, [drawerWidth, opacity, slideX, visible]);
+  }, [drawerWidth, mounted, opacity, slideX, visible]);
 
   useEffect(() => {
     if (!visible || Platform.OS !== "android") return;
@@ -206,7 +236,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
     requestAnimationFrame(() => router.push(route as any));
   }
 
-  if (!visible) return null;
+  if (!mounted) return null;
 
   const content = (
     <View style={[StyleSheet.absoluteFillObject, { zIndex: 9999, elevation: 9999 }]}>
@@ -216,8 +246,20 @@ export function DrawerMenu({ visible, onClose }: Props) {
       </Animated.View>
 
       {/* Drawer panel — slides from RIGHT (RTL) */}
-      <Animated.View style={[s.drawer, tvMode && s.tvDrawer, { width: drawerWidth, transform: [{ translateX: slideX }], paddingTop: topPad, backgroundColor: colors.surface, borderLeftColor: colors.border }]}>
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
+      <Animated.View
+        renderToHardwareTextureAndroid={true}
+        shouldRasterizeIOS={true}
+        style={[s.drawer, tvMode && s.tvDrawer, { width: drawerWidth, transform: [{ translateX: slideX }], paddingTop: topPad, backgroundColor: colors.surface, borderLeftColor: colors.border }]}
+      >
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          bounces={true}
+          overScrollMode="always"
+          decelerationRate="normal"
+          scrollEventThrottle={16}
+          nestedScrollEnabled={true}
+          contentContainerStyle={{ paddingBottom: insets.bottom + 36, paddingTop: 4 }}
+        >
 
           {/* ── Logo header (matches Home screen | ANIME NOVA logo) ── */}
           <View style={[s.logoRow, tvMode && s.tvLogoRow, { borderBottomColor: colors.border, flexDirection: ROW_RTL, justifyContent: "space-between" }]}>
@@ -230,14 +272,20 @@ export function DrawerMenu({ visible, onClose }: Props) {
                 <Text style={[s.logoSub, tvMode && s.tvLogoSub, { color: colors.textMuted }]}>منصة الأنمي العربية</Text>
               </View>
             </View>
-            <Pressable onPress={onClose} focusable={tvMode}
+            <Pressable
+              onPress={onClose}
+              focusable={tvMode}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel="إغلاق القائمة"
               style={({ focused }) => [
                 s.closeBtn,
                 tvMode && s.tvCloseBtn,
-                { backgroundColor: colors.surfaceElevated, borderWidth: 2, borderColor: focused ? "#FACC15" : "transparent" },
+                { backgroundColor: colors.surfaceElevated, borderWidth: 1.5, borderColor: focused ? "#FACC15" : colors.border },
                 tvMode && tvFocusStyle(focused),
-              ]}>
-              <Ionicons name="close" size={tvMode ? 17 : 15} color={colors.textMuted} />
+              ]}
+            >
+              <Ionicons name="close" size={tvMode ? 26 : 24} color={colors.textPrimary} />
             </Pressable>
           </View>
 
@@ -396,7 +444,7 @@ function SectionHeading({ label, colors }: {
   );
 }
 
-function DrawerItem({ item, onPress, tvMode, hasTVPreferredFocus = false, colors, badge }: {
+const DrawerItem = React.memo(function DrawerItem({ item, onPress, tvMode, hasTVPreferredFocus = false, colors, badge }: {
   item: NavItem;
   onPress: () => void;
   tvMode: boolean;
@@ -422,7 +470,7 @@ function DrawerItem({ item, onPress, tvMode, hasTVPreferredFocus = false, colors
       ]}
     >
       <View style={[s.navIcon, tvMode && s.tvNavIcon, { backgroundColor: (item.color || "#8B5CF6") + "18" }]}>
-        <Ionicons name={item.icon} size={tvMode ? 16 : 15} color={item.color || "#8B5CF6"} />
+        <Ionicons name={item.icon} size={tvMode ? 18 : 17} color={item.color || "#8B5CF6"} />
       </View>
       <Text style={[s.navLabel, tvMode && s.tvNavLabel, { color: colors.textPrimary }]} numberOfLines={1}>{item.label}</Text>
       {badgeLabel && (
@@ -435,7 +483,7 @@ function DrawerItem({ item, onPress, tvMode, hasTVPreferredFocus = false, colors
       )}
     </Pressable>
   );
-}
+});
 
 const s = StyleSheet.create({
   backdrop: {
@@ -474,15 +522,15 @@ const s = StyleSheet.create({
   logoSub: { fontSize: 8.5, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.3)", marginTop: -2, textAlign: "right" },
   tvLogoSub: { fontSize: 9.5, marginTop: -1 },
   closeBtn: {
-    width: 28, height: 28, borderRadius: 14,
+    width: 44, height: 44, borderRadius: 22,
     alignItems: "center", justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.05)",
+    backgroundColor: "rgba(255,255,255,0.06)",
   },
-  tvCloseBtn: { width: 32, height: 32, borderRadius: 10 },
+  tvCloseBtn: { width: 48, height: 48, borderRadius: 14 },
   userCard: {
-    marginHorizontal: 10,
+    marginHorizontal: 12,
     marginTop: 10,
-    marginBottom: 4,
+    marginBottom: 10,
     borderRadius: 14,
     overflow: "hidden",
     borderWidth: 1.5,
@@ -572,10 +620,10 @@ const s = StyleSheet.create({
   },
   sectionHeading: {
     flexDirection: "row", alignItems: "center", gap: 8,
-    paddingHorizontal: 12, paddingTop: 9, paddingBottom: 4,
+    paddingHorizontal: 14, paddingTop: 16, paddingBottom: 8,
   },
   sectionLabel: {
-    fontSize: 8.5, fontFamily: "Cairo_700Bold",
+    fontSize: 9, fontFamily: "Cairo_700Bold",
     textTransform: "uppercase",
     letterSpacing: 1,
   },
@@ -583,19 +631,19 @@ const s = StyleSheet.create({
     flex: 1, height: StyleSheet.hairlineWidth,
   },
   navItem: {
-    flexDirection: "row", alignItems: "center", gap: 9,
-    paddingHorizontal: 9, paddingVertical: 7,
-    marginHorizontal: 10, marginBottom: 4,
-    borderRadius: 11, borderWidth: 1,
+    flexDirection: "row", alignItems: "center", gap: 12,
+    paddingHorizontal: 14, paddingVertical: 11,
+    marginHorizontal: 12, marginBottom: 9,
+    borderRadius: 14, borderWidth: 1,
   },
-  tvNavItem: { paddingHorizontal: 11, paddingVertical: 8, marginHorizontal: 12, marginBottom: 5, borderRadius: 12, gap: 10 },
+  tvNavItem: { paddingHorizontal: 14, paddingVertical: 11, marginHorizontal: 12, marginBottom: 10, borderRadius: 14, gap: 12 },
   navIcon: {
-    width: 30, height: 30, borderRadius: 8,
+    width: 36, height: 36, borderRadius: 11,
     alignItems: "center", justifyContent: "center",
   },
-  tvNavIcon: { width: 32, height: 32, borderRadius: 9 },
-  navLabel: { flex: 1, fontSize: 11.5, fontFamily: "Cairo_700Bold" },
-  tvNavLabel: { fontSize: 12.5 },
+  tvNavIcon: { width: 38, height: 38, borderRadius: 11 },
+  navLabel: { flex: 1, fontSize: 13.5, fontFamily: "Cairo_700Bold" },
+  tvNavLabel: { fontSize: 14 },
   badge: {
     minWidth: 22, height: 20, paddingHorizontal: 5, borderRadius: 10,
     alignItems: "center", justifyContent: "center",

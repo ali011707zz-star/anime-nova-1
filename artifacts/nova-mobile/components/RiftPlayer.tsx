@@ -13,7 +13,7 @@ import * as Brightness from "expo-brightness";
 import { VolumeManager } from "../lib/volume-manager";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator, Alert, Animated, AppState, DeviceEventEmitter, Dimensions, Easing, I18nManager, Linking, Platform,
+  ActivityIndicator, Alert, Animated, AppState, DeviceEventEmitter, Dimensions, Easing, I18nManager, InteractionManager, Linking, Platform,
   BackHandler, findNodeHandle, PanResponder, ScrollView, StyleSheet, Text, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -736,9 +736,31 @@ function ExpoRiftPlayer({
     && dismissedSkipRanges.outro;
 
   /* ─── Animated values ─── */
+  const entryFadeAnim     = useRef(new Animated.Value(0)).current;
+  const entryScaleAnim    = useRef(new Animated.Value(0.985)).current;
   const controlsOpacity   = useRef(new Animated.Value(1)).current;
   const dblTapLeft        = useRef(new Animated.Value(0)).current;
   const dblTapRight       = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => {
+      Animated.parallel([
+        Animated.timing(entryFadeAnim, {
+          toValue: 1,
+          duration: 220,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(entryScaleAnim, {
+          toValue: 1,
+          duration: 220,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]).start();
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [entryFadeAnim, entryScaleAnim]);
 
   /* ─── Refs ─── */
   const hideTimer         = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1018,6 +1040,7 @@ function ExpoRiftPlayer({
 
   /* ─── Load SubSettings + subOffset + autoPlay pref from storage ─── */
   useEffect(() => {
+    const task = InteractionManager.runAfterInteractions(() => {
     AsyncStorage.getItem("sub-settings-v1").then(raw => {
       if (!aliveRef.current) return; // لا setState بعد unmount
       if (raw) {
@@ -1033,6 +1056,8 @@ function ExpoRiftPlayer({
     }).catch(() => {});
     /* sub-offset intentionally NOT restored from storage — resets to 0 on each session
        so X-TIMESTAMP-MAP auto-sync is always fresh without manual intervention */
+    });
+    return () => task.cancel();
   }, []);
 
   const toggleAutoPlay = useCallback(() => {
@@ -3058,6 +3083,14 @@ function ExpoRiftPlayer({
   return (
     <View ref={rootViewRef} style={[s.root, isFlipped && { transform: [{ rotate: "180deg" }] }]}>
       <StatusBar hidden />
+      <Animated.View
+        renderToHardwareTextureAndroid={true}
+        shouldRasterizeIOS={true}
+        style={[
+          StyleSheet.absoluteFill,
+          { opacity: entryFadeAnim, transform: [{ scale: entryScaleAnim }] },
+        ]}
+      >
       {/* ── Video ── */}
       <VideoView
         player={player}
@@ -4246,7 +4279,7 @@ function ExpoRiftPlayer({
           )}
         </View>
       )}
-
+      </Animated.View>
     </View>
   );
 }

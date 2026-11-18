@@ -147,13 +147,13 @@ function ActiveDownloadCard({
           <View style={{ flex: 1 }}>
             <Text style={s.activeTitle} numberOfLines={1}>{item.title}</Text>
             <Text style={s.activeEp} numberOfLines={1}>
-              الحلقة {item.ep} · {item.quality || "جودة غير محددة"} · {formatFileSize(item.totalBytes || item.bytesWritten)}
+              الحلقة {item.ep} · {item.quality || "جودة غير محددة"} · {item.totalBytes > 0 ? formatFileSize(item.totalBytes) : item.bytesWritten > 0 ? formatFileSize(item.bytesWritten) : "جارٍ التجهيز"}
             </Text>
           </View>
           {/* Percentage badge */}
           <View style={[s.activePctBadge, isError && s.activePctBadgeError]}>
             <Text style={[s.activePctText, isError && { color: colors.destructive }]}>
-           {isError ? "خطأ" : isPaused ? "متوقف" : `${pct}%`}
+           {isError ? "خطأ" : isPaused ? "متوقف" : `${Math.max(1, pct)}%`}
             </Text>
           </View>
         </View>
@@ -162,7 +162,7 @@ function ActiveDownloadCard({
         <View style={s.progressTrack}>
           <View style={[
             s.progressFill,
-            { width: `${isError ? 100 : pct}%` as any },
+            { width: `${isError ? 100 : Math.max(isPaused ? pct : 2, pct)}%` as any },
             isError && { backgroundColor: colors.destructive },
           ]} />
         </View>
@@ -171,9 +171,11 @@ function ActiveDownloadCard({
           <Text style={s.activeStatus}>
             {item.totalBytes > 0
               ? `${formatFileSize(item.bytesWritten)} من ${formatFileSize(item.totalBytes)}`
-              : "جارٍ حساب حجم الملف"}
+              : item.bytesWritten > 0
+                ? `تم تنزيل ${formatFileSize(item.bytesWritten)} · جارٍ التنزيل...`
+                : "جارٍ تجهيز وتحويل الحلقة للتنزيل..."}
           </Text>
-          <Text style={s.activeStatus}>{isError ? "لم يكتمل" : `${pct}%`}</Text>
+          <Text style={s.activeStatus}>{isError ? "لم يكتمل" : `${Math.max(1, pct)}%`}</Text>
         </View>
 
         <Text style={[s.activeStatus, isError && { color: colors.destructive }]}>
@@ -182,7 +184,7 @@ function ActiveDownloadCard({
               : isPaused
               ? "متوقف مؤقتاً — اضغط ▶ للاستئناف"
                 : canPause
-                  ? "يعمل في الخلفية..."
+                  ? "يجري التنزيل في الخلفية..."
                   : "تنزيل نظامي — يستمر حتى بعد إغلاق التطبيق"}
         </Text>
       </View>

@@ -194,6 +194,11 @@ async function loadQualifiedStardimaSection(
 
 // Public catalog endpoints. These return provider/server page URLs, never
 // resolved MP4/HLS URLs. Playback is still resolved by the existing extractors.
+import { existsSync as _scExists, mkdirSync as _scMkdir, readFileSync as _scRead, writeFileSync as _scWrite } from "node:fs";
+import { join as _scJoin } from "node:path";
+const TMDB_POSTER_CACHE_DIR = "/opt/nova-cache/tmdb-posters";
+try { _scMkdir(TMDB_POSTER_CACHE_DIR, { recursive: true }); } catch {}
+
 router.get("/source-catalog/tmdb-poster/:size/:file", async (req: Request, res: Response) => {
   const size = String(req.params.size ?? "");
   const file = String(req.params.file ?? "");
@@ -201,10 +206,23 @@ router.get("/source-catalog/tmdb-poster/:size/:file", async (req: Request, res: 
     return void res.status(400).send("invalid poster path");
   }
 
+  const ext = file.toLowerCase().endsWith(".png") ? "image/png" : file.toLowerCase().endsWith(".webp") ? "image/webp" : "image/jpeg";
+  const cacheFile = _scJoin(TMDB_POSTER_CACHE_DIR, `${size}_${file}`);
+
   try {
+    if (_scExists(cacheFile)) {
+      const cached = _scRead(cacheFile);
+      if (cached.length > 100) {
+        res.setHeader("Content-Type", ext);
+        res.setHeader("Cache-Control", "public, max-age=2592000, immutable");
+        res.setHeader("X-Content-Type-Options", "nosniff");
+        return void res.send(cached);
+      }
+    }
+
     const upstream = await fetch(`https://image.tmdb.org/t/p/${size}/${file}`, {
       headers: {
-        Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+        Accept: "image/jpeg,image/png,image/webp,image/*,*/*;q=0.8",
         "User-Agent": "NovaAnime/1.0",
       },
       signal: AbortSignal.timeout(10_000),
@@ -222,6 +240,8 @@ router.get("/source-catalog/tmdb-poster/:size/:file", async (req: Request, res: 
     if (!image.length || image.length > 8 * 1024 * 1024) {
       return void res.status(502).send("invalid poster size");
     }
+
+    try { _scWrite(cacheFile, image); } catch {}
 
     res.setHeader("Content-Type", contentType);
     res.setHeader("Cache-Control", "public, max-age=2592000, immutable");

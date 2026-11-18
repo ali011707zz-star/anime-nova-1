@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useFocusEffect, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
-import { FlatList, Image, useWindowDimensions } from "react-native";
+import { ActivityIndicator, FlatList, Image, ScrollView, useWindowDimensions } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
@@ -30,9 +30,9 @@ const SEASON_AR: Record<string, string> = {
 
 import { historyRoute, useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvListFocusScroll, useTvMetrics } from "@/utils/tv";
 import { useTvFocusMemory } from "@/utils/tvFocus";
-import { getPosterUri, getTvPosterUri } from "@/utils/media";
+import { getPosterUri, getTvPosterUri, proxyPosterUrl } from "@/utils/media";
 import { getKnownArabicAnimeTitle } from "@/utils/arabicAnimeTitles";
 import {
   catalogBadge,
@@ -67,8 +67,18 @@ export default function HomeScreen() {
   const isTvLayout = isTvDevice(width, height);
   const { size: scaleSize } = useTvMetrics();
   const { ready } = useTvFocusMemory("home");
-  const stardimaAnimation = useDubbedCatalogFeed("animation", "");
-  const stardimaCartoon = useDubbedCatalogFeed("cartoon", "");
+  const homeListRef = useRef<FlatList<any> | null>(null);
+  const continueListRef = useRef<FlatList<any> | null>(null);
+  const todayEpsListRef = useRef<FlatList<any> | null>(null);
+  const dubbedRailListRef = useRef<FlatList<any> | null>(null);
+  const { scrollToFocusedIndex: scrollHomeSectionIntoView } = useTvListFocusScroll(homeListRef, 0.22);
+  const { scrollToFocusedIndex: scrollContinueIntoView } = useTvListFocusScroll(continueListRef, 0.35);
+  const { scrollToFocusedIndex: scrollTodayEpsIntoView } = useTvListFocusScroll(todayEpsListRef, 0.35);
+  const { scrollToFocusedIndex: scrollDubbedRailIntoView } = useTvListFocusScroll(dubbedRailListRef, 0.35);
+  type DubbedHomeTab = "anime" | "animation" | "spacetoon" | "cartoon" | "cartoon2";
+  const [activeDubbedTab, setActiveDubbedTab] = useState<DubbedHomeTab>("anime");
+  const stardimaAnimation = useDubbedCatalogFeed("animation", "", activeDubbedTab === "animation");
+  const stardimaCartoon = useDubbedCatalogFeed("cartoon", "", activeDubbedTab === "cartoon");
 
   const { season, year } = getCurrentSeason();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
@@ -135,83 +145,98 @@ export default function HomeScreen() {
 
   const isLoading = loadingT || loadingP || loadingA;
 
-  /* ── Dubbed cartoon catalog ── */
+  /* ── القسم الموحد للأعمال المدبلجة (تحميل كسول حسب التبويب المختار) ── */
+  const [animezidHomeItems, setAnimezidHomeItems] = useState<any[]>([]);
   const [dubbedSeries, setDubbedSeries] = useState<any[]>([]);
-  const dubbedRequestRef = useRef<AbortController | null>(null);
-  const dubbedLastFetchedRef = useRef(0);
-  const refreshDubbed = useCallback(async (forceRefresh = false) => {
-    if (!forceRefresh && Date.now() - dubbedLastFetchedRef.current < 5 * 60 * 1000) return;
-    dubbedRequestRef.current?.abort();
+  const [awDubbedSeries, setAwDubbedSeries] = useState<any[]>([]);
+  const [cartoon2HomeItems, setCartoon2HomeItems] = useState<any[]>([]);
+  const [spacetoonHomeItems, setSpacetoonHomeItems] = useState<any[]>([]);
+  const [dubbedTabLoading, setDubbedTabLoading] = useState(false);
+  const dubbedFetchedAtRef = useRef<Record<DubbedHomeTab, number>>({
+    anime: 0,
+    animation: 0,
+    spacetoon: 0,
+    cartoon: 0,
+    cartoon2: 0,
+  });
+  const dubbedReqRef = useRef<AbortController | null>(null);
+
+  const fetchActiveDubbedTab = useCallback(async (tab: DubbedHomeTab, forceRefresh = false) => {
+    const lastFetched = dubbedFetchedAtRef.current[tab] || 0;
+    if (!forceRefresh && lastFetched > 0 && Date.now() - lastFetched < 5 * 60 * 1000) return;
+
+    dubbedReqRef.current?.abort();
     const controller = new AbortController();
-    dubbedRequestRef.current = controller;
-    const refresh = forceRefresh ? "&refresh=1" : "";
-    fetch(`${getBaseUrl()}/api/dubbed/catalog?page=1${refresh}`, {
-      cache: forceRefresh ? "no-store" : "default",
-      signal: controller.signal,
-    })
-      .then(r => r.json())
-      .then(d => {
+    dubbedReqRef.current = controller;
+    const base = getBaseUrl();
+
+    const hasCached = lastFetched > 0;
+    if (!hasCached) setDubbedTabLoading(true);
+
+    try {
+      if (tab === "anime") {
+        const res = await fetch(`${base}/api/dubbed/animezid/catalog?page=1&sort=newest`, {
+          cache: forceRefresh ? "no-store" : "default",
+          signal: controller.signal,
+        });
+        const data = await res.json();
+        if (!controller.signal.aborted && Array.isArray(data?.results)) {
+          setAnimezidHomeItems(data.results.slice(0, 14));
+          dubbedFetchedAtRef.current.anime = Date.now();
+        }
+      } else if (tab === "animation") {
+        const res = await fetch(`${base}/api/aw-dubbed/catalog?page=1`, { signal: controller.signal });
+        const data = await res.json();
+        if (!controller.signal.aborted && Array.isArray(data?.results)) {
+          setAwDubbedSeries(data.results);
+          dubbedFetchedAtRef.current.animation = Date.now();
+        }
+      } else if (tab === "spacetoon") {
+        const res = await fetch(`${base}/api/dubbed/carateen/catalog?page=1&limit=18&provider=sp`, {
+          signal: controller.signal,
+        });
+        const data = await res.json();
+        if (!controller.signal.aborted && Array.isArray(data?.results)) {
+          setSpacetoonHomeItems(data.results.slice(0, 14));
+          dubbedFetchedAtRef.current.spacetoon = Date.now();
+        }
+      } else if (tab === "cartoon") {
+        const refresh = forceRefresh ? "&refresh=1" : "";
+        const res = await fetch(`${base}/api/dubbed/catalog?page=1${refresh}`, {
+          cache: forceRefresh ? "no-store" : "default",
+          signal: controller.signal,
+        });
+        const data = await res.json();
         if (!controller.signal.aborted) {
-          const results = d.results || d.items || d.series || [];
+          const results = data.results || data.items || data.series || [];
           setDubbedSeries(
             (Array.isArray(results) ? results : [])
               .filter(isLegacyCartoonEntry)
               .slice(0, 14),
           );
-          dubbedLastFetchedRef.current = Date.now();
+          dubbedFetchedAtRef.current.cartoon = Date.now();
         }
-      })
-      .catch((e) => { if (e?.name !== "AbortError") console.warn("[Home] dubbed/catalog fetch error"); });
-  }, []);
-  useFocusEffect(useCallback(() => {
-    void refreshDubbed();
-    return () => dubbedRequestRef.current?.abort();
-  }, [refreshDubbed]));
-
-  /* ── أنيميشن مدبلج (aw-dubbed) catalog ── */
-  const [awDubbedSeries, setAwDubbedSeries] = useState<any[]>([]);
-  useEffect(() => {
-    const ctrl = new AbortController();
-    fetch(`${getBaseUrl()}/api/aw-dubbed/catalog?page=1`, { signal: ctrl.signal })
-      .then(r => r.json())
-      .then(d => { if (!ctrl.signal.aborted) setAwDubbedSeries(d.results || []); })
-      .catch((e) => { if (e?.name !== "AbortError") console.warn("[Home] aw-dubbed/catalog fetch error"); });
-    return () => ctrl.abort();
+      } else if (tab === "cartoon2") {
+        const res = await fetch(`${base}/api/dubbed/sd2/catalog?page=1&limit=14`, {
+          signal: controller.signal,
+        });
+        const data = await res.json();
+        if (!controller.signal.aborted && Array.isArray(data?.results)) {
+          setCartoon2HomeItems(data.results.slice(0, 14));
+          dubbedFetchedAtRef.current.cartoon2 = Date.now();
+        }
+      }
+    } catch (e: any) {
+      if (e?.name !== "AbortError") console.warn(`[Home] dubbed(${tab}) fetch error`);
+    } finally {
+      if (!controller.signal.aborted) setDubbedTabLoading(false);
+    }
   }, []);
 
-  /* ── كرتون مدبلج 2 (sd2) catalog ── */
-  const [cartoon2HomeItems, setCartoon2HomeItems] = useState<any[]>([]);
   useEffect(() => {
-    const ctrl = new AbortController();
-    fetch(`${getBaseUrl()}/api/dubbed/sd2/catalog?page=1&limit=14`, { signal: ctrl.signal })
-      .then((r) => r.json())
-      .then((d) => {
-        if (!ctrl.signal.aborted && Array.isArray(d.results)) {
-          setCartoon2HomeItems(d.results.slice(0, 14));
-        }
-      })
-      .catch((e) => {
-        if (e?.name !== "AbortError") console.warn("[Home] cartoon2 catalog fetch error");
-      });
-    return () => ctrl.abort();
-  }, []);
-
-  /* ── سبيستون مدبلج (spacetoon) catalog ── */
-  const [spacetoonHomeItems, setSpacetoonHomeItems] = useState<any[]>([]);
-  useEffect(() => {
-    const ctrl = new AbortController();
-    fetch(`${getBaseUrl()}/api/dubbed/carateen/catalog?page=1&limit=18&provider=sp`, { signal: ctrl.signal })
-      .then((r) => r.json())
-      .then((d) => {
-        if (!ctrl.signal.aborted && Array.isArray(d.results)) {
-          setSpacetoonHomeItems(d.results.slice(0, 14));
-        }
-      })
-      .catch((e) => {
-        if (e?.name !== "AbortError") console.warn("[Home] spacetoon catalog fetch error");
-      });
-    return () => ctrl.abort();
-  }, []);
+    void fetchActiveDubbedTab(activeDubbedTab);
+    return () => dubbedReqRef.current?.abort();
+  }, [activeDubbedTab, fetchActiveDubbedTab]);
 
   /* ── Manhwa (Azorafly) & Manga (MangaDar) from Backend (Hidden in TV mode) ── */
   const { data: manhwaData, refetch: refetchManhwa } = useQuery({
@@ -308,17 +333,14 @@ export default function HomeScreen() {
     await Promise.all([
       refetchT(), refetchP(), refetchA(), refetchM(), refetchIsekai(),
       refetchManhwa(), refetchJpManga(),
-      refreshDubbed(true),
+      fetchActiveDubbedTab(activeDubbedTab, true),
     ]);
   };
 
   type HomeSectionItem =
     | { kind: "continue"; key: string }
     | { kind: "todayEps"; key: string }
-    | { kind: "animationHome"; key: string }
-    | { kind: "dubbedHome"; key: string }
-    | { kind: "spacetoonHome"; key: string }
-    | { kind: "cartoon2Home"; key: string }
+    | { kind: "dubbedUnified"; key: string }
     | { kind: "manhwa"; key: string }
     | { kind: "manga"; key: string }
     | { kind: "anilist"; key: string; title: string; items: AnilistMedia[]; onSeeAll: () => void };
@@ -327,10 +349,7 @@ export default function HomeScreen() {
     const sections: HomeSectionItem[] = [];
     if (recentHistory.length > 0) sections.push({ kind: "continue", key: "continue" });
     if (todayEps.length > 0 || todayChecking) sections.push({ kind: "todayEps", key: "todayEps" });
-    if (animationHomeRows.length > 0) sections.push({ kind: "animationHome", key: "animationHome" });
-    if (dubbedHomeRows.length > 0) sections.push({ kind: "dubbedHome", key: "dubbedHome" });
-    if (spacetoonHomeItems.length > 0) sections.push({ kind: "spacetoonHome", key: "spacetoonHome" });
-    if (cartoon2HomeItems.length > 0) sections.push({ kind: "cartoon2Home", key: "cartoon2Home" });
+    sections.push({ kind: "dubbedUnified", key: "dubbedUnified" });
     if (!isTvLayout && manhwaItems.length > 0) sections.push({ kind: "manhwa", key: "manhwa" });
     if (!isTvLayout && mangaItems.length > 0) sections.push({ kind: "manga", key: "manga" });
     if (!isLoading) {
@@ -370,10 +389,6 @@ export default function HomeScreen() {
     recentHistory.length,
     todayEps.length,
     todayChecking,
-    animationHomeRows.length,
-    dubbedHomeRows.length,
-    spacetoonHomeItems.length,
-    cartoon2HomeItems.length,
     isTvLayout,
     manhwaItems.length,
     mangaItems.length,
@@ -385,9 +400,19 @@ export default function HomeScreen() {
     router,
   ]);
 
-  const renderHomeSection = ({ item: section }: { item: HomeSectionItem; index: number }) => {
+  const railStride = railCardWidth + railGap;
+  const getRailItemLayout = useCallback(
+    (_data: ArrayLike<any> | null | undefined, index: number) => ({
+      length: railCardWidth,
+      offset: railStride * index,
+      index,
+    }),
+    [railCardWidth, railStride],
+  );
+
+  const renderHomeSection = ({ item: section, index: sectionIndex }: { item: HomeSectionItem; index: number }) => {
     const sectionFocusable = true;
-    const handleSectionFocus = undefined;
+    const handleSectionFocus = isTvLayout ? () => scrollHomeSectionIntoView(sectionIndex) : undefined;
     if (section.kind === "anilist") {
       return (
         <SectionRow
@@ -422,6 +447,7 @@ export default function HomeScreen() {
               </View>
             </SectionHeader>
             <FlatList
+              ref={continueListRef}
               data={recentHistory}
               horizontal
                keyExtractor={(h) => `${h.contentKind || "anime"}-${h.contentKey || h.animeId}-${h.season || 1}-${h.ep}`}
@@ -430,7 +456,7 @@ export default function HomeScreen() {
                  paddingHorizontal: isTvLayout ? railSidePadding : scaleSize(12, 24),
                  gap: isTvLayout ? railGap : scaleSize(7, 12),
                }}
-              renderItem={({ item: h }) => {
+              renderItem={({ item: h, index: hIdx }) => {
                 const hasPlaybackPosition =
                   typeof h.position === "number" &&
                   typeof h.duration === "number" &&
@@ -457,7 +483,10 @@ export default function HomeScreen() {
                 return (
                   <Pressable
                     onPress={() => router.push(historyRoute(h) as any)}
-                    onFocus={handleSectionFocus}
+                    onFocus={() => {
+                      handleSectionFocus?.();
+                      if (isTvLayout) scrollContinueIntoView(hIdx);
+                    }}
                     focusable={isTvLayout && sectionFocusable}
                     style={({ focused }) => [
                       styles.historyCard,
@@ -476,7 +505,7 @@ export default function HomeScreen() {
                       style={styles.historyImg}
                       resizeMode="cover"
                       resizeMethod="resize"
-                      fadeDuration={isTvLayout ? 0 : 100}
+                      fadeDuration={0}
                     />
                     <View
                       style={[
@@ -552,6 +581,9 @@ export default function HomeScreen() {
                         />
                       </View>
                     </LinearGradient>
+                    {isTvLayout && (
+                      <View pointerEvents="none" style={styles.tvCardFocusHidden} />
+                    )}
                   </Pressable>
                 );
               }}
@@ -572,7 +604,8 @@ export default function HomeScreen() {
               onFocus={handleSectionFocus}
             >
               <View style={styles.sectionRightRow}>
-                <Text style={[styles.sectionTitle, isTvLayout && styles.tvSectionTitle, { color: colors.text }]}>أحدث الحلقات 📺</Text>
+                <Text style={{ fontSize: isTvLayout ? 22 : 15 }}>📺</Text>
+                <Text style={[styles.sectionTitle, isTvLayout && styles.tvSectionTitle, { color: colors.text }]}>أحدث الحلقات</Text>
                 <View style={[styles.continueAccent, { backgroundColor: colors.homeAccent || "#06b6d4" }]} />
               </View>
             </SectionHeader>
@@ -580,17 +613,22 @@ export default function HomeScreen() {
                <SkeletonRow />
             ) : (
               <FlatList
+                ref={todayEpsListRef}
                 data={todayEps}
                 horizontal
+                getItemLayout={getRailItemLayout}
                 keyExtractor={(ep, idx) => `${ep.source}-${ep.anslayerId || ep.awAnimeId || ep.animeId || ep.name || "ep"}-${ep.episode}-${idx}`}
                 showsHorizontalScrollIndicator={false}
                  contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
-                renderItem={({ item: ep }) => (
+                renderItem={({ item: ep, index: epIdx }) => (
                   /* بطاقة أحدث الحلقات تمرر anslayerId كمرجع احتياطي لـ AS،
                      لكن صفحة المشاهدة تفحص كل المصادر المتاحة مثل الويب. */
                    <Pressable
                       onPress={() => router.push(`/watch?anime=${ep.animeId || 0}&anilistId=${ep.anilistId || ep.animeId || 0}&ep=${ep.episode}&totalEps=${ep.episode}&title=${encodeURIComponent(ep.romaji || ep.name || "")}&english=${encodeURIComponent(ep.english || "")}&native=${encodeURIComponent(ep.native || "")}&titles=${encodeURIComponent(JSON.stringify(ep.titleVariants || []))}&cover=${encodeURIComponent(ep.cover || "")}&titleAr=${encodeURIComponent(ep.titleAr || "")}&anslayerId=${ep.anslayerId}&awAnimeId=${encodeURIComponent(ep.awAnimeId || "")}&site=${encodeURIComponent(ep.source)}&fromLatest=1&latestSource=${encodeURIComponent(ep.source)}` as any)}
-                      onFocus={handleSectionFocus}
+                      onFocus={() => {
+                        handleSectionFocus?.();
+                        if (isTvLayout) scrollTodayEpsIntoView(epIdx);
+                      }}
                      focusable={isTvLayout && sectionFocusable}
                      style={({ focused }) => [todayEpStyles.card, { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border }, isTvLayout && tvFocusStyle(focused)]}
                   >
@@ -602,7 +640,7 @@ export default function HomeScreen() {
                         style={todayEpStyles.img}
                         resizeMode="cover"
                         resizeMethod="resize"
-                        fadeDuration={isTvLayout ? 0 : 100}
+                        fadeDuration={0}
                       />
                     ) : (
                       <View style={[todayEpStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
@@ -649,374 +687,464 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* ── الأقسام المدبلجة — مباشرة بعد أحدث الحلقات ── */}
-        {section.kind === "animationHome" && animationHomeRows.length > 0 && (
-          <View style={{ marginTop: 24, marginBottom: 24 }}>
+        {/* ── القسم الموحد للأعمال المدبلجة ── */}
+        {section.kind === "dubbedUnified" && (
+          <View style={{ marginTop: 22, marginBottom: 24 }}>
             <SectionHeader
-              onSeeAll={() => router.push("/aw-dubbed" as any)}
+              onSeeAll={() => router.push({ pathname: "/aw-dubbed" as any, params: { tab: activeDubbedTab } })}
               focusable={isTvLayout && sectionFocusable}
               onFocus={handleSectionFocus}
             >
               <View style={styles.sectionRightRow}>
-                <Text style={[styles.sectionTitle, isTvLayout && styles.tvSectionTitle, { color: colors.text }]}>انميشن مدبلج ✨</Text>
-                <View style={[styles.continueAccent, { backgroundColor: colors.homeAccent || "#06b6d4" }]} />
+                <Text style={{ fontSize: isTvLayout ? 22 : 15 }}>✨</Text>
+                <Text style={[styles.sectionTitle, isTvLayout && styles.tvSectionTitle, { color: colors.text }]}>
+                  الأنمي والكرتون المدبلج
+                </Text>
+                <View style={[styles.continueAccent, { backgroundColor: "#06b6d4" }]} />
               </View>
             </SectionHeader>
-            <FlatList
-              data={animationHomeRows}
+
+            <ScrollView
               horizontal
-              keyExtractor={(row, idx) => row.kind === "stardima"
-                ? `stardima:${row.item.provider_title_id}`
-                : `aw:${row.item.key || idx}`}
               showsHorizontalScrollIndicator={false}
-               contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
-              renderItem={({ item: row }) => {
-                const item = row.item;
-                const stardima = row.kind === "stardima";
-                const rawImg = stardima
-                  ? String(item.poster_url || item.backdrop_url || "").trim()
-                  : getPosterUri(item) || "";
-                const imgUri = rawImg
-                  ? rawImg.startsWith("http") ? rawImg : `${getBaseUrl()}${rawImg}`
-                  : null;
-                const titleText = stardima
-                  ? item.title_ar || item.title || item.title_en || "عنوان"
-                  : item.english || item.title;
-                const badgeText = stardima ? catalogBadge(item, "animation") : "مدبلج";
-                const badgeColor = badgeText?.includes("مترجم") ? "#D94141" : "#35B955";
+              contentContainerStyle={{
+                flexDirection: "row-reverse",
+                alignItems: "center",
+                gap: 8,
+                paddingHorizontal: railSidePadding,
+                marginBottom: 12,
+              }}
+            >
+              {(
+                [
+                  { key: "anime" as const, label: "أنمي مدبلج", color: "#06b6d4" },
+                  { key: "animation" as const, label: "أنيميشن مدبلج", color: "#10B981" },
+                  { key: "spacetoon" as const, label: "سبيستون", color: "#38BDF8" },
+                  { key: "cartoon" as const, label: "كرتون مدبلج", color: "#7C3AED" },
+                  { key: "cartoon2" as const, label: "كرتون مدبلج 2", color: "#F59E0B" },
+                ]
+              ).map((tabOpt) => {
+                const isActive = activeDubbedTab === tabOpt.key;
                 return (
-                   <Pressable
-                    onPress={() => {
-                       if (stardima) {
-                         router.push({
-                           pathname: "/stardima-title" as any,
-                           params: { providerTitleId: item.provider_title_id },
-                         });
-                         return;
-                       }
-                      const key = String(item.key || "").trim();
-                      if (!key) return;
-                      const seasons = JSON.stringify(
-                        Array.isArray(item.seasons) && item.seasons.length
-                          ? item.seasons
-                          : [{ label: "الحلقات", animeId: key }],
-                      );
-                       router.push({
-                         pathname: "/aw-dubbed/[key]" as any,
-                         params: {
-                           key: encodeURIComponent(key),
-                           title: item.title || "",
-                           titleAr: item.titleAr || "",
-                           seasons: encodeURIComponent(seasons),
-                           poster: encodeURIComponent(imgUri || ""),
-                         },
-                       });
-                      }}
-                      onFocus={handleSectionFocus}
-                      focusable={isTvLayout && sectionFocusable}
-                      style={({ focused }) => [todayStyles.card, { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border }, isTvLayout && tvFocusStyle(focused)]}
-                   >
-                    {imgUri ? (
-                      <Image source={{ uri: imgUri }} style={todayStyles.img} resizeMode="cover" resizeMethod="resize" fadeDuration={isTvLayout ? 0 : 100} />
-                    ) : (
-                      <View style={[todayStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
-                        <Ionicons name="film-outline" size={28} color="rgba(255,255,255,0.2)" />
-                      </View>
-                    )}
-                    <View style={{
-                      position: "absolute",
-                      top: 8,
-                      right: 8,
-                      zIndex: 2,
-                      paddingHorizontal: 8,
-                      paddingVertical: 3,
-                      borderRadius: 7,
-                      backgroundColor: badgeColor,
-                    }}>
-                      <Text style={{
-                        color: "#fff",
+                  <Pressable
+                    key={tabOpt.key}
+                    onPress={() => setActiveDubbedTab(tabOpt.key)}
+                    onFocus={handleSectionFocus}
+                    focusable={isTvLayout && sectionFocusable}
+                    style={({ focused }) => [
+                      {
+                        paddingHorizontal: isTvLayout ? 20 : 16,
+                        paddingVertical: isTvLayout ? 9 : 7,
+                        borderRadius: 12,
+                        borderWidth: 1,
+                        flexShrink: 0,
+                        alignItems: "center",
+                        justifyContent: "center",
+                        backgroundColor: isActive ? `${tabOpt.color}22` : colors.card,
+                        borderColor: isActive ? `${tabOpt.color}88` : colors.border,
+                      },
+                      isTvLayout && tvFocusStyle(focused),
+                    ]}
+                  >
+                    <Text
+                      style={{
+                        fontSize: isTvLayout ? 15 : 12.5,
+                        lineHeight: isTvLayout ? 22 : 19,
                         fontFamily: "Cairo_700Bold",
-                        fontSize: isTvLayout ? 12 : 9,
-                      }}>{badgeText || "مدبلج"}</Text>
-                    </View>
-                    <LinearGradient colors={["transparent", "rgba(0,0,0,0.92)"]} style={todayStyles.grad}>
-                      <Text style={todayStyles.title} numberOfLines={2}>{titleText}</Text>
-                      {(item.title_ar && !stardima) ? (
-                        <Text style={{ color: "rgba(255,255,255,0.75)", fontSize: isTvLayout ? 14 : 9, lineHeight: isTvLayout ? 20 : 13, fontFamily: "Cairo_700Bold", textAlign: "right", writingDirection: "rtl", marginTop: 2 }} numberOfLines={1}>
-                          {item.title_ar}
-                        </Text>
-                      ) : null}
-                    </LinearGradient>
-                  </Pressable>
-                );
-              }}
-              initialNumToRender={isTvLayout ? 5 : 5}
-              maxToRenderPerBatch={isTvLayout ? 4 : 5}
-              windowSize={isTvLayout ? 5 : 3}
-              removeClippedSubviews={false}
-            />
-          </View>
-        )}
-
-        {section.kind === "dubbedHome" && dubbedHomeRows.length > 0 && (
-          <View style={{ marginBottom: 24 }}>
-            <SectionHeader
-              onSeeAll={() => router.push({ pathname: "/aw-dubbed" as any, params: { tab: "cartoon" } })}
-              focusable={isTvLayout && sectionFocusable}
-              onFocus={handleSectionFocus}
-            >
-              <View style={styles.sectionRightRow}>
-                <Text style={[styles.sectionTitle, isTvLayout && styles.tvSectionTitle, { color: colors.text }]}>كرتون مدبلج ومترجم 🎬</Text>
-                <View style={[styles.continueAccent, { backgroundColor: colors.homeAccent || "#06b6d4" }]} />
-              </View>
-            </SectionHeader>
-            <FlatList
-              data={dubbedHomeRows}
-              horizontal
-              keyExtractor={(row, idx) => row.kind === "stardima"
-                ? `stardima:${row.item.provider_title_id}`
-                : `dubbed:${row.item.key || row.item.id || idx}`}
-              showsHorizontalScrollIndicator={false}
-               contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
-              renderItem={({ item: row }) => {
-                const item = row.item;
-                const stardima = row.kind === "stardima";
-                // The dubbed catalog returns its image as a relative API path.
-                // Keep that path so it can be resolved against the production API
-                // base below instead of falling through to the placeholder.
-                const rawImg = stardima
-                  ? String(item.poster_url || item.backdrop_url || "").trim()
-                  : typeof item.image === "string" && item.image.trim()
-                    ? item.image.trim()
-                    : getPosterUri(item);
-                const imgUri = rawImg
-                  ? rawImg.startsWith("http") ? rawImg : `${getBaseUrl()}${rawImg}`
-                  : null;
-                const titleText = stardima
-                  ? item.title_ar || item.title || item.title_en || "عنوان"
-                  : item.title;
-                const badgeText = stardima ? catalogBadge(item, "cartoon") : "مدبلج";
-                const badgeColor = badgeText?.includes("مترجم") ? "#D94141" : "#35B955";
-                return (
-                   <Pressable
-                    onPress={() => {
-                      if (stardima) {
-                        router.push({
-                          pathname: "/stardima-title" as any,
-                          params: { providerTitleId: item.provider_title_id },
-                        });
-                        return;
-                      }
-                      const seasons = JSON.stringify(item.seasons || [{ label: "الحلقات", arabicToonsId: item.arabicToonsId }]);
-                      router.push({ pathname: "/dubbed/[id]" as any, params: { id: item.key || item.id || item.title, title: item.title, seasons, img: rawImg } });
-                     }}
-                     onFocus={handleSectionFocus}
-                     focusable={isTvLayout && sectionFocusable}
-                     style={({ focused }) => [todayStyles.card, { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border }, isTvLayout && tvFocusStyle(focused)]}
-                  >
-                    {imgUri ? (
-                       <Image source={{ uri: imgUri }} style={todayStyles.img} resizeMode="cover" resizeMethod="resize" fadeDuration={isTvLayout ? 0 : 100} />
-                    ) : (
-                      <View style={[todayStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
-                        <Ionicons name="tv" size={28} color="rgba(255,255,255,0.2)" />
-                      </View>
-                    )}
-                    {badgeText ? (
-                      <View style={{
-                        position: "absolute",
-                        top: 8,
-                        right: 8,
-                        zIndex: 2,
-                        paddingHorizontal: 8,
-                        paddingVertical: 3,
-                        borderRadius: 7,
-                        backgroundColor: badgeColor,
-                      }}>
-                        <Text style={{
-                          color: "#fff",
-                          fontFamily: "Cairo_700Bold",
-                          fontSize: isTvLayout ? 12 : 9,
-                        }}>{badgeText}</Text>
-                      </View>
-                    ) : null}
-                    <LinearGradient colors={["transparent", "rgba(0,0,0,0.92)"]} style={todayStyles.grad}>
-                      <Text style={todayStyles.title} numberOfLines={2}>{titleText}</Text>
-                    </LinearGradient>
-                  </Pressable>
-                );
-              }}
-              initialNumToRender={isTvLayout ? 5 : 5}
-              maxToRenderPerBatch={isTvLayout ? 4 : 5}
-              windowSize={isTvLayout ? 5 : 3}
-              removeClippedSubviews={false}
-            />
-          </View>
-        )}
-
-        {/* ── سبيستون مدبلج ── */}
-        {section.kind === "spacetoonHome" && spacetoonHomeItems.length > 0 && (
-          <View style={{ marginBottom: 24 }}>
-            <SectionHeader
-              onSeeAll={() => router.push({ pathname: "/aw-dubbed" as any, params: { tab: "spacetoon" } })}
-              focusable={isTvLayout && sectionFocusable}
-              onFocus={handleSectionFocus}
-            >
-              <View style={styles.sectionRightRow}>
-                <Text style={[styles.sectionTitle, isTvLayout && styles.tvSectionTitle, { color: colors.text }]}>سبيستون مدبلج 🚀</Text>
-                <View style={[styles.continueAccent, { backgroundColor: colors.homeAccent || "#06b6d4" }]} />
-              </View>
-            </SectionHeader>
-            <FlatList
-              data={spacetoonHomeItems}
-              horizontal
-              keyExtractor={(item, idx) => `sp-home:${item.id || idx}`}
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
-              renderItem={({ item }) => {
-                const rawImg = String(item.image || "").trim();
-                const imgUri = rawImg
-                  ? rawImg.startsWith("http") ? rawImg : `${getBaseUrl()}${rawImg}`
-                  : null;
-                return (
-                  <Pressable
-                    onPress={() =>
-                      router.push({
-                        pathname: "/dubbed/[id]" as any,
-                        params: {
-                          id: `sp-${item.id}`,
-                          provider: "sp",
-                          showId: String(item.id),
-                          isMovie: item.isMovie ? "1" : "0",
-                          title: item.title,
-                          img: item.image || "",
-                        },
-                      })
-                    }
-                    onFocus={handleSectionFocus}
-                    focusable={isTvLayout && sectionFocusable}
-                    style={({ focused }) => [
-                      todayStyles.card,
-                      { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border },
-                      isTvLayout && tvFocusStyle(focused),
-                    ]}
-                  >
-                    {imgUri ? (
-                      <Image source={{ uri: imgUri }} style={todayStyles.img} resizeMode="cover" resizeMethod="resize" fadeDuration={isTvLayout ? 0 : 100} />
-                    ) : (
-                      <View style={[todayStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
-                        <Ionicons name="planet-outline" size={28} color="rgba(255,255,255,0.2)" />
-                      </View>
-                    )}
-                    <View
-                      style={{
-                        position: "absolute",
-                        top: 8,
-                        right: 8,
-                        zIndex: 2,
-                        paddingHorizontal: 8,
-                        paddingVertical: 3,
-                        borderRadius: 7,
-                        backgroundColor: "#06b6d4",
+                        color: isActive ? tabOpt.color : colors.mutedForeground,
+                        includeFontPadding: false,
+                        textAlign: "center",
+                        paddingHorizontal: 3,
+                        flexShrink: 0,
                       }}
                     >
-                      <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: isTvLayout ? 12 : 9 }}>
-                        سبيستون
-                      </Text>
-                    </View>
-                    <LinearGradient colors={["transparent", "rgba(0,0,0,0.92)"]} style={todayStyles.grad}>
-                      <Text style={todayStyles.title} numberOfLines={2}>{item.title}</Text>
-                    </LinearGradient>
+                      {` ${tabOpt.label} `}
+                    </Text>
                   </Pressable>
                 );
-              }}
-              initialNumToRender={isTvLayout ? 5 : 5}
-              maxToRenderPerBatch={isTvLayout ? 4 : 5}
-              windowSize={isTvLayout ? 5 : 3}
-              removeClippedSubviews={false}
-            />
-          </View>
-        )}
+              })}
+            </ScrollView>
 
-        {/* ── كرتون مدبلج 2 ── */}
-        {section.kind === "cartoon2Home" && cartoon2HomeItems.length > 0 && (
-          <View style={{ marginBottom: 24 }}>
-            <SectionHeader
-              onSeeAll={() => router.push({ pathname: "/aw-dubbed" as any, params: { tab: "cartoon2" } })}
-              focusable={isTvLayout && sectionFocusable}
-              onFocus={handleSectionFocus}
-            >
-              <View style={styles.sectionRightRow}>
-                <Text style={[styles.sectionTitle, isTvLayout && styles.tvSectionTitle, { color: colors.text }]}>كرتون مدبلج 2 ✨</Text>
-                <View style={[styles.continueAccent, { backgroundColor: "#F59E0B" }]} />
-              </View>
-            </SectionHeader>
-            <FlatList
-              data={cartoon2HomeItems}
-              horizontal
-              keyExtractor={(item, idx) => `sd2-home:${item.slug || idx}`}
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
-              renderItem={({ item }) => {
-                const imgUri = String(item.image || "").trim() || null;
-                return (
-                  <Pressable
-                    onPress={() =>
-                      router.push({
-                        pathname: "/dubbed/[id]" as any,
-                        params: {
-                          id: `sd2-${item.slug}`,
-                          provider: "sd2",
-                          showId: item.slug,
-                          slug: item.slug,
-                          isMovie: item.isMovie ? "1" : "0",
-                          title: item.title,
-                          img: item.image || "",
-                          languageLabel: item.languageLabel || "",
-                        },
-                      })
-                    }
-                    onFocus={handleSectionFocus}
-                    focusable={isTvLayout && sectionFocusable}
-                    style={({ focused }) => [
-                      todayStyles.card,
-                      { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border },
-                      isTvLayout && tvFocusStyle(focused),
-                    ]}
-                  >
-                    {imgUri ? (
-                      <Image source={{ uri: imgUri }} style={todayStyles.img} resizeMode="cover" resizeMethod="resize" fadeDuration={isTvLayout ? 0 : 100} />
-                    ) : (
-                      <View style={[todayStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
-                        <Ionicons name="film-outline" size={28} color="rgba(255,255,255,0.2)" />
-                      </View>
-                    )}
-                    <View
-                      style={{
-                        position: "absolute",
-                        top: 8,
-                        right: 8,
-                        zIndex: 2,
-                        paddingHorizontal: 8,
-                        paddingVertical: 3,
-                        borderRadius: 7,
-                        backgroundColor: item.isSubbed ? "#D94141" : "#F59E0B",
-                      }}
-                    >
-                      <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: isTvLayout ? 12 : 9 }}>
-                        {item.languageLabel || "مدبلج"}
-                      </Text>
-                    </View>
-                    <LinearGradient colors={["transparent", "rgba(0,0,0,0.92)"]} style={todayStyles.grad}>
-                      <Text style={todayStyles.title} numberOfLines={2}>{item.title}</Text>
-                    </LinearGradient>
-                  </Pressable>
-                );
-              }}
-              initialNumToRender={isTvLayout ? 5 : 5}
-              maxToRenderPerBatch={isTvLayout ? 4 : 5}
-              windowSize={isTvLayout ? 5 : 3}
-              removeClippedSubviews={false}
-            />
+            {activeDubbedTab === "anime" ? (
+              animezidHomeItems.length > 0 ? (
+                <FlatList
+                  ref={dubbedRailListRef}
+                  data={animezidHomeItems}
+                  horizontal
+                  getItemLayout={getRailItemLayout}
+                  keyExtractor={(item, idx) => `az-home:${item.slug || idx}`}
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
+                  renderItem={({ item, index: itemIdx }) => {
+                    const imgUri = item.poster ? String(item.poster) : null;
+                    return (
+                      <Pressable
+                        onPress={() =>
+                          router.push({
+                            pathname: "/dubbed-anime/[slug]" as any,
+                            params: {
+                              slug: item.slug,
+                              title: item.title,
+                              poster: item.poster || "",
+                            },
+                          })
+                        }
+                        onFocus={() => {
+                          handleSectionFocus?.();
+                          if (isTvLayout) scrollDubbedRailIntoView(itemIdx);
+                        }}
+                        focusable={isTvLayout && sectionFocusable}
+                        style={({ focused }) => [
+                          todayStyles.card,
+                          { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border },
+                          isTvLayout && tvFocusStyle(focused),
+                        ]}
+                      >
+                        {imgUri ? (
+                          <Image source={{ uri: imgUri }} style={todayStyles.img} resizeMode="cover" resizeMethod="resize" fadeDuration={0} />
+                        ) : (
+                          <View style={[todayStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
+                            <Ionicons name="film-outline" size={28} color="rgba(255,255,255,0.2)" />
+                          </View>
+                        )}
+                        <View style={{
+                          position: "absolute", top: 8, right: 8, zIndex: 2,
+                          paddingHorizontal: 8, paddingVertical: 3, borderRadius: 7, backgroundColor: "#10B981",
+                        }}>
+                          <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: isTvLayout ? 12 : 9 }}>
+                            {item.badge || "مدبلج"}
+                          </Text>
+                        </View>
+                        <LinearGradient colors={["transparent", "rgba(0,0,0,0.92)"]} style={todayStyles.grad}>
+                          <Text style={todayStyles.title} numberOfLines={2}>{item.title}</Text>
+                        </LinearGradient>
+                      </Pressable>
+                    );
+                  }}
+                  initialNumToRender={5}
+                  maxToRenderPerBatch={5}
+                  windowSize={3}
+                  removeClippedSubviews={false}
+                />
+              ) : dubbedTabLoading ? (
+                <View style={{ height: Math.round(railCardWidth * 1.46), alignItems: "center", justifyContent: "center" }}>
+                  <ActivityIndicator color="#06b6d4" />
+                </View>
+              ) : null
+            ) : activeDubbedTab === "animation" ? (
+              animationHomeRows.length > 0 ? (
+                <FlatList
+                  ref={dubbedRailListRef}
+                  data={animationHomeRows}
+                  horizontal
+                  getItemLayout={getRailItemLayout}
+                  keyExtractor={(row, idx) => row.kind === "stardima"
+                    ? `stardima:${row.item.provider_title_id}`
+                    : `aw:${row.item.key || idx}`}
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
+                  renderItem={({ item: row, index: rowIdx }) => {
+                    const item = row.item;
+                    const stardima = row.kind === "stardima";
+                    const rawImg = stardima
+                      ? String(item.poster_url || item.backdrop_url || "").trim()
+                      : getPosterUri(item) || "";
+                    const imgUri = proxyPosterUrl(rawImg) || null;
+                    const titleText = stardima
+                      ? item.title_ar || item.title || item.title_en || "عنوان"
+                      : item.english || item.title;
+                    const badgeText = stardima ? catalogBadge(item, "animation") : "مدبلج";
+                    const badgeColor = badgeText?.includes("مترجم") ? "#D94141" : "#35B955";
+                    return (
+                      <Pressable
+                        onPress={() => {
+                          if (stardima) {
+                            router.push({
+                              pathname: "/stardima-title" as any,
+                              params: { providerTitleId: item.provider_title_id },
+                            });
+                            return;
+                          }
+                          const key = String(item.key || "").trim();
+                          if (!key) return;
+                          const seasons = JSON.stringify(
+                            Array.isArray(item.seasons) && item.seasons.length
+                              ? item.seasons
+                              : [{ label: "الحلقات", animeId: key }],
+                          );
+                          router.push({
+                            pathname: "/aw-dubbed/[key]" as any,
+                            params: {
+                              key: encodeURIComponent(key),
+                              title: item.title || "",
+                              titleAr: item.titleAr || "",
+                              seasons: encodeURIComponent(seasons),
+                              poster: encodeURIComponent(imgUri || ""),
+                            },
+                          });
+                        }}
+                        onFocus={() => {
+                          handleSectionFocus?.();
+                          if (isTvLayout) scrollDubbedRailIntoView(rowIdx);
+                        }}
+                        focusable={isTvLayout && sectionFocusable}
+                        style={({ focused }) => [todayStyles.card, { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border }, isTvLayout && tvFocusStyle(focused)]}
+                      >
+                        {imgUri ? (
+                          <Image source={{ uri: imgUri }} style={todayStyles.img} resizeMode="cover" resizeMethod="resize" fadeDuration={0} />
+                        ) : (
+                          <View style={[todayStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
+                            <Ionicons name="film-outline" size={28} color="rgba(255,255,255,0.2)" />
+                          </View>
+                        )}
+                        <View style={{
+                          position: "absolute", top: 8, right: 8, zIndex: 2,
+                          paddingHorizontal: 8, paddingVertical: 3, borderRadius: 7, backgroundColor: badgeColor,
+                        }}>
+                          <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: isTvLayout ? 12 : 9 }}>
+                            {badgeText || "مدبلج"}
+                          </Text>
+                        </View>
+                        <LinearGradient colors={["transparent", "rgba(0,0,0,0.92)"]} style={todayStyles.grad}>
+                          <Text style={todayStyles.title} numberOfLines={2}>{titleText}</Text>
+                          {(item.title_ar && !stardima) ? (
+                            <Text style={{ color: "rgba(255,255,255,0.75)", fontSize: isTvLayout ? 14 : 9, lineHeight: isTvLayout ? 20 : 13, fontFamily: "Cairo_700Bold", textAlign: "right", writingDirection: "rtl", marginTop: 2 }} numberOfLines={1}>
+                              {item.title_ar}
+                            </Text>
+                          ) : null}
+                        </LinearGradient>
+                      </Pressable>
+                    );
+                  }}
+                  initialNumToRender={5}
+                  maxToRenderPerBatch={5}
+                  windowSize={3}
+                  removeClippedSubviews={false}
+                />
+              ) : (dubbedTabLoading || stardimaAnimation.loading) ? (
+                <View style={{ height: Math.round(railCardWidth * 1.46), alignItems: "center", justifyContent: "center" }}>
+                  <ActivityIndicator color="#10B981" />
+                </View>
+              ) : null
+            ) : activeDubbedTab === "spacetoon" ? (
+              spacetoonHomeItems.length > 0 ? (
+                <FlatList
+                  ref={dubbedRailListRef}
+                  data={spacetoonHomeItems}
+                  horizontal
+                  getItemLayout={getRailItemLayout}
+                  keyExtractor={(item, idx) => `sp-home:${item.id || idx}`}
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
+                  renderItem={({ item, index: spIdx }) => {
+                    const imgUri = proxyPosterUrl(item.image) || null;
+                    return (
+                      <Pressable
+                        onPress={() =>
+                          router.push({
+                            pathname: "/dubbed/[id]" as any,
+                            params: {
+                              id: `sp-${item.id}`,
+                              provider: "sp",
+                              showId: String(item.id),
+                              isMovie: item.isMovie ? "1" : "0",
+                              title: item.title,
+                              img: item.image || "",
+                            },
+                          })
+                        }
+                        onFocus={() => {
+                          handleSectionFocus?.();
+                          if (isTvLayout) scrollDubbedRailIntoView(spIdx);
+                        }}
+                        focusable={isTvLayout && sectionFocusable}
+                        style={({ focused }) => [
+                          todayStyles.card,
+                          { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border },
+                          isTvLayout && tvFocusStyle(focused),
+                        ]}
+                      >
+                        {imgUri ? (
+                          <Image source={{ uri: imgUri }} style={todayStyles.img} resizeMode="cover" resizeMethod="resize" fadeDuration={0} />
+                        ) : (
+                          <View style={[todayStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
+                            <Ionicons name="planet-outline" size={28} color="rgba(255,255,255,0.2)" />
+                          </View>
+                        )}
+                        <View style={{
+                          position: "absolute", top: 8, right: 8, zIndex: 2,
+                          paddingHorizontal: 8, paddingVertical: 3, borderRadius: 7, backgroundColor: "#06b6d4",
+                        }}>
+                          <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: isTvLayout ? 12 : 9 }}>سبيستون</Text>
+                        </View>
+                        <LinearGradient colors={["transparent", "rgba(0,0,0,0.92)"]} style={todayStyles.grad}>
+                          <Text style={todayStyles.title} numberOfLines={2}>{item.title}</Text>
+                        </LinearGradient>
+                      </Pressable>
+                    );
+                  }}
+                  initialNumToRender={5}
+                  maxToRenderPerBatch={5}
+                  windowSize={3}
+                  removeClippedSubviews={false}
+                />
+              ) : dubbedTabLoading ? (
+                <View style={{ height: Math.round(railCardWidth * 1.46), alignItems: "center", justifyContent: "center" }}>
+                  <ActivityIndicator color="#38BDF8" />
+                </View>
+              ) : null
+            ) : activeDubbedTab === "cartoon" ? (
+              dubbedHomeRows.length > 0 ? (
+                <FlatList
+                  ref={dubbedRailListRef}
+                  data={dubbedHomeRows}
+                  horizontal
+                  getItemLayout={getRailItemLayout}
+                  keyExtractor={(row, idx) => row.kind === "stardima"
+                    ? `stardima:${row.item.provider_title_id}`
+                    : `dubbed:${row.item.key || row.item.id || idx}`}
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
+                  renderItem={({ item: row, index: c1Idx }) => {
+                    const item = row.item;
+                    const stardima = row.kind === "stardima";
+                    const rawImg = stardima
+                      ? String(item.poster_url || item.backdrop_url || "").trim()
+                      : typeof item.image === "string" && item.image.trim()
+                        ? item.image.trim()
+                        : getPosterUri(item);
+                    const imgUri = rawImg
+                      ? rawImg.startsWith("http") ? rawImg : `${getBaseUrl()}${rawImg}`
+                      : null;
+                    const titleText = stardima
+                      ? item.title_ar || item.title || item.title_en || "عنوان"
+                      : item.title;
+                    const badgeText = stardima ? catalogBadge(item, "cartoon") : "مدبلج";
+                    const badgeColor = badgeText?.includes("مترجم") ? "#D94141" : "#35B955";
+                    return (
+                      <Pressable
+                        onPress={() => {
+                          if (stardima) {
+                            router.push({
+                              pathname: "/stardima-title" as any,
+                              params: { providerTitleId: item.provider_title_id },
+                            });
+                            return;
+                          }
+                          const seasons = JSON.stringify(item.seasons || [{ label: "الحلقات", arabicToonsId: item.arabicToonsId }]);
+                          router.push({ pathname: "/dubbed/[id]" as any, params: { id: item.key || item.id || item.title, title: item.title, seasons, img: rawImg } });
+                        }}
+                        onFocus={() => {
+                          handleSectionFocus?.();
+                          if (isTvLayout) scrollDubbedRailIntoView(c1Idx);
+                        }}
+                        focusable={isTvLayout && sectionFocusable}
+                        style={({ focused }) => [todayStyles.card, { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border }, isTvLayout && tvFocusStyle(focused)]}
+                      >
+                        {imgUri ? (
+                          <Image source={{ uri: imgUri }} style={todayStyles.img} resizeMode="cover" resizeMethod="resize" fadeDuration={0} />
+                        ) : (
+                          <View style={[todayStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
+                            <Ionicons name="tv" size={28} color="rgba(255,255,255,0.2)" />
+                          </View>
+                        )}
+                        {badgeText ? (
+                          <View style={{
+                            position: "absolute", top: 8, right: 8, zIndex: 2,
+                            paddingHorizontal: 8, paddingVertical: 3, borderRadius: 7, backgroundColor: badgeColor,
+                          }}>
+                            <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: isTvLayout ? 12 : 9 }}>{badgeText}</Text>
+                          </View>
+                        ) : null}
+                        <LinearGradient colors={["transparent", "rgba(0,0,0,0.92)"]} style={todayStyles.grad}>
+                          <Text style={todayStyles.title} numberOfLines={2}>{titleText}</Text>
+                        </LinearGradient>
+                      </Pressable>
+                    );
+                  }}
+                  initialNumToRender={5}
+                  maxToRenderPerBatch={5}
+                  windowSize={3}
+                  removeClippedSubviews={false}
+                />
+              ) : (dubbedTabLoading || stardimaCartoon.loading) ? (
+                <View style={{ height: Math.round(railCardWidth * 1.46), alignItems: "center", justifyContent: "center" }}>
+                  <ActivityIndicator color="#7C3AED" />
+                </View>
+              ) : null
+            ) : (
+              cartoon2HomeItems.length > 0 ? (
+                <FlatList
+                  ref={dubbedRailListRef}
+                  data={cartoon2HomeItems}
+                  horizontal
+                  getItemLayout={getRailItemLayout}
+                  keyExtractor={(item, idx) => `sd2-home:${item.slug || idx}`}
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
+                  renderItem={({ item, index: c2Idx }) => {
+                    const imgUri = proxyPosterUrl(item.image) || null;
+                    return (
+                      <Pressable
+                        onPress={() =>
+                          router.push({
+                            pathname: "/dubbed/[id]" as any,
+                            params: {
+                              id: `sd2-${item.slug}`,
+                              provider: "sd2",
+                              showId: item.slug,
+                              slug: item.slug,
+                              isMovie: item.isMovie ? "1" : "0",
+                              title: item.title,
+                              img: item.image || "",
+                              languageLabel: item.languageLabel || "",
+                            },
+                          })
+                        }
+                        onFocus={() => {
+                          handleSectionFocus?.();
+                          if (isTvLayout) scrollDubbedRailIntoView(c2Idx);
+                        }}
+                        focusable={isTvLayout && sectionFocusable}
+                        style={({ focused }) => [
+                          todayStyles.card,
+                          { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border },
+                          isTvLayout && tvFocusStyle(focused),
+                        ]}
+                      >
+                        {imgUri ? (
+                          <Image source={{ uri: imgUri }} style={todayStyles.img} resizeMode="cover" resizeMethod="resize" fadeDuration={0} />
+                        ) : (
+                          <View style={[todayStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
+                            <Ionicons name="film-outline" size={28} color="rgba(255,255,255,0.2)" />
+                          </View>
+                        )}
+                        <View style={{
+                          position: "absolute", top: 8, right: 8, zIndex: 2,
+                          paddingHorizontal: 8, paddingVertical: 3, borderRadius: 7,
+                          backgroundColor: item.isSubbed ? "#D94141" : "#F59E0B",
+                        }}>
+                          <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: isTvLayout ? 12 : 9 }}>
+                            {item.languageLabel || "مدبلج"}
+                          </Text>
+                        </View>
+                        <LinearGradient colors={["transparent", "rgba(0,0,0,0.92)"]} style={todayStyles.grad}>
+                          <Text style={todayStyles.title} numberOfLines={2}>{item.title}</Text>
+                        </LinearGradient>
+                      </Pressable>
+                    );
+                  }}
+                  initialNumToRender={5}
+                  maxToRenderPerBatch={5}
+                  windowSize={3}
+                  removeClippedSubviews={false}
+                />
+              ) : dubbedTabLoading ? (
+                <View style={{ height: Math.round(railCardWidth * 1.46), alignItems: "center", justifyContent: "center" }}>
+                  <ActivityIndicator color="#F59E0B" />
+                </View>
+              ) : null
+            )}
           </View>
         )}
 
@@ -1028,7 +1156,8 @@ export default function HomeScreen() {
               focusable={isTvLayout}
             >
               <View style={styles.sectionRightRow}>
-                <Text style={[styles.sectionTitle, isTvLayout && styles.tvSectionTitle, { color: colors.text }]}>مانهوا 🔥</Text>
+                <Text style={{ fontSize: isTvLayout ? 22 : 15 }}>🔥</Text>
+                <Text style={[styles.sectionTitle, isTvLayout && styles.tvSectionTitle, { color: colors.text }]}>مانهوا</Text>
                 <View style={[styles.continueAccent, { backgroundColor: "#f59e0b" }]} />
               </View>
             </SectionHeader>
@@ -1095,7 +1224,8 @@ export default function HomeScreen() {
               focusable={isTvLayout}
             >
               <View style={styles.sectionRightRow}>
-                <Text style={[styles.sectionTitle, isTvLayout && styles.tvSectionTitle, { color: colors.text }]}>مانجا مترجمة 📚</Text>
+                <Text style={{ fontSize: isTvLayout ? 22 : 15 }}>📚</Text>
+                <Text style={[styles.sectionTitle, isTvLayout && styles.tvSectionTitle, { color: colors.text }]}>مانجا مترجمة</Text>
                 <View style={[styles.continueAccent, { backgroundColor: colors.homeAccent || "#06b6d4" }]} />
               </View>
             </SectionHeader>
@@ -1147,6 +1277,7 @@ export default function HomeScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <FlatList
+        ref={homeListRef}
         data={homeSections}
         keyExtractor={(item) => item.key}
         renderItem={renderHomeSection}
@@ -1233,10 +1364,10 @@ export default function HomeScreen() {
         showsVerticalScrollIndicator={false}
         refreshControl={isTvLayout ? undefined : <RefreshControl refreshing={false} onRefresh={refresh} tintColor={colors.primary} />}
         removeClippedSubviews={false}
-        initialNumToRender={isTvLayout ? 3 : 3}
-        maxToRenderPerBatch={isTvLayout ? 2 : 2}
-        updateCellsBatchingPeriod={50}
-        windowSize={isTvLayout ? 7 : 5}
+        initialNumToRender={isTvLayout ? 6 : 6}
+        maxToRenderPerBatch={isTvLayout ? 4 : 4}
+        updateCellsBatchingPeriod={40}
+        windowSize={isTvLayout ? 11 : 11}
       />
       <DrawerMenu visible={showDrawer} onClose={() => setShowDrawer(false)} />
     </View>
@@ -1270,7 +1401,8 @@ const styles = StyleSheet.create({
   sectionLeft: { flexDirection: "row", direction: "ltr", alignItems: "center", gap: 8 },
   sectionRightRow: { flexDirection: "row", direction: "ltr", alignItems: "center", justifyContent: "flex-end", gap: 9 },
   sectionDot: { width: 8, height: 8, borderRadius: 4 },
-  sectionTitle: { fontSize: 17, fontFamily: "Cairo_700Bold", textAlign: "right" },
+  sectionTitle: { fontSize: 17, fontFamily: "Cairo_700Bold", textAlign: "right", includeFontPadding: false, paddingHorizontal: 2, flexShrink: 0 },
+  tvCardFocusHidden: { display: "none" },
   tvSectionTitle: { fontSize: 25, lineHeight: 34 },
   continueHeading: { flex: 1, flexDirection: "row", direction: "ltr", alignItems: "center", justifyContent: "flex-end", gap: 9 },
   continueAccent: { width: 3.5, height: 22, borderRadius: 2 },

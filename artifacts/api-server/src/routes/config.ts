@@ -36,9 +36,9 @@ const DEFAULT_CONFIG = {
   latestVersionCode: LATEST_VERSION_CODE,
   apkUrl: "https://animenovaa.duckdns.org/nova.apk?v=" + LATEST_APP_VERSION,
   tvDownloaderCode: "2576388",
-  forceUpdate: true,
-  updateTitle: "التحديث مطلوب",
-  updateMessage: "يجب تحديث التطبيق إلى الإصدار " + LATEST_APP_VERSION + " للمتابعة — هذا الإصدار لم يعد مدعوماً.",
+  forceUpdate: false,
+  updateTitle: "يتوفر تحديث جديد",
+  updateMessage: "يتوفر تحديث جديد (" + LATEST_APP_VERSION + ") يحتوي على تحسينات في السرعة والمشغل.",
   updateChangelog: [
     "دعم الأسماء العربية الأنيقة فوق الإنجليزية لجميع الأنميات في البحث والبطاقات والتفاصيل والجدول",
     "ترجمة عربية احترافية غير حرفية لأكثر من 3,000 أنمي مع بحث عربي فوري",
