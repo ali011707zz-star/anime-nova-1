@@ -699,9 +699,7 @@ function parseAwFsDoc(doc: any): Record<string, any> {
 function normalizeAwMangaImageUrl(rawUrl: string): string {
   const clean = String(rawUrl || "").trim();
   if (!clean) return "";
-  return clean
-    .replace(/^http:\/\//i, "https://")
-    .replace(/:\/\/tempsolo\.mangalik\.net\//i, "://leksolo.mangalik.net/");
+  return clean.replace(/^http:\/\//i, "https://");
 }
 
 function mapAwMangaStatus(statusAr: string): { status: "RELEASING" | "FINISHED" | "HIATUS"; statusAr: string } {
@@ -1127,7 +1125,7 @@ async function fetchMangaDarDetail(slug: string) {
 async function fetchMangaDarChapterPages(slug: string, chapter: string) {
   const rawClean = String(slug || "").trim();
   const cleanChapter = String(chapter || "").replace(/^\/+|\/+$/g, "").trim();
-  const cacheKey = `aw:chapter:${rawClean}:${cleanChapter}`;
+  const cacheKey = `aw:chapter:v2:${rawClean}:${cleanChapter}`;
   const cached = getCached<any>(cacheKey);
   if (cached) return cached;
 
@@ -1313,22 +1311,47 @@ async function fetchAzoraflyCatalog(opts: {
   search?: string;
 }) {
   const { page, status, search } = opts;
-  const cacheKey = `az:catalog:v2:${page}:${status || "ALL"}:${search || ""}`;
+  const cacheKey = `az:catalog:v3:${page}:${status || "ALL"}:${search || ""}`;
   const cached = getCached<any>(cacheKey);
   if (cached) return cached;
 
   const params = new URLSearchParams();
   params.set("page", String(page));
+  params.set("perPage", "24");
+  params.set("seriesType", "MANHWA");
   if (status === "RELEASING") params.set("seriesStatus", "ONGOING");
   else if (status === "FINISHED") params.set("seriesStatus", "COMPLETED");
   if (search && search.trim()) {
     params.set("searchTerm", search.trim());
   }
 
-  const url = `${AZORAFLY_BASE}/series?${params.toString()}`;
-  const data = await fetchAzoraflyTsrData(url);
-  const posts = Array.isArray(data?.initialPosts) ? data.initialPosts : [];
-  const totalCount = Number(data?.initialTotalCount || posts.length);
+  let rawPosts: any[] = [];
+  let totalCount = 0;
+  try {
+    const apiRes = await fetch(`${AZORAFLY_BASE}/api/query?${params.toString()}`, {
+      headers: { "User-Agent": UA, Accept: "application/json", Referer: `${AZORAFLY_BASE}/series` },
+      signal: AbortSignal.timeout(12000),
+    });
+    if (apiRes.ok) {
+      const apiJson = (await apiRes.json()) as any;
+      if (Array.isArray(apiJson?.posts)) {
+        rawPosts = apiJson.posts;
+        totalCount = Number(apiJson.totalCount || rawPosts.length);
+      }
+    }
+  } catch {}
+
+  if (!rawPosts.length) {
+    const url = `${AZORAFLY_BASE}/series?${params.toString()}`;
+    const data = await fetchAzoraflyTsrData(url);
+    rawPosts = Array.isArray(data?.initialPosts) ? data.initialPosts : [];
+    totalCount = Number(data?.initialTotalCount || rawPosts.length);
+  }
+
+  // Strictly exclude text-only web novels (seriesType === "NOVEL" or isNovel)
+  const posts = rawPosts.filter(
+    (p: any) => String(p?.seriesType || "").toUpperCase() !== "NOVEL" && !p?.isNovel
+  );
 
   const items = posts.map((post: any) => {
     const slug = String(post.slug || post.id);
@@ -1653,42 +1676,82 @@ async function handleMangaImageProxy(req: any, res: any) {
       return res.status(400).send("Invalid image URL");
     }
     const normalizedUrl = normalizeAwMangaImageUrl(rawUrl);
-    const host = new URL(normalizedUrl).hostname.toLowerCase();
-    let referer = "https://mangalik.net/";
-    if (host.includes("azorafly")) referer = "https://azorafly.com/";
-    else if (host.includes("api.mangatek.com")) referer = "https://mangatek.com/";
-    else if (host.includes("mangatek")) referer = "";
+    const parsedUrl = new URL(normalizedUrl);
+    const host = parsedUrl.hostname.toLowerCase();
 
-    const headers: Record<string, string> = {
-      "User-Agent": UA,
-      Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
-    };
-    if (referer) headers.Referer = referer;
-
-    let upstream = await fetch(normalizedUrl, {
-      headers,
-      signal: AbortSignal.timeout(15000),
-    });
-
-    if (!upstream.ok && host.includes("mangatek")) {
-      const altReferer = referer ? "" : "https://mangatek.com/";
-      const altHeaders: Record<string, string> = {
+    const makeHeaders = (ref: string): Record<string, string> => {
+      const h: Record<string, string> = {
         "User-Agent": UA,
         Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
       };
-      if (altReferer) altHeaders.Referer = altReferer;
-      upstream = await fetch(normalizedUrl, {
-        headers: altHeaders,
-        signal: AbortSignal.timeout(15000),
-      });
+      if (ref) h.Referer = ref;
+      return h;
+    };
+
+    const attempts: Array<{ url: string; ref: string }> = [];
+    const seenAttempts = new Set<string>();
+    const addAttempt = (url: string, ref: string) => {
+      const key = `${url}|${ref}`;
+      if (!seenAttempts.has(key)) {
+        seenAttempts.add(key);
+        attempts.push({ url, ref });
+      }
+    };
+
+    if (host.includes("azorafly")) {
+      addAttempt(normalizedUrl, "https://azorafly.com/");
+      addAttempt(normalizedUrl, "");
+    } else if (host.includes("mangalik.net")) {
+      addAttempt(normalizedUrl, "https://mangalik.net/");
+      // Fallback across mangalik CDN mirrors (tempsolo <-> leksolo <-> s2solo <-> io)
+      const mirrors = ["tempsolo.mangalik.net", "leksolo.mangalik.net", "s2solo.mangalik.net", "io.mangalik.net"];
+      for (const m of mirrors) {
+        if (m !== host) {
+          addAttempt(normalizedUrl.replace(`://${host}/`, `://${m}/`), "https://mangalik.net/");
+        }
+      }
+      addAttempt(normalizedUrl, "");
+    } else if (host.includes("api.mangatek.com")) {
+      addAttempt(normalizedUrl, "https://mangatek.com/");
+      addAttempt(normalizedUrl, "");
+    } else if (host.includes("mangatek")) {
+      addAttempt(normalizedUrl, "");
+      addAttempt(normalizedUrl, "https://mangatek.com/");
+    } else if (host.includes("lekmanga")) {
+      addAttempt(normalizedUrl, "https://lekmanga.net/");
+      addAttempt(normalizedUrl, "https://mangalik.net/");
+      addAttempt(normalizedUrl, "");
+    } else if (host.includes("olympustaff")) {
+      addAttempt(normalizedUrl, "https://olympustaff.com/");
+      addAttempt(normalizedUrl, "");
+    } else {
+      addAttempt(normalizedUrl, `${parsedUrl.origin}/`);
+      addAttempt(normalizedUrl, "https://mangalik.net/");
+      addAttempt(normalizedUrl, "");
     }
 
-    if (!upstream.ok) {
-      return res.status(upstream.status || 502).send("Upstream image error");
+    let lastStatus = 502;
+    for (const att of attempts) {
+      try {
+        const upstream = await fetch(att.url, {
+          headers: makeHeaders(att.ref),
+          signal: AbortSignal.timeout(12000),
+        });
+        lastStatus = upstream.status || 502;
+        if (!upstream.ok) continue;
+        const ct = String(upstream.headers.get("content-type") || "").toLowerCase();
+        if (ct.includes("text/html") || ct.includes("application/json")) continue;
+        const buf = Buffer.from(await upstream.arrayBuffer());
+        if (buf.length < 150) continue;
+        res.setHeader("Content-Type", ct && ct.startsWith("image/") ? ct : "image/jpeg");
+        res.setHeader("Cache-Control", "public, max-age=86400");
+        return res.status(200).send(buf);
+      } catch {
+        // try next fallback
+      }
     }
-    res.setHeader("Content-Type", upstream.headers.get("content-type") || "image/jpeg");
-    res.setHeader("Cache-Control", "public, max-age=86400");
-    return res.status(200).send(Buffer.from(await upstream.arrayBuffer()));
+
+    return res.status(lastStatus || 502).send("Upstream image error");
   } catch (error: any) {
     return res.status(502).send(error?.message || "Image proxy error");
   }
@@ -1891,7 +1954,7 @@ async function fetchAwLatestMangaDocs(): Promise<MangaLatestUpdateItem[]> {
 
     // Fetch exact latest chapter number & timestamp for top 10 AW manga from chapters_summery/summery
     await Promise.all(
-      baseItems.slice(0, 10).map(async (item) => {
+      baseItems.map(async (item) => {
         try {
           const sumRes = await fetch(
             `${AW_FS_BASE}/manga_list/${encodeURIComponent(item.slug)}/chapters_summery/summery`,
@@ -1942,7 +2005,7 @@ async function fetchAwLatestMangaDocs(): Promise<MangaLatestUpdateItem[]> {
         it.title = it.arabicTitle;
       }
     }
-    return baseItems;
+    return baseItems.filter((it) => typeof it.latestChapter === "number" && it.latestChapter > 0);
   } catch (err: any) {
     logger.warn({ err: err?.message || String(err) }, "[manga] latest AW docs fetch failed");
     return [];

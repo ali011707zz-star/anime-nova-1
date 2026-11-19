@@ -1,3 +1,4 @@
+import { recordDubbedRecentRelease } from "./dubbed.js";
 /**
  * telegram.ts — بوت تيليجرام لـ Anime NOVA
  * يستقبل رسائل المستخدمين، يرد عليهم، ويحوّل التقارير للأدمن
@@ -693,7 +694,7 @@ function collectMangaKeys(item: any): string[] {
 
 async function pollDubbedLatest(): Promise<void> {
   try {
-    const resp = await fetch(`${internalApiBaseUrl()}/api/dubbed/latest-episodes`, {
+    const resp = await fetch(`${internalApiBaseUrl()}/api/dubbed/latest-episodes?mode=all`, {
       headers: { "User-Agent": "NovaBot/1.0", Accept: "application/json" },
       signal: AbortSignal.timeout(25_000),
     });
@@ -734,6 +735,8 @@ async function pollDubbedLatest(): Promise<void> {
       const poster = typeof item?.cover === "string" && /^https?:\/\//i.test(item.cover) ? item.cover : "";
       const photoSent = poster ? await sendChannelPhoto(poster, caption) : false;
       const delivered = photoSent || await sendMessage(channelId, caption);
+      // سجل الحلقة المدبلجة الجديدة في قائمة أحدث الحلقات (آخر 14 يوماً) حتى تظهر للمستخدمين
+      await recordDubbedRecentRelease(item).catch(() => {});
       if (delivered) {
         await markNotifKeys(keys);
         sent++;

@@ -7,6 +7,7 @@ import {
   ActivityIndicator, StyleSheet, Platform, ScrollView, I18nManager,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -114,7 +115,41 @@ export default function AwDubbedDetailScreen() {
       .catch(() => setEpLoading(false));
   }, [curSeason?.animeId]);
 
+  const watchedStorageKey = `watched-awdub:${favKey}:s${selSeason}`;
+  const [watchedSet, setWatchedSet] = useState<Set<number>>(new Set());
+
+  useEffect(() => {
+    let active = true;
+    void AsyncStorage.getItem(watchedStorageKey)
+      .then((raw) => {
+        if (!active) return;
+        const arr = raw ? JSON.parse(raw) : [];
+        setWatchedSet(new Set(Array.isArray(arr) ? arr.map(Number).filter(Number.isFinite) : []));
+      })
+      .catch(() => {
+        if (active) setWatchedSet(new Set());
+      });
+    return () => { active = false; };
+  }, [watchedStorageKey]);
+
+  const toggleWatched = useCallback((epNum: number) => {
+    setWatchedSet((prev) => {
+      const next = new Set(prev);
+      if (next.has(epNum)) next.delete(epNum);
+      else next.add(epNum);
+      void AsyncStorage.setItem(watchedStorageKey, JSON.stringify([...next])).catch(() => {});
+      return next;
+    });
+  }, [watchedStorageKey]);
+
   const openWatch = useCallback((ep: Episode) => {
+    setWatchedSet((prev) => {
+      if (prev.has(ep.number)) return prev;
+      const next = new Set(prev);
+      next.add(ep.number);
+      void AsyncStorage.setItem(watchedStorageKey, JSON.stringify([...next])).catch(() => {});
+      return next;
+    });
     router.push({
       pathname: "/watch",
       params: {
@@ -130,47 +165,75 @@ export default function AwDubbedDetailScreen() {
         awKey: encodeURIComponent(keyParam || ""),
       },
     });
-  }, [curSeason, selSeason, title, titleAr, poster, seasons, keyParam, router]);
+  }, [curSeason, selSeason, title, titleAr, poster, seasons, keyParam, router, watchedStorageKey]);
 
-  const renderEp = useCallback(({ item: ep, index }: { item: Episode; index: number }) => (
-    <Pressable
-      onPress={() => openWatch(ep)}
-      focusable={tvMode}
-      hasTVPreferredFocus={tvMode && ep.number === episodes[0]?.number}
-      onFocus={() => episodeFocusScroll.scrollToFocusedIndex(index)}
-      style={({ pressed, focused }) => [
-        styles.epRow,
-        { backgroundColor: colors.card, borderColor: colors.border },
-        tvMode && styles.tvEpRow,
-        { opacity: pressed ? 0.78 : 1 },
-        tvMode && tvFocusStyle(focused),
-      ]}
-    >
-      <View style={[styles.epThumb, { backgroundColor: colors.surfaceElevated }, tvMode && styles.tvEpThumb]}>
-        {poster && !imgError ? (
-          <Image source={{ uri: poster }} style={StyleSheet.absoluteFill} resizeMode="cover"
-            onError={() => setImgError(true)} />
-        ) : (
-          <View style={styles.epPlaceholder}>
-            <Ionicons name="play-circle-outline" size={22} color={colors.textMuted} />
+  const renderEp = useCallback(({ item: ep, index }: { item: Episode; index: number }) => {
+    const isWatched = watchedSet.has(ep.number);
+    return (
+      <Pressable
+        onPress={() => openWatch(ep)}
+        focusable={tvMode}
+        hasTVPreferredFocus={tvMode && ep.number === episodes[0]?.number}
+        onFocus={() => episodeFocusScroll.scrollToFocusedIndex(index)}
+        style={({ pressed, focused }) => [
+          styles.epRow,
+          { backgroundColor: colors.card, borderColor: isWatched ? "rgba(16,185,129,0.34)" : colors.border },
+          tvMode && styles.tvEpRow,
+          { opacity: pressed ? 0.78 : 1 },
+          tvMode && tvFocusStyle(focused),
+        ]}
+      >
+        <View style={[styles.epThumb, { backgroundColor: colors.surfaceElevated }, tvMode && styles.tvEpThumb]}>
+          {poster && !imgError ? (
+            <Image source={{ uri: poster }} style={StyleSheet.absoluteFill} resizeMode="cover"
+              onError={() => setImgError(true)} />
+          ) : (
+            <View style={styles.epPlaceholder}>
+              <Ionicons name="play-circle-outline" size={22} color={colors.textMuted} />
+            </View>
+          )}
+          <View style={styles.epPlayOverlay}>
+            <View style={[styles.epPlayBtn, isWatched && { backgroundColor: "#10B981" }]}>
+              <Ionicons name={isWatched ? "checkmark" : "play"} size={isWatched ? 14 : 12} color="#fff" style={isWatched ? undefined : { marginLeft: 1 }} />
+            </View>
           </View>
-        )}
-        <View style={styles.epPlayOverlay}>
-          <View style={styles.epPlayBtn}>
-            <Ionicons name="play" size={12} color="#fff" style={{ marginLeft: 1 }} />
+          <View style={styles.epNumBadge}>
+            <Text style={styles.epNumText}>{ep.number}</Text>
           </View>
         </View>
-        <View style={styles.epNumBadge}>
-          <Text style={styles.epNumText}>{ep.number}</Text>
+        <View style={styles.epInfo}>
+          <Text style={[styles.epTitle, tvMode && styles.tvEpTitle, { color: colors.textPrimary }]}>الحلقة {ep.number}</Text>
+          <Text style={[styles.epSub, tvMode && styles.tvEpSub, { color: colors.textSecondary }]}>{curSeason?.label || `الموسم ${selSeason + 1}`}</Text>
+          {isWatched ? (
+            <View style={styles.watchedBadge}>
+              <Text style={styles.watchedBadgeText}>تمت المشاهدة</Text>
+            </View>
+          ) : null}
         </View>
-      </View>
-      <View style={styles.epInfo}>
-        <Text style={[styles.epTitle, tvMode && styles.tvEpTitle, { color: colors.textPrimary }]}>الحلقة {ep.number}</Text>
-        <Text style={[styles.epSub, tvMode && styles.tvEpSub, { color: colors.textSecondary }]}>{curSeason?.label || `الموسم ${selSeason + 1}`}</Text>
-      </View>
-      <Ionicons name="chevron-back" size={16} color={colors.textMuted} />
-    </Pressable>
-  ), [openWatch, poster, imgError, curSeason, selSeason, episodes, tvMode, colors, episodeFocusScroll.scrollToFocusedIndex]);
+        <Pressable
+          onPress={(e: any) => {
+            e?.stopPropagation?.();
+            toggleWatched(ep.number);
+          }}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={isWatched ? `إلغاء مشاهدة الحلقة ${ep.number}` : `تحديد الحلقة ${ep.number} كمشاهدة`}
+          style={[
+            styles.eyeBtn,
+            { backgroundColor: colors.input, borderColor: colors.border },
+            isWatched && styles.eyeBtnWatched,
+          ]}
+        >
+          <Ionicons
+            name={isWatched ? "eye" : "eye-outline"}
+            size={18}
+            color={isWatched ? "#10B981" : colors.textMuted}
+          />
+        </Pressable>
+        <Ionicons name="chevron-back" size={16} color={colors.textMuted} />
+      </Pressable>
+    );
+  }, [openWatch, toggleWatched, watchedSet, poster, imgError, curSeason, selSeason, episodes, tvMode, colors, episodeFocusScroll.scrollToFocusedIndex]);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
@@ -375,5 +438,9 @@ const styles = StyleSheet.create({
   epTitle:         { color: "#fff", fontSize: 14, fontFamily: "Cairo_700Bold", textAlign: "right" },
   epSub:           { color: "rgba(255,255,255,0.45)", fontSize: 11, fontFamily: "Cairo_400Regular", marginTop: 2, textAlign: "right" },
   center:          { paddingVertical: 40, alignItems: "center", justifyContent: "center" },
+  watchedBadge:    { marginTop: 4, alignSelf: ALIGN_RIGHT, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, backgroundColor: "rgba(16,185,129,0.14)", borderWidth: 1, borderColor: "rgba(16,185,129,0.35)" },
+  watchedBadgeText:{ fontSize: 10, fontFamily: "Cairo_700Bold", color: "#10B981" },
+  eyeBtn:          { width: 34, height: 34, borderRadius: 17, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  eyeBtnWatched:   { backgroundColor: "rgba(16,185,129,0.14)", borderColor: "rgba(16,185,129,0.4)" },
   emptyText:       { color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular" },
 });

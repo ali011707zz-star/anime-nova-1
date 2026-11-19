@@ -2638,13 +2638,85 @@ async function fetchSd2LatestRows(): Promise<DubbedLatestItem[]> {
   }
 }
 
+const DUBBED_RECENT_WINDOW_MS = 14 * 24 * 60 * 60 * 1000; // 14 days strictly recent window
+const DUBBED_RECENT_CONFIG_KEY = "dubbed_recent_releases_v1";
+
+function isWithinRecentWindow(iso: string | null | undefined): boolean {
+  if (!iso) return false;
+  const ts = Date.parse(String(iso));
+  if (!Number.isFinite(ts)) return false;
+  const age = Date.now() - ts;
+  return age >= -24 * 60 * 60 * 1000 && age <= DUBBED_RECENT_WINDOW_MS;
+}
+
+async function readRecordedDubbedReleases(): Promise<DubbedLatestItem[]> {
+  const SB_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
+  const SB_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+  if (!SB_URL || !SB_KEY) return [];
+  try {
+    const r = await fetch(
+      `${SB_URL}/rest/v1/app_config?key=eq.${encodeURIComponent(DUBBED_RECENT_CONFIG_KEY)}&select=value`,
+      {
+        headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+        signal: AbortSignal.timeout(8_000),
+      },
+    );
+    if (!r.ok) return [];
+    const rows = (await r.json()) as any[];
+    const rawVal = rows?.[0]?.value;
+    if (!rawVal) return [];
+    const parsed = JSON.parse(String(rawVal));
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((it: any) => it && it.id && isWithinRecentWindow(it.updatedAt));
+  } catch {
+    return [];
+  }
+}
+
+export async function recordDubbedRecentRelease(item: any): Promise<void> {
+  const SB_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
+  const SB_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+  if (!SB_URL || !SB_KEY || !item?.id) return;
+  try {
+    const existing = await readRecordedDubbedReleases();
+    const stamped: DubbedLatestItem = {
+      ...item,
+      updatedAt: new Date().toISOString(),
+    };
+    const next = [
+      stamped,
+      ...existing.filter((x) => x.id !== stamped.id),
+    ]
+      .filter((x) => isWithinRecentWindow(x.updatedAt))
+      .slice(0, 30);
+
+    await fetch(`${SB_URL}/rest/v1/app_config`, {
+      method: "POST",
+      headers: {
+        apikey: SB_KEY,
+        Authorization: `Bearer ${SB_KEY}`,
+        "Content-Type": "application/json",
+        Prefer: "resolution=merge-duplicates",
+      },
+      body: JSON.stringify({ key: DUBBED_RECENT_CONFIG_KEY, value: JSON.stringify(next) }),
+      signal: AbortSignal.timeout(8_000),
+    });
+    _dubbedRecentCache = null;
+  } catch (err: any) {
+    logger.warn({ err: err?.message || String(err) }, "dubbed: failed to record recent release");
+  }
+}
+
+let _dubbedRecentCache: { expiresAt: number; items: DubbedLatestItem[] } | null = null;
+let _dubbedRecentInFlight: Promise<DubbedLatestItem[]> | null = null;
+
 async function buildDubbedLatestFeed(): Promise<DubbedLatestItem[]> {
   const [azItems, awItems, sd2Items] = await Promise.all([
     fetchAnimeZidLatestRows(),
     fetchAwDubbedLatestRows(),
     fetchSd2LatestRows(),
   ]);
-  // Interleave fairly across all 3 dubbed sections so all 3 are visible near the top
+  // Interleave fairly across all 3 dubbed sections (used by Telegram monitor mode=all)
   const merged: DubbedLatestItem[] = [];
   const maxLen = Math.max(azItems.length, awItems.length, sd2Items.length);
   for (let i = 0; i < maxLen; i++) {
@@ -2655,29 +2727,74 @@ async function buildDubbedLatestFeed(): Promise<DubbedLatestItem[]> {
   return merged;
 }
 
+async function buildStrictlyRecentDubbedFeed(): Promise<DubbedLatestItem[]> {
+  // Combine ONLY genuinely recent releases (within last 14 days):
+  // 1) Newly detected dubbed releases stamped by our 10-min monitor
+  // 2) Any aw-dubbed / live rows whose real updatedAt/imported_at is within the last 14 days
+  const [recorded, awItems] = await Promise.all([
+    readRecordedDubbedReleases(),
+    fetchAwDubbedLatestRows(),
+  ]);
+  const recentLive = awItems.filter((it) => isWithinRecentWindow(it.updatedAt));
+  const combined = [...recorded, ...recentLive];
+  combined.sort((a, b) => {
+    const ta = a.updatedAt ? Date.parse(a.updatedAt) : 0;
+    const tb = b.updatedAt ? Date.parse(b.updatedAt) : 0;
+    return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+  });
+  const seen = new Set<string>();
+  const deduped: DubbedLatestItem[] = [];
+  for (const item of combined) {
+    if (!item.id || seen.has(item.id)) continue;
+    seen.add(item.id);
+    deduped.push(item);
+  }
+  return deduped.slice(0, 24);
+}
+
 router.get("/dubbed/latest-episodes", async (req, res) => {
   const force = req.query.refresh === "1";
+  const allMode = req.query.mode === "all";
   try {
-    if (!force && _dubbedLatestCache && Date.now() < _dubbedLatestCache.expiresAt) {
+    if (allMode) {
+      if (!force && _dubbedLatestCache && Date.now() < _dubbedLatestCache.expiresAt) {
+        res.setHeader("Cache-Control", "no-store");
+        res.json({ items: _dubbedLatestCache.items });
+        return;
+      }
+      if (!_dubbedLatestInFlight) {
+        _dubbedLatestInFlight = buildDubbedLatestFeed().finally(() => {
+          _dubbedLatestInFlight = null;
+        });
+      }
+      const items = await _dubbedLatestInFlight;
+      if (items.length > 0) {
+        _dubbedLatestCache = { expiresAt: Date.now() + 5 * 60 * 1000, items };
+      }
       res.setHeader("Cache-Control", "no-store");
-      res.json({ items: _dubbedLatestCache.items });
+      res.json({ items });
       return;
     }
-    if (!_dubbedLatestInFlight) {
-      _dubbedLatestInFlight = buildDubbedLatestFeed().finally(() => {
-        _dubbedLatestInFlight = null;
+
+    // Default public app feed: STRICTLY recent dubbed episodes only (<= 14 days old)
+    if (!force && _dubbedRecentCache && Date.now() < _dubbedRecentCache.expiresAt) {
+      res.setHeader("Cache-Control", "no-store");
+      res.json({ items: _dubbedRecentCache.items });
+      return;
+    }
+    if (!_dubbedRecentInFlight) {
+      _dubbedRecentInFlight = buildStrictlyRecentDubbedFeed().finally(() => {
+        _dubbedRecentInFlight = null;
       });
     }
-    const items = await _dubbedLatestInFlight;
-    if (items.length > 0) {
-      _dubbedLatestCache = { expiresAt: Date.now() + 5 * 60 * 1000, items };
-    }
+    const items = await _dubbedRecentInFlight;
+    _dubbedRecentCache = { expiresAt: Date.now() + 3 * 60 * 1000, items };
     res.setHeader("Cache-Control", "no-store");
     res.json({ items });
   } catch (err: any) {
     logger.warn({ err: err?.message || String(err) }, "dubbed: latest-episodes route failed");
     res.setHeader("Cache-Control", "no-store");
-    res.json({ items: _dubbedLatestCache?.items || [] });
+    res.json({ items: allMode ? (_dubbedLatestCache?.items || []) : (_dubbedRecentCache?.items || []) });
   }
 });
 

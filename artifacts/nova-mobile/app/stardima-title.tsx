@@ -236,6 +236,35 @@ export default function StardimaTitleScreen() {
       fontSize: 14,
       textAlign: "right",
     },
+    watchedBadge: {
+      marginTop: 4,
+      alignSelf: ALIGN_RIGHT,
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      borderRadius: 6,
+      backgroundColor: "rgba(16,185,129,0.14)",
+      borderWidth: 1,
+      borderColor: "rgba(16,185,129,0.35)",
+    },
+    watchedBadgeText: {
+      fontSize: 10,
+      fontFamily: "Cairo_700Bold",
+      color: "#10B981",
+    },
+    eyeBtn: {
+      width: 34,
+      height: 34,
+      borderRadius: 17,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.input,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    eyeBtnWatched: {
+      backgroundColor: "rgba(16,185,129,0.14)",
+      borderColor: "rgba(16,185,129,0.4)",
+    },
     episodeMeta: {
       color: colors.textSecondary,
       fontFamily: "Cairo_400Regular",
@@ -367,6 +396,47 @@ export default function StardimaTitleScreen() {
     return () => { active = false; };
   }, [providerTitleId, visibleEpisodes]));
 
+  const watchedStorageKey = `watched-sd2:${providerTitleId}:s${selectedSeason || 1}`;
+  const [watchedIds, setWatchedIds] = useState<Set<string>>(new Set());
+
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    if (!providerTitleId) {
+      setWatchedIds(new Set());
+      return () => { active = false; };
+    }
+    void AsyncStorage.getItem(watchedStorageKey)
+      .then((raw) => {
+        if (!active) return;
+        const arr = raw ? JSON.parse(raw) : [];
+        setWatchedIds(new Set(Array.isArray(arr) ? arr.map(String) : []));
+      })
+      .catch(() => {
+        if (active) setWatchedIds(new Set());
+      });
+    return () => { active = false; };
+  }, [providerTitleId, watchedStorageKey]));
+
+  const toggleWatchedEpisode = useCallback((epKey: string) => {
+    setWatchedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(epKey)) next.delete(epKey);
+      else next.add(epKey);
+      void AsyncStorage.setItem(watchedStorageKey, JSON.stringify([...next])).catch(() => {});
+      return next;
+    });
+  }, [watchedStorageKey]);
+
+  const markWatchedEpisode = useCallback((epKey: string) => {
+    setWatchedIds((prev) => {
+      if (prev.has(epKey)) return prev;
+      const next = new Set(prev);
+      next.add(epKey);
+      void AsyncStorage.setItem(watchedStorageKey, JSON.stringify([...next])).catch(() => {});
+      return next;
+    });
+  }, [watchedStorageKey]);
+
   const renderEpisode = ({ item, index }: { item: CatalogEpisode; index: number }) => {
     const episodeNumber = Number(item.episode_number) || index + 1;
     const isMovie = title?.media_type === "movie";
@@ -377,9 +447,13 @@ export default function StardimaTitleScreen() {
     const progressPercent = progress?.duration
       ? Math.min(100, Math.max(0, (progress.position / progress.duration) * 100))
       : 0;
+    const epKey = String(item.id || episodeNumber);
+    const isWatched = watchedIds.has(epKey) || progressPercent >= 90;
     return (
       <Pressable
-        onPress={() => router.push({
+        onPress={() => {
+          markWatchedEpisode(epKey);
+          router.push({
           pathname: "/stardima-servers" as any,
           params: {
             providerTitleId,
@@ -407,12 +481,14 @@ export default function StardimaTitleScreen() {
               nextEpisodeIndex: String(globalIndex + 1),
             } : {}),
           },
-        })}
+        });
+        }}
         focusable={tvMode}
         accessibilityRole="button"
         accessibilityLabel={isMovie ? "عرض روابط مشاهدة الفيلم" : `عرض روابط الحلقة ${episodeNumber}`}
         style={({ pressed, focused }) => [
           styles.episodeRow,
+          isWatched && { borderColor: "rgba(16,185,129,0.34)" },
           { opacity: pressed ? 0.78 : 1 },
           tvMode && focused && tvFocusStyle(true),
         ]}
@@ -422,8 +498,8 @@ export default function StardimaTitleScreen() {
             <Image source={{ uri: title.poster_url }} style={StyleSheet.absoluteFill} resizeMode="cover" />
           ) : null}
           <View style={styles.episodePlayOverlay}>
-            <View style={styles.episodePlayCircle}>
-              <Ionicons name="play" size={12} color="#fff" style={{ marginLeft: 1 }} />
+            <View style={[styles.episodePlayCircle, isWatched && { backgroundColor: "#10B981" }]}>
+              <Ionicons name={isWatched ? "checkmark" : "play"} size={isWatched ? 14 : 12} color="#fff" style={isWatched ? undefined : { marginLeft: 1 }} />
             </View>
           </View>
           <View style={styles.episodeNumBadge}>
@@ -440,15 +516,36 @@ export default function StardimaTitleScreen() {
               : `الموسم ${Number(item.season_number) || 1}`}
             {progress?.position ? ` · متابعة من ${Math.floor(progress.position / 60)} دقيقة` : ""}
           </Text>
-          {progressPercent > 0 && progressPercent < 90 ? (
+          {progressPercent > 0 && progressPercent < 90 && !isWatched ? (
             <View style={styles.progressTrack}>
               <View style={[styles.progressFill, { width: `${progressPercent}%` }]} />
             </View>
           ) : null}
-          {progressPercent >= 90 ? (
-            <Text style={[styles.episodeMeta, { color: "#10B981" }]}>تمت المشاهدة</Text>
+          {isWatched ? (
+            <View style={styles.watchedBadge}>
+              <Text style={styles.watchedBadgeText}>تمت المشاهدة</Text>
+            </View>
           ) : null}
         </View>
+        <Pressable
+          onPress={(e: any) => {
+            e?.stopPropagation?.();
+            toggleWatchedEpisode(epKey);
+          }}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={isWatched ? `إلغاء مشاهدة الحلقة ${episodeNumber}` : `تحديد الحلقة ${episodeNumber} كمشاهدة`}
+          style={[
+            styles.eyeBtn,
+            isWatched && styles.eyeBtnWatched,
+          ]}
+        >
+          <Ionicons
+            name={isWatched ? "eye" : "eye-outline"}
+            size={18}
+            color={isWatched ? "#10B981" : colors.textMuted}
+          />
+        </Pressable>
         <Ionicons name="chevron-back" size={16} color={colors.textMuted} />
       </Pressable>
     );
