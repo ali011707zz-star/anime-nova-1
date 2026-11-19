@@ -24,6 +24,8 @@ import { getAnimeSeoEntryById, getArabicAnimeTitleById } from "./lib/arabicAnime
 import crashReportRouter from "./routes/crashReport.js";
 import hlsProxyRouter from "./routes/hlsProxy.js";
 import otaRouter from "./routes/ota.js";
+import filmRouter from "./routes/film.js";
+import otaFilmRouter from "./routes/otaFilm.js";
 import mediaVaultRouter from "./routes/mediaVault.js";
 import { registerWebAdminRoutes } from "./routes/webAdmin.js";
 import analyticsRouter from "./routes/analytics.js";
@@ -87,7 +89,7 @@ export async function createApp(): Promise<Express> {
   // media proxy (for example megaplay.buzz). Those origins must never be
   // allowed to call the application API, but they also must not be rejected
   // by this global CORS guard before the proxy can handle the request.
-  const MEDIA_PROXY_PATH = /^\/api\/(?:anime|animation)\/(?:hls-proxy|video-proxy|seg-proxy|download-mp4)$/;
+  const MEDIA_PROXY_PATH = /^\/api\/(?:anime|animation|film)\/(?:hls-proxy|video-proxy|seg-proxy|download-mp4)$/;
   const ALLOWED_ORIGINS = new Set([
     process.env.FRONTEND_ORIGIN || "",
     process.env.APP_DOMAIN ? `https://${process.env.APP_DOMAIN}` : "",
@@ -186,6 +188,7 @@ export async function createApp(): Promise<Express> {
   // ── توكن المصادقة وتحديثات OTA الهوائية (تسبق Middleware الحماية) ──
   app.use(authTokenRouter);
   app.use("/api/ota", otaRouter);
+  app.use("/api/ota-film", otaFilmRouter);
   app.use("/api/media-vault", mediaVaultRouter);
 
   // ── Mobile release gate ───────────────────────────────────────────────────
@@ -304,6 +307,7 @@ export async function createApp(): Promise<Express> {
     next();
   });
 
+  app.use("/api/film", filmRouter);
   app.use("/api", router);
   app.use("/api/push", pushRouter);
   app.use("/api", pushRouter);
