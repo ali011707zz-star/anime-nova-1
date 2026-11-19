@@ -42,8 +42,11 @@ import {
 } from "@/hooks/useDubbedCatalogFeed";
 import {
   fetchLatestEpisodes,
+  fetchMangaLatestUpdates,
+  getLatestEpisodeRoute,
   normalizeLatestEpisodeItem,
   type LatestEpisodeItem,
+  type MangaLatestItem,
 } from "@/utils/latestEpisodes";
 
 function randomSample<T>(items: T[], limit = items.length): T[] {
@@ -115,10 +118,39 @@ export default function HomeScreen() {
     staleTime: 5 * 60 * 1000,
   });
 
-  /* أحدث الحلقات — نفس كتالوج AnimeSlayer المستخدم في الويب. */
+  /* أحدث الحلقات — أنمي مترجم + الأقسام المدبلجة (أنمي مدبلج، أنيميشن مدبلج، كرتون مدبلج 2) */
   type TodayEp = LatestEpisodeItem;
   const [todayEps, setTodayEps] = useState<TodayEp[]>([]);
   const [todayChecking, setTodayChecking] = useState(true);
+  const [latestManga, setLatestManga] = useState<MangaLatestItem[]>([]);
+  const [latestMangaChecking, setLatestMangaChecking] = useState(true);
+
+  const loadLatestFeeds = useCallback((signal?: AbortSignal) => {
+    fetchLatestEpisodes(signal)
+      .then((normalized) => {
+        if (signal?.aborted) return;
+        setTodayEps(normalized);
+        AsyncStorage.setItem("nova-latest-episodes", JSON.stringify(normalized)).catch(() => {});
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!signal?.aborted) setTodayChecking(false);
+      });
+
+    fetchMangaLatestUpdates(signal)
+      .then((mangaLatest) => {
+        if (signal?.aborted) return;
+        if (mangaLatest.length > 0) {
+          setLatestManga(mangaLatest);
+          AsyncStorage.setItem("nova-latest-manga-updates", JSON.stringify(mangaLatest)).catch(() => {});
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!signal?.aborted) setLatestMangaChecking(false);
+      });
+  }, []);
+
   useEffect(() => {
     const ctrl = new AbortController();
     AsyncStorage.getItem("nova-latest-episodes").then((stored) => {
@@ -127,23 +159,24 @@ export default function HomeScreen() {
         if (Array.isArray(parsed) && parsed.length) {
           const cachedItems = parsed
             .map((item) => normalizeLatestEpisodeItem(item))
-            .filter((item) => item.source === "anslayer");
+            .filter((item) => item.source === "anslayer" || Boolean(item.dubbedKind));
           if (cachedItems.length) setTodayEps(cachedItems);
         }
       } catch {}
     }).catch(() => {});
-    fetchLatestEpisodes(ctrl.signal)
-      .then((normalized) => {
-        if (ctrl.signal.aborted) return;
-        setTodayEps(normalized);
-        AsyncStorage.setItem("nova-latest-episodes", JSON.stringify(normalized)).catch(() => {});
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!ctrl.signal.aborted) setTodayChecking(false);
-      });
+
+    AsyncStorage.getItem("nova-latest-manga-updates").then((stored) => {
+      try {
+        const parsed = JSON.parse(stored || "[]");
+        if (Array.isArray(parsed) && parsed.length) {
+          setLatestManga(parsed);
+        }
+      } catch {}
+    }).catch(() => {});
+
+    loadLatestFeeds(ctrl.signal);
     return () => ctrl.abort();
-  }, []);
+  }, [loadLatestFeeds]);
 
   const isLoading = loadingT || loadingP || loadingA;
 
@@ -337,11 +370,13 @@ export default function HomeScreen() {
       ...(isTvLayout ? [] : [refetchManhwa(), refetchJpManga()]),
       fetchActiveDubbedTab(activeDubbedTab, true),
     ]);
+    loadLatestFeeds();
   };
 
   type HomeSectionItem =
     | { kind: "continue"; key: string }
     | { kind: "todayEps"; key: string }
+    | { kind: "latestManga"; key: string }
     | { kind: "dubbedUnified"; key: string }
     | { kind: "mangaUnified"; key: string }
     | { kind: "anilist"; key: string; title: string; items: AnilistMedia[]; onSeeAll: () => void };
@@ -350,6 +385,7 @@ export default function HomeScreen() {
     const sections: HomeSectionItem[] = [];
     if (recentHistory.length > 0) sections.push({ kind: "continue", key: "continue" });
     if (todayEps.length > 0 || todayChecking) sections.push({ kind: "todayEps", key: "todayEps" });
+    if (latestManga.length > 0 || latestMangaChecking) sections.push({ kind: "latestManga", key: "latestManga" });
     sections.push({ kind: "dubbedUnified", key: "dubbedUnified" });
     if (!isTvLayout && (manhwaItems.length > 0 || mangaItems.length > 0)) {
       sections.push({ kind: "mangaUnified", key: "mangaUnified" });
@@ -391,6 +427,8 @@ export default function HomeScreen() {
     recentHistory.length,
     todayEps.length,
     todayChecking,
+    latestManga.length,
+    latestMangaChecking,
     isTvLayout,
     manhwaItems.length,
     mangaItems.length,
@@ -626,7 +664,14 @@ export default function HomeScreen() {
                   /* بطاقة أحدث الحلقات تمرر anslayerId كمرجع احتياطي لـ AS،
                      لكن صفحة المشاهدة تفحص كل المصادر المتاحة مثل الويب. */
                    <Pressable
-                      onPress={() => router.push(`/watch?anime=${ep.animeId || 0}&anilistId=${ep.anilistId || ep.animeId || 0}&ep=${ep.episode}&totalEps=${ep.episode}&title=${encodeURIComponent(ep.romaji || ep.name || "")}&english=${encodeURIComponent(ep.english || "")}&native=${encodeURIComponent(ep.native || "")}&titles=${encodeURIComponent(JSON.stringify(ep.titleVariants || []))}&cover=${encodeURIComponent(ep.cover || "")}&titleAr=${encodeURIComponent(ep.titleAr || "")}&anslayerId=${ep.anslayerId}&awAnimeId=${encodeURIComponent(ep.awAnimeId || "")}&site=${encodeURIComponent(ep.source)}&fromLatest=1&latestSource=${encodeURIComponent(ep.source)}` as any)}
+                      onPress={() => {
+                        const target = getLatestEpisodeRoute(ep);
+                        if (target.params) {
+                          router.push({ pathname: target.pathname as any, params: target.params });
+                        } else {
+                          router.push(target.pathname as any);
+                        }
+                      }}
                       onFocus={() => {
                         handleSectionFocus?.();
                         if (isTvLayout) scrollTodayEpsIntoView(epIdx);
@@ -637,8 +682,8 @@ export default function HomeScreen() {
                     {ep.cover ? (
                       <Image
                         source={{ uri: isTvLayout
-                          ? getTvPosterUri(ep, ep.animeId ? `https://img.anili.st/media/${ep.animeId}` : "")
-                          : getPosterUri(ep, ep.animeId ? `https://img.anili.st/media/${ep.animeId}` : "") }}
+                          ? getTvPosterUri(ep, !ep.dubbedKind && ep.animeId ? `https://img.anili.st/media/${ep.animeId}` : "")
+                          : getPosterUri(ep, !ep.dubbedKind && ep.animeId ? `https://img.anili.st/media/${ep.animeId}` : "") }}
                         style={todayEpStyles.img}
                         resizeMode="cover"
                         resizeMethod="resize"
@@ -650,10 +695,34 @@ export default function HomeScreen() {
                       </View>
                     )}
                     <View style={[styles.historyBadge, styles.historyEpisodeBadge]}>
-                      <Text style={styles.historyBadgeText}>الحلقة {ep.episode}</Text>
+                      <Text style={styles.historyBadgeText}>
+                        {ep.isMovie ? "فيلم" : `الحلقة ${ep.episode}`}
+                      </Text>
                     </View>
+                    {ep.dubbedKind && ep.sectionLabel ? (
+                      <View
+                        style={{
+                          position: "absolute",
+                          top: 6,
+                          left: 6,
+                          paddingHorizontal: 6,
+                          paddingVertical: 2,
+                          borderRadius: 6,
+                          backgroundColor:
+                            ep.dubbedKind === "dubbed-anime"
+                              ? "rgba(16, 185, 129, 0.92)"
+                              : ep.dubbedKind === "aw-dubbed"
+                                ? "rgba(139, 92, 246, 0.92)"
+                                : "rgba(245, 158, 11, 0.92)",
+                        }}
+                      >
+                        <Text style={{ color: "#fff", fontSize: 8.5, fontFamily: "Cairo_700Bold" }} numberOfLines={1}>
+                          {ep.sectionLabel}
+                        </Text>
+                      </View>
+                    ) : null}
                     {(() => {
-                      const epArRaw = ep.titleAr || ep.title_ar || getKnownArabicAnimeTitle(ep.animeId || ep.anilistId, ep.english || ep.name, ep.romaji || ep.name);
+                      const epArRaw = ep.titleAr || ep.title_ar || (!ep.dubbedKind ? getKnownArabicAnimeTitle(ep.animeId || ep.anilistId, ep.english || ep.name, ep.romaji || ep.name) : ep.name);
                       const epAr = typeof epArRaw === "string" ? epArRaw : "";
                       const epEn = String(ep.english || ep.romaji || ep.name || "");
                       return (
@@ -683,6 +752,129 @@ export default function HomeScreen() {
                 initialNumToRender={isTvLayout ? 5 : 5}
                 maxToRenderPerBatch={isTvLayout ? 4 : 5}
                 windowSize={isTvLayout ? 5 : 3}
+                removeClippedSubviews={false}
+              />
+            )}
+          </View>
+        )}
+
+
+        {/* ── أحدث فصول وأعمال المانجا والمانهوا (أسفل أحدث الحلقات مباشرة) ── */}
+        {section.kind === "latestManga" && (latestManga.length > 0 || latestMangaChecking) && (
+          <View style={{ marginTop: 22 }}>
+            <SectionHeader
+              onSeeAll={() => router.push("/manga" as any)}
+              focusable={isTvLayout && sectionFocusable}
+              onFocus={handleSectionFocus}
+            >
+              <View style={styles.sectionRightRow}>
+                <Text style={{ fontSize: isTvLayout ? 22 : 15 }}>📖</Text>
+                <Text style={[styles.sectionTitle, isTvLayout && styles.tvSectionTitle, { color: colors.text }]}>
+                  أحدث فصول المانجا والمانهوا
+                </Text>
+                <View style={[styles.continueAccent, { backgroundColor: "#F59E0B" }]} />
+              </View>
+            </SectionHeader>
+            {latestMangaChecking && latestManga.length === 0 ? (
+              <SkeletonRow />
+            ) : (
+              <FlatList
+                data={latestManga}
+                horizontal
+                getItemLayout={getRailItemLayout}
+                keyExtractor={(item, idx) => `latest-manga-${item.id}-${idx}`}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
+                renderItem={({ item }) => {
+                  const posterUri = proxyPosterUrl(item.poster) || item.poster || "";
+                  const isManhwa = item.source === "manhwa" || item.typeLabel === "مانهوا";
+                  return (
+                    <Pressable
+                      onPress={() =>
+                        router.push({
+                          pathname: "/manga/[id]" as any,
+                          params: {
+                            id: item.id,
+                            title: item.arabicTitle || item.title,
+                            english: item.englishTitle || item.title,
+                            cover: posterUri,
+                            source: item.source,
+                          },
+                        })
+                      }
+                      onFocus={() => handleSectionFocus?.()}
+                      focusable={isTvLayout && sectionFocusable}
+                      style={({ focused }) => [
+                        todayEpStyles.card,
+                        {
+                          width: railCardWidth,
+                          height: Math.round(railCardWidth * 1.46),
+                          backgroundColor: colors.card,
+                          borderColor: colors.border,
+                        },
+                        isTvLayout && tvFocusStyle(focused),
+                      ]}
+                    >
+                      {posterUri ? (
+                        <Image
+                          source={{ uri: posterUri }}
+                          style={todayEpStyles.img}
+                          resizeMode="cover"
+                          resizeMethod="resize"
+                          fadeDuration={0}
+                        />
+                      ) : (
+                        <View style={[todayEpStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
+                          <Ionicons name="book-outline" size={28} color="rgba(255,255,255,0.25)" />
+                        </View>
+                      )}
+                      <View style={[styles.historyBadge, { backgroundColor: "rgba(245, 158, 11, 0.94)" }]}>
+                        <Text style={[styles.historyBadgeText, { color: "#09090B" }]}>
+                          {item.latestChapter ? `الفصل ${item.latestChapter}` : "جديد"}
+                        </Text>
+                      </View>
+                      <View
+                        style={{
+                          position: "absolute",
+                          top: 6,
+                          left: 6,
+                          paddingHorizontal: 6,
+                          paddingVertical: 2,
+                          borderRadius: 6,
+                          backgroundColor: isManhwa ? "rgba(14, 165, 233, 0.92)" : "rgba(236, 72, 153, 0.92)",
+                        }}
+                      >
+                        <Text style={{ color: "#fff", fontSize: 8.5, fontFamily: "Cairo_700Bold" }}>
+                          {isManhwa ? "مانهوا" : "مانجا"}
+                        </Text>
+                      </View>
+                      <LinearGradient colors={["transparent", "rgba(0,0,0,0.95)"]} style={todayEpStyles.grad}>
+                        <Text style={todayEpStyles.title} numberOfLines={2}>
+                          {item.arabicTitle || item.title}
+                        </Text>
+                        {item.englishTitle && item.englishTitle.trim() !== (item.arabicTitle || item.title).trim() ? (
+                          <Text
+                            style={{
+                              color: "rgba(255,255,255,0.72)",
+                              fontSize: isTvLayout ? 11 : 8.5,
+                              lineHeight: isTvLayout ? 15 : 12,
+                              fontFamily: "Cairo_600SemiBold",
+                              textAlign: "right",
+                              writingDirection: "ltr",
+                              marginTop: 1,
+                            }}
+                            numberOfLines={1}
+                          >
+                            {item.englishTitle}
+                          </Text>
+                        ) : null}
+                      </LinearGradient>
+                    </Pressable>
+                  );
+                }}
+                initialNumToRender={5}
+                maxToRenderPerBatch={5}
+                windowSize={3}
                 removeClippedSubviews={false}
               />
             )}

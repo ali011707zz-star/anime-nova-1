@@ -12,28 +12,28 @@ on:
       - 'artifacts/nova-mobile/utils/**'
       - 'artifacts/nova-mobile/scripts/export-ota.mjs'
       - 'artifacts/nova-mobile/scripts/publish-ota.mjs'
+      - 'artifacts/api-server/src/**'
 
 jobs:
   publish-ota:
-    name: Publish OTA Update to VPS
+    name: Publish API + OTA Update to VPS
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
-      - name: 🚀 Trigger OTA Export on VPS
+      - name: 🚀 Build API & Export OTA on VPS
         uses: appleboy/ssh-action@v1.2.2
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: 22
-          command_timeout: 8m
+          command_timeout: 10m
           script: |
             set -euo pipefail
             export PATH="$HOME/.local/share/pnpm:$HOME/.pnpm-global/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
             if [ -s "$HOME/.nvm/nvm.sh" ]; then
               . "$HOME/.nvm/nvm.sh"
             fi
-
             APP_DIR="/opt/anime-nova"
             if [ ! -d "$APP_DIR/.git" ]; then
               FOUND_OTA="$(find /opt /root /home /srv /var -maxdepth 5 -name 'ota-manifest.json' 2>/dev/null | head -1 || true)"
@@ -46,6 +46,17 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
             NODE_ENV="" pnpm install --prefer-offline --ignore-scripts 2>/dev/null || NODE_ENV="" pnpm install --ignore-scripts
+            echo "🔧 Building @workspace/api-server..."
+            pnpm --filter @workspace/api-server run build
+            echo "♻️ Restarting anime-nova-api via PM2..."
+            pm2 delete anime-nova-api 2>/dev/null || true
+            pm2 start "$APP_DIR/ecosystem.config.cjs" --only anime-nova-api
+            pm2 save
+            sleep 3
+            echo "=== API HEALTH ==="
+            curl -fsSL http://127.0.0.1:8080/api/health || true
+            echo ""
+            echo "📦 Exporting mobile OTA bundle..."
             EXPO_PUBLIC_DOMAIN="${EXPO_PUBLIC_DOMAIN:-https://animenovaa.duckdns.org}" \
               pnpm --filter @workspace/nova-mobile run export:ota
             echo "=== OTA STATUS ==="

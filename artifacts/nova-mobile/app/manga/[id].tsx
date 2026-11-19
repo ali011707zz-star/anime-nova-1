@@ -6,6 +6,7 @@ import * as ScreenOrientation from "expo-screen-orientation";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   BackHandler,
   FlatList,
   I18nManager,
@@ -26,6 +27,17 @@ import { getWatchContentId, useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { getBaseUrl } from "@/utils/api";
 import { translateMangaGenre } from "@/utils/mangaLocalization";
+import {
+  ActiveMangaDownload,
+  DownloadedMangaChapter,
+  deleteDownloadedMangaChapter,
+  downloadMangaChapter,
+  getActiveMangaDownloadsSnapshot,
+  getDownloadedChapter,
+  getDownloadedChaptersForManga,
+  readOfflineChapterText,
+  subscribeMangaDownloads,
+} from "@/utils/mangaDownloadManager";
 import { getYoutubeEmbedUrl, getYoutubeReferer } from "@/utils/youtube";
 import { YoutubeTrailerModal } from "@/components/YoutubeTrailerModal";
 import { TvPressable as Pressable, tvFocusStyle, useTvListFocusScroll, useTvMetrics } from "@/utils/tv";
@@ -36,6 +48,61 @@ const ROW_LTR = (IS_RTL ? "row-reverse" : "row") as "row" | "row-reverse";
 const ALIGN_RIGHT = (IS_RTL ? "flex-start" : "flex-end") as "flex-start" | "flex-end";
 
 const CHAPTERS_PER_PAGE = 50;
+
+const ARABIC_MONTHS = [
+  "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
+  "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر",
+];
+
+function formatArabicChapterDate(raw?: string | null): string {
+  if (!raw || typeof raw !== "string") return "";
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  const ms = Date.parse(trimmed);
+  if (!Number.isFinite(ms)) return trimmed.slice(0, 10);
+  const d = new Date(ms);
+  const now = new Date();
+  const diffDays = Math.floor((now.getTime() - d.getTime()) / (24 * 60 * 60 * 1000));
+  const formatted = `${d.getDate()} ${ARABIC_MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+  if (diffDays === 0 && d.getDate() === now.getDate()) return `اليوم • ${formatted}`;
+  if (diffDays === 1) return `أمس • ${formatted}`;
+  return formatted;
+}
+
+const OfflinePageImage = React.memo(function OfflinePageImage({
+  uri,
+  screenWidth,
+}: {
+  uri: string;
+  screenWidth: number;
+}) {
+  const [ratio, setRatio] = useState(1.42);
+  useEffect(() => {
+    let active = true;
+    Image.getSize(
+      uri,
+      (w, h) => {
+        if (active && w > 0 && h > 0) {
+          setRatio(Math.min(Math.max(h / w, 0.35), 8));
+        }
+      },
+      () => {},
+    );
+    return () => {
+      active = false;
+    };
+  }, [uri]);
+
+  return (
+    <Image
+      source={{ uri }}
+      style={{ width: screenWidth, height: Math.round(screenWidth * ratio), backgroundColor: "#050507" }}
+      resizeMode="contain"
+      fadeDuration={0}
+    />
+  );
+});
+
 
 type MangaChapter = {
   id: string;
@@ -470,6 +537,7 @@ export default function MangaDetailScreen() {
     chapters?: string;
     score?: string;
     source?: string;
+    offlineChapter?: string;
   }>();
   const router = useRouter();
   const colors = useColors();
@@ -509,10 +577,17 @@ export default function MangaDetailScreen() {
   const [readerOpen, setReaderOpen] = useState(false);
   const [activeChapter, setActiveChapter] = useState<MangaChapter | null>(null);
   const [chapterPages, setChapterPages] = useState<MangaPageData[]>([]);
+  const [offlineLocalPages, setOfflineLocalPages] = useState<string[]>([]);
+  const [readingOffline, setReadingOffline] = useState(false);
   const [chapterContentType, setChapterContentType] = useState<"images" | "text">("images");
   const [chapterTextHtml, setChapterTextHtml] = useState<string>("");
   const [pagesLoading, setPagesLoading] = useState(false);
   const [pagesError, setPagesError] = useState<string | null>(null);
+
+  // Offline downloaded chapters state for this manga/manhwa
+  const [downloadedMap, setDownloadedMap] = useState<Map<string, DownloadedMangaChapter>>(new Map());
+  const [activeDownloadsMap, setActiveDownloadsMap] = useState<Map<string, ActiveMangaDownload>>(new Map());
+  const offlineAutoOpenedRef = useRef(false);
 
   const readerWebViewRef = useRef<WebView>(null);
   const { tv: tvMode } = useTvMetrics();
@@ -643,6 +718,29 @@ export default function MangaDetailScreen() {
     void fetchDetail();
   }, [fetchDetail]);
 
+  const refreshMangaDownloads = useCallback(async () => {
+    const targetId = manga?.id || decodedId;
+    if (!targetId) return;
+    const saved = await getDownloadedChaptersForManga(targetId);
+    const nextMap = new Map<string, DownloadedMangaChapter>();
+    for (const item of saved) nextMap.set(item.chapterSlug, item);
+    setDownloadedMap(nextMap);
+
+    const active = getActiveMangaDownloadsSnapshot();
+    const actMap = new Map<string, ActiveMangaDownload>();
+    for (const a of active) {
+      if (a.mangaId === targetId) actMap.set(a.chapterSlug, a);
+    }
+    setActiveDownloadsMap(actMap);
+  }, [decodedId, manga?.id]);
+
+  useEffect(() => {
+    void refreshMangaDownloads();
+    return subscribeMangaDownloads(() => {
+      void refreshMangaDownloads();
+    });
+  }, [refreshMangaDownloads]);
+
   const loadChapterPages = useCallback(
     async (chapter: MangaChapter) => {
       const targetId = manga?.id || decodedId;
@@ -651,9 +749,31 @@ export default function MangaDetailScreen() {
       setPagesLoading(true);
       setPagesError(null);
       setChapterPages([]);
+      setOfflineLocalPages([]);
+      setReadingOffline(false);
       setChapterTextHtml("");
       setChapterContentType("images");
       try {
+        // 1. Offline-first: if chapter is already downloaded locally, open immediately with zero internet!
+        const offlineRec = await getDownloadedChapter(targetId, chapter.slug);
+        if (offlineRec) {
+          setReadingOffline(true);
+          if (offlineRec.contentType === "text") {
+            const html = await readOfflineChapterText(offlineRec);
+            if (html) {
+              setChapterContentType("text");
+              setChapterTextHtml(html);
+              return;
+            }
+          } else if (offlineRec.localPages.length > 0) {
+            setChapterContentType("images");
+            setOfflineLocalPages(offlineRec.localPages);
+            return;
+          }
+          setReadingOffline(false);
+        }
+
+        // 2. Online fetch
         const qs = new URLSearchParams({
           id: targetId,
           chapter: chapter.slug,
@@ -715,9 +835,37 @@ export default function MangaDetailScreen() {
     [loadChapterPages]
   );
 
-  // Chapters sorted ascending by numeric order
+  // If navigated directly from Downloads screen with ?offlineChapter=<slug>, open offline immediately!
+  useEffect(() => {
+    const slugParam = typeof params.offlineChapter === "string" ? params.offlineChapter.trim() : "";
+    if (!slugParam || offlineAutoOpenedRef.current) return;
+    const saved = downloadedMap.get(slugParam);
+    if (saved) {
+      offlineAutoOpenedRef.current = true;
+      openChapterInApp({
+        id: saved.chapterSlug,
+        slug: saved.chapterSlug,
+        number: saved.chapterNumber,
+        numberStr: saved.chapterNumber,
+        title: saved.chapterTitle,
+        date: saved.chapterDate,
+      });
+    }
+  }, [params.offlineChapter, downloadedMap, openChapterInApp]);
+
+  // Chapters sorted ascending by numeric order (falls back to locally downloaded chapters when offline!)
   const chaptersAsc = useMemo(() => {
-    const raw = manga?.chapters || [];
+    const raw: MangaChapter[] =
+      manga?.chapters && manga.chapters.length > 0
+        ? manga.chapters
+        : Array.from(downloadedMap.values()).map((d) => ({
+            id: d.chapterSlug,
+            slug: d.chapterSlug,
+            number: d.chapterNumber,
+            numberStr: d.chapterNumber,
+            title: d.chapterTitle,
+            date: d.chapterDate,
+          }));
     return [...raw].sort((a, b) => {
       const na = parseFloat(formatChapterNumber(a));
       const nb = parseFloat(formatChapterNumber(b));
@@ -853,6 +1001,58 @@ export default function MangaDetailScreen() {
     [targetMangaId]
   );
   const isFav = isFavorite(favNumericId);
+
+  const handleChapterDownload = useCallback(
+    async (ch: MangaChapter) => {
+      const targetId = manga?.id || decodedId;
+      if (!targetId) return;
+      const existing = downloadedMap.get(ch.slug);
+      if (existing) {
+        Alert.alert(
+          "حذف الفصل المحمّل",
+          `هل تريد حذف ${ch.title || `الفصل ${formatChapterNumber(ch)}`} من التنزيلات؟`,
+          [
+            { text: "إلغاء", style: "cancel" },
+            {
+              text: "حذف",
+              style: "destructive",
+              onPress: () => {
+                void deleteDownloadedMangaChapter(existing.id);
+              },
+            },
+          ],
+        );
+        return;
+      }
+      if (activeDownloadsMap.has(ch.slug)) return;
+      try {
+        await downloadMangaChapter({
+          mangaId: targetId,
+          source: manga?.source || inferredSource,
+          mangaTitle: primaryTitle || "مانجا",
+          mangaTitleEn: englishTitle || primaryTitle || "Manga",
+          coverUrl: cover || "",
+          chapterSlug: ch.slug,
+          chapterNumber: formatChapterNumber(ch),
+          chapterTitle: ch.title || `الفصل ${formatChapterNumber(ch)}`,
+          chapterDate: ch.createdAt || ch.date || "",
+        });
+      } catch (err: any) {
+        Alert.alert("تعذر التحميل", err?.message || "حدث خطأ أثناء تحميل الفصل. حاول مرة أخرى.");
+      }
+    },
+    [
+      manga?.id,
+      manga?.source,
+      decodedId,
+      inferredSource,
+      downloadedMap,
+      activeDownloadsMap,
+      primaryTitle,
+      englishTitle,
+      cover,
+    ],
+  );
 
   const handleToggleFavorite = useCallback(() => {
     if (!targetMangaId) return;
@@ -1008,12 +1208,34 @@ export default function MangaDetailScreen() {
                 </Text>
               </View>
 
-              <Text style={[styles.title, { color: colors.textPrimary }]} numberOfLines={3}>
+              <Text
+                style={[
+                  styles.title,
+                  {
+                    color: "#FFFFFF",
+                    textShadowColor: "rgba(0,0,0,0.75)",
+                    textShadowOffset: { width: 0, height: 1 },
+                    textShadowRadius: 6,
+                  },
+                ]}
+                numberOfLines={3}
+              >
                 {primaryTitle}
               </Text>
 
               {secondaryTitle ? (
-                <Text style={[styles.subTitle, { color: colors.textMuted }]} numberOfLines={2}>
+                <Text
+                  style={[
+                    styles.subTitle,
+                    {
+                      color: "rgba(255,255,255,0.86)",
+                      textShadowColor: "rgba(0,0,0,0.6)",
+                      textShadowOffset: { width: 0, height: 1 },
+                      textShadowRadius: 4,
+                    },
+                  ]}
+                  numberOfLines={2}
+                >
                   {secondaryTitle}
                 </Text>
               ) : null}
@@ -1668,7 +1890,9 @@ export default function MangaDetailScreen() {
               renderItem={({ item: ch }) => {
                 const isCurrent = activeChapter?.slug === ch.slug;
                 const numLabel = formatChapterNumber(ch);
-                const dateLabel = ch.date || (ch.createdAt ? ch.createdAt.slice(0, 10) : "");
+                const dateLabel = formatArabicChapterDate(ch.createdAt || ch.date);
+                const isDownloaded = downloadedMap.has(ch.slug);
+                const activeDl = activeDownloadsMap.get(ch.slug);
                 return (
                   <Pressable
                     onPress={() => openChapterInApp(ch)}
@@ -1689,10 +1913,14 @@ export default function MangaDetailScreen() {
                           {
                             backgroundColor: isCurrent
                               ? "rgba(245, 158, 11, 0.22)"
-                              : "rgba(56, 189, 248, 0.12)",
+                              : isDownloaded
+                                ? "rgba(16, 185, 129, 0.14)"
+                                : "rgba(56, 189, 248, 0.12)",
                             borderColor: isCurrent
                               ? "rgba(245, 158, 11, 0.45)"
-                              : "rgba(56, 189, 248, 0.28)",
+                              : isDownloaded
+                                ? "rgba(16, 185, 129, 0.42)"
+                                : "rgba(56, 189, 248, 0.28)",
                           },
                         ]}
                       >
@@ -1700,6 +1928,7 @@ export default function MangaDetailScreen() {
                           style={[
                             styles.chapterNumBadgeText,
                             isCurrent && { color: "#FBBF24" },
+                            !isCurrent && isDownloaded && { color: "#10B981" },
                           ]}
                         >
                           {numLabel}
@@ -1716,12 +1945,62 @@ export default function MangaDetailScreen() {
                           style={[styles.chapterSub, { color: colors.textMuted }]}
                           numberOfLines={1}
                         >
-                          {dateLabel ? `تاريخ النشر: ${dateLabel}` : "مترجم بالعربية"}
+                          {dateLabel
+                            ? `📅 ${dateLabel}${isDownloaded ? " • بدون إنترنت" : ""}`
+                            : isDownloaded
+                              ? "متاح للقراءة بدون إنترنت ✓"
+                              : "مترجم بالعربية"}
                         </Text>
                       </View>
                     </View>
 
-                    <View style={styles.chapterLeft}>
+                    <View style={[styles.chapterLeft, { gap: 8 }]}>
+                      <Pressable
+                        onPress={(e: any) => {
+                          e?.stopPropagation?.();
+                          void handleChapterDownload(ch);
+                        }}
+                        hitSlop={6}
+                        accessibilityRole="button"
+                        accessibilityLabel={isDownloaded ? "الفصل محمّل" : "تحميل الفصل للقراءة بدون إنترنت"}
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 4,
+                          paddingHorizontal: 8,
+                          paddingVertical: 5,
+                          borderRadius: 8,
+                          borderWidth: 1,
+                          backgroundColor: isDownloaded
+                            ? "rgba(16, 185, 129, 0.14)"
+                            : activeDl
+                              ? "rgba(245, 158, 11, 0.14)"
+                              : "rgba(56, 189, 248, 0.10)",
+                          borderColor: isDownloaded
+                            ? "rgba(16, 185, 129, 0.42)"
+                            : activeDl
+                              ? "rgba(245, 158, 11, 0.42)"
+                              : "rgba(56, 189, 248, 0.28)",
+                        }}
+                      >
+                        {activeDl ? (
+                          <>
+                            <ActivityIndicator size={12} color="#F59E0B" />
+                            <Text style={{ fontSize: 10.5, fontFamily: "Cairo_700Bold", color: "#F59E0B" }}>
+                              {activeDl.progress}%
+                            </Text>
+                          </>
+                        ) : isDownloaded ? (
+                          <>
+                            <Ionicons name="checkmark-circle" size={14} color="#10B981" />
+                            <Text style={{ fontSize: 10.5, fontFamily: "Cairo_700Bold", color: "#10B981" }}>
+                              محمّل
+                            </Text>
+                          </>
+                        ) : (
+                          <Ionicons name="download-outline" size={15} color={colors.homeAccent} />
+                        )}
+                      </Pressable>
                       <Text
                         style={[styles.chapterTranslatedLabel, { color: colors.homeAccent }]}
                       >
@@ -1904,15 +2183,55 @@ export default function MangaDetailScreen() {
                     : primaryTitle}
                 </Text>
                 <Text style={styles.readerHeaderSub} numberOfLines={1}>
-                  {primaryTitle} {chapterContentType === "text" ? "• قراءة نصية" : chapterPages.length > 0 ? `• ${chapterPages.length} صفحة` : ""}
+                  {primaryTitle}{" "}
+                  {readingOffline
+                    ? `• بدون إنترنت (${offlineLocalPages.length || 1} صفحة)`
+                    : chapterContentType === "text"
+                      ? "• قراءة نصية"
+                      : chapterPages.length > 0
+                        ? `• ${chapterPages.length} صفحة`
+                        : ""}
                 </Text>
               </View>
             </View>
 
-            <Pressable onPress={() => setChapterPickerVisible(true)} style={styles.qualityPill}>
-              <Ionicons name="list" size={13} color="#FBBF24" />
-              <Text style={styles.qualityPillText}>الفصول</Text>
-            </Pressable>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+              {activeChapter ? (() => {
+                const isDl = downloadedMap.has(activeChapter.slug);
+                const actDl = activeDownloadsMap.get(activeChapter.slug);
+                return (
+                  <Pressable
+                    onPress={() => void handleChapterDownload(activeChapter)}
+                    style={[
+                      styles.qualityPill,
+                      isDl && { borderColor: "rgba(16,185,129,0.5)", backgroundColor: "rgba(16,185,129,0.16)" },
+                    ]}
+                  >
+                    {actDl ? (
+                      <>
+                        <ActivityIndicator size={11} color="#FBBF24" />
+                        <Text style={styles.qualityPillText}>{actDl.progress}%</Text>
+                      </>
+                    ) : (
+                      <>
+                        <Ionicons
+                          name={isDl ? "checkmark-circle" : "download-outline"}
+                          size={13}
+                          color={isDl ? "#34D399" : "#38BDF8"}
+                        />
+                        <Text style={[styles.qualityPillText, isDl && { color: "#34D399" }]}>
+                          {isDl ? "محمّل" : "تحميل"}
+                        </Text>
+                      </>
+                    )}
+                  </Pressable>
+                );
+              })() : null}
+              <Pressable onPress={() => setChapterPickerVisible(true)} style={styles.qualityPill}>
+                <Ionicons name="list" size={13} color="#FBBF24" />
+                <Text style={styles.qualityPillText}>الفصول</Text>
+              </Pressable>
+            </View>
           </View>
 
           {pagesLoading ? (
@@ -1936,6 +2255,53 @@ export default function MangaDetailScreen() {
                 )}
               </View>
             </View>
+          ) : readingOffline && chapterContentType === "images" && offlineLocalPages.length > 0 ? (
+            <FlatList
+              data={offlineLocalPages}
+              keyExtractor={(uri, idx) => `offline-page-${idx}-${uri}`}
+              style={{ flex: 1, backgroundColor: "#050507" }}
+              showsVerticalScrollIndicator={true}
+              initialNumToRender={4}
+              maxToRenderPerBatch={4}
+              windowSize={5}
+              removeClippedSubviews={false}
+              renderItem={({ item: localUri }) => (
+                <OfflinePageImage uri={localUri} screenWidth={width} />
+              )}
+              ListFooterComponent={
+                <View style={{ padding: 28, alignItems: "center", gap: 14, backgroundColor: "#050507" }}>
+                  <View
+                    style={{
+                      paddingHorizontal: 14,
+                      paddingVertical: 6,
+                      borderRadius: 999,
+                      backgroundColor: "rgba(16,185,129,0.16)",
+                      borderWidth: 1,
+                      borderColor: "rgba(16,185,129,0.4)",
+                    }}
+                  >
+                    <Text style={{ color: "#34D399", fontSize: 13, fontFamily: "Cairo_700Bold" }}>
+                      ✓ نهاية {activeChapter ? activeChapter.title || `الفصل ${formatChapterNumber(activeChapter)}` : "الفصل"} (قراءة بدون إنترنت)
+                    </Text>
+                  </View>
+                  {nextChapter ? (
+                    <Pressable
+                      onPress={() => openChapterInApp(nextChapter)}
+                      style={{
+                        backgroundColor: "#F59E0B",
+                        paddingHorizontal: 22,
+                        paddingVertical: 11,
+                        borderRadius: 12,
+                      }}
+                    >
+                      <Text style={{ color: "#09090B", fontSize: 14, fontFamily: "Cairo_700Bold" }}>
+                        الانتقال إلى الفصل التالي ({formatChapterNumber(nextChapter)}) ←
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              }
+            />
           ) : (
             <WebView
               ref={readerWebViewRef}

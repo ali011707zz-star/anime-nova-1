@@ -2442,4 +2442,243 @@ router.get("/dubbed/animezid/watch-src", async (req, res) => {
   }
 });
 
+
+// ── GET /api/dubbed/latest-episodes ────────────────────────────────────────
+// يجمع أحدث الحلقات والإصدارات من:
+//   1. قسم الأنمي المدبلج (animezid)
+//   2. قسم الأنيميشن المدبلج (aw-dubbed / dubbed_anim_links)
+//   3. قسم كرتون مدبلج 2 (sd2 / stardimaV2)
+type DubbedLatestItem = {
+  id: string;
+  dubbedKind: "dubbed-anime" | "aw-dubbed" | "sd2";
+  sectionLabel: string;
+  source: string;
+  name: string;
+  titleAr: string;
+  english: string;
+  episode: number;
+  cover: string;
+  year: string;
+  isMovie: boolean;
+  updatedAt: string | null;
+  dubbedSlug?: string;
+  awKey?: string;
+  awSeries?: string;
+  awSeasons?: string;
+  sd2Slug?: string;
+  sd2Id?: number;
+  languageLabel?: string;
+};
+
+let _dubbedLatestCache: { expiresAt: number; items: DubbedLatestItem[] } | null = null;
+let _dubbedLatestInFlight: Promise<DubbedLatestItem[]> | null = null;
+
+async function fetchAwDubbedLatestRows(): Promise<DubbedLatestItem[]> {
+  const SB_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
+  const SB_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+  if (!SB_URL || !SB_KEY) return [];
+  try {
+    const [rowsRes, catalog] = await Promise.all([
+      fetch(
+        `${SB_URL}/rest/v1/dubbed_anim_links?select=series_id,series_name,series_name_ar,ep_number,imported_at&ep_number=not.is.null&link=not.is.null&link=neq.&order=imported_at.desc&limit=120`,
+        {
+          headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+          signal: AbortSignal.timeout(10_000),
+        },
+      ),
+      getAwCatalog().catch(() => [] as any[]),
+    ]);
+    if (!rowsRes.ok) return [];
+    const rows: any[] = await rowsRes.json().catch(() => []);
+    if (!Array.isArray(rows) || !rows.length) return [];
+
+    // Build quick lookup from series_id -> AwCatalog entry (poster, seasons, key, titleAr)
+    const bySeriesId = new Map<string, any>();
+    for (const cat of catalog) {
+      if (cat?.key) bySeriesId.set(String(cat.key).toLowerCase(), cat);
+      for (const s of Array.isArray(cat?.seasons) ? cat.seasons : []) {
+        if (s?.animeId) bySeriesId.set(String(s.animeId).toLowerCase(), cat);
+      }
+    }
+
+    // Keep latest episode per series (max 12 unique series)
+    const seenSeries = new Set<string>();
+    const out: DubbedLatestItem[] = [];
+    for (const r of rows) {
+      const sid = String(r?.series_id || "").trim();
+      const epNum = Math.round(Number(r?.ep_number || 0));
+      if (!sid || !Number.isFinite(epNum) || epNum <= 0) continue;
+      const normSid = sid.toLowerCase();
+      const cat = bySeriesId.get(normSid) || bySeriesId.get(normSid.replace(/\s+dub$/i, ""));
+      const dedupKey = (cat?.key || sid).toLowerCase();
+      if (seenSeries.has(dedupKey)) continue;
+      seenSeries.add(dedupKey);
+
+      const titleEn = String(cat?.title || r?.series_name || sid).trim();
+      const titleAr = String(cat?.titleAr || r?.series_name_ar || titleEn).trim();
+      const seasons = Array.isArray(cat?.seasons) && cat.seasons.length > 0
+        ? cat.seasons
+        : [{ label: "الحلقات", animeId: sid }];
+      const cover = String(cat?.poster || "").trim();
+
+      out.push({
+        id: `aw-dubbed:${cat?.key || sid}:${epNum}`,
+        dubbedKind: "aw-dubbed",
+        sectionLabel: "أنيميشن مدبلج",
+        source: "aw-dubbed",
+        name: titleAr || titleEn,
+        titleAr: titleAr || titleEn,
+        english: titleEn,
+        episode: epNum,
+        cover,
+        year: cat?.year ? String(cat.year) : "",
+        isMovie: false,
+        updatedAt: r?.imported_at ? String(r.imported_at) : null,
+        awKey: String(cat?.key || sid),
+        awSeries: sid,
+        awSeasons: JSON.stringify(seasons),
+      });
+      if (out.length >= 12) break;
+    }
+    return out;
+  } catch (err: any) {
+    logger.warn({ err: err?.message || String(err) }, "dubbed: aw-dubbed latest fetch failed");
+    return [];
+  }
+}
+
+async function fetchAnimeZidLatestRows(): Promise<DubbedLatestItem[]> {
+  try {
+    const data: any = await getAnimeZidCatalog({ page: 1, sort: "newest" });
+    const rows: any[] = Array.isArray(data?.results) ? data.results : [];
+    const out: DubbedLatestItem[] = [];
+    for (const r of rows.slice(0, 12)) {
+      const slug = String(r?.slug || r?.id || "").trim();
+      const title = String(r?.title || "").trim();
+      if (!slug || !title) continue;
+      const isMovie = String(r?.mediaType || "").toLowerCase() === "movie";
+      const epCount = Math.max(1, Number(r?.episodesCount || 1) || 1);
+      out.push({
+        id: `dubbed-anime:${slug}:${epCount}`,
+        dubbedKind: "dubbed-anime",
+        sectionLabel: "أنمي مدبلج",
+        source: "dubbed-anime",
+        name: title,
+        titleAr: title,
+        english: title,
+        episode: epCount,
+        cover: String(r?.poster || "").trim(),
+        year: String(r?.year || ""),
+        isMovie,
+        updatedAt: r?.updatedAt ? String(r.updatedAt) : null,
+        dubbedSlug: slug,
+      });
+    }
+    return out;
+  } catch (err: any) {
+    logger.warn({ err: err?.message || String(err) }, "dubbed: animezid latest fetch failed");
+    return [];
+  }
+}
+
+async function fetchSd2LatestRows(): Promise<DubbedLatestItem[]> {
+  try {
+    const catalog = await getStardimaV2Catalog(false);
+    const newest = [...catalog]
+      .sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0))
+      .slice(0, 12);
+
+    // For top 6 series, try to read cached/live latest episode count without blocking long
+    const enriched = await Promise.all(
+      newest.map(async (item, idx): Promise<DubbedLatestItem | null> => {
+        const slug = String(item.slug || "").trim();
+        const title = String(item.title || "").trim();
+        if (!slug || !title) return null;
+        const isMovie = Boolean(item.isMovie || item.mediaType === "movie");
+        let epNum = 1;
+        if (!isMovie && idx < 6) {
+          try {
+            const detail = await Promise.race([
+              getStardimaV2Episodes(slug, "series"),
+              new Promise<null>((resolve) => setTimeout(() => resolve(null), 3500)),
+            ]);
+            if (detail?.seasons?.length) {
+              const lastSeason = detail.seasons[detail.seasons.length - 1];
+              const eps = Array.isArray(lastSeason?.episodes) ? lastSeason.episodes : [];
+              if (eps.length > 0) {
+                const maxEp = eps.reduce((m, e) => Math.max(m, Number(e.number) || 0), 0);
+                epNum = maxEp > 0 ? maxEp : eps.length;
+              }
+            }
+          } catch {}
+        }
+        return {
+          id: `sd2:${slug}:${epNum}`,
+          dubbedKind: "sd2",
+          sectionLabel: "كرتون مدبلج 2",
+          source: "sd2",
+          name: title,
+          titleAr: title,
+          english: title,
+          episode: epNum,
+          cover: String(item.image || "").trim(),
+          year: String(item.year || ""),
+          isMovie,
+          updatedAt: null,
+          sd2Slug: slug,
+          sd2Id: Number(item.id) || 0,
+          languageLabel: String(item.languageLabel || item.providerLabel || ""),
+        };
+      }),
+    );
+    return enriched.filter((x): x is DubbedLatestItem => Boolean(x));
+  } catch (err: any) {
+    logger.warn({ err: err?.message || String(err) }, "dubbed: sd2 latest fetch failed");
+    return [];
+  }
+}
+
+async function buildDubbedLatestFeed(): Promise<DubbedLatestItem[]> {
+  const [azItems, awItems, sd2Items] = await Promise.all([
+    fetchAnimeZidLatestRows(),
+    fetchAwDubbedLatestRows(),
+    fetchSd2LatestRows(),
+  ]);
+  // Interleave fairly across all 3 dubbed sections so all 3 are visible near the top
+  const merged: DubbedLatestItem[] = [];
+  const maxLen = Math.max(azItems.length, awItems.length, sd2Items.length);
+  for (let i = 0; i < maxLen; i++) {
+    if (azItems[i]) merged.push(azItems[i]);
+    if (awItems[i]) merged.push(awItems[i]);
+    if (sd2Items[i]) merged.push(sd2Items[i]);
+  }
+  return merged;
+}
+
+router.get("/dubbed/latest-episodes", async (req, res) => {
+  const force = req.query.refresh === "1";
+  try {
+    if (!force && _dubbedLatestCache && Date.now() < _dubbedLatestCache.expiresAt) {
+      res.setHeader("Cache-Control", "no-store");
+      res.json({ items: _dubbedLatestCache.items });
+      return;
+    }
+    if (!_dubbedLatestInFlight) {
+      _dubbedLatestInFlight = buildDubbedLatestFeed().finally(() => {
+        _dubbedLatestInFlight = null;
+      });
+    }
+    const items = await _dubbedLatestInFlight;
+    if (items.length > 0) {
+      _dubbedLatestCache = { expiresAt: Date.now() + 5 * 60 * 1000, items };
+    }
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ items });
+  } catch (err: any) {
+    logger.warn({ err: err?.message || String(err) }, "dubbed: latest-episodes route failed");
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ items: _dubbedLatestCache?.items || [] });
+  }
+});
+
 export default router;

@@ -8,6 +8,15 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import {
+  DownloadedMangaChapter,
+  ActiveMangaDownload,
+  getDownloadedMangaChapters,
+  deleteDownloadedMangaChapter,
+  clearAllMangaDownloads,
+  subscribeMangaDownloads,
+  getActiveMangaDownloadsSnapshot,
+} from "@/utils/mangaDownloadManager";
+import {
   getDownloads, deleteDownload, clearAllDownloads,
   formatFileSize, DownloadItem, ActiveDownload,
   subscribeActiveDownloads, getActiveDownloadsSnapshot, cancelActiveDownload,
@@ -470,8 +479,11 @@ export default function DownloadsScreen() {
   const router = useRouter();
   const { tv: tvMode } = useTvMetrics();
   const { width: windowWidth } = useWindowDimensions();
+  const [downloadsTab, setDownloadsTab] = useState<"anime" | "manga">("anime");
   const [downloads, setDownloads] = useState<DownloadItem[]>([]);
   const [activeDownloads, setActiveDownloads] = useState<ActiveDownload[]>(getActiveDownloadsSnapshot);
+  const [mangaDownloads, setMangaDownloads] = useState<DownloadedMangaChapter[]>([]);
+  const [activeMangaDownloads, setActiveMangaDownloads] = useState<ActiveMangaDownload[]>(getActiveMangaDownloadsSnapshot);
   const [playingItem, setPlayingItem] = useState<DownloadItem | null>(null);
   const [gallerySavingId, setGallerySavingId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -486,16 +498,34 @@ export default function DownloadsScreen() {
   }, []);
 
   /* اشترك في التنزيلات الجارية — يتحدث فوراً عند كل تغيير */
-  useEffect(() => {
-    return subscribeActiveDownloads(() => {
-      if (mountedRef.current) setActiveDownloads(getActiveDownloadsSnapshot());
-    });
+  const loadMangaDownloads = useCallback(async () => {
+    const items = await getDownloadedMangaChapters();
+    if (mountedRef.current) {
+      setMangaDownloads(items);
+    }
   }, []);
 
+  useEffect(() => {
+    const unsub1 = subscribeActiveDownloads(() => {
+      if (mountedRef.current) setActiveDownloads(getActiveDownloadsSnapshot());
+    });
+    const unsub2 = subscribeMangaDownloads(() => {
+      if (mountedRef.current) {
+        setActiveMangaDownloads(getActiveMangaDownloadsSnapshot());
+        void loadMangaDownloads();
+      }
+    });
+    return () => {
+      unsub1();
+      unsub2();
+    };
+  }, [loadMangaDownloads]);
+
   const loadDownloads = useCallback(async () => {
-    const items = await getDownloads();
+    const [items, mangaItems] = await Promise.all([getDownloads(), getDownloadedMangaChapters()]);
     if (mountedRef.current) {
       setDownloads(items.sort((a, b) => b.downloadedAt - a.downloadedAt));
+      setMangaDownloads(mangaItems);
     }
   }, []);
 
@@ -553,6 +583,33 @@ export default function DownloadsScreen() {
   }, [activeDownloads, searchQuery]);
 
   const totalDownloadedBytes = downloads.reduce((sum, item) => sum + (item.fileSize || 0), 0);
+  const totalMangaBytes = mangaDownloads.reduce((sum, item) => sum + (item.totalBytes || 0), 0);
+  const mangaGroups = useMemo(() => {
+    const map = new Map<string, DownloadedMangaChapter[]>();
+    for (const ch of mangaDownloads) {
+      const list = map.get(ch.mangaId) ?? [];
+      list.push(ch);
+      map.set(ch.mangaId, list);
+    }
+    return [...map.entries()]
+      .map(([mangaId, chapters]) => {
+        const sorted = [...chapters].sort(
+          (a, b) => (parseFloat(a.chapterNumber) || 0) - (parseFloat(b.chapterNumber) || 0),
+        );
+        const first = sorted[0]!;
+        return {
+          mangaId,
+          source: first.source,
+          title: first.mangaTitle,
+          titleEn: first.mangaTitleEn,
+          cover: first.localCoverUri || first.coverUrl,
+          chapters: sorted,
+          totalBytes: sorted.reduce((acc, c) => acc + (c.totalBytes || 0), 0),
+          lastAt: sorted.reduce((acc, c) => Math.max(acc, c.downloadedAt), 0),
+        };
+      })
+      .sort((a, b) => b.lastAt - a.lastAt);
+  }, [mangaDownloads]);
 
   useEffect(() => {
     if (selectedGroupKey && !selectedGroup) setSelectedGroupKey(null);
@@ -778,6 +835,79 @@ export default function DownloadsScreen() {
         )}
       </View>
 
+      {!selectedGroup && (
+        <View
+          style={{
+            flexDirection: ROW_RTL,
+            gap: 8,
+            paddingHorizontal: 14,
+            paddingTop: 10,
+            paddingBottom: 6,
+          }}
+        >
+          <Pressable
+            onPress={() => setDownloadsTab("anime")}
+            style={{
+              flex: 1,
+              flexDirection: ROW_RTL,
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 6,
+              paddingVertical: 9,
+              borderRadius: 12,
+              borderWidth: 1,
+              backgroundColor: downloadsTab === "anime" ? colors.accent : colors.surface,
+              borderColor: downloadsTab === "anime" ? colors.accent : colors.border,
+            }}
+          >
+            <Ionicons
+              name="film-outline"
+              size={15}
+              color={downloadsTab === "anime" ? colors.buttonText : colors.textSecondary}
+            />
+            <Text
+              style={{
+                fontSize: 12.5,
+                fontFamily: "Cairo_700Bold",
+                color: downloadsTab === "anime" ? colors.buttonText : colors.textPrimary,
+              }}
+            >
+              حلقات الأنمي ({downloads.length})
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setDownloadsTab("manga")}
+            style={{
+              flex: 1,
+              flexDirection: ROW_RTL,
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 6,
+              paddingVertical: 9,
+              borderRadius: 12,
+              borderWidth: 1,
+              backgroundColor: downloadsTab === "manga" ? colors.accent : colors.surface,
+              borderColor: downloadsTab === "manga" ? colors.accent : colors.border,
+            }}
+          >
+            <Ionicons
+              name="book-outline"
+              size={15}
+              color={downloadsTab === "manga" ? colors.buttonText : colors.textSecondary}
+            />
+            <Text
+              style={{
+                fontSize: 12.5,
+                fontFamily: "Cairo_700Bold",
+                color: downloadsTab === "manga" ? colors.buttonText : colors.textPrimary,
+              }}
+            >
+              المانجا والمانهوا ({mangaDownloads.length})
+            </Text>
+          </Pressable>
+        </View>
+      )}
+
       <ScrollView
         focusable={false}
         ref={scrollRef}
@@ -786,7 +916,175 @@ export default function DownloadsScreen() {
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
       >
-        {selectedGroup ? (
+        {downloadsTab === "manga" && !selectedGroup ? (
+          <View style={{ paddingHorizontal: 14, paddingTop: 10, gap: 14 }}>
+            {activeMangaDownloads.length > 0 && (
+              <View style={{ gap: 8 }}>
+                <Text style={{ fontSize: 13.5, fontFamily: "Cairo_700Bold", color: colors.textPrimary, textAlign: "right" }}>
+                  جاري التحميل ({activeMangaDownloads.length})
+                </Text>
+                {activeMangaDownloads.map((act) => (
+                  <View
+                    key={act.id}
+                    style={{
+                      padding: 12,
+                      borderRadius: 12,
+                      borderWidth: 1,
+                      borderColor: colors.border,
+                      backgroundColor: colors.surface,
+                      gap: 6,
+                    }}
+                  >
+                    <View style={{ flexDirection: ROW_RTL, justifyContent: "space-between", alignItems: "center" }}>
+                      <Text style={{ fontSize: 13, fontFamily: "Cairo_700Bold", color: colors.textPrimary }} numberOfLines={1}>
+                        {act.chapterTitle}
+                      </Text>
+                      <Text style={{ fontSize: 12, fontFamily: "Cairo_700Bold", color: "#F59E0B" }}>
+                        {act.progress}% ({act.downloadedPages}/{act.totalPages || "?"})
+                      </Text>
+                    </View>
+                    <View style={{ height: 5, borderRadius: 4, backgroundColor: "rgba(245,158,11,0.18)", overflow: "hidden" }}>
+                      <View style={{ width: `${act.progress}%`, height: "100%", backgroundColor: "#F59E0B" }} />
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {mangaGroups.length === 0 && activeMangaDownloads.length === 0 ? (
+              <View style={{ alignItems: "center", justifyContent: "center", paddingVertical: 64, gap: 10 }}>
+                <Ionicons name="book-outline" size={44} color={colors.textMuted} />
+                <Text style={{ fontSize: 15, fontFamily: "Cairo_700Bold", color: colors.textPrimary }}>
+                  لا توجد فصول مانجا أو مانهوا محمّلة
+                </Text>
+                <Text style={{ fontSize: 12.5, fontFamily: "Cairo_400Regular", color: colors.textMuted, textAlign: "center", paddingHorizontal: 24 }}>
+                  افتح أي مانجا أو مانهوا واضغط زر التحميل بجانب أي فصل لقراءته بسلاسة بدون إنترنت.
+                </Text>
+              </View>
+            ) : (
+              mangaGroups.map((group) => (
+                <View
+                  key={group.mangaId}
+                  style={{
+                    borderRadius: 14,
+                    borderWidth: 1,
+                    borderColor: colors.border,
+                    backgroundColor: colors.surface,
+                    padding: 12,
+                    gap: 10,
+                  }}
+                >
+                  <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 10 }}>
+                    {group.cover ? (
+                      <Image
+                        source={{ uri: group.cover }}
+                        style={{ width: 52, height: 74, borderRadius: 9, backgroundColor: "#18181B" }}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <View style={{ width: 52, height: 74, borderRadius: 9, backgroundColor: "#18181B", alignItems: "center", justifyContent: "center" }}>
+                        <Ionicons name="book-outline" size={22} color={colors.accent} />
+                      </View>
+                    )}
+                    <View style={{ flex: 1, gap: 3 }}>
+                      <Text style={{ fontSize: 14.5, fontFamily: "Cairo_700Bold", color: colors.textPrimary, textAlign: "right" }} numberOfLines={2}>
+                        {group.title}
+                      </Text>
+                      <Text style={{ fontSize: 11.5, fontFamily: "Cairo_600SemiBold", color: colors.textMuted, textAlign: "right" }}>
+                        {group.source === "manhwa" ? "مانهوا" : "مانجا"} · {group.chapters.length} فصول · {formatFileSize(group.totalBytes)}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={{ gap: 7 }}>
+                    {group.chapters.map((ch) => (
+                      <View
+                        key={ch.id}
+                        style={{
+                          flexDirection: ROW_RTL,
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          paddingVertical: 8,
+                          paddingHorizontal: 10,
+                          borderRadius: 10,
+                          borderWidth: 1,
+                          borderColor: colors.border,
+                          backgroundColor: colors.background,
+                          gap: 8,
+                        }}
+                      >
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontSize: 13, fontFamily: "Cairo_700Bold", color: colors.textPrimary, textAlign: "right" }} numberOfLines={1}>
+                            {ch.chapterTitle}
+                          </Text>
+                          <Text style={{ fontSize: 11, fontFamily: "Cairo_400Regular", color: colors.textMuted, textAlign: "right" }}>
+                            {ch.pageCount} صفحة · {formatFileSize(ch.totalBytes)} · بدون إنترنت ✓
+                          </Text>
+                        </View>
+                        <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 6 }}>
+                          <Pressable
+                            onPress={() =>
+                              router.push({
+                                pathname: "/manga/[id]" as any,
+                                params: {
+                                  id: ch.mangaId,
+                                  title: ch.mangaTitle,
+                                  english: ch.mangaTitleEn,
+                                  cover: ch.localCoverUri || ch.coverUrl,
+                                  source: ch.source,
+                                  offlineChapter: ch.chapterSlug,
+                                },
+                              })
+                            }
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                              gap: 4,
+                              backgroundColor: colors.accent,
+                              paddingHorizontal: 10,
+                              paddingVertical: 6,
+                              borderRadius: 8,
+                            }}
+                          >
+                            <Ionicons name="book" size={12} color={colors.buttonText} />
+                            <Text style={{ fontSize: 11.5, fontFamily: "Cairo_700Bold", color: colors.buttonText }}>
+                              قراءة
+                            </Text>
+                          </Pressable>
+                          <Pressable
+                            onPress={() => {
+                              Alert.alert(
+                                "حذف الفصل",
+                                `حذف ${ch.chapterTitle} من التنزيلات؟`,
+                                [
+                                  { text: "إلغاء", style: "cancel" },
+                                  {
+                                    text: "حذف",
+                                    style: "destructive",
+                                    onPress: () => { void deleteDownloadedMangaChapter(ch.id); },
+                                  },
+                                ],
+                              );
+                            }}
+                            style={{
+                              padding: 6,
+                              borderRadius: 8,
+                              borderWidth: 1,
+                              borderColor: "rgba(239,68,68,0.35)",
+                              backgroundColor: "rgba(239,68,68,0.1)",
+                            }}
+                          >
+                            <Ionicons name="trash-outline" size={14} color="#EF4444" />
+                          </Pressable>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              ))
+            )}
+          </View>
+        ) : selectedGroup ? (
           <View style={[s.detailContent, tvMode && s.tvDetailContent]}>
             <View style={[s.detailHero, tvMode && s.tvDetailHero]}>
               <View style={s.detailInfo}>

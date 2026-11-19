@@ -954,19 +954,25 @@ async function fetchMangaDarDetail(slug: string) {
     name: string;
     thumb_uri?: string;
     title_translated?: string;
+    createdAt?: string;
   }> = [];
 
+  let summaryUpdatedAt = "";
   if (summaryRes.ok) {
-    const sumDoc = parseAwFsDoc(await summaryRes.json());
+    const sumRaw = (await summaryRes.json()) as any;
+    summaryUpdatedAt = String(sumRaw?.updateTime || sumRaw?.createTime || "");
+    const sumDoc = parseAwFsDoc(sumRaw);
     if (Array.isArray(sumDoc.chapters)) {
       for (const ch of sumDoc.chapters) {
         const docId = String(ch?.doc_id || ch?.id || "").trim();
         if (!docId) continue;
+        const rawDate = String(ch?.created_at || ch?.createdAt || ch?.date || ch?.updated_at || "").trim();
         rawChapters.push({
           doc_id: docId,
           name: String(ch?.name || docId).trim(),
           thumb_uri: ch?.thumb_uri ? String(ch.thumb_uri) : undefined,
           title_translated: ch?.title_translated ? String(ch.title_translated).trim() : undefined,
+          createdAt: rawDate || undefined,
         });
       }
     }
@@ -988,11 +994,13 @@ async function fetchMangaDarDetail(slug: string) {
           const cf = parseAwFsDoc(doc);
           const docId = String(cf.doc_id || doc.name?.split("/").pop() || "").trim();
           if (!docId) continue;
+          const rawDate = String(cf.created_at || cf.createdAt || cf.date || doc.createTime || doc.updateTime || "").trim();
           rawChapters.push({
             doc_id: docId,
             name: String(cf.name || docId).trim(),
             thumb_uri: cf.thumb_uri ? String(cf.thumb_uri) : undefined,
             title_translated: cf.title_translated ? String(cf.title_translated).trim() : undefined,
+            createdAt: rawDate || undefined,
           });
         }
       }
@@ -1017,9 +1025,57 @@ async function fetchMangaDarDetail(slug: string) {
         title: fullTitle,
         url: `${AW_FS_BASE}/manga_list/${encodeURIComponent(mangaId)}/chapters/${encodeURIComponent(chapId)}/summary_pages/summery`,
         thumb: ch.thumb_uri,
+        createdAt: ch.createdAt,
+        date: ch.createdAt ? ch.createdAt.slice(0, 10) : undefined,
       };
     })
     .sort((a, b) => a.number - b.number);
+
+  // Hydrate real Firestore createTime for the latest chapters (masked query = ~150B each)
+  const missingDateChaps = chapters.filter((c) => !c.createdAt);
+  if (missingDateChaps.length > 0) {
+    const recentSlice = missingDateChaps.slice(-24);
+    const BATCH = 8;
+    for (let i = 0; i < recentSlice.length; i += BATCH) {
+      const batch = recentSlice.slice(i, i + BATCH);
+      await Promise.all(
+        batch.map(async (ch) => {
+          try {
+            const metaRes = await fetch(
+              `${AW_FS_BASE}/manga_list/${encodeURIComponent(mangaId)}/chapters/${encodeURIComponent(ch.slug)}/summary_pages/summery?mask.fieldPaths=__name__`,
+              {
+                headers: { Accept: "application/json", "User-Agent": UA },
+                signal: AbortSignal.timeout(3500),
+              },
+            );
+            if (!metaRes.ok) return;
+            const meta = (await metaRes.json()) as any;
+            const ts = String(meta?.createTime || meta?.updateTime || "").trim();
+            if (ts) {
+              ch.createdAt = ts;
+              ch.date = ts.slice(0, 10);
+            }
+          } catch {}
+        }),
+      );
+    }
+    // Fallback for latest chapter if still missing date
+    const lastChap = chapters[chapters.length - 1];
+    if (lastChap && !lastChap.createdAt && summaryUpdatedAt) {
+      lastChap.createdAt = summaryUpdatedAt;
+      lastChap.date = summaryUpdatedAt.slice(0, 10);
+    }
+    // For older chapters beyond the latest 24, inherit manga date_created if available
+    const fallbackMangaDate = String(f.date_created || "").trim();
+    if (fallbackMangaDate) {
+      for (const ch of chapters) {
+        if (!ch.createdAt) {
+          ch.createdAt = fallbackMangaDate;
+          ch.date = fallbackMangaDate.slice(0, 10);
+        }
+      }
+    }
+  }
 
   const synonyms: string[] = Array.isArray(f.Synonyms)
     ? f.Synonyms.map((s: any) => String(s || "").trim()).filter(Boolean)
@@ -1286,11 +1342,17 @@ async function fetchAzoraflyCatalog(opts: {
     // Estimate latest chapter count from preview chapters
     const previewChaps = Array.isArray(post.chapters) ? post.chapters : [];
     const unlockedPreview = previewChaps.filter((c: any) => !c.isLocked);
+    const latestPreview = unlockedPreview[0] || previewChaps[0] || null;
     const maxChapNum = unlockedPreview.reduce((max: number, c: any) => {
       const n = parseFloat(String(c.number || "0"));
       return Number.isFinite(n) && n > max ? n : max;
     }, 0);
     const chapters = maxChapNum > 0 ? Math.round(maxChapNum) : previewChaps.length || null;
+    const latestChapterNum = latestPreview?.number != null
+      ? parseFloat(String(latestPreview.number))
+      : (maxChapNum > 0 ? maxChapNum : null);
+    const latestChapterSlug = latestPreview?.slug ? String(latestPreview.slug) : "";
+    const latestChapterDate = String(latestPreview?.createdAt || post.updatedAt || post.createdAt || "").trim() || null;
 
     const genres = Array.isArray(post.genres)
       ? post.genres.map((g: any) => String(g?.name || "").trim()).filter(Boolean)
@@ -1314,6 +1376,10 @@ async function fetchAzoraflyCatalog(opts: {
       averageScore,
       scoreText,
       chapters,
+      latestChapter: Number.isFinite(latestChapterNum) ? latestChapterNum : chapters,
+      latestChapterSlug,
+      latestChapterDate,
+      updatedAt: latestChapterDate,
       genres,
       countryOfOrigin: "KR",
       typeLabel: "مانهوا",
@@ -1395,6 +1461,7 @@ async function fetchAzoraflyDetail(slug: string) {
         title: chTitle ? `الفصل ${numStr} — ${chTitle}` : `الفصل ${numStr}`,
         url: `${AZORAFLY_BASE}/series/${cleanSlug}/${chSlug}`,
         createdAt: ch.createdAt,
+        date: typeof ch.createdAt === "string" && ch.createdAt ? ch.createdAt.slice(0, 10) : undefined,
       };
     })
     .sort((a: any, b: any) => a.number - b.number);
@@ -1740,5 +1807,225 @@ async function handleMangaChapterPages(req: any, res: any) {
 
 router.get("/manga/chapter", handleMangaChapterPages);
 router.get("/manga/pages", handleMangaChapterPages);
+
+
+// ── GET /api/manga/latest-updates ──────────────────────────────────────────
+// يجمع أحدث الفصول والأعمال الجديدة من المانجا (AW Firestore) والمانهوا (Azorafly)
+type MangaLatestUpdateItem = {
+  id: string;
+  slug: string;
+  source: "manga" | "manhwa";
+  typeLabel: string;
+  title: string;
+  arabicTitle: string;
+  englishTitle: string;
+  poster: string;
+  description: string;
+  latestChapter: number | null;
+  latestChapterSlug: string;
+  latestChapterLabel: string;
+  updatedAt: string | null;
+  scoreText: string;
+  statusAr: string;
+  genres: string[];
+};
+
+let _mangaLatestCache: { expiresAt: number; items: MangaLatestUpdateItem[] } | null = null;
+let _mangaLatestInFlight: Promise<MangaLatestUpdateItem[]> | null = null;
+
+async function fetchAwLatestMangaDocs(): Promise<MangaLatestUpdateItem[]> {
+  try {
+    const res = await fetch(
+      `${AW_FS_BASE}/manga_list?pageSize=18&orderBy=date_created%20desc`,
+      {
+        headers: { Accept: "application/json", "User-Agent": UA },
+        signal: AbortSignal.timeout(10_000),
+      },
+    );
+    if (!res.ok) return [];
+    const json = (await res.json()) as any;
+    const docs: any[] = Array.isArray(json?.documents) ? json.documents : [];
+    const baseItems = docs
+      .map((doc) => {
+        const docId = String(doc?.name || "").split("/").pop() || "";
+        if (!docId) return null;
+        const f = parseAwFsDoc(doc);
+        const rawName = decodeHtmlEntities(String(f.name || "").trim());
+        if (!rawName) return null;
+        const poster = String(
+          f.poster?.large || f.poster?.medium || f.poster_uri || f.cover_uri || "",
+        ).trim();
+        const storyAr = stripHtml(String(f.story?.ar || f.story_ar || ""));
+        const storyEn = stripHtml(String(f.story_en || f.story?.en || ""));
+        const rateVal = parseFloat(String(f.rating?.rate ?? f.rate ?? "0"));
+        const scoreText = rateVal > 0 ? (rateVal > 10 ? rateVal / 10 : rateVal).toFixed(1) : "8.5";
+        const { statusAr } = mapAwMangaStatus(String(f.details?.status || f.details?.state || "مستمر"));
+        const genres: string[] = Array.isArray(f.tags)
+          ? f.tags.map((g: any) => decodeHtmlEntities(String(g || "")).trim()).filter(Boolean)
+          : [];
+        const updatedAt = String(f.date_created || doc?.updateTime || doc?.createTime || "").trim() || null;
+        const chMatch = String(f.details?.chapters || "").match(/(\d+)/);
+        const rawCh = chMatch ? parseInt(chMatch[1], 10) : null;
+        const typeRaw = String(f.type || "").trim();
+        const isManhwaType = /مانهوا|manhwa|webtoon|مانها/i.test(typeRaw);
+        return {
+          id: `aw--${docId}`,
+          slug: docId,
+          source: "manga" as const,
+          typeLabel: isManhwaType ? "مانهوا" : "مانجا",
+          title: rawName,
+          arabicTitle: /[\u0600-\u06FF]/.test(rawName) ? rawName : "",
+          englishTitle: rawName,
+          poster,
+          description: storyAr || storyEn || "",
+          latestChapter: rawCh && rawCh > 0 ? rawCh : null,
+          latestChapterSlug: "",
+          latestChapterLabel: rawCh && rawCh > 0 ? `الفصل ${rawCh}` : "عمل جديد",
+          updatedAt,
+          scoreText,
+          statusAr,
+          genres,
+        };
+      })
+      .filter((x): x is MangaLatestUpdateItem => Boolean(x));
+
+    // Fetch exact latest chapter number & timestamp for top 10 AW manga from chapters_summery/summery
+    await Promise.all(
+      baseItems.slice(0, 10).map(async (item) => {
+        try {
+          const sumRes = await fetch(
+            `${AW_FS_BASE}/manga_list/${encodeURIComponent(item.slug)}/chapters_summery/summery`,
+            {
+              headers: { Accept: "application/json", "User-Agent": UA },
+              signal: AbortSignal.timeout(4500),
+            },
+          );
+          if (!sumRes.ok) return;
+          const sumRaw = (await sumRes.json()) as any;
+          const sumDoc = parseAwFsDoc(sumRaw);
+          if (Array.isArray(sumDoc.chapters) && sumDoc.chapters.length > 0) {
+            let maxNum = 0;
+            let maxSlug = "";
+            for (const ch of sumDoc.chapters) {
+              const cid = String(ch?.doc_id || ch?.id || "").trim();
+              const cname = String(ch?.name || cid);
+              const m = cname.match(/(\d+(?:\.\d+)?)/) || cid.match(/(\d+(?:\.\d+)?)/);
+              const n = m ? parseFloat(m[1]) : 0;
+              if (Number.isFinite(n) && n >= maxNum) {
+                maxNum = n;
+                maxSlug = cid;
+              }
+            }
+            if (maxNum > 0) {
+              item.latestChapter = maxNum;
+              item.latestChapterSlug = maxSlug;
+              item.latestChapterLabel = `الفصل ${maxNum}`;
+            }
+          }
+          if (sumRaw?.updateTime) {
+            const sumMs = Date.parse(String(sumRaw.updateTime));
+            const curMs = item.updatedAt ? Date.parse(item.updatedAt) : 0;
+            if (Number.isFinite(sumMs) && (!Number.isFinite(curMs) || sumMs > curMs)) {
+              item.updatedAt = String(sumRaw.updateTime);
+            }
+          }
+        } catch {}
+      }),
+    );
+
+    const trMap = await translateTitlesBatchToArabic(
+      baseItems.filter((it) => !it.arabicTitle).map((it) => it.englishTitle),
+    ).catch(() => new Map<string, string>());
+    for (const it of baseItems) {
+      if (!it.arabicTitle) {
+        it.arabicTitle = trMap.get(it.englishTitle) || it.englishTitle;
+        it.title = it.arabicTitle;
+      }
+    }
+    return baseItems;
+  } catch (err: any) {
+    logger.warn({ err: err?.message || String(err) }, "[manga] latest AW docs fetch failed");
+    return [];
+  }
+}
+
+async function fetchAzLatestManhwaItems(): Promise<MangaLatestUpdateItem[]> {
+  try {
+    const cat = await fetchAzoraflyCatalog({ page: 1 });
+    const rows: any[] = Array.isArray(cat?.items) ? cat.items : [];
+    return rows.slice(0, 18).map((it: any): MangaLatestUpdateItem => {
+      const chNum = Number(it.latestChapter ?? it.chapters ?? 0);
+      const validCh = Number.isFinite(chNum) && chNum > 0 ? chNum : null;
+      return {
+        id: String(it.id),
+        slug: String(it.slug || ""),
+        source: "manhwa",
+        typeLabel: "مانهوا",
+        title: String(it.arabicTitle || it.displayTitle || it.title || ""),
+        arabicTitle: String(it.arabicTitle || it.displayTitle || it.title || ""),
+        englishTitle: String(it.englishTitle || it.title || ""),
+        poster: String(it.poster || it.cover || ""),
+        description: String(it.description || ""),
+        latestChapter: validCh,
+        latestChapterSlug: String(it.latestChapterSlug || ""),
+        latestChapterLabel: validCh ? `الفصل ${validCh}` : "عمل جديد",
+        updatedAt: it.latestChapterDate || it.updatedAt || null,
+        scoreText: String(it.scoreText || "8.6"),
+        statusAr: String(it.statusAr || "مستمر"),
+        genres: Array.isArray(it.genres) ? it.genres : [],
+      };
+    });
+  } catch (err: any) {
+    logger.warn({ err: err?.message || String(err) }, "[manga] latest Azorafly fetch failed");
+    return [];
+  }
+}
+
+async function buildMangaLatestFeed(): Promise<MangaLatestUpdateItem[]> {
+  const [manhwaItems, mangaItems] = await Promise.all([
+    fetchAzLatestManhwaItems(),
+    fetchAwLatestMangaDocs(),
+  ]);
+  const combined = [...manhwaItems, ...mangaItems];
+  combined.sort((a, b) => {
+    const ta = a.updatedAt ? Date.parse(a.updatedAt) : 0;
+    const tb = b.updatedAt ? Date.parse(b.updatedAt) : 0;
+    return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+  });
+  const seen = new Set<string>();
+  const deduped: MangaLatestUpdateItem[] = [];
+  for (const item of combined) {
+    if (!item.id || seen.has(item.id)) continue;
+    seen.add(item.id);
+    deduped.push(item);
+  }
+  return deduped.slice(0, 30);
+}
+
+router.get("/manga/latest-updates", async (req, res) => {
+  const force = req.query.refresh === "1";
+  try {
+    if (!force && _mangaLatestCache && Date.now() < _mangaLatestCache.expiresAt) {
+      res.setHeader("Cache-Control", "no-store");
+      res.json({ items: _mangaLatestCache.items });
+      return;
+    }
+    if (!_mangaLatestInFlight) {
+      _mangaLatestInFlight = buildMangaLatestFeed().finally(() => {
+        _mangaLatestInFlight = null;
+      });
+    }
+    const items = await _mangaLatestInFlight;
+    if (items.length > 0) {
+      _mangaLatestCache = { expiresAt: Date.now() + 5 * 60 * 1000, items };
+    }
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ items });
+  } catch (err: any) {
+    logger.warn({ err: err?.message || String(err) }, "[manga] latest-updates route failed");
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ items: _mangaLatestCache?.items || [] });
+  }
+});
 
 export default router;

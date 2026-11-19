@@ -1059,7 +1059,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
     const userId = currentUser?.id;
     if (userId) {
-      void postFavorite(userId, anime);
+      void postFavorite(anime);
     }
   }, [currentUser?.id, postFavorite]);
 

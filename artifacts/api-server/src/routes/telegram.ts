@@ -556,6 +556,289 @@ async function pollAnimeSlayerDirect(): Promise<void> {
   }
 }
 
+
+/* ── إشعارات الأقسام المدبلجة + المانجا والمانهوا (بلا تكرار نهائياً) ──── */
+
+let dubbedSchedulerFirstRun = true;
+let mangaSchedulerFirstRun = true;
+
+async function hasAnyNotifKeys(keys: string[]): Promise<boolean> {
+  for (const k of keys) {
+    if (notifiedEpisodes.has(k) || telegramNotifiedEpisodes.has(k)) return true;
+  }
+  try {
+    for (const k of keys) {
+      const rows = await sbSelect("app_config", { key: `eq.${k}` }, { limit: 1 });
+      if (Array.isArray(rows) && rows.length > 0) {
+        for (const allK of keys) {
+          notifiedEpisodes.add(allK);
+          telegramNotifiedEpisodes.add(allK);
+        }
+        return true;
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+async function markNotifKeys(keys: string[]): Promise<void> {
+  const nowStr = String(Date.now());
+  for (const k of keys) {
+    notifiedEpisodes.add(k);
+    telegramNotifiedEpisodes.add(k);
+    try {
+      await sbInsert("app_config", { key: k, value: nowStr });
+    } catch { /* silent */ }
+  }
+}
+
+function truncateStoryForTelegram(raw: unknown, maxChars = 270): string {
+  const clean = String(raw || "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!clean) return "";
+  if (clean.length <= maxChars) return clean;
+  const cut = clean.slice(0, maxChars);
+  const lastSpace = cut.lastIndexOf(" ");
+  return `${(lastSpace > maxChars * 0.65 ? cut.slice(0, lastSpace) : cut).trim()}...`;
+}
+
+function buildDubbedEpisodeCaption(item: any): string {
+  const kind = String(item?.dubbedKind || "");
+  const sectionBadge =
+    kind === "dubbed-anime"
+      ? "🎙️ أنمي مدبلج"
+      : kind === "aw-dubbed"
+        ? "🎬 أنيميشن مدبلج"
+        : "📺 كرتون مدبلج 2";
+  const title = String(item?.titleAr || item?.name || "عمل مدبلج").trim();
+  const isMovie = Boolean(item?.isMovie);
+  const epNum = Number(item?.episode || 1);
+  const epLine = isMovie ? "🎞️ فيلم كامل متاح الآن" : `🎬 الحلقة ${escapeTelegramHtml(epNum)}`;
+  return [
+    `🔊 <b>إصدار مدبلج جديد وصل!</b>`,
+    `${sectionBadge}`,
+    ``,
+    `✨ <b>${escapeTelegramHtml(title)}</b>`,
+    epLine,
+    ``,
+    `✅ متاح الآن للمشاهدة على Anime NOVA 🎮`,
+    `📲 حمّل تطبيق Anime NOVA من هنا:`,
+    `🔗 ${SITE_URL}`,
+  ].join("\n");
+}
+
+function buildMangaCaption(item: any, story: string): string {
+  const isManhwa = item?.source === "manhwa" || item?.typeLabel === "مانهوا";
+  const typeBadge = isManhwa ? "🇰🇷 مانهوا" : "🇯🇵 مانجا";
+  const titleAr = String(item?.arabicTitle || item?.title || "عمل جديد").trim();
+  const titleEn = String(item?.englishTitle || "").trim();
+  const chNum = Number(item?.latestChapter || 0);
+  const isChapterUpdate = Number.isFinite(chNum) && chNum > 0;
+  const headline = isChapterUpdate
+    ? `📖 <b>فصل جديد وصل!</b>`
+    : `📚 <b>عمل جديد أُضيف الآن!</b>`;
+
+  const lines: string[] = [
+    headline,
+    `${typeBadge}`,
+    ``,
+    `✨ <b>${escapeTelegramHtml(titleAr)}</b>`,
+  ];
+  if (titleEn && titleEn.toLowerCase() !== titleAr.toLowerCase()) {
+    lines.push(`🏷️ ${escapeTelegramHtml(titleEn)}`);
+  }
+  if (isChapterUpdate) {
+    lines.push(`📑 الفصل ${escapeTelegramHtml(chNum)}`);
+  }
+  const excerpt = truncateStoryForTelegram(story, 270);
+  if (excerpt) {
+    lines.push(``);
+    lines.push(`📝 <b>القصة:</b> ${escapeTelegramHtml(excerpt)}`);
+  }
+  lines.push(``);
+  lines.push(`✅ متاح الآن للقراءة على Anime NOVA 🎮`);
+  lines.push(`🔗 ${SITE_URL}`);
+  return lines.join("\n");
+}
+
+function collectDubbedKeys(item: any): string[] {
+  const kind = String(item?.dubbedKind || item?.source || "dubbed").trim();
+  const keyRaw = String(item?.dubbedSlug || item?.awKey || item?.sd2Slug || item?.id || "").trim().toLowerCase();
+  const ep = Math.max(1, Number(item?.episode || 1) || 1);
+  const keys = new Set<string>();
+  if (keyRaw) keys.add(`tg_dubbed:${kind}:${keyRaw}:${ep}`);
+  for (const t of [item?.titleAr, item?.name, item?.english]) {
+    const norm = normalizeNotifTitleKey(t);
+    if (norm.length >= 3) keys.add(`tg_dubbed_t:${kind}:${norm}:${ep}`);
+  }
+  return Array.from(keys);
+}
+
+function collectMangaKeys(item: any): string[] {
+  const id = String(item?.id || item?.slug || "").trim().toLowerCase();
+  const chNum = Number(item?.latestChapter || 0);
+  const chTag = Number.isFinite(chNum) && chNum > 0 ? `ch${chNum}` : "new";
+  const keys = new Set<string>();
+  if (id) keys.add(`tg_manga:${id}:${chTag}`);
+  for (const t of [item?.arabicTitle, item?.englishTitle, item?.title]) {
+    const norm = normalizeNotifTitleKey(t);
+    if (norm.length >= 3) keys.add(`tg_manga_t:${norm}:${chTag}`);
+  }
+  return Array.from(keys);
+}
+
+async function pollDubbedLatest(): Promise<void> {
+  try {
+    const resp = await fetch(`${internalApiBaseUrl()}/api/dubbed/latest-episodes`, {
+      headers: { "User-Agent": "NovaBot/1.0", Accept: "application/json" },
+      signal: AbortSignal.timeout(25_000),
+    });
+    if (!resp.ok) return;
+    const data = (await resp.json()) as any;
+    const list: any[] = Array.isArray(data?.items) ? data.items : [];
+    if (!list.length) return;
+
+    // أول دورة: بذر جميع العناصر الحالية بدون إرسال لتجنب إغراق القناة
+    if (dubbedSchedulerFirstRun) {
+      dubbedSchedulerFirstRun = false;
+      for (const item of list) {
+        const keys = collectDubbedKeys(item);
+        if (keys.length) await markNotifKeys(keys);
+      }
+      console.log(`[scheduler] 🌱 dubbed latest startup: seeded=${list.length}`);
+      return;
+    }
+
+    const channelId = process.env.TELEGRAM_CHANNEL_ID;
+    const tok = await getToken();
+    if (!channelId || !tok) return;
+
+    let sent = 0;
+    for (let idx = 0; idx < list.length; idx++) {
+      const item = list[idx];
+      const keys = collectDubbedKeys(item);
+      if (!keys.length) continue;
+      if (await hasAnyNotifKeys(keys)) continue;
+
+      // أرسل فقط لأحدث العناصر في المقدمة، وبذر البقية بصمت
+      if (idx >= 12) {
+        await markNotifKeys(keys);
+        continue;
+      }
+
+      const caption = buildDubbedEpisodeCaption(item);
+      const poster = typeof item?.cover === "string" && /^https?:\/\//i.test(item.cover) ? item.cover : "";
+      const photoSent = poster ? await sendChannelPhoto(poster, caption) : false;
+      const delivered = photoSent || await sendMessage(channelId, caption);
+      if (delivered) {
+        await markNotifKeys(keys);
+        sent++;
+        schedulerSentToday++;
+        await saveNotification({
+          type: "dubbed_episode",
+          title: String(item?.titleAr || item?.name || "عمل مدبلج"),
+          body: item?.isMovie ? `${item?.sectionLabel || "مدبلج"} · فيلم متاح الآن` : `${item?.sectionLabel || "مدبلج"} · الحلقة ${item?.episode || 1}`,
+          image_url: poster || undefined,
+          episode_num: Number(item?.episode || 1),
+        }).catch(() => {});
+        console.log(`[scheduler] 🎙️ أُرسل إشعار مدبلج → ${item?.sectionLabel} · ${item?.titleAr || item?.name} ح${item?.episode || 1}`);
+        await new Promise((r) => setTimeout(r, 1_500));
+      }
+      if (sent >= 5) break;
+    }
+  } catch (e: any) {
+    console.warn("[scheduler] dubbed latest poll error:", e?.message || String(e));
+  }
+}
+
+async function resolveMangaStory(item: any): Promise<string> {
+  const existing = String(item?.description || "").trim();
+  if (existing.length >= 25) return existing;
+  try {
+    const id = String(item?.id || "").trim();
+    if (!id) return existing;
+    const res = await fetch(
+      `${internalApiBaseUrl()}/api/manga/detail?id=${encodeURIComponent(id)}&source=${encodeURIComponent(String(item?.source || "manga"))}`,
+      { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(12_000) },
+    );
+    if (!res.ok) return existing;
+    const detail = (await res.json()) as any;
+    return String(detail?.description || existing || "").trim();
+  } catch {
+    return existing;
+  }
+}
+
+async function pollMangaLatest(): Promise<void> {
+  try {
+    const resp = await fetch(`${internalApiBaseUrl()}/api/manga/latest-updates`, {
+      headers: { "User-Agent": "NovaBot/1.0", Accept: "application/json" },
+      signal: AbortSignal.timeout(25_000),
+    });
+    if (!resp.ok) return;
+    const data = (await resp.json()) as any;
+    const list: any[] = Array.isArray(data?.items) ? data.items : [];
+    if (!list.length) return;
+
+    // أول دورة: بذر جميع العناصر الحالية بدون إرسال لتجنب التكرار وإغراق القناة
+    if (mangaSchedulerFirstRun) {
+      mangaSchedulerFirstRun = false;
+      for (const item of list) {
+        const keys = collectMangaKeys(item);
+        if (keys.length) await markNotifKeys(keys);
+      }
+      console.log(`[scheduler] 🌱 manga/manhwa latest startup: seeded=${list.length}`);
+      return;
+    }
+
+    const channelId = process.env.TELEGRAM_CHANNEL_ID;
+    const tok = await getToken();
+    if (!channelId || !tok) return;
+
+    let sent = 0;
+    for (let idx = 0; idx < list.length; idx++) {
+      const item = list[idx];
+      const keys = collectMangaKeys(item);
+      if (!keys.length) continue;
+      if (await hasAnyNotifKeys(keys)) continue;
+
+      if (idx >= 12) {
+        await markNotifKeys(keys);
+        continue;
+      }
+
+      const story = await resolveMangaStory(item);
+      const caption = buildMangaCaption(item, story);
+      const poster = typeof item?.poster === "string" && /^https?:\/\//i.test(item.poster) ? item.poster : "";
+      const photoSent = poster ? await sendChannelPhoto(poster, caption) : false;
+      const delivered = photoSent || await sendMessage(channelId, caption);
+      if (delivered) {
+        await markNotifKeys(keys);
+        sent++;
+        schedulerSentToday++;
+        const chNum = Number(item?.latestChapter || 0);
+        await saveNotification({
+          type: "manga_chapter",
+          title: String(item?.arabicTitle || item?.title || "مانجا"),
+          body: chNum > 0 ? `${item?.typeLabel || "مانجا"} · الفصل ${chNum} متاح الآن` : `${item?.typeLabel || "مانجا"} · عمل جديد متاح الآن`,
+          image_url: poster || undefined,
+          link_path: `/manga/${encodeURIComponent(String(item?.id || ""))}`,
+          episode_num: chNum > 0 ? chNum : undefined,
+        }).catch(() => {});
+        console.log(`[scheduler] 📖 أُرسل إشعار مانجا/مانهوا → ${item?.arabicTitle || item?.title} (${item?.latestChapterLabel})`);
+        await new Promise((r) => setTimeout(r, 1_500));
+      }
+      if (sent >= 5) break;
+    }
+  } catch (e: any) {
+    console.warn("[scheduler] manga latest poll error:", e?.message || String(e));
+  }
+}
+
 /* ── الدورة الواحدة ────────────────────────────────────────────────────── */
 
 let schedulerCyclePromise: Promise<void> | null = null;
@@ -578,9 +861,11 @@ async function runSchedulerCycleInner(): Promise<void> {
   schedulerLastRun = now;
   schedulerNextRun = now + INTERVAL_MS / 1000;
 
-  // المصدر الوحيد للإشعارات هو قسم "أحدث الحلقات" (/api/anime/anslayer-latest)
-  // لضمان تطابق 100% بين ما يصل في تيليجرام وما يظهر للمستخدم في مقدمة أحدث الحلقات بالتطبيق.
+  // فحص أحدث الحلقات (الأنمي المترجم + الأقسام المدبلجة) وأحدث فصول المانجا والمانهوا
+  // مع بذر أول دورة ومنع التكرار نهائياً عبر app_config.
   await pollAnimeSlayerDirect();
+  await pollDubbedLatest();
+  await pollMangaLatest();
 }
 
 /* ── إرسال تنبيه للأدمن (يُستخدم من app.ts لأخطاء 500) ──────────────── */

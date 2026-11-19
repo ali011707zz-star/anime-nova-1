@@ -40,7 +40,7 @@ const RATING_QUERY = `
   }
 `;
 
-type LatestFilter = "all" | "today" | "top";
+type LatestFilter = "all" | "subbed" | "dubbed" | "today" | "top";
 
 function timestamp(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -124,7 +124,7 @@ export default function LatestEpisodesScreen() {
             setItems(
               parsed
                 .map((item) => normalizeLatestEpisodeItem(item))
-                .filter((item) => item.source === "anslayer"),
+                .filter((item) => item.source === "anslayer" || Boolean(item.dubbedKind)),
             );
           }
         }
@@ -134,7 +134,7 @@ export default function LatestEpisodesScreen() {
       await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(fresh));
       setRatingError(false);
 
-      const ids = Array.from(new Set(fresh.map((item) => item.animeId).filter((id) => id > 0)));
+      const ids = Array.from(new Set(fresh.filter((item) => !item.dubbedKind).map((item) => item.animeId).filter((id) => id > 0)));
       if (ids.length) {
         try {
           const ratingData = await anilistQuery<{
@@ -164,6 +164,8 @@ export default function LatestEpisodesScreen() {
   }, [load]);
 
   const visibleItems = useMemo(() => {
+    if (filter === "subbed") return items.filter((item) => !item.dubbedKind);
+    if (filter === "dubbed") return items.filter((item) => Boolean(item.dubbedKind));
     if (filter === "today") return items.filter((item) => isToday(item.updatedAt));
     if (filter === "top") {
       return [...items]
@@ -176,6 +178,8 @@ export default function LatestEpisodesScreen() {
   const cardWidth = Math.max(96, (width - 32 - 20) / 3);
   const filters: Array<{ id: LatestFilter; label: string }> = [
     { id: "all", label: "الكل" },
+    { id: "subbed", label: "مترجم" },
+    { id: "dubbed", label: "مدبلج" },
     { id: "today", label: "حلقات اليوم" },
     { id: "top", label: "الأعلى تقييماً" },
   ];
@@ -202,7 +206,7 @@ export default function LatestEpisodesScreen() {
                 </View>
               </View>
               <Text style={styles.subtitle} numberOfLines={1}>
-                جميع الحلقات الجديدة المضافة مترجمة بجودة فائقة
+                أحدث الحلقات المترجمة والمدبلجة (أنمي · أنيميشن · كرتون 2)
               </Text>
             </View>
           </View>
@@ -291,7 +295,14 @@ export default function LatestEpisodesScreen() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`مشاهدة ${item.name} الحلقة ${item.episode}`}
-              onPress={() => router.push(watchRoute(item) as any)}
+              onPress={() => {
+                const target = getLatestEpisodeRoute(item);
+                if (target.params) {
+                  router.push({ pathname: target.pathname as any, params: target.params });
+                } else {
+                  router.push(target.pathname as any);
+                }
+              }}
               focusable={tvMode}
               style={({ focused, pressed }) => [
                 styles.episodeCard,
@@ -304,8 +315,8 @@ export default function LatestEpisodesScreen() {
                   <Image
                     source={{
                       uri: tvMode
-                        ? getTvPosterUri(item, item.animeId ? `https://img.anili.st/media/${item.animeId}` : "")
-                        : getPosterUri(item, item.animeId ? `https://img.anili.st/media/${item.animeId}` : ""),
+                        ? getTvPosterUri(item, !item.dubbedKind && item.animeId ? `https://img.anili.st/media/${item.animeId}` : "")
+                        : getPosterUri(item, !item.dubbedKind && item.animeId ? `https://img.anili.st/media/${item.animeId}` : ""),
                     }}
                     style={styles.poster}
                     resizeMode="cover"
@@ -320,8 +331,29 @@ export default function LatestEpisodesScreen() {
                   style={styles.posterGradient}
                 />
                 <View style={styles.episodeBadge}>
-                  <Text style={styles.episodeBadgeText}>حلقة {item.episode}</Text>
+                  <Text style={styles.episodeBadgeText}>
+                    {item.isMovie ? "فيلم" : `حلقة ${item.episode}`}
+                  </Text>
                 </View>
+                {item.dubbedKind && item.sectionLabel ? (
+                  <View
+                    style={[
+                      styles.scoreBadge,
+                      {
+                        backgroundColor:
+                          item.dubbedKind === "dubbed-anime"
+                            ? "rgba(16, 185, 129, 0.92)"
+                            : item.dubbedKind === "aw-dubbed"
+                              ? "rgba(139, 92, 246, 0.92)"
+                              : "rgba(245, 158, 11, 0.92)",
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.scoreText, { color: "#ffffff" }]} numberOfLines={1}>
+                      {item.sectionLabel}
+                    </Text>
+                  </View>
+                ) : null}
                 {item.averageScore != null && filter === "top" && (
                   <View style={styles.scoreBadge}>
                     <Ionicons name="star" size={10} color="#fde047" />
