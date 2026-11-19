@@ -141,18 +141,23 @@ export default function HomeScreen() {
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: homeNewsData, refetch: refetchHomeNews } = useQuery<HomeNewsArticle[]>({
+  const {
+    data: homeNewsData,
+    isLoading: homeNewsLoading,
+    isError: homeNewsError,
+    refetch: refetchHomeNews,
+  } = useQuery<HomeNewsArticle[]>({
     queryKey: ["homeLatestNews"],
     queryFn: async () => {
-      try {
-        const res = await fetch(`${getBaseUrl()}/api/news?limit=12&hasImage=1`);
-        if (!res.ok) return [];
-        const json = await res.json();
-        return Array.isArray(json?.articles) ? json.articles : [];
-      } catch {
-        return [];
-      }
+      const res = await fetch(`${getBaseUrl()}/api/news?limit=12&hasImage=1`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      const articles = Array.isArray(json?.articles) ? json.articles : [];
+      if (articles.length === 0) throw new Error("Empty news feed");
+      return articles;
     },
+    retry: 4,
+    retryDelay: (attempt) => Math.min(2000 * (attempt + 1), 8000),
     staleTime: 1000 * 60 * 10,
   });
   const homeNewsList = homeNewsData || [];
@@ -461,7 +466,7 @@ export default function HomeScreen() {
           items: moviesList,
           onSeeAll: () => router.push({ pathname: "/browse", params: { format: "MOVIE", sort: "POPULARITY_DESC" } } as any),
         },
-        ...(homeNewsList.length > 0 ? [{ kind: "latestNews" as const, key: "latestNews" }] : []),
+        { kind: "latestNews" as const, key: "latestNews" },
         {
           kind: "anilist",
           key: "isekai",
@@ -810,7 +815,7 @@ export default function HomeScreen() {
 
 
         {/* ── آخر الأخبار (أسفل أفلام الأنمي مباشرة) ── */}
-        {section.kind === "latestNews" && homeNewsList.length > 0 && (
+        {section.kind === "latestNews" && (
           <View style={{ marginTop: 24 }}>
             <SectionHeader
               onSeeAll={() => router.push("/(tabs)/news" as any)}
@@ -823,6 +828,31 @@ export default function HomeScreen() {
                 <View style={[styles.continueAccent, { backgroundColor: "#06b6d4" }]} />
               </View>
             </SectionHeader>
+            {homeNewsLoading && homeNewsList.length === 0 ? (
+              <SkeletonRow />
+            ) : homeNewsList.length === 0 ? (
+              <Pressable
+                onPress={() => void refetchHomeNews()}
+                style={{
+                  marginHorizontal: railSidePadding,
+                  paddingVertical: 18,
+                  paddingHorizontal: 16,
+                  borderRadius: 14,
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                  backgroundColor: colors.card,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
+                }}
+              >
+                <Ionicons name="refresh" size={16} color="#06b6d4" />
+                <Text style={{ color: colors.text, fontFamily: "Cairo_700Bold", fontSize: 12 }}>
+                  {homeNewsError ? "تعذّر تحميل الأخبار · اضغط لإعادة المحاولة" : "جاري تحميل آخر الأخبار..."}
+                </Text>
+              </Pressable>
+            ) : (
             <FlatList
               data={homeNewsList}
               horizontal
@@ -910,9 +940,12 @@ export default function HomeScreen() {
                         </Text>
                       )}
                       <View style={homeNewsStyles.footerRow}>
-                        <Text style={[homeNewsStyles.readMore, { color: colors.homeAccent || "#06b6d4" }]}>
-                          التفاصيل ←
-                        </Text>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
+                          <Ionicons name="chevron-back" size={13} color={colors.homeAccent || "#06b6d4"} />
+                          <Text style={[homeNewsStyles.readMore, { color: colors.homeAccent || "#06b6d4" }]}>
+                            التفاصيل
+                          </Text>
+                        </View>
                         <Text style={[homeNewsStyles.time, { color: colors.mutedForeground }]}>
                           {formatNewsTimeAgo(art.publishedAt)}
                         </Text>
@@ -926,6 +959,7 @@ export default function HomeScreen() {
               windowSize={3}
               removeClippedSubviews={false}
             />
+            )}
           </View>
         )}
 
@@ -1693,6 +1727,7 @@ export default function HomeScreen() {
       <FlatList
         ref={homeListRef}
         data={homeSections}
+        extraData={{ newsLen: homeNewsList.length, newsLoading: homeNewsLoading, newsErr: homeNewsError }}
         keyExtractor={(item) => item.key}
         renderItem={renderHomeSection}
         ListHeaderComponent={

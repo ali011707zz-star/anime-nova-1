@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View, Text, StyleSheet,
-  Image, ActivityIndicator, FlatList, Linking, ScrollView,
+  Image, ActivityIndicator, FlatList, Linking, Modal, ScrollView,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -76,6 +76,7 @@ interface MoviesFeedResponse {
 interface NewsArticle {
   id: string;
   title: string;
+  originalTitle?: string;
   description: string;
   url: string;
   thumbnail: string | null;
@@ -184,6 +185,7 @@ export default function NewsScreen() {
   /* Comments sheet */
   const [commentsVisible, setCommentsVisible] = useState(false);
   const [activeArticle, setActiveArticle]     = useState<NewsArticle | null>(null);
+  const [detailArticle, setDetailArticle]     = useState<NewsArticle | null>(null);
   /* comment counts cache: newsId → count */
   const [commentCounts, setCommentCounts] = useState<Record<string, number>>({});
 
@@ -320,7 +322,7 @@ export default function NewsScreen() {
     const commentCount = commentCounts[newsId] ?? 0;
     return (
       <Pressable
-        onPress={() => Linking.openURL(item.url).catch(() => {})}
+        onPress={() => setDetailArticle(item)}
         focusable={tvMode}
         style={({ pressed, focused }) => [s.newsCard, { backgroundColor: colors.card, borderColor: colors.border }, pressed && { opacity: 0.78 }, tvMode && tvFocusStyle(focused)]}
       >
@@ -727,10 +729,27 @@ export default function NewsScreen() {
 
       {/* ── Header ── */}
       <View style={[s.header, { borderBottomColor: colors.border }]}>
+        <Pressable
+          onPress={() => {
+            if (router.canGoBack()) router.back();
+            else router.replace("/(tabs)" as any);
+          }}
+          focusable={tvMode}
+          hitSlop={8}
+          accessibilityLabel="رجوع"
+          style={({ pressed, focused }) => [
+            s.backBtn,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+            pressed && { opacity: 0.72 },
+            tvMode && tvFocusStyle(focused),
+          ]}
+        >
+          <Ionicons name="chevron-forward" size={20} color={colors.textPrimary} />
+        </Pressable>
         <View style={s.headerIcon}>
           <Ionicons name="newspaper" size={20} color="#8B5CF6" />
         </View>
-        <View>
+        <View style={{ flex: 1 }}>
           <Text style={[s.headerTitle, { color: colors.textPrimary }]}>أخبار الأنمي</Text>
           <Text style={[s.headerSub, { color: colors.textSecondary }]}>آخر الأخبار والإضافات والإصدارات</Text>
         </View>
@@ -921,7 +940,72 @@ export default function NewsScreen() {
         )
       )}
 
-      {/* ── Comments Sheet ── */}
+      {/* ── News Detail Modal ── */}
+      <Modal
+        visible={Boolean(detailArticle)}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setDetailArticle(null)}
+      >
+        <View style={s.modalBackdrop}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setDetailArticle(null)} />
+          {detailArticle && (
+            <View style={[s.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <ScrollView showsVerticalScrollIndicator={false}>
+                <View style={s.modalImgWrap}>
+                  {detailArticle.thumbnail ? (
+                    <Image source={{ uri: detailArticle.thumbnail }} style={s.modalImg} resizeMode="cover" />
+                  ) : (
+                    <View style={[s.modalImg, { backgroundColor: colors.surface, alignItems: "center", justifyContent: "center" }]}>
+                      <Ionicons name="newspaper-outline" size={40} color="#8B5CF6" />
+                    </View>
+                  )}
+                  <Pressable onPress={() => setDetailArticle(null)} style={s.modalCloseBtn}>
+                    <Ionicons name="close" size={20} color="#fff" />
+                  </Pressable>
+                </View>
+                <View style={s.modalBody}>
+                  <View style={s.modalMetaRow}>
+                    <Text style={[s.newsTime, { color: colors.textMuted }]}>{timeAgo(detailArticle.publishedAt)}</Text>
+                    <View style={s.newsCategoryBadge}>
+                      <Text style={s.newsCategoryText}>{detailArticle.category || "أخبار الأنمي"}</Text>
+                    </View>
+                  </View>
+                  <Text style={[s.modalTitle, { color: colors.textPrimary }]}>{detailArticle.title}</Text>
+                  {detailArticle.originalTitle && detailArticle.originalTitle !== detailArticle.title ? (
+                    <Text style={[s.modalOrigTitle, { color: colors.textMuted }]}>{detailArticle.originalTitle}</Text>
+                  ) : null}
+                  {!!detailArticle.description && (
+                    <Text style={[s.modalDesc, { color: colors.textSecondary }]}>{detailArticle.description}</Text>
+                  )}
+                  <View style={s.modalActions}>
+                    <Pressable
+                      onPress={() => {
+                        const target = detailArticle;
+                        setDetailArticle(null);
+                        openComments(target);
+                      }}
+                      style={[s.modalPrimaryBtn, { backgroundColor: colors.button || "#8B5CF6" }]}
+                    >
+                      <Ionicons name="chatbubble-outline" size={15} color="#fff" />
+                      <Text style={s.modalPrimaryText}>التعليقات</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => Linking.openURL(detailArticle.url).catch(() => {})}
+                      style={[s.modalSecondaryBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                    >
+                      <Ionicons name="open-outline" size={15} color={colors.textPrimary} />
+                      <Text style={[s.modalSecondaryText, { color: colors.textPrimary }]}>المصدر الأصلي</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              </ScrollView>
+            </View>
+          )}
+        </View>
+      </Modal>
+
+            {/* ── Comments Sheet ── */}
       {activeArticle && (
         <CommentsSheet
           visible={commentsVisible}
@@ -950,6 +1034,10 @@ const s = StyleSheet.create({
     flexDirection: "row", alignItems: "center", gap: 12,
     paddingHorizontal: 16, paddingVertical: 14,
     borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)",
+  },
+  backBtn: {
+    width: 38, height: 38, borderRadius: 12,
+    borderWidth: 1, alignItems: "center", justifyContent: "center",
   },
   headerIcon: {
     width: 40, height: 40, borderRadius: 12,
@@ -1061,4 +1149,19 @@ const s = StyleSheet.create({
   trendBadge:  { position: "absolute", top: 8, right: 10, borderWidth: 0, borderRadius: 20 },
   trendBody:   { flexDirection: "row", padding: 12, gap: 10 },
   trendDesc:   { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.35)", marginTop: 4, lineHeight: 15 },
+  modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.72)", justifyContent: "flex-end" },
+  modalCard: { maxHeight: "82%", borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1, overflow: "hidden" },
+  modalImgWrap: { width: "100%", height: 210, position: "relative" },
+  modalImg: { width: "100%", height: "100%" },
+  modalCloseBtn: { position: "absolute", top: 12, left: 12, width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(0,0,0,0.6)", alignItems: "center", justifyContent: "center" },
+  modalBody: { padding: 16, paddingBottom: 28, gap: 10 },
+  modalMetaRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  modalTitle: { fontSize: 16, fontFamily: "Cairo_800ExtraBold", lineHeight: 24, textAlign: "right", writingDirection: "rtl" },
+  modalOrigTitle: { fontSize: 11, fontFamily: "Cairo_400Regular", textAlign: "right", writingDirection: "ltr" },
+  modalDesc: { fontSize: 13.5, fontFamily: "Cairo_400Regular", lineHeight: 22, textAlign: "right", writingDirection: "rtl" },
+  modalActions: { flexDirection: "row", gap: 10, marginTop: 8 },
+  modalPrimaryBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 12, borderRadius: 14 },
+  modalPrimaryText: { color: "#fff", fontSize: 13, fontFamily: "Cairo_700Bold" },
+  modalSecondaryBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 12, borderRadius: 14, borderWidth: 1 },
+  modalSecondaryText: { fontSize: 13, fontFamily: "Cairo_700Bold" },
 });
