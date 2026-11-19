@@ -279,13 +279,14 @@ export function registerEmailAuthRoutes(app: Express): void {
   });
 
   app.get("/api/auth/me", async (req: Request, res: Response) => {
-    const userId = (req.session as any)?.userId || getMobileUserId(req);
+    const mobileUserId = getMobileUserId(req);
+    const userId = mobileUserId || (req.session as any)?.userId;
 
     if (!userId) return res.status(401).json({ error: "غير مصرّح" });
     try {
       const rows = await sbSelect("users", { id: `eq.${userId}` }, { limit: 1 });
       if (!rows.length) {
-        if ((req.session as any)?.userId) req.session.destroy(() => {});
+        if (!mobileUserId && (req.session as any)?.userId) req.session.destroy(() => {});
         return res.status(401).json({ error: "غير مصرّح" });
       }
       /* تجديد الجلسة للمتصفح عند الحاجة */
@@ -293,14 +294,23 @@ export function registerEmailAuthRoutes(app: Express): void {
         (req.session as any).userId = rows[0].id;
         req.session.cookie.maxAge = 30 * 24 * 60 * 60 * 1000;
       }
-      return res.json(authenticatedPayload(rows[0]));
+      const rawUserTok = Array.isArray(req.headers["x-user-token"])
+        ? req.headers["x-user-token"][0]
+        : String(req.headers["x-user-token"] || "");
+      const payload = authenticatedPayload(rows[0]);
+      // Keep valid linked-TV device token intact instead of overwriting with a regular user token
+      if (mobileUserId && rawUserTok.startsWith("device.")) {
+        payload.authToken = rawUserTok;
+      }
+      res.setHeader("Cache-Control", "no-store");
+      return res.json(payload);
     } catch {
       return res.status(500).json({ error: "خطأ في الخادم" });
     }
   });
 
   app.patch("/api/auth/profile", async (req: Request, res: Response) => {
-    const userId = (req.session as any)?.userId || getMobileUserId(req);
+    const userId = getMobileUserId(req) || (req.session as any)?.userId;
     if (!userId) return res.status(401).json({ error: "غير مصرّح" });
     try {
       const { displayName, username, profileImageCustom, avatarColor } = req.body || {};
@@ -342,7 +352,7 @@ export function registerEmailAuthRoutes(app: Express): void {
   });
 
   app.post("/api/auth/change-password", async (req: Request, res: Response) => {
-    const userId = (req.session as any)?.userId || getMobileUserId(req);
+    const userId = getMobileUserId(req) || (req.session as any)?.userId;
     if (!userId) return res.status(401).json({ error: "غير مصرّح" });
     try {
       const { currentPassword, newPassword } = req.body || {};
@@ -373,7 +383,7 @@ export function registerEmailAuthRoutes(app: Express): void {
   });
 
   app.delete("/api/auth/account", async (req: Request, res: Response) => {
-    const userId = (req.session as any)?.userId || getMobileUserId(req);
+    const userId = getMobileUserId(req) || (req.session as any)?.userId;
     if (!userId) return res.status(401).json({ error: "غير مصرّح" });
     try {
       await sbDelete("users", { id: `eq.${userId}` });

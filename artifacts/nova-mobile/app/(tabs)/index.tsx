@@ -62,7 +62,10 @@ export default function HomeScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { watchHistory } = useApp();
+  const { watchHistory, syncAccountNow } = useApp();
+  useFocusEffect(useCallback(() => {
+    void syncAccountNow(false);
+  }, [syncAccountNow]));
   const { width, height } = useWindowDimensions();
   const [showDrawer, setShowDrawer] = useState(false);
   const [headerSearch, setHeaderSearch] = useState("");

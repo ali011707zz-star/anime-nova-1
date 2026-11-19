@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   FlatList, Platform, ScrollView,
@@ -72,7 +72,10 @@ export default function LibraryScreen() {
     ? tvPosterWidth * gridColumns + 8 * (gridColumns - 1) + 32
     : Math.min(Math.max(width - 24, 0), 900);
   const router = useRouter();
-  const { watchHistory, favorites, removeFromHistory, toggleFavorite, updateFavorite } = useApp();
+  const { watchHistory, favorites, removeFromHistory, toggleFavorite, updateFavorite, syncAccountNow } = useApp();
+  useFocusEffect(useCallback(() => {
+    void syncAccountNow(true);
+  }, [syncAccountNow]));
   const openingFavRef = React.useRef(false);
   const openFavoriteItem = useCallback(async (item: FavoriteAnime) => {
     if (openingFavRef.current) return;

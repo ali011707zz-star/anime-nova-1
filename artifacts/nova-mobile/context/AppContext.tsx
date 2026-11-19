@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { AppState, StyleSheet, Text, View } from "react-native";
 import { DEFAULT_CONFIG, fetchRemoteConfig, getBaseUrl, RemoteConfig } from "@/utils/api";
 import { getAuthToken, secureFetch, setUserAuthToken } from "@/utils/secureApi";
 import { setActiveThemeIsWhite } from "@/utils/tv";
@@ -85,6 +85,7 @@ type AppContextType = {
   authReady: boolean;
   setCurrentUser: (user: MobileUser | null) => void;
   restoreAuth: () => Promise<void>;
+  syncAccountNow: (force?: boolean) => Promise<boolean>;
 };
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -494,10 +495,12 @@ function mapServerFavorite(row: any): FavoriteAnime | null {
     id,
     ...decoded,
     title: String(row?.anime_title ?? row?.title ?? ""),
+    titleAr: row?.title_ar || row?.titleAr ? String(row?.title_ar ?? row?.titleAr) : undefined,
     english: String(row?.english_title ?? row?.english ?? row?.anime_title ?? row?.title ?? ""),
     thumbnail: String(row?.anime_cover ?? row?.image ?? row?.poster ?? ""),
     episodes: row?.episodes == null ? null : asNumber(row.episodes),
     score: row?.score == null ? null : asNumber(row.score),
+    startYear: row?.start_year == null && row?.startYear == null ? undefined : asNumber(row?.start_year ?? row?.startYear),
     addedAt: Date.parse(row?.added_at || row?.created_at || "") || Date.now(),
   };
 }
@@ -517,10 +520,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // "loading" prevents a user switch from persisting the previous account's
   // in-memory data into the anonymous cache before the new owner is loaded.
   const dataOwnerRef = useRef<string | null | "loading">("loading");
+  const watchHistoryRef = useRef<WatchProgress[]>([]);
+  const favoritesRef = useRef<FavoriteAnime[]>([]);
+  const pendingHistoryKeysRef = useRef<Set<string>>(new Set());
+  const pendingFavoriteIdsRef = useRef<Set<number>>(new Set());
+  const syncedUserIdRef = useRef<string | null>(null);
+  const syncInFlightRef = useRef<Promise<boolean> | null>(null);
+  const lastSyncedAtRef = useRef<number>(0);
 
   useEffect(() => {
     currentUserRef.current = currentUser;
   }, [currentUser]);
+
+  useEffect(() => {
+    watchHistoryRef.current = watchHistory;
+  }, [watchHistory]);
+
+  useEffect(() => {
+    favoritesRef.current = favorites;
+  }, [favorites]);
 
   const restoreAuth = useCallback(async () => {
     try {
@@ -616,6 +634,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           animeTitle: item.titleAr || item.title || item.english,
           animeCover: item.thumbnail || null,
           animeType: serverFavoriteType(item),
+          ...(item.titleAr ? { titleAr: item.titleAr } : {}),
+          ...(item.english ? { english: item.english } : {}),
+          ...(item.episodes != null ? { episodes: item.episodes } : {}),
+          ...(item.score != null ? { score: item.score } : {}),
+          ...(item.startYear != null ? { startYear: item.startYear } : {}),
         }),
       });
       return response.ok;
@@ -628,7 +651,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     userId: string,
     localHistory: WatchProgress[],
     localFavorites: FavoriteAnime[],
+    mode: "initial" | "refresh" = "initial",
   ): Promise<boolean> => {
+    if (syncInFlightRef.current) return syncInFlightRef.current;
+    const task = (async (): Promise<boolean> => {
     try {
       const [historyResponse, favoritesResponse] = await Promise.all([
         secureFetch(accountUrl("/user/history?limit=100")),
@@ -716,10 +742,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const historyToUpload: WatchProgress[] = [];
       for (const item of localHistory) {
         if (deletedHistorySet.has(item.animeId)) continue;
-        const remote = historyClearPending === "1" ? undefined : remoteHistoryByKey.get(historyKey(item));
+        const key = historyKey(item);
+        const remote = historyClearPending === "1" ? undefined : remoteHistoryByKey.get(key);
+        const isPendingLocal = pendingHistoryKeysRef.current.has(key);
+        if (mode === "refresh" && !remote && !isPendingLocal) {
+          // On live refresh after initial sync, remote deletion wins unless this device has an un-uploaded local write
+          continue;
+        }
         if (!remote || item.updatedAt >= remote.updatedAt) {
-          mergedHistory.set(historyKey(item), item);
-          if (!remote || (item.updatedAt - remote.updatedAt > 10000) || historyClearPending === "1") {
+          mergedHistory.set(key, item);
+          if (!remote || (item.updatedAt - remote.updatedAt > 10000) || historyClearPending === "1" || isPendingLocal) {
             historyToUpload.push(item);
           }
         }
@@ -738,11 +770,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       for (const item of localFavorites) {
         if (deletedFavoritesSet.has(item.id)) continue;
         const remote = favoritesClearPending === "1" ? undefined : remoteFavoritesById.get(item.id);
+        const isPendingLocal = pendingFavoriteIdsRef.current.has(item.id);
+        if (mode === "refresh" && !remote && !isPendingLocal) {
+          // On live refresh after initial sync, remote deletion wins unless this device has an un-uploaded local save
+          continue;
+        }
         const localHasRichRouting = Boolean((item.contentKind && item.contentKind !== "anime") || item.mangaId);
         const remoteMissingRichRouting = Boolean(remote && !remote.contentKind && !remote.mangaId);
-        if (!remote || item.addedAt >= remote.addedAt || (localHasRichRouting && remoteMissingRichRouting)) {
+        if (!remote || item.addedAt >= remote.addedAt || (localHasRichRouting && remoteMissingRichRouting) || isPendingLocal) {
           mergedFavorites.set(item.id, item);
-          if (!remote || item.addedAt > remote.addedAt || favoritesClearPending === "1" || (localHasRichRouting && remoteMissingRichRouting)) {
+          if (!remote || item.addedAt > remote.addedAt || favoritesClearPending === "1" || (localHasRichRouting && remoteMissingRichRouting) || isPendingLocal) {
             favoritesToUpload.push(item);
           }
         }
@@ -767,14 +804,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       if (historyDeletesSucceeded && historyUploadsSucceeded) {
         await AsyncStorage.removeItem(HISTORY_DELETED_KEY(userId));
+        historyToUpload.slice(0, 12).forEach((it) => pendingHistoryKeysRef.current.delete(historyKey(it)));
       }
       if (favoriteDeletesSucceeded && favoriteUploadsSucceeded) {
         await AsyncStorage.removeItem(FAVORITES_DELETED_KEY(userId));
+        favoritesToUpload.slice(0, 12).forEach((it) => pendingFavoriteIdsRef.current.delete(it.id));
       }
 
       // A logout or account switch may happen while the requests above are in
       // flight. Never let a previous account repopulate the new account's UI.
       if (currentUserRef.current?.id !== userId) return false;
+      syncedUserIdRef.current = userId;
+      lastSyncedAtRef.current = Date.now();
       setWatchHistory([...mergedHistory.values()].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 100));
       setFavorites([...mergedFavorites.values()].sort((a, b) => b.addedAt - a.addedAt).slice(0, 500));
       return historyDeletesSucceeded && favoriteDeletesSucceeded &&
@@ -782,8 +823,47 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // Local state remains the offline source of truth.
       return false;
+    } finally {
+      syncInFlightRef.current = null;
     }
+    })();
+    syncInFlightRef.current = task;
+    return task;
   }, [accountUrl, postFavorite, postHistory, readDeletedIds]);
+
+  const syncAccountNow = useCallback(async (force = false): Promise<boolean> => {
+    const userId = currentUserRef.current?.id;
+    if (!userId || dataOwnerRef.current !== userId) return false;
+    const now = Date.now();
+    if (!force && now - lastSyncedAtRef.current < 5000) return true;
+    const mode: "initial" | "refresh" = syncedUserIdRef.current === userId ? "refresh" : "initial";
+    return syncAccountData(userId, watchHistoryRef.current, favoritesRef.current, mode);
+  }, [syncAccountData]);
+
+  // Automatic cross-device sync (Phone <-> TV):
+  // 1) Sync immediately whenever the app returns to foreground (AppState -> "active")
+  // 2) Lightweight 30s active poll while logged in so TV & Phone stay in sync without restarting!
+  useEffect(() => {
+    const userId = currentUser?.id;
+    if (!userId || !authReady) return;
+    let appState = AppState.currentState;
+    const sub = AppState.addEventListener("change", (nextState) => {
+      const wasBackground = appState !== "active";
+      appState = nextState;
+      if (wasBackground && nextState === "active") {
+        void syncAccountNow(true);
+      }
+    });
+    const timer = setInterval(() => {
+      if (AppState.currentState === "active") {
+        void syncAccountNow(false);
+      }
+    }, 30_000);
+    return () => {
+      sub.remove();
+      clearInterval(timer);
+    };
+  }, [authReady, currentUser?.id, syncAccountNow]);
 
   useEffect(() => {
     if (!authReady || !historyHydrated || !favoritesHydrated) return;
@@ -791,6 +871,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
     const userId = currentUser?.id || null;
     dataOwnerRef.current = "loading";
+    if (syncedUserIdRef.current !== userId) {
+      syncedUserIdRef.current = null;
+      pendingHistoryKeysRef.current.clear();
+      pendingFavoriteIdsRef.current.clear();
+    }
 
     const parseArray = <T,>(raw: string | null): T[] => {
       if (!raw) return [];
@@ -972,7 +1057,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
     // The caller invokes this when leaving the episode. Keep the network
     // write at that boundary; onProgress only updates an in-memory ref.
-    if (userId) void postHistory(item);
+    if (userId) {
+      const hKey = historyKey(item);
+      pendingHistoryKeysRef.current.add(hKey);
+      void postHistory(item).then((ok) => {
+        if (ok) pendingHistoryKeysRef.current.delete(hKey);
+      });
+    }
   }, [currentUser?.id, postHistory, readDeletedIds, writeDeletedIds]);
 
   /*
@@ -1045,7 +1136,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (deleted.includes(anime.id)) {
         await writeDeletedIds(key, deleted.filter(id => id !== anime.id));
       }
-      void postFavorite(anime);
+      pendingFavoriteIdsRef.current.add(anime.id);
+      void postFavorite(anime).then((ok) => {
+        if (ok) pendingFavoriteIdsRef.current.delete(anime.id);
+      });
     }
   }, [accountUrl, currentUser?.id, favorites, postFavorite, readDeletedIds, writeDeletedIds]);
 
@@ -1059,7 +1153,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
     const userId = currentUser?.id;
     if (userId) {
-      void postFavorite(anime);
+      pendingFavoriteIdsRef.current.add(anime.id);
+      void postFavorite(anime).then((ok) => {
+        if (ok) pendingFavoriteIdsRef.current.delete(anime.id);
+      });
     }
   }, [currentUser?.id, postFavorite]);
 
@@ -1096,6 +1193,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     authReady,
     setCurrentUser,
     restoreAuth,
+    syncAccountNow,
   }), [
     addToHistory,
     authReady,
@@ -1108,6 +1206,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     remoteConfig,
     removeFromHistory,
     restoreAuth,
+    syncAccountNow,
     setTheme,
     theme,
     toggleFavorite,
