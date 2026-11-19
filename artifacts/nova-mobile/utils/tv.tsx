@@ -247,16 +247,43 @@ export function tvFocusStyle(focused: boolean, isWhite?: boolean): ViewStyle {
 }
 
 export const TV_FOCUS_VIEWABILITY_CONFIG = {
-  itemVisiblePercentThreshold: 65,
+  itemVisiblePercentThreshold: 85,
 };
 
-/** Scroll a virtualized list smoothly when D-pad focus reaches an item. */
+/**
+ * Scroll a virtualized list smoothly ONLY when D-pad focus moves to an item
+ * that is partially or fully off-screen. Keeping already-visible items fixed
+ * prevents horizontal row drift when moving vertically across poster rows on TV.
+ */
 export function useTvListFocusScroll<T>(
   listRef: React.RefObject<FlatList<T> | null>,
   viewPosition = 0.35,
 ) {
   const rafRef = React.useRef<number | null>(null);
   const lastIndexRef = React.useRef<number>(-1);
+  const viewableSetRef = React.useRef<Set<number>>(new Set());
+  const minViewableRef = React.useRef<number>(0);
+  const maxViewableRef = React.useRef<number>(4);
+
+  const onViewableItemsChanged = React.useRef(
+    ({ viewableItems }: { viewableItems: Array<{ index: number | null; isViewable?: boolean }> }) => {
+      const next = new Set<number>();
+      let minIdx = Number.POSITIVE_INFINITY;
+      let maxIdx = -1;
+      for (const item of viewableItems) {
+        if (typeof item.index === "number" && item.index >= 0) {
+          next.add(item.index);
+          if (item.index < minIdx) minIdx = item.index;
+          if (item.index > maxIdx) maxIdx = item.index;
+        }
+      }
+      if (next.size > 0) {
+        viewableSetRef.current = next;
+        minViewableRef.current = minIdx;
+        maxViewableRef.current = maxIdx;
+      }
+    },
+  ).current;
 
   React.useEffect(() => {
     return () => {
@@ -268,11 +295,31 @@ export function useTvListFocusScroll<T>(
 
   const scrollToFocusedIndex = React.useCallback((index: number) => {
     if (!listRef?.current || typeof index !== "number" || index < 0) return;
-    if (lastIndexRef.current === index) return;
+
+    const prevIndex = lastIndexRef.current;
     lastIndexRef.current = index;
+
+    // Never scroll horizontally if the focused card is already fully visible!
+    const viewable = viewableSetRef.current;
+    if (viewable.size > 0) {
+      if (viewable.has(index)) return;
+    } else if (index <= 3) {
+      return;
+    }
+
+    if (prevIndex === index) return;
+
+    // Scroll minimally toward the revealed edge instead of violently re-centering
+    let edgePosition = viewPosition;
+    if (viewable.size > 0) {
+      if (index > maxViewableRef.current) edgePosition = 0.85;
+      else if (index < minViewableRef.current) edgePosition = 0.12;
+    }
+
     if (rafRef.current !== null) {
       cancelAnimationFrame(rafRef.current);
     }
+
     rafRef.current = requestAnimationFrame(() => {
       rafRef.current = null;
       if (!listRef?.current) return;
@@ -280,7 +327,7 @@ export function useTvListFocusScroll<T>(
         listRef.current.scrollToIndex({
           index,
           animated: true,
-          viewPosition,
+          viewPosition: edgePosition,
         });
       } catch {
         try {
@@ -294,7 +341,7 @@ export function useTvListFocusScroll<T>(
   }, [listRef, viewPosition]);
 
   return {
-    onViewableItemsChanged: undefined,
+    onViewableItemsChanged,
     viewabilityConfig: TV_FOCUS_VIEWABILITY_CONFIG,
     scrollToFocusedIndex,
   };

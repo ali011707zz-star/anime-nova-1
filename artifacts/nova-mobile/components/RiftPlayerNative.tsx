@@ -95,6 +95,8 @@ type TvPlayerSurfaceProps = {
   autoPlayNext: boolean;
   controlsVisible: boolean;
   onTvFocus: () => void;
+  onProgressFocus?: () => void;
+  onProgressBlur?: () => void;
   togglePlayback: () => void;
   seek: (position: number) => void;
   playableSources: PlayerSource[];
@@ -371,6 +373,8 @@ function TvPlayerSurface({
   autoPlayNext,
   controlsVisible,
   onTvFocus,
+  onProgressFocus,
+  onProgressBlur,
   togglePlayback,
   seek,
   playableSources,
@@ -466,7 +470,13 @@ function TvPlayerSurface({
                 accessibilityRole="adjustable"
                 accessibilityLabel="شريط تقدم الحلقة"
                 onPress={togglePlayback}
-                onFocus={onTvFocus}
+                onFocus={() => {
+                  onProgressFocus?.();
+                  onTvFocus();
+                }}
+                onBlur={() => {
+                  onProgressBlur?.();
+                }}
                 hasTVPreferredFocus
                 focusable
                 style={({ focused }) => [
@@ -1040,6 +1050,11 @@ export function RiftPlayer({
     [duration, onProgress, player, position, scheduleHide],
   );
 
+  const progressFocusedRef = useRef(false);
+  useEffect(() => {
+    if (!controlsVisible) progressFocusedRef.current = false;
+  }, [controlsVisible]);
+
   useEffect(() => {
     if (!tvMode) return;
     const handleEvent = (evt: any) => {
@@ -1051,9 +1066,13 @@ export function RiftPlayer({
       const repeatCount = Number(evt.repeatCount || 0);
       if (showSources || showSpeeds || showSubtitleSettings) return;
       if (eventType === "left" || keyCode === 21 || keyCode === 89) {
-        performTvStepSeek(-1, repeatCount);
+        if (controlsVisible && progressFocusedRef.current) {
+          performTvStepSeek(-1, repeatCount);
+        }
       } else if (eventType === "right" || keyCode === 22 || keyCode === 90) {
-        performTvStepSeek(1, repeatCount);
+        if (controlsVisible && progressFocusedRef.current) {
+          performTvStepSeek(1, repeatCount);
+        }
       } else if (
         eventType === "playPause" ||
         keyCode === 85 ||
@@ -1233,6 +1252,8 @@ export function RiftPlayer({
         setSubtitleSettings={setSubtitleSettings}
         showSubtitleSettings={showSubtitleSettings}
         setShowSubtitleSettings={setShowSubtitleSettings}
+        onProgressFocus={() => { progressFocusedRef.current = true; }}
+        onProgressBlur={() => { progressFocusedRef.current = false; }}
         buffering={buffering}
         position={position}
         duration={duration}

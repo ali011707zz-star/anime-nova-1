@@ -2485,7 +2485,7 @@ function ExpoRiftPlayer({
   }, [fadeIn, markTvProgressFocused, performTvStepSeek]);
 
   const handleTvProgressKeyDown = useCallback((event: any) => {
-    if (!tvMode || !showControls) return;
+    if (!tvMode || !showControls || !progressFocusedRef.current) return;
     const nativeEvent = event?.nativeEvent || {};
     const rawAction = nativeEvent.action ?? nativeEvent.eventKeyAction;
     if (rawAction !== undefined && rawAction !== null && Number(rawAction) !== 0) return;
@@ -2519,7 +2519,9 @@ function ExpoRiftPlayer({
       const isRight = keyCode === 22 || keyCode === 90 || eventType === "right" || eventType === "fastforward";
       const isLeft = keyCode === 21 || keyCode === 89 || eventType === "left" || eventType === "rewind";
       if (isRight || isLeft) {
-        if (!showControls || progressFocusedRef.current || keyCode === 90 || keyCode === 89) {
+        // Seek ONLY when controls are visible and cursor is stopped on the progress bar (شريط التقدم).
+        // Pressing Left/Right while controls are hidden must NOT change playback time.
+        if (showControls && progressFocusedRef.current) {
           const now = Date.now();
           if (now - lastTvSeekAtRef.current < 70) return;
           lastTvSeekAtRef.current = now;
@@ -2528,7 +2530,7 @@ function ExpoRiftPlayer({
           setTimeout(() => {
             try { (tvProgressRef.current as any)?.focus?.(); } catch {}
           }, 0);
-        } else {
+        } else if (showControls) {
           fadeIn();
         }
         return;

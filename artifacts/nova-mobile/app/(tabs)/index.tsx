@@ -15,7 +15,7 @@ import { DrawerMenu } from "@/components/DrawerMenu";
 import { HeroSection } from "@/components/HeroSection";
 import { SectionHeader } from "@/components/SectionHeader";
 import { SectionRow, SkeletonRow } from "@/components/SectionRow";
-import { getRailCardWidth, getRailSidePadding } from "@/components/AnimeCard";
+import { AnimeCard, getRailCardWidth, getRailSidePadding } from "@/components/AnimeCard";
 import { useColors } from "@/hooks/useColors";
 import {
   AIRING_QUERY, AnilistMedia, anilistQuery,
@@ -102,10 +102,22 @@ export default function HomeScreen() {
   const todayEpsListRef = useRef<FlatList<any> | null>(null);
   const dubbedRailListRef = useRef<FlatList<any> | null>(null);
   const mangaRailListRef = useRef<FlatList<any> | null>(null);
-  const { scrollToFocusedIndex: scrollContinueIntoView } = useTvListFocusScroll(continueListRef, 0.35);
-  const { scrollToFocusedIndex: scrollTodayEpsIntoView } = useTvListFocusScroll(todayEpsListRef, 0.35);
-  const { scrollToFocusedIndex: scrollDubbedRailIntoView } = useTvListFocusScroll(dubbedRailListRef, 0.35);
-  const { scrollToFocusedIndex: scrollMangaRailIntoView } = useTvListFocusScroll(mangaRailListRef, 0.35);
+  const animeUnifiedListRef = useRef<FlatList<any> | null>(null);
+  const newsRailListRef = useRef<FlatList<any> | null>(null);
+  const continueFocusScroll = useTvListFocusScroll(continueListRef, 0.35);
+  const todayEpsFocusScroll = useTvListFocusScroll(todayEpsListRef, 0.35);
+  const dubbedFocusScroll = useTvListFocusScroll(dubbedRailListRef, 0.35);
+  const mangaFocusScroll = useTvListFocusScroll(mangaRailListRef, 0.35);
+  const animeUnifiedFocusScroll = useTvListFocusScroll(animeUnifiedListRef, 0.35);
+  const newsFocusScroll = useTvListFocusScroll(newsRailListRef, 0.35);
+  const scrollContinueIntoView = continueFocusScroll.scrollToFocusedIndex;
+  const scrollTodayEpsIntoView = todayEpsFocusScroll.scrollToFocusedIndex;
+  const scrollDubbedRailIntoView = dubbedFocusScroll.scrollToFocusedIndex;
+  const scrollMangaRailIntoView = mangaFocusScroll.scrollToFocusedIndex;
+  type LatestHomeTab = "episodes" | "manga";
+  const [activeLatestTab, setActiveLatestTab] = useState<LatestHomeTab>("episodes");
+  type AnimeUnifiedHomeTab = "airing" | "popular" | "movies";
+  const [activeAnimeTab, setActiveAnimeTab] = useState<AnimeUnifiedHomeTab>("airing");
   type DubbedHomeTab = "anime" | "animation" | "spacetoon" | "cartoon" | "cartoon2";
   const [activeDubbedTab, setActiveDubbedTab] = useState<DubbedHomeTab>("anime");
   type MangaHomeTab = "manhwa" | "manga";
@@ -426,44 +438,25 @@ export default function HomeScreen() {
   type HomeSectionItem =
     | { kind: "continue"; key: string }
     | { kind: "todayEps"; key: string }
-    | { kind: "latestManga"; key: string }
     | { kind: "dubbedUnified"; key: string }
     | { kind: "mangaUnified"; key: string }
+    | { kind: "animeUnified"; key: string }
     | { kind: "latestNews"; key: string }
     | { kind: "anilist"; key: string; title: string; items: AnilistMedia[]; onSeeAll: () => void };
 
   const homeSections = useMemo<HomeSectionItem[]>(() => {
     const sections: HomeSectionItem[] = [];
     if (recentHistory.length > 0) sections.push({ kind: "continue", key: "continue" });
-    if (todayEps.length > 0 || todayChecking) sections.push({ kind: "todayEps", key: "todayEps" });
-    if (latestManga.length > 0 || latestMangaChecking) sections.push({ kind: "latestManga", key: "latestManga" });
+    if (todayEps.length > 0 || todayChecking || latestManga.length > 0 || latestMangaChecking) {
+      sections.push({ kind: "todayEps", key: "todayEps" });
+    }
     sections.push({ kind: "dubbedUnified", key: "dubbedUnified" });
     if (!isTvLayout && (manhwaItems.length > 0 || mangaItems.length > 0)) {
       sections.push({ kind: "mangaUnified", key: "mangaUnified" });
     }
     if (!isLoading) {
       sections.push(
-        {
-          kind: "anilist",
-          key: "airing",
-          title: "يُعرض حالياً",
-          items: airingList,
-          onSeeAll: () => router.push({ pathname: "/browse", params: { status: "RELEASING", sort: "POPULARITY_DESC" } } as any),
-        },
-        {
-          kind: "anilist",
-          key: "popular",
-          title: "⭐ الأكثر شعبية",
-          items: popularList,
-          onSeeAll: () => router.push({ pathname: "/browse", params: { sort: "POPULARITY_DESC" } } as any),
-        },
-        {
-          kind: "anilist",
-          key: "movies",
-          title: "🎬 أفلام الأنمي",
-          items: moviesList,
-          onSeeAll: () => router.push({ pathname: "/browse", params: { format: "MOVIE", sort: "POPULARITY_DESC" } } as any),
-        },
+        { kind: "animeUnified", key: "animeUnified" },
         { kind: "latestNews" as const, key: "latestNews" },
         {
           kind: "anilist",
@@ -541,6 +534,8 @@ export default function HomeScreen() {
             </SectionHeader>
             <FlatList
               ref={continueListRef}
+                onViewableItemsChanged={continueFocusScroll.onViewableItemsChanged}
+                viewabilityConfig={continueFocusScroll.viewabilityConfig}
               data={recentHistory}
               horizontal
                keyExtractor={(h) => `${h.contentKind || "anime"}-${h.contentKey || h.animeId}-${h.season || 1}-${h.ep}`}
@@ -688,35 +683,91 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* أحدث الحلقات — AnimeSlayer (مطابق للويب) */}
-        {section.kind === "todayEps" && (todayEps.length > 0 || todayChecking) && (
+        {/* أحدث الحلقات وفصول المانجا والمانهوا — قسم مدمج بنظام التبويبات مثل المدبلج */}
+        {section.kind === "todayEps" && (todayEps.length > 0 || todayChecking || latestManga.length > 0 || latestMangaChecking) && (
           <View style={{ marginTop: 24 }}>
             <SectionHeader
-              onSeeAll={() => router.push("/latest" as any)}
+              onSeeAll={() => router.push((activeLatestTab === "manga" ? "/manga" : "/latest") as any)}
               focusable={isTvLayout && sectionFocusable}
               onFocus={handleSectionFocus}
             >
               <View style={styles.sectionRightRow}>
-                <Text style={{ fontSize: isTvLayout ? 22 : 15 }}>📺</Text>
-                <Text style={[styles.sectionTitle, isTvLayout && styles.tvSectionTitle, { color: colors.text }]}>أحدث الحلقات</Text>
-                <View style={[styles.continueAccent, { backgroundColor: colors.homeAccent || "#06b6d4" }]} />
+                <Text style={{ fontSize: isTvLayout ? 22 : 15 }}>{activeLatestTab === "manga" ? "📖" : "📺"}</Text>
+                <Text style={[styles.sectionTitle, isTvLayout && styles.tvSectionTitle, { color: colors.text }]}>
+                  {activeLatestTab === "manga" ? "أحدث الفصول" : "أحدث الحلقات"}
+                </Text>
+                <View style={[styles.continueAccent, { backgroundColor: activeLatestTab === "manga" ? "#F59E0B" : (colors.homeAccent || "#06b6d4") }]} />
               </View>
             </SectionHeader>
-            {todayChecking && todayEps.length === 0 ? (
-               <SkeletonRow />
-            ) : (
-              <FlatList
-                ref={todayEpsListRef}
-                data={todayEps}
-                horizontal
-                getItemLayout={getRailItemLayout}
-                keyExtractor={(ep, idx) => `${ep.source}-${ep.anslayerId || ep.awAnimeId || ep.animeId || ep.name || "ep"}-${ep.episode}-${idx}`}
-                showsHorizontalScrollIndicator={false}
-                 contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
-                renderItem={({ item: ep, index: epIdx }) => (
-                  /* بطاقة أحدث الحلقات تمرر anslayerId كمرجع احتياطي لـ AS،
-                     لكن صفحة المشاهدة تفحص كل المصادر المتاحة مثل الويب. */
-                   <Pressable
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={{ marginBottom: 12 }}
+              contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: 8, flexDirection: "row", alignItems: "center" }}
+            >
+              {([
+                { key: "episodes" as const, label: "أحدث الحلقات", color: "#06b6d4" },
+                { key: "manga" as const, label: "المانجا والمانهوا", color: "#F59E0B" },
+              ]).map((tabOpt) => {
+                const isActive = activeLatestTab === tabOpt.key;
+                return (
+                  <Pressable
+                    key={tabOpt.key}
+                    onPress={() => {
+                      setActiveLatestTab(tabOpt.key);
+                      todayEpsListRef.current?.scrollToOffset({ offset: 0, animated: false });
+                    }}
+                    onFocus={handleSectionFocus}
+                    focusable={isTvLayout && sectionFocusable}
+                    style={({ focused }) => [
+                      {
+                        paddingHorizontal: isTvLayout ? 20 : 16,
+                        paddingVertical: isTvLayout ? 9 : 7,
+                        borderRadius: 12,
+                        borderWidth: 1,
+                        flexShrink: 0,
+                        alignItems: "center",
+                        justifyContent: "center",
+                        backgroundColor: isActive ? `${tabOpt.color}22` : colors.card,
+                        borderColor: isActive ? `${tabOpt.color}88` : colors.border,
+                      },
+                      isTvLayout && tvFocusStyle(focused),
+                    ]}
+                  >
+                    <Text
+                      style={{
+                        fontSize: isTvLayout ? 15 : 12.5,
+                        lineHeight: isTvLayout ? 22 : 19,
+                        fontFamily: "Cairo_700Bold",
+                        color: isActive ? tabOpt.color : colors.mutedForeground,
+                        includeFontPadding: false,
+                        textAlign: "center",
+                        paddingHorizontal: 3,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {` ${tabOpt.label} `}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+            {activeLatestTab === "episodes" ? (
+              todayChecking && todayEps.length === 0 ? (
+                <SkeletonRow />
+              ) : (
+                <FlatList
+                  ref={todayEpsListRef}
+                  data={todayEps}
+                  horizontal
+                  getItemLayout={getRailItemLayout}
+                  onViewableItemsChanged={todayEpsFocusScroll.onViewableItemsChanged}
+                  viewabilityConfig={todayEpsFocusScroll.viewabilityConfig}
+                  keyExtractor={(ep, idx) => `${ep.source}-${ep.anslayerId || ep.awAnimeId || ep.animeId || ep.name || "ep"}-${ep.episode}-${idx}`}
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
+                  renderItem={({ item: ep, index: epIdx }) => (
+                    <Pressable
                       onPress={() => {
                         const target = getLatestEpisodeRoute(ep);
                         if (target.params) {
@@ -729,30 +780,149 @@ export default function HomeScreen() {
                         handleSectionFocus?.();
                         if (isTvLayout) scrollTodayEpsIntoView(epIdx);
                       }}
-                     focusable={isTvLayout && sectionFocusable}
-                     style={({ focused }) => [todayEpStyles.card, { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border }, isTvLayout && tvFocusStyle(focused)]}
-                  >
-                    {ep.cover ? (
-                      <Image
-                        source={{ uri: isTvLayout
-                          ? getTvPosterUri(ep, !ep.dubbedKind && ep.animeId ? `https://img.anili.st/media/${ep.animeId}` : "")
-                          : getPosterUri(ep, !ep.dubbedKind && ep.animeId ? `https://img.anili.st/media/${ep.animeId}` : "") }}
-                        style={todayEpStyles.img}
-                        resizeMode="cover"
-                        resizeMethod="resize"
-                        fadeDuration={0}
-                      />
-                    ) : (
-                      <View style={[todayEpStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
-                        <Ionicons name="tv" size={28} color="rgba(255,255,255,0.2)" />
+                      focusable={isTvLayout && sectionFocusable}
+                      style={({ focused }) => [todayEpStyles.card, { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border }, isTvLayout && tvFocusStyle(focused)]}
+                    >
+                      {ep.cover ? (
+                        <Image
+                          source={{ uri: isTvLayout
+                            ? getTvPosterUri(ep, !ep.dubbedKind && ep.animeId ? `https://img.anili.st/media/${ep.animeId}` : "")
+                            : getPosterUri(ep, !ep.dubbedKind && ep.animeId ? `https://img.anili.st/media/${ep.animeId}` : "") }}
+                          style={todayEpStyles.img}
+                          resizeMode="cover"
+                          resizeMethod="resize"
+                          fadeDuration={0}
+                        />
+                      ) : (
+                        <View style={[todayEpStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
+                          <Ionicons name="tv" size={28} color="rgba(255,255,255,0.2)" />
+                        </View>
+                      )}
+                      <View style={[styles.historyBadge, styles.historyEpisodeBadge]}>
+                        <Text style={styles.historyBadgeText}>
+                          {ep.isMovie ? "فيلم" : `الحلقة ${ep.episode}`}
+                        </Text>
                       </View>
-                    )}
-                    <View style={[styles.historyBadge, styles.historyEpisodeBadge]}>
-                      <Text style={styles.historyBadgeText}>
-                        {ep.isMovie ? "فيلم" : `الحلقة ${ep.episode}`}
-                      </Text>
-                    </View>
-                    {ep.dubbedKind && ep.sectionLabel ? (
+                      {ep.dubbedKind && ep.sectionLabel ? (
+                        <View
+                          style={{
+                            position: "absolute",
+                            top: 6,
+                            left: 6,
+                            paddingHorizontal: 6,
+                            paddingVertical: 2,
+                            borderRadius: 6,
+                            backgroundColor:
+                              ep.dubbedKind === "dubbed-anime"
+                                ? "rgba(16, 185, 129, 0.92)"
+                                : ep.dubbedKind === "aw-dubbed"
+                                  ? "rgba(139, 92, 246, 0.92)"
+                                  : "rgba(245, 158, 11, 0.92)",
+                          }}
+                        >
+                          <Text style={{ color: "#fff", fontSize: 8.5, fontFamily: "Cairo_700Bold" }} numberOfLines={1}>
+                            {ep.sectionLabel}
+                          </Text>
+                        </View>
+                      ) : null}
+                      {(() => {
+                        const epArRaw = ep.titleAr || ep.title_ar || (!ep.dubbedKind ? getKnownArabicAnimeTitle(ep.animeId || ep.anilistId, ep.english || ep.name, ep.romaji || ep.name) : ep.name);
+                        const epAr = typeof epArRaw === "string" ? epArRaw : "";
+                        const epEn = String(ep.english || ep.romaji || ep.name || "");
+                        return (
+                          <LinearGradient colors={["transparent", "rgba(0,0,0,0.95)"]} style={todayEpStyles.grad}>
+                            <Text style={todayEpStyles.title} numberOfLines={2}>{epAr || ep.name}</Text>
+                            {epAr && epEn && epAr.trim() !== epEn.trim() ? (
+                              <Text
+                                style={{
+                                  color: "rgba(255,255,255,0.72)",
+                                  fontSize: isTvLayout ? 11 : 8.5,
+                                  lineHeight: isTvLayout ? 15 : 12,
+                                  fontFamily: "Cairo_600SemiBold",
+                                  textAlign: "right",
+                                  writingDirection: "ltr",
+                                  marginTop: 1,
+                                }}
+                                numberOfLines={1}
+                              >
+                                {epEn}
+                              </Text>
+                            ) : null}
+                          </LinearGradient>
+                        );
+                      })()}
+                    </Pressable>
+                  )}
+                  initialNumToRender={5}
+                  maxToRenderPerBatch={5}
+                  windowSize={isTvLayout ? 5 : 3}
+                  removeClippedSubviews={false}
+                />
+              )
+            ) : latestMangaChecking && latestManga.length === 0 ? (
+              <SkeletonRow />
+            ) : (
+              <FlatList
+                ref={todayEpsListRef}
+                data={latestManga}
+                horizontal
+                getItemLayout={getRailItemLayout}
+                onViewableItemsChanged={todayEpsFocusScroll.onViewableItemsChanged}
+                viewabilityConfig={todayEpsFocusScroll.viewabilityConfig}
+                keyExtractor={(item, idx) => `latest-manga-${item.id}-${idx}`}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
+                renderItem={({ item, index: mIdx }) => {
+                  const posterUri = proxyPosterUrl(item.poster) || item.poster || "";
+                  const isManhwa = item.source === "manhwa" || item.typeLabel === "مانهوا";
+                  return (
+                    <Pressable
+                      onPress={() =>
+                        router.push({
+                          pathname: "/manga/[id]" as any,
+                          params: {
+                            id: item.id,
+                            title: item.arabicTitle || item.title,
+                            english: item.englishTitle || item.title,
+                            cover: posterUri,
+                            source: item.source,
+                          },
+                        })
+                      }
+                      onFocus={() => {
+                        handleSectionFocus?.();
+                        if (isTvLayout) scrollTodayEpsIntoView(mIdx);
+                      }}
+                      focusable={isTvLayout && sectionFocusable}
+                      style={({ focused }) => [
+                        todayEpStyles.card,
+                        {
+                          width: railCardWidth,
+                          height: Math.round(railCardWidth * 1.46),
+                          backgroundColor: colors.card,
+                          borderColor: colors.border,
+                        },
+                        isTvLayout && tvFocusStyle(focused),
+                      ]}
+                    >
+                      {posterUri ? (
+                        <Image
+                          source={{ uri: posterUri }}
+                          style={todayEpStyles.img}
+                          resizeMode="cover"
+                          resizeMethod="resize"
+                          fadeDuration={0}
+                        />
+                      ) : (
+                        <View style={[todayEpStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
+                          <Ionicons name="book-outline" size={28} color="rgba(255,255,255,0.25)" />
+                        </View>
+                      )}
+                      <View style={[styles.historyBadge, { backgroundColor: "rgba(245, 158, 11, 0.94)" }]}>
+                        <Text style={[styles.historyBadgeText, { color: "#09090B" }]}>
+                          {item.latestChapter ? `الفصل ${item.latestChapter}` : "جديد"}
+                        </Text>
+                      </View>
                       <View
                         style={{
                           position: "absolute",
@@ -761,49 +931,39 @@ export default function HomeScreen() {
                           paddingHorizontal: 6,
                           paddingVertical: 2,
                           borderRadius: 6,
-                          backgroundColor:
-                            ep.dubbedKind === "dubbed-anime"
-                              ? "rgba(16, 185, 129, 0.92)"
-                              : ep.dubbedKind === "aw-dubbed"
-                                ? "rgba(139, 92, 246, 0.92)"
-                                : "rgba(245, 158, 11, 0.92)",
+                          backgroundColor: isManhwa ? "rgba(14, 165, 233, 0.92)" : "rgba(236, 72, 153, 0.92)",
                         }}
                       >
-                        <Text style={{ color: "#fff", fontSize: 8.5, fontFamily: "Cairo_700Bold" }} numberOfLines={1}>
-                          {ep.sectionLabel}
+                        <Text style={{ color: "#fff", fontSize: 8.5, fontFamily: "Cairo_700Bold" }}>
+                          {isManhwa ? "مانهوا" : "مانجا"}
                         </Text>
                       </View>
-                    ) : null}
-                    {(() => {
-                      const epArRaw = ep.titleAr || ep.title_ar || (!ep.dubbedKind ? getKnownArabicAnimeTitle(ep.animeId || ep.anilistId, ep.english || ep.name, ep.romaji || ep.name) : ep.name);
-                      const epAr = typeof epArRaw === "string" ? epArRaw : "";
-                      const epEn = String(ep.english || ep.romaji || ep.name || "");
-                      return (
-                        <LinearGradient colors={["transparent", "rgba(0,0,0,0.95)"]} style={todayEpStyles.grad}>
-                          <Text style={todayEpStyles.title} numberOfLines={2}>{epAr || ep.name}</Text>
-                          {epAr && epEn && epAr.trim() !== epEn.trim() ? (
-                            <Text
-                              style={{
-                                color: "rgba(255,255,255,0.72)",
-                                fontSize: isTvLayout ? 11 : 8.5,
-                                lineHeight: isTvLayout ? 15 : 12,
-                                fontFamily: "Cairo_600SemiBold",
-                                textAlign: "right",
-                                writingDirection: "ltr",
-                                marginTop: 1,
-                              }}
-                              numberOfLines={1}
-                            >
-                              {epEn}
-                            </Text>
-                          ) : null}
-                        </LinearGradient>
-                      );
-                    })()}
-                  </Pressable>
-                )}
-                initialNumToRender={isTvLayout ? 5 : 5}
-                maxToRenderPerBatch={isTvLayout ? 4 : 5}
+                      <LinearGradient colors={["transparent", "rgba(0,0,0,0.95)"]} style={todayEpStyles.grad}>
+                        <Text style={todayEpStyles.title} numberOfLines={2}>
+                          {item.arabicTitle || item.title}
+                        </Text>
+                        {item.englishTitle && item.englishTitle.trim() !== (item.arabicTitle || item.title).trim() ? (
+                          <Text
+                            style={{
+                              color: "rgba(255,255,255,0.72)",
+                              fontSize: isTvLayout ? 11 : 8.5,
+                              lineHeight: isTvLayout ? 15 : 12,
+                              fontFamily: "Cairo_600SemiBold",
+                              textAlign: "right",
+                              writingDirection: "ltr",
+                              marginTop: 1,
+                            }}
+                            numberOfLines={1}
+                          >
+                            {item.englishTitle}
+                          </Text>
+                        ) : null}
+                      </LinearGradient>
+                    </Pressable>
+                  );
+                }}
+                initialNumToRender={5}
+                maxToRenderPerBatch={5}
                 windowSize={isTvLayout ? 5 : 3}
                 removeClippedSubviews={false}
               />
@@ -811,6 +971,140 @@ export default function HomeScreen() {
           </View>
         )}
 
+        {/* ── الأنمي والأفلام (دمج يُعرض حالياً + الأكثر شعبية + أفلام الأنمي بنظام التبويبات مثل المدبلج) ── */}
+        {section.kind === "animeUnified" && (() => {
+          const animeTabs = [
+            {
+              key: "airing" as const,
+              label: "يُعرض حالياً",
+              icon: "🔥",
+              color: "#06b6d4",
+              items: airingList,
+              onSeeAll: () => router.push({ pathname: "/browse", params: { status: "RELEASING", sort: "POPULARITY_DESC" } } as any),
+            },
+            {
+              key: "popular" as const,
+              label: "الأكثر شعبية",
+              icon: "⭐",
+              color: "#F59E0B",
+              items: popularList,
+              onSeeAll: () => router.push({ pathname: "/browse", params: { sort: "POPULARITY_DESC" } } as any),
+            },
+            {
+              key: "movies" as const,
+              label: "أفلام الأنمي",
+              icon: "🎬",
+              color: "#a855f7",
+              items: moviesList,
+              onSeeAll: () => router.push({ pathname: "/browse", params: { format: "MOVIE", sort: "POPULARITY_DESC" } } as any),
+            },
+          ];
+          const currentTab = animeTabs.find((t) => t.key === activeAnimeTab) || animeTabs[0];
+          const activeItems = currentTab.items || [];
+          return (
+            <View style={{ marginTop: 24 }}>
+              <SectionHeader
+                onSeeAll={currentTab.onSeeAll}
+                focusable={isTvLayout && sectionFocusable}
+                onFocus={handleSectionFocus}
+              >
+                <View style={styles.sectionRightRow}>
+                  <Text style={{ fontSize: isTvLayout ? 22 : 16 }}>{currentTab.icon}</Text>
+                  <Text style={[styles.sectionTitle, isTvLayout && styles.tvSectionTitle, { color: colors.text }]}>
+                    {currentTab.label}
+                  </Text>
+                  <View style={[styles.continueAccent, { backgroundColor: currentTab.color }]} />
+                </View>
+              </SectionHeader>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={{ marginBottom: 12 }}
+                contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: 8, flexDirection: "row", alignItems: "center" }}
+              >
+                {animeTabs.map((tabOpt) => {
+                  const isActive = activeAnimeTab === tabOpt.key;
+                  return (
+                    <Pressable
+                      key={tabOpt.key}
+                      onPress={() => {
+                        setActiveAnimeTab(tabOpt.key);
+                        animeUnifiedListRef.current?.scrollToOffset({ offset: 0, animated: false });
+                      }}
+                      onFocus={handleSectionFocus}
+                      focusable={isTvLayout && sectionFocusable}
+                      style={({ focused }) => [
+                        {
+                          paddingHorizontal: isTvLayout ? 20 : 16,
+                          paddingVertical: isTvLayout ? 9 : 7,
+                          borderRadius: 12,
+                          borderWidth: 1,
+                          flexShrink: 0,
+                          alignItems: "center",
+                          justifyContent: "center",
+                          backgroundColor: isActive ? `${tabOpt.color}22` : colors.card,
+                          borderColor: isActive ? `${tabOpt.color}88` : colors.border,
+                        },
+                        isTvLayout && tvFocusStyle(focused),
+                      ]}
+                    >
+                      <Text
+                        style={{
+                          fontSize: isTvLayout ? 15 : 12.5,
+                          lineHeight: isTvLayout ? 22 : 19,
+                          fontFamily: "Cairo_700Bold",
+                          color: isActive ? tabOpt.color : colors.mutedForeground,
+                          includeFontPadding: false,
+                          textAlign: "center",
+                          paddingHorizontal: 3,
+                          flexShrink: 0,
+                        }}
+                      >
+                        {` ${tabOpt.label} `}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+              {activeItems.length === 0 ? (
+                <SkeletonRow />
+              ) : (
+                <FlatList
+                  ref={animeUnifiedListRef}
+                  data={isTvLayout ? activeItems.slice(0, 14) : activeItems}
+                  horizontal
+                  onViewableItemsChanged={animeUnifiedFocusScroll.onViewableItemsChanged}
+                  viewabilityConfig={animeUnifiedFocusScroll.viewabilityConfig}
+                  keyExtractor={(item) => `unified-${activeAnimeTab}-${item.id}`}
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: 14 }}
+                  getItemLayout={(_, index) => ({
+                    length: railCardWidth + 14,
+                    offset: (railCardWidth + 14) * index,
+                    index,
+                  })}
+                  renderItem={({ item, index }) => (
+                    <AnimeCard
+                      anime={item}
+                      size="md"
+                      cardWidth={railCardWidth}
+                      tvFocusable={sectionFocusable}
+                      hasTVPreferredFocus={false}
+                      onFocus={() => {
+                        handleSectionFocus?.();
+                        if (isTvLayout) animeUnifiedFocusScroll.scrollToFocusedIndex(index);
+                      }}
+                    />
+                  )}
+                  initialNumToRender={isTvLayout ? 5 : 4}
+                  maxToRenderPerBatch={isTvLayout ? 4 : 3}
+                  windowSize={isTvLayout ? 5 : 3}
+                  removeClippedSubviews={false}
+                />
+              )}
+            </View>
+          );
+        })()}
 
         {/* ── آخر الأخبار (أسفل أفلام الأنمي مباشرة) ── */}
         {section.kind === "latestNews" && (
@@ -852,18 +1146,24 @@ export default function HomeScreen() {
               </Pressable>
             ) : (
             <FlatList
+              ref={newsRailListRef}
               data={homeNewsList}
               horizontal
+              onViewableItemsChanged={newsFocusScroll.onViewableItemsChanged}
+              viewabilityConfig={newsFocusScroll.viewabilityConfig}
               keyExtractor={(art) => `home-news-${art.id}`}
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: isTvLayout ? 16 : 12 }}
-              renderItem={({ item: art }) => {
+              renderItem={({ item: art, index: newsIdx }) => {
                 const cardW = isTvLayout ? 340 : 276;
                 const imgH = isTvLayout ? 172 : 148;
                 return (
                   <Pressable
                     onPress={() => setSelectedNewsArticle(art)}
-                    onFocus={handleSectionFocus}
+                    onFocus={() => {
+                      handleSectionFocus?.();
+                      if (isTvLayout) newsFocusScroll.scrollToFocusedIndex(newsIdx);
+                    }}
                     focusable={isTvLayout && sectionFocusable}
                     style={({ pressed, focused }) => [
                       homeNewsStyles.card,
@@ -968,128 +1268,6 @@ export default function HomeScreen() {
           </View>
         )}
 
-                {/* ── أحدث فصول وأعمال المانجا والمانهوا (أسفل أحدث الحلقات مباشرة) ── */}
-        {section.kind === "latestManga" && (latestManga.length > 0 || latestMangaChecking) && (
-          <View style={{ marginTop: 22 }}>
-            <SectionHeader
-              onSeeAll={() => router.push("/manga" as any)}
-              focusable={isTvLayout && sectionFocusable}
-              onFocus={handleSectionFocus}
-            >
-              <View style={styles.sectionRightRow}>
-                <Text style={{ fontSize: isTvLayout ? 22 : 15 }}>📖</Text>
-                <Text style={[styles.sectionTitle, isTvLayout && styles.tvSectionTitle, { color: colors.text }]}>
-                  أحدث فصول المانجا والمانهوا
-                </Text>
-                <View style={[styles.continueAccent, { backgroundColor: "#F59E0B" }]} />
-              </View>
-            </SectionHeader>
-            {latestMangaChecking && latestManga.length === 0 ? (
-              <SkeletonRow />
-            ) : (
-              <FlatList
-                data={latestManga}
-                horizontal
-                getItemLayout={getRailItemLayout}
-                keyExtractor={(item, idx) => `latest-manga-${item.id}-${idx}`}
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: railGap }}
-                renderItem={({ item }) => {
-                  const posterUri = proxyPosterUrl(item.poster) || item.poster || "";
-                  const isManhwa = item.source === "manhwa" || item.typeLabel === "مانهوا";
-                  return (
-                    <Pressable
-                      onPress={() =>
-                        router.push({
-                          pathname: "/manga/[id]" as any,
-                          params: {
-                            id: item.id,
-                            title: item.arabicTitle || item.title,
-                            english: item.englishTitle || item.title,
-                            cover: posterUri,
-                            source: item.source,
-                          },
-                        })
-                      }
-                      onFocus={() => handleSectionFocus?.()}
-                      focusable={isTvLayout && sectionFocusable}
-                      style={({ focused }) => [
-                        todayEpStyles.card,
-                        {
-                          width: railCardWidth,
-                          height: Math.round(railCardWidth * 1.46),
-                          backgroundColor: colors.card,
-                          borderColor: colors.border,
-                        },
-                        isTvLayout && tvFocusStyle(focused),
-                      ]}
-                    >
-                      {posterUri ? (
-                        <Image
-                          source={{ uri: posterUri }}
-                          style={todayEpStyles.img}
-                          resizeMode="cover"
-                          resizeMethod="resize"
-                          fadeDuration={0}
-                        />
-                      ) : (
-                        <View style={[todayEpStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
-                          <Ionicons name="book-outline" size={28} color="rgba(255,255,255,0.25)" />
-                        </View>
-                      )}
-                      <View style={[styles.historyBadge, { backgroundColor: "rgba(245, 158, 11, 0.94)" }]}>
-                        <Text style={[styles.historyBadgeText, { color: "#09090B" }]}>
-                          {item.latestChapter ? `الفصل ${item.latestChapter}` : "جديد"}
-                        </Text>
-                      </View>
-                      <View
-                        style={{
-                          position: "absolute",
-                          top: 6,
-                          left: 6,
-                          paddingHorizontal: 6,
-                          paddingVertical: 2,
-                          borderRadius: 6,
-                          backgroundColor: isManhwa ? "rgba(14, 165, 233, 0.92)" : "rgba(236, 72, 153, 0.92)",
-                        }}
-                      >
-                        <Text style={{ color: "#fff", fontSize: 8.5, fontFamily: "Cairo_700Bold" }}>
-                          {isManhwa ? "مانهوا" : "مانجا"}
-                        </Text>
-                      </View>
-                      <LinearGradient colors={["transparent", "rgba(0,0,0,0.95)"]} style={todayEpStyles.grad}>
-                        <Text style={todayEpStyles.title} numberOfLines={2}>
-                          {item.arabicTitle || item.title}
-                        </Text>
-                        {item.englishTitle && item.englishTitle.trim() !== (item.arabicTitle || item.title).trim() ? (
-                          <Text
-                            style={{
-                              color: "rgba(255,255,255,0.72)",
-                              fontSize: isTvLayout ? 11 : 8.5,
-                              lineHeight: isTvLayout ? 15 : 12,
-                              fontFamily: "Cairo_600SemiBold",
-                              textAlign: "right",
-                              writingDirection: "ltr",
-                              marginTop: 1,
-                            }}
-                            numberOfLines={1}
-                          >
-                            {item.englishTitle}
-                          </Text>
-                        ) : null}
-                      </LinearGradient>
-                    </Pressable>
-                  );
-                }}
-                initialNumToRender={5}
-                maxToRenderPerBatch={5}
-                windowSize={3}
-                removeClippedSubviews={false}
-              />
-            )}
-          </View>
-        )}
-
         {/* ── القسم الموحد للأعمال المدبلجة ── */}
         {section.kind === "dubbedUnified" && (
           <View style={{ marginTop: 22, marginBottom: 24 }}>
@@ -1176,6 +1354,8 @@ export default function HomeScreen() {
               animezidHomeItems.length > 0 ? (
                 <FlatList
                   ref={dubbedRailListRef}
+                  onViewableItemsChanged={dubbedFocusScroll.onViewableItemsChanged}
+                  viewabilityConfig={dubbedFocusScroll.viewabilityConfig}
                   data={animezidHomeItems}
                   horizontal
                   getItemLayout={getRailItemLayout}
@@ -1242,6 +1422,8 @@ export default function HomeScreen() {
               animationHomeRows.length > 0 ? (
                 <FlatList
                   ref={dubbedRailListRef}
+                  onViewableItemsChanged={dubbedFocusScroll.onViewableItemsChanged}
+                  viewabilityConfig={dubbedFocusScroll.viewabilityConfig}
                   data={animationHomeRows}
                   horizontal
                   getItemLayout={getRailItemLayout}
@@ -1337,6 +1519,8 @@ export default function HomeScreen() {
               spacetoonHomeItems.length > 0 ? (
                 <FlatList
                   ref={dubbedRailListRef}
+                  onViewableItemsChanged={dubbedFocusScroll.onViewableItemsChanged}
+                  viewabilityConfig={dubbedFocusScroll.viewabilityConfig}
                   data={spacetoonHomeItems}
                   horizontal
                   getItemLayout={getRailItemLayout}
@@ -1404,6 +1588,8 @@ export default function HomeScreen() {
               dubbedHomeRows.length > 0 ? (
                 <FlatList
                   ref={dubbedRailListRef}
+                  onViewableItemsChanged={dubbedFocusScroll.onViewableItemsChanged}
+                  viewabilityConfig={dubbedFocusScroll.viewabilityConfig}
                   data={dubbedHomeRows}
                   horizontal
                   getItemLayout={getRailItemLayout}
@@ -1483,6 +1669,8 @@ export default function HomeScreen() {
               cartoon2HomeItems.length > 0 ? (
                 <FlatList
                   ref={dubbedRailListRef}
+                  onViewableItemsChanged={dubbedFocusScroll.onViewableItemsChanged}
+                  viewabilityConfig={dubbedFocusScroll.viewabilityConfig}
                   data={cartoon2HomeItems}
                   horizontal
                   getItemLayout={getRailItemLayout}
@@ -1640,6 +1828,8 @@ export default function HomeScreen() {
               <TvFocusGuideView autoFocus={false} style={isTvLayout ? { minHeight: 1 } : undefined}>
               <FlatList
                 ref={mangaRailListRef}
+                  onViewableItemsChanged={mangaFocusScroll.onViewableItemsChanged}
+                  viewabilityConfig={mangaFocusScroll.viewabilityConfig}
                 data={activeList}
                 horizontal
                 getItemLayout={getRailItemLayout}
@@ -1732,7 +1922,7 @@ export default function HomeScreen() {
       <FlatList
         ref={homeListRef}
         data={homeSections}
-        extraData={{ newsLen: homeNewsList.length, newsLoading: homeNewsLoading, newsErr: homeNewsError }}
+        extraData={{ activeLatestTab, activeAnimeTab, activeDubbedTab, activeMangaTab, newsLen: homeNewsList.length, newsLoading: homeNewsLoading, newsErr: homeNewsError }}
         keyExtractor={(item) => item.key}
         renderItem={renderHomeSection}
         ListHeaderComponent={
@@ -1847,7 +2037,8 @@ export default function HomeScreen() {
                   )}
                   <Pressable
                     onPress={() => setSelectedNewsArticle(null)}
-                    style={homeNewsStyles.modalCloseBtn}
+                    focusable={isTvLayout}
+                    style={({ focused }) => [homeNewsStyles.modalCloseBtn, isTvLayout && tvFocusStyle(focused)]}
                   >
                     <Ionicons name="close" size={20} color="#fff" />
                   </Pressable>
@@ -1888,14 +2079,17 @@ export default function HomeScreen() {
                           },
                         });
                       }}
-                      style={[homeNewsStyles.modalActionPrimary, { backgroundColor: colors.primary }]}
+                      focusable={isTvLayout}
+                      hasTVPreferredFocus={isTvLayout}
+                      style={({ focused }) => [homeNewsStyles.modalActionPrimary, { backgroundColor: colors.primary }, isTvLayout && tvFocusStyle(focused)]}
                     >
                       <Ionicons name="chatbubble-ellipses-outline" size={16} color="#fff" />
                       <Text style={homeNewsStyles.modalActionPrimaryText}>التعليقات</Text>
                     </Pressable>
                     <Pressable
                       onPress={() => Linking.openURL(selectedNewsArticle.url).catch(() => {})}
-                      style={[homeNewsStyles.modalActionSecondary, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                      focusable={isTvLayout}
+                      style={({ focused }) => [homeNewsStyles.modalActionSecondary, { backgroundColor: colors.surface, borderColor: colors.border }, isTvLayout && tvFocusStyle(focused)]}
                     >
                       <Ionicons name="open-outline" size={16} color={colors.text} />
                       <Text style={[homeNewsStyles.modalActionSecondaryText, { color: colors.text }]}>المصدر</Text>
