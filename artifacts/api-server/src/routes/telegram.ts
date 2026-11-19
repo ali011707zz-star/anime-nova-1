@@ -788,6 +788,7 @@ async function pollAnimeSlayerDirect(): Promise<void> {
 
 let dubbedSchedulerFirstRun = true;
 let mangaSchedulerFirstRun = true;
+let newsSchedulerFirstRun = true;
 
 async function hasAnyNotifKeys(keys: string[]): Promise<boolean> {
   for (const k of keys) {
@@ -1068,6 +1069,106 @@ async function pollMangaLatest(): Promise<void> {
   }
 }
 
+function collectNewsKeys(article: any): string[] {
+  const keys: string[] = [];
+  const id = String(article?.id || "").trim();
+  if (id) keys.push(`news_tg:id:${id.slice(0, 120)}`);
+  const orig = String(article?.originalTitle || article?.title || "").trim().toLowerCase().replace(/[^a-z0-9\u0600-\u06FF]/g, "").slice(0, 72);
+  if (orig) keys.push(`news_tg:t:${orig}`);
+  return keys;
+}
+
+function escapeHtmlBasic(str: string): string {
+  return String(str || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function buildNewsCaption(article: any): string {
+  const title = escapeHtmlBasic(String(article?.title || "خبر أنمي جديد").trim());
+  const descRaw = String(article?.description || "").trim();
+  const desc = descRaw ? escapeHtmlBasic(descRaw.slice(0, 440) + (descRaw.length > 440 ? "..." : "")) : "";
+  const cat = escapeHtmlBasic(String(article?.category || "أخبار الأنمي").trim());
+  const lines = [
+    `📰 <b>${cat} · خبر جديد!</b>`,
+    "",
+    `✨ <b>${title}</b>`,
+  ];
+  if (desc) {
+    lines.push("", `📝 <b>التفاصيل:</b> ${desc}`);
+  }
+  lines.push("", "🎬 <i>تابع آخر الأخبار والتفاصيل والنقاش داخل تطبيق Anime NOVA</i>");
+  return lines.join("\n");
+}
+
+async function pollNewsLatest(): Promise<void> {
+  try {
+    const resp = await fetch(`${internalApiBaseUrl()}/api/news?limit=12&hasImage=1`, {
+      headers: { "User-Agent": "NovaBot/1.0", Accept: "application/json" },
+      signal: AbortSignal.timeout(25_000),
+    });
+    if (!resp.ok) return;
+    const data = (await resp.json()) as any;
+    const list: any[] = Array.isArray(data?.articles) ? data.articles : [];
+    if (!list.length) return;
+
+    // أول دورة: بذر الأخبار الحالية بصمت لمنع إرسال أخبار قديمة وإغراق القناة
+    if (newsSchedulerFirstRun) {
+      newsSchedulerFirstRun = false;
+      for (const art of list) {
+        const keys = collectNewsKeys(art);
+        if (keys.length) await markNotifKeys(keys);
+      }
+      console.log(`[scheduler] 🌱 anime news startup: seeded=${list.length}`);
+      return;
+    }
+
+    const channelId = process.env.TELEGRAM_CHANNEL_ID;
+    const tok = await getToken();
+    if (!channelId || !tok) return;
+
+    let sent = 0;
+    for (let idx = 0; idx < list.length; idx++) {
+      const art = list[idx];
+      const keys = collectNewsKeys(art);
+      if (!keys.length) continue;
+      if (await hasAnyNotifKeys(keys)) continue;
+
+      if (idx >= 6) {
+        await markNotifKeys(keys);
+        continue;
+      }
+
+      const caption = buildNewsCaption(art);
+      const thumb = typeof art?.thumbnail === "string" && /^https?:\/\//i.test(art.thumbnail) ? art.thumbnail : "";
+      const photoSent = await sendChannelPhoto(thumb, caption, {
+        title: String(art?.originalTitle || art?.title || ""),
+        type: "ANIME",
+      });
+      const delivered = photoSent || await sendMessage(channelId, caption);
+
+      if (delivered) {
+        await markNotifKeys(keys);
+        sent++;
+        schedulerSentToday++;
+        await saveNotification({
+          type: "anime_news",
+          title: String(art?.title || "خبر أنمي جديد").slice(0, 140),
+          body: String(art?.description || "خبر جديد في عالم الأنمي").slice(0, 220),
+          image_url: thumb || undefined,
+          link_path: "/news",
+        }).catch(() => {});
+        console.log(`[scheduler] 📰 أُرسل خبر أنمي → ${String(art?.title || "").slice(0, 60)}`);
+        await new Promise((r) => setTimeout(r, 1_500));
+      }
+      if (sent >= 3) break;
+    }
+  } catch (e: any) {
+    console.warn("[scheduler] anime news poll error:", e?.message || String(e));
+  }
+}
+
 /* ── الدورة الواحدة ────────────────────────────────────────────────────── */
 
 let schedulerCyclePromise: Promise<void> | null = null;
@@ -1095,6 +1196,7 @@ async function runSchedulerCycleInner(): Promise<void> {
   await pollAnimeSlayerDirect();
   await pollDubbedLatest();
   await pollMangaLatest();
+  await pollNewsLatest();
 }
 
 /* ── إرسال تنبيه للأدمن (يُستخدم من app.ts لأخطاء 500) ──────────────── */

@@ -66,7 +66,11 @@ function parseRSS(xml: string, sourceTag: string): NewsArticle[] {
     const title       = decodeEntities(extract(block, "title"));
     const link        = decodeEntities(extract(block, "link"));
     const pubDate     = extract(block, "pubDate");
-    const description = decodeEntities(stripTags(extract(block, "description"))).slice(0, 320);
+    const description = decodeEntities(stripTags(extract(block, "description")))
+      .replace(/\s*(?:\.\.\.)?\s*read\s+more\s*$/i, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 580);
     const category    = decodeEntities(extract(block, "category")) || "أخبار الأنمي";
 
     let thumbnail: string | null = null;
@@ -145,7 +149,7 @@ async function translateToArabic(text: string): Promise<string> {
   if (cached && Date.now() - cached.at < TRANSLATION_TTL) return cached.text;
 
   try {
-    const url = "https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=en&tl=ar&q=" + encodeURIComponent(clean.slice(0, 450));
+    const url = "https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=en&tl=ar&q=" + encodeURIComponent(clean.slice(0, 620));
     const r = await fetch(url, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
@@ -335,12 +339,37 @@ async function fetchMovieNewsBundle(): Promise<MoviesNewsCache> {
 /* ─────────────────────────────────────────
    GET /api/news?page=1&limit=20&category=movies
 ───────────────────────────────────────── */
+async function localizeArticlesToArabic(list: NewsArticle[]): Promise<NewsArticle[]> {
+  return Promise.all(
+    list.map(async (art) => {
+      const [arTitle, arDesc] = await Promise.all([
+        translateToArabic(art.title),
+        art.description ? translateToArabic(art.description.slice(0, 560)) : Promise.resolve(""),
+      ]);
+      const cat = art.isMovieNews
+        ? "أفلام الأنمي"
+        : /manga/i.test(art.category)
+          ? "أخبار المانجا"
+          : "أخبار الأنمي";
+      return {
+        ...art,
+        originalTitle: art.originalTitle || art.title,
+        title: arTitle || art.title,
+        description: arDesc || art.description,
+        category: cat,
+      };
+    })
+  );
+}
+
 router.get("/news", async (req: Request, res: Response) => {
   try {
-    const page     = Math.max(1, Number(req.query.page)  || 1);
-    const limit    = Math.min(50, Number(req.query.limit) || 20);
-    const category = String(req.query.category || "").trim().toLowerCase();
-    const offset   = (page - 1) * limit;
+    const page      = Math.max(1, Number(req.query.page)  || 1);
+    const limit     = Math.min(50, Number(req.query.limit) || 20);
+    const category  = String(req.query.category || "").trim().toLowerCase();
+    const hasImage  = String(req.query.hasImage || "").trim() === "1";
+    const wantRawEn = String(req.query.translate || "").trim() === "0";
+    const offset    = (page - 1) * limit;
 
     if (category === "movies" || category === "movie" || category === "films") {
       const bundle   = await fetchMovieNewsBundle();
@@ -350,9 +379,16 @@ router.get("/news", async (req: Request, res: Response) => {
       return res.json({ articles, total, page, limit, category: "movies" });
     }
 
-    const all      = await fetchNews();
-    const total    = all.length;
-    const articles = all.slice(offset, offset + limit);
+    const all = await fetchNews();
+    const pool = hasImage
+      ? (() => {
+          const withImg = all.filter((a) => typeof a.thumbnail === "string" && /^https?:\/\//i.test(a.thumbnail));
+          return withImg.length > 0 ? withImg : all;
+        })()
+      : all;
+    const total = pool.length;
+    const pageSlice = pool.slice(offset, offset + limit);
+    const articles = wantRawEn ? pageSlice : await localizeArticlesToArabic(pageSlice);
 
     res.setHeader("Cache-Control", "public, max-age=300");
     return res.json({ articles, total, page, limit });

@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useFocusEffect, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
-import { ActivityIndicator, FlatList, Image, ScrollView, useWindowDimensions } from "react-native";
+import { ActivityIndicator, FlatList, Image, Linking, Modal, ScrollView, useWindowDimensions } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AnnouncementBanner } from "@/components/AnnouncementBanner";
 import { DrawerMenu } from "@/components/DrawerMenu";
+import { CommentsSheet } from "@/components/CommentsSheet";
 import { HeroSection } from "@/components/HeroSection";
 import { SectionHeader } from "@/components/SectionHeader";
 import { SectionRow, SkeletonRow } from "@/components/SectionRow";
@@ -48,6 +49,31 @@ import {
   type LatestEpisodeItem,
   type MangaLatestItem,
 } from "@/utils/latestEpisodes";
+
+interface HomeNewsArticle {
+  id: string;
+  title: string;
+  originalTitle?: string;
+  description: string;
+  url: string;
+  thumbnail: string | null;
+  publishedAt: string;
+  category: string;
+}
+
+function formatNewsTimeAgo(iso: string): string {
+  const ms = new Date(iso).getTime();
+  if (!Number.isFinite(ms)) return "حديثاً";
+  const diff = Math.max(0, Date.now() - ms);
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 1) return "الآن";
+  if (mins < 60) return `منذ ${mins} دقيقة`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs === 1 ? "منذ ساعة" : hrs === 2 ? "منذ ساعتين" : `منذ ${hrs} ساعات`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return days === 1 ? "منذ يوم" : days === 2 ? "منذ يومين" : `منذ ${days} أيام`;
+  return `منذ ${Math.floor(days / 7)} أسبوع`;
+}
 
 function randomSample<T>(items: T[], limit = items.length): T[] {
   const shuffled = [...items];
@@ -114,6 +140,24 @@ export default function HomeScreen() {
     queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(MOVIES_QUERY),
     staleTime: 5 * 60 * 1000,
   });
+
+  const { data: homeNewsData, refetch: refetchHomeNews } = useQuery<HomeNewsArticle[]>({
+    queryKey: ["homeLatestNews"],
+    queryFn: async () => {
+      try {
+        const res = await fetch(`${getBaseUrl()}/api/news?limit=12&hasImage=1`);
+        if (!res.ok) return [];
+        const json = await res.json();
+        return Array.isArray(json?.articles) ? json.articles : [];
+      } catch {
+        return [];
+      }
+    },
+    staleTime: 1000 * 60 * 10,
+  });
+  const homeNewsList = homeNewsData || [];
+  const [selectedNewsArticle, setSelectedNewsArticle] = useState<HomeNewsArticle | null>(null);
+  const [newsCommentArticle, setNewsCommentArticle] = useState<HomeNewsArticle | null>(null);
 
   const { data: isekai, refetch: refetchIsekai } = useQuery({
     queryKey: ["isekai"],
@@ -369,7 +413,7 @@ export default function HomeScreen() {
   const refresh = async () => {
     heroSampleRef.current = [];
     await Promise.all([
-      refetchT(), refetchP(), refetchA(), refetchM(), refetchIsekai(),
+      refetchT(), refetchP(), refetchA(), refetchM(), refetchIsekai(), refetchHomeNews(),
       ...(isTvLayout ? [] : [refetchManhwa(), refetchJpManga()]),
       fetchActiveDubbedTab(activeDubbedTab, true),
     ]);
@@ -382,6 +426,7 @@ export default function HomeScreen() {
     | { kind: "latestManga"; key: string }
     | { kind: "dubbedUnified"; key: string }
     | { kind: "mangaUnified"; key: string }
+    | { kind: "latestNews"; key: string }
     | { kind: "anilist"; key: string; title: string; items: AnilistMedia[]; onSeeAll: () => void };
 
   const homeSections = useMemo<HomeSectionItem[]>(() => {
@@ -416,6 +461,7 @@ export default function HomeScreen() {
           items: moviesList,
           onSeeAll: () => router.push({ pathname: "/browse", params: { format: "MOVIE", sort: "POPULARITY_DESC" } } as any),
         },
+        ...(homeNewsList.length > 0 ? [{ kind: "latestNews" as const, key: "latestNews" }] : []),
         {
           kind: "anilist",
           key: "isekai",
@@ -439,6 +485,7 @@ export default function HomeScreen() {
     airingList,
     popularList,
     moviesList,
+    homeNewsList.length,
     isekaiList,
     router,
   ]);
@@ -762,7 +809,127 @@ export default function HomeScreen() {
         )}
 
 
-        {/* ── أحدث فصول وأعمال المانجا والمانهوا (أسفل أحدث الحلقات مباشرة) ── */}
+        {/* ── آخر الأخبار (أسفل أفلام الأنمي مباشرة) ── */}
+        {section.kind === "latestNews" && homeNewsList.length > 0 && (
+          <View style={{ marginTop: 24 }}>
+            <SectionHeader
+              onSeeAll={() => router.push("/(tabs)/news" as any)}
+              seeAllLabel="عرض المزيد"
+              focusable={isTvLayout && sectionFocusable}
+              onFocus={handleSectionFocus}
+            >
+              <View style={styles.sectionRightRow}>
+                <Text style={[styles.sectionTitle, isTvLayout && styles.tvSectionTitle, { color: colors.text }]}>آخر الأخبار</Text>
+                <View style={[styles.continueAccent, { backgroundColor: "#06b6d4" }]} />
+              </View>
+            </SectionHeader>
+            <FlatList
+              data={homeNewsList}
+              horizontal
+              keyExtractor={(art) => `home-news-${art.id}`}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: railSidePadding, gap: isTvLayout ? 16 : 12 }}
+              renderItem={({ item: art }) => {
+                const cardW = isTvLayout ? 340 : 276;
+                const imgH = isTvLayout ? 172 : 148;
+                return (
+                  <Pressable
+                    onPress={() => setSelectedNewsArticle(art)}
+                    onFocus={handleSectionFocus}
+                    focusable={isTvLayout && sectionFocusable}
+                    style={({ pressed, focused }) => [
+                      homeNewsStyles.card,
+                      {
+                        width: cardW,
+                        backgroundColor: colors.card,
+                        borderColor: colors.border,
+                      },
+                      pressed && { opacity: 0.85 },
+                      isTvLayout && tvFocusStyle(focused),
+                    ]}
+                  >
+                    <View style={[homeNewsStyles.thumbWrap, { height: imgH }]}>
+                      {art.thumbnail ? (
+                        <Image
+                          source={{ uri: art.thumbnail }}
+                          style={homeNewsStyles.thumbImg}
+                          resizeMode="cover"
+                          resizeMethod="resize"
+                          fadeDuration={0}
+                        />
+                      ) : (
+                        <View style={[homeNewsStyles.thumbImg, { backgroundColor: colors.surface, alignItems: "center", justifyContent: "center" }]}>
+                          <Ionicons name="newspaper-outline" size={30} color="rgba(6,182,212,0.5)" />
+                        </View>
+                      )}
+                      <LinearGradient
+                        colors={["rgba(0,0,0,0.05)", "rgba(0,0,0,0.55)"]}
+                        style={homeNewsStyles.thumbGrad}
+                      />
+                      {/* تصنيف الخبر أعلى اليمين */}
+                      <View style={homeNewsStyles.catBadge}>
+                        <Text style={homeNewsStyles.catBadgeText}>{art.category || "أخبار الأنمي"}</Text>
+                      </View>
+                      {/* أزرار سريعة دائرية أسفل يسار الصورة (مطابق للصورة المرفقة) */}
+                      <View style={homeNewsStyles.floatingActions}>
+                        <Pressable
+                          onPress={(e) => {
+                            e.stopPropagation();
+                            setNewsCommentArticle(art);
+                          }}
+                          hitSlop={6}
+                          style={({ pressed }) => [homeNewsStyles.circleBtn, pressed && { opacity: 0.75 }]}
+                        >
+                          <Ionicons name="chatbox-ellipses" size={16} color="#18181B" />
+                        </Pressable>
+                        <Pressable
+                          onPress={(e) => {
+                            e.stopPropagation();
+                            Linking.openURL(art.url).catch(() => {});
+                          }}
+                          hitSlop={6}
+                          style={({ pressed }) => [homeNewsStyles.circleBtn, pressed && { opacity: 0.75 }]}
+                        >
+                          <Ionicons name="link" size={16} color="#18181B" />
+                        </Pressable>
+                      </View>
+                    </View>
+                    <View style={homeNewsStyles.body}>
+                      <Text
+                        style={[homeNewsStyles.title, { color: colors.text, fontSize: isTvLayout ? 15 : 13.5 }]}
+                        numberOfLines={2}
+                      >
+                        {art.title}
+                      </Text>
+                      {!!art.description && (
+                        <Text
+                          style={[homeNewsStyles.desc, { color: colors.mutedForeground, fontSize: isTvLayout ? 12.5 : 11 }]}
+                          numberOfLines={3}
+                        >
+                          {art.description}
+                        </Text>
+                      )}
+                      <View style={homeNewsStyles.footerRow}>
+                        <Text style={[homeNewsStyles.readMore, { color: colors.homeAccent || "#06b6d4" }]}>
+                          التفاصيل ←
+                        </Text>
+                        <Text style={[homeNewsStyles.time, { color: colors.mutedForeground }]}>
+                          {formatNewsTimeAgo(art.publishedAt)}
+                        </Text>
+                      </View>
+                    </View>
+                  </Pressable>
+                );
+              }}
+              initialNumToRender={4}
+              maxToRenderPerBatch={4}
+              windowSize={3}
+              removeClippedSubviews={false}
+            />
+          </View>
+        )}
+
+                {/* ── أحدث فصول وأعمال المانجا والمانهوا (أسفل أحدث الحلقات مباشرة) ── */}
         {section.kind === "latestManga" && (latestManga.length > 0 || latestMangaChecking) && (
           <View style={{ marginTop: 22 }}>
             <SectionHeader
@@ -1617,6 +1784,91 @@ export default function HomeScreen() {
         windowSize={isTvLayout ? 11 : 11}
       />
       <DrawerMenu visible={showDrawer} onClose={() => setShowDrawer(false)} />
+
+      {/* نافذة تفاصيل الخبر */}
+      <Modal
+        visible={Boolean(selectedNewsArticle)}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setSelectedNewsArticle(null)}
+      >
+        <View style={homeNewsStyles.modalBackdrop}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setSelectedNewsArticle(null)} />
+          {selectedNewsArticle && (
+            <View style={[homeNewsStyles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <ScrollView showsVerticalScrollIndicator={false}>
+                <View style={homeNewsStyles.modalImgWrap}>
+                  {selectedNewsArticle.thumbnail ? (
+                    <Image source={{ uri: selectedNewsArticle.thumbnail }} style={homeNewsStyles.modalImg} resizeMode="cover" />
+                  ) : (
+                    <View style={[homeNewsStyles.modalImg, { backgroundColor: colors.surface, alignItems: "center", justifyContent: "center" }]}>
+                      <Ionicons name="newspaper-outline" size={40} color="#06b6d4" />
+                    </View>
+                  )}
+                  <Pressable
+                    onPress={() => setSelectedNewsArticle(null)}
+                    style={homeNewsStyles.modalCloseBtn}
+                  >
+                    <Ionicons name="close" size={20} color="#fff" />
+                  </Pressable>
+                </View>
+                <View style={homeNewsStyles.modalBody}>
+                  <View style={homeNewsStyles.modalMetaRow}>
+                    <Text style={[homeNewsStyles.time, { color: colors.mutedForeground }]}>
+                      {formatNewsTimeAgo(selectedNewsArticle.publishedAt)}
+                    </Text>
+                    <View style={homeNewsStyles.modalCatPill}>
+                      <Text style={homeNewsStyles.modalCatText}>{selectedNewsArticle.category || "أخبار الأنمي"}</Text>
+                    </View>
+                  </View>
+                  <Text style={[homeNewsStyles.modalTitle, { color: colors.text }]}>
+                    {selectedNewsArticle.title}
+                  </Text>
+                  {selectedNewsArticle.originalTitle && selectedNewsArticle.originalTitle !== selectedNewsArticle.title ? (
+                    <Text style={[homeNewsStyles.modalOrigTitle, { color: colors.mutedForeground }]}>
+                      {selectedNewsArticle.originalTitle}
+                    </Text>
+                  ) : null}
+                  {!!selectedNewsArticle.description && (
+                    <Text style={[homeNewsStyles.modalDesc, { color: colors.text }]}>
+                      {selectedNewsArticle.description}
+                    </Text>
+                  )}
+                  <View style={homeNewsStyles.modalActions}>
+                    <Pressable
+                      onPress={() => {
+                        const target = selectedNewsArticle;
+                        setSelectedNewsArticle(null);
+                        setNewsCommentArticle(target);
+                      }}
+                      style={[homeNewsStyles.modalActionPrimary, { backgroundColor: colors.primary }]}
+                    >
+                      <Ionicons name="chatbubble-ellipses-outline" size={16} color="#fff" />
+                      <Text style={homeNewsStyles.modalActionPrimaryText}>التعليقات</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => Linking.openURL(selectedNewsArticle.url).catch(() => {})}
+                      style={[homeNewsStyles.modalActionSecondary, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                    >
+                      <Ionicons name="open-outline" size={16} color={colors.text} />
+                      <Text style={[homeNewsStyles.modalActionSecondaryText, { color: colors.text }]}>المصدر</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              </ScrollView>
+            </View>
+          )}
+        </View>
+      </Modal>
+
+      {newsCommentArticle && (
+        <CommentsSheet
+          visible={Boolean(newsCommentArticle)}
+          onClose={() => setNewsCommentArticle(null)}
+          tmdbId={`news-${newsCommentArticle.id}`}
+          title={newsCommentArticle.title}
+        />
+      )}
     </View>
   );
 }
@@ -1745,3 +1997,200 @@ const todayEpStyles = StyleSheet.create({
   time: { color: "rgba(255,255,255,0.5)", fontSize: 9, fontFamily: "Cairo_400Regular", marginTop: 3 },
 });
 
+
+
+const homeNewsStyles = StyleSheet.create({
+  card: {
+    borderRadius: 16,
+    overflow: "hidden",
+    borderWidth: 1,
+  },
+  thumbWrap: {
+    width: "100%",
+    position: "relative",
+    overflow: "hidden",
+  },
+  thumbImg: {
+    width: "100%",
+    height: "100%",
+  },
+  thumbGrad: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 64,
+  },
+  catBadge: {
+    position: "absolute",
+    top: 10,
+    right: 10,
+    backgroundColor: "rgba(6,182,212,0.88)",
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+    borderRadius: 10,
+  },
+  catBadgeText: {
+    color: "#fff",
+    fontSize: 9.5,
+    fontFamily: "Cairo_700Bold",
+  },
+  floatingActions: {
+    position: "absolute",
+    bottom: 10,
+    left: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  circleBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "rgba(255,255,255,0.92)",
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 3,
+  },
+  body: {
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 12,
+    gap: 6,
+  },
+  title: {
+    fontFamily: "Cairo_700Bold",
+    lineHeight: 20,
+    textAlign: "right",
+    writingDirection: "rtl",
+  },
+  desc: {
+    fontFamily: "Cairo_400Regular",
+    lineHeight: 17,
+    textAlign: "right",
+    writingDirection: "rtl",
+  },
+  footerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 4,
+  },
+  time: {
+    fontSize: 10.5,
+    fontFamily: "Cairo_600SemiBold",
+  },
+  readMore: {
+    fontSize: 10.5,
+    fontFamily: "Cairo_700Bold",
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.72)",
+    justifyContent: "flex-end",
+  },
+  modalCard: {
+    maxHeight: "82%",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderWidth: 1,
+    overflow: "hidden",
+  },
+  modalImgWrap: {
+    width: "100%",
+    height: 210,
+    position: "relative",
+  },
+  modalImg: {
+    width: "100%",
+    height: "100%",
+  },
+  modalCloseBtn: {
+    position: "absolute",
+    top: 12,
+    left: 12,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalBody: {
+    padding: 16,
+    paddingBottom: 28,
+    gap: 10,
+  },
+  modalMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  modalCatPill: {
+    backgroundColor: "rgba(6,182,212,0.16)",
+    borderColor: "rgba(6,182,212,0.35)",
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 12,
+  },
+  modalCatText: {
+    color: "#06b6d4",
+    fontSize: 11,
+    fontFamily: "Cairo_700Bold",
+  },
+  modalTitle: {
+    fontSize: 16,
+    fontFamily: "Cairo_800ExtraBold",
+    lineHeight: 24,
+    textAlign: "right",
+    writingDirection: "rtl",
+  },
+  modalOrigTitle: {
+    fontSize: 11,
+    fontFamily: "Cairo_400Regular",
+    textAlign: "right",
+    writingDirection: "ltr",
+  },
+  modalDesc: {
+    fontSize: 13.5,
+    fontFamily: "Cairo_400Regular",
+    lineHeight: 22,
+    textAlign: "right",
+    writingDirection: "rtl",
+    opacity: 0.9,
+  },
+  modalActions: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 8,
+  },
+  modalActionPrimary: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    paddingVertical: 12,
+    borderRadius: 14,
+  },
+  modalActionPrimaryText: {
+    color: "#fff",
+    fontSize: 13,
+    fontFamily: "Cairo_700Bold",
+  },
+  modalActionSecondary: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    paddingVertical: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  modalActionSecondaryText: {
+    fontSize: 13,
+    fontFamily: "Cairo_700Bold",
+  },
+});
