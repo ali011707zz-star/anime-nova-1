@@ -892,7 +892,7 @@ async function fetchMangaDarCatalog(opts: {
 
 async function fetchMangaDarDetail(slug: string) {
   const rawClean = String(slug || "").trim();
-  const cacheKey = `aw:detail:${rawClean}`;
+  const cacheKey = `aw:detail:v2:${rawClean}`;
   const cached = getCached<any>(cacheKey);
   if (cached) return cached;
 
@@ -1313,7 +1313,7 @@ async function fetchAzoraflyCatalog(opts: {
   search?: string;
 }) {
   const { page, status, search } = opts;
-  const cacheKey = `az:catalog:${page}:${status || "ALL"}:${search || ""}`;
+  const cacheKey = `az:catalog:v2:${page}:${status || "ALL"}:${search || ""}`;
   const cached = getCached<any>(cacheKey);
   if (cached) return cached;
 
@@ -1406,7 +1406,7 @@ async function fetchAzoraflyCatalog(opts: {
 
 async function fetchAzoraflyDetail(slug: string) {
   const cleanSlug = slug.replace(/^az--/, "").replace(/^\/+|\/+$/g, "");
-  const cacheKey = `az:detail:${cleanSlug}`;
+  const cacheKey = `az:detail:v2:${cleanSlug}`;
   const cached = getCached<any>(cacheKey);
   if (cached) return cached;
 
@@ -1851,7 +1851,7 @@ async function fetchAwLatestMangaDocs(): Promise<MangaLatestUpdateItem[]> {
         if (!docId) return null;
         const f = parseAwFsDoc(doc);
         const rawName = decodeHtmlEntities(String(f.name || "").trim());
-        if (!rawName) return null;
+        if (!rawName || /\b(kilo\s*test|test\s*manga)\b|مانجا\s*تجريبية/i.test(rawName)) return null;
         const poster = String(
           f.poster?.large || f.poster?.medium || f.poster_uri || f.cover_uri || "",
         ).trim();
@@ -1986,12 +1986,21 @@ async function buildMangaLatestFeed(): Promise<MangaLatestUpdateItem[]> {
     fetchAzLatestManhwaItems(),
     fetchAwLatestMangaDocs(),
   ]);
-  const combined = [...manhwaItems, ...mangaItems];
-  combined.sort((a, b) => {
-    const ta = a.updatedAt ? Date.parse(a.updatedAt) : 0;
-    const tb = b.updatedAt ? Date.parse(b.updatedAt) : 0;
-    return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
-  });
+  const sortByDate = (arr: MangaLatestUpdateItem[]) =>
+    [...arr].sort((a, b) => {
+      const ta = a.updatedAt ? Date.parse(a.updatedAt) : 0;
+      const tb = b.updatedAt ? Date.parse(b.updatedAt) : 0;
+      return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+    });
+  const sortedManga = sortByDate(mangaItems);
+  const sortedManhwa = sortByDate(manhwaItems);
+  // Interleave manga & manhwa so both sections are immediately visible in the home rail
+  const combined: MangaLatestUpdateItem[] = [];
+  const maxLen = Math.max(sortedManga.length, sortedManhwa.length);
+  for (let i = 0; i < maxLen; i++) {
+    if (i < sortedManga.length) combined.push(sortedManga[i]);
+    if (i < sortedManhwa.length) combined.push(sortedManhwa[i]);
+  }
   const seen = new Set<string>();
   const deduped: MangaLatestUpdateItem[] = [];
   for (const item of combined) {

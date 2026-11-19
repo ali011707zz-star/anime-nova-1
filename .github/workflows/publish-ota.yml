@@ -2,6 +2,12 @@ name: 🚀 نشر تحديث هوائي (OTA)
 
 on:
   workflow_dispatch:
+    inputs:
+      skip_ota:
+        description: 'Rebuild API server only (skip mobile OTA export)'
+        required: false
+        default: 'false'
+        type: string
   push:
     branches: [main]
     paths:
@@ -56,9 +62,13 @@ jobs:
             echo "=== API HEALTH ==="
             curl -fsSL http://127.0.0.1:8080/api/health || true
             echo ""
-            echo "📦 Exporting mobile OTA bundle..."
-            EXPO_PUBLIC_DOMAIN="${EXPO_PUBLIC_DOMAIN:-https://animenovaa.duckdns.org}" \
-              pnpm --filter @workspace/nova-mobile run export:ota
+            if [ "${{ inputs.skip_ota || 'false' }}" != "true" ]; then
+              echo "📦 Exporting mobile OTA bundle..."
+              EXPO_PUBLIC_DOMAIN="${EXPO_PUBLIC_DOMAIN:-https://animenovaa.duckdns.org}" \
+                pnpm --filter @workspace/nova-mobile run export:ota
+            else
+              echo "⏭️ Skipping OTA export (skip_ota=true)"
+            fi
             echo "=== OTA STATUS ==="
             curl -fsSL http://127.0.0.1:8080/api/ota/status || curl -fsSL https://animenovaa.duckdns.org/api/ota/status
             echo ""
