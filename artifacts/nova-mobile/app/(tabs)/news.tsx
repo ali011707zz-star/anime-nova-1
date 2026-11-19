@@ -8,7 +8,6 @@ import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { getKnownArabicAnimeTitle } from "@/utils/arabicAnimeTitles";
-import { CommentsSheet } from "@/components/CommentsSheet";
 import { getBaseUrl } from "@/utils/api";
 import { proxyPosterUrl } from "@/utils/media";
 import { isTvDevice, useTvMetrics, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
@@ -293,8 +292,14 @@ export default function NewsScreen() {
   }
 
   function openComments(article: NewsArticle) {
-    setActiveArticle(article);
-    setCommentsVisible(true);
+    router.push({
+      pathname: "/comments" as any,
+      params: {
+        tmdbId: `news-${article.id}`,
+        title: article.title,
+        type: "news",
+      },
+    });
   }
 
   function goAnime(id: number) {
@@ -1005,21 +1010,7 @@ export default function NewsScreen() {
         </View>
       </Modal>
 
-            {/* ── Comments Sheet ── */}
-      {activeArticle && (
-        <CommentsSheet
-          visible={commentsVisible}
-          onClose={() => {
-            setCommentsVisible(false);
-            // تحديث عدد تعليقات هذا المقال بعد الإغلاق
-            setTimeout(() => {
-              if (activeArticle) fetchCommentCountsBatch([activeArticle]);
-            }, 500);
-          }}
-          tmdbId={`news-${activeArticle.id}`}
-          title={activeArticle.title}
-        />
-      )}
+      
     </View>
   );
 }

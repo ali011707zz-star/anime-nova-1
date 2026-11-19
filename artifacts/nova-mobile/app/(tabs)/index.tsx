@@ -12,7 +12,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AnnouncementBanner } from "@/components/AnnouncementBanner";
 import { DrawerMenu } from "@/components/DrawerMenu";
-import { CommentsSheet } from "@/components/CommentsSheet";
 import { HeroSection } from "@/components/HeroSection";
 import { SectionHeader } from "@/components/SectionHeader";
 import { SectionRow, SkeletonRow } from "@/components/SectionRow";
@@ -162,7 +161,6 @@ export default function HomeScreen() {
   });
   const homeNewsList = homeNewsData || [];
   const [selectedNewsArticle, setSelectedNewsArticle] = useState<HomeNewsArticle | null>(null);
-  const [newsCommentArticle, setNewsCommentArticle] = useState<HomeNewsArticle | null>(null);
 
   const { data: isekai, refetch: refetchIsekai } = useQuery({
     queryKey: ["isekai"],
@@ -905,7 +903,14 @@ export default function HomeScreen() {
                         <Pressable
                           onPress={(e) => {
                             e.stopPropagation();
-                            setNewsCommentArticle(art);
+                            router.push({
+                              pathname: "/comments" as any,
+                              params: {
+                                tmdbId: `news-${art.id}`,
+                                title: art.title,
+                                type: "news",
+                              },
+                            });
                           }}
                           hitSlop={6}
                           style={({ pressed }) => [homeNewsStyles.circleBtn, pressed && { opacity: 0.75 }]}
@@ -1874,7 +1879,14 @@ export default function HomeScreen() {
                       onPress={() => {
                         const target = selectedNewsArticle;
                         setSelectedNewsArticle(null);
-                        setNewsCommentArticle(target);
+                        router.push({
+                          pathname: "/comments" as any,
+                          params: {
+                            tmdbId: `news-${target.id}`,
+                            title: target.title,
+                            type: "news",
+                          },
+                        });
                       }}
                       style={[homeNewsStyles.modalActionPrimary, { backgroundColor: colors.primary }]}
                     >
@@ -1896,14 +1908,7 @@ export default function HomeScreen() {
         </View>
       </Modal>
 
-      {newsCommentArticle && (
-        <CommentsSheet
-          visible={Boolean(newsCommentArticle)}
-          onClose={() => setNewsCommentArticle(null)}
-          tmdbId={`news-${newsCommentArticle.id}`}
-          title={newsCommentArticle.title}
-        />
-      )}
+
     </View>
   );
 }
