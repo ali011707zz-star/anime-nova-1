@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
-import { useApp } from "@/context/AppContext";
+import { resolveFavoriteRouteTarget, useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch, setUserAuthToken } from "@/utils/secureApi";
 import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
@@ -62,7 +62,7 @@ export default function ProfileScreen() {
   const base = getBaseUrl();
   const topPad = Platform.OS === "web" ? 0 : Math.max(insets.top, Platform.OS === "android" ? 28 : 44);
 
-  const { favorites, toggleFavorite, currentUser: globalUser, setCurrentUser: setGlobalUser } = useApp();
+  const { favorites, watchHistory, toggleFavorite, updateFavorite, currentUser: globalUser, setCurrentUser: setGlobalUser } = useApp();
 
   const [activeTab, setActiveTab] = useState<ProfileTab>("username");
   const [user, setUser] = useState<MobileUser | null>(globalUser || null);
@@ -283,7 +283,8 @@ export default function ProfileScreen() {
 
   const realFavorites = favorites.map(f => ({
     id: f.id,
-    title: f.title,
+    raw: f,
+    title: f.titleAr || f.title,
     titleEn: f.english || f.title,
     coverImage: f.thumbnail,
     score: f.score ? Number((f.score > 10 ? f.score / 10 : f.score).toFixed(1)) : null,
@@ -543,11 +544,12 @@ export default function ProfileScreen() {
 
                     <View style={s.favActionsLeft}>
                       <Pressable
-                        onPress={() =>
-                          router.push(
-                            `/anime/${item.id}?title=${encodeURIComponent(item.title)}&english=${encodeURIComponent(item.titleEn || item.title)}` as any
-                          )
-                        }
+                        onPress={() => {
+                          void resolveFavoriteRouteTarget(item.raw, watchHistory).then((target) => {
+                            if (target.upgraded) void updateFavorite(target.upgraded);
+                            router.push({ pathname: target.pathname as any, params: target.params });
+                          });
+                        }}
                         style={s.openItemBtn}
                       >
                         <Text style={s.openItemBtnText}>عرض</Text>

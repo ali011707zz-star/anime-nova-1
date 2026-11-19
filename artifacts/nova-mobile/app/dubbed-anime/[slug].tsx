@@ -544,11 +544,14 @@ export default function DubbedAnimeDetailScreen() {
   const handleFavorite = useCallback(async () => {
     await toggleFavorite({
       id: numericFavId,
+      contentKind: "dubbed-anime",
+      contentKey: slug,
+      routeParams: { slug },
       title: displayTitle,
       english: englishTitle || displayTitle,
       titleAr: displayTitle,
       thumbnail: posterUri || "",
-      score: rawScore ? rawScore / 10 : null,
+      score: rawScore ? Math.round(rawScore) : null,
       episodes: totalEpisodesCount || null,
       startYear: Number(releaseYear) || null,
       genres: anilist?.genres,
@@ -557,6 +560,7 @@ export default function DubbedAnimeDetailScreen() {
   }, [
     toggleFavorite,
     numericFavId,
+    slug,
     displayTitle,
     englishTitle,
     posterUri,

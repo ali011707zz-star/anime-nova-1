@@ -19,6 +19,7 @@ import {
   TvPressable,
   useTvListFocusScroll, useTvMetrics } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
+import { getWatchContentId, useApp } from "@/context/AppContext";
 const Pressable = TvPressable;
 const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
 const ROW_LTR = I18nManager.isRTL ? "row-reverse" : "row";
@@ -80,6 +81,28 @@ export default function AwDubbedDetailScreen() {
     [episodes, epDescOrder],
   );
   const displayTitle = titleAr || title;
+  const { isFavorite, toggleFavorite } = useApp();
+  const favKey = keyParam || curSeason?.animeId || displayTitle;
+  const numericFavId = React.useMemo(() => getWatchContentId("aw-dubbed", favKey), [favKey]);
+  const isFav = isFavorite(numericFavId);
+  const handleFavorite = useCallback(async () => {
+    await toggleFavorite({
+      id: numericFavId,
+      contentKind: "aw-dubbed",
+      contentKey: favKey,
+      routeParams: {
+        key: favKey,
+        seasons: JSON.stringify(seasons),
+      },
+      title: displayTitle,
+      english: title || displayTitle,
+      titleAr: titleAr || displayTitle,
+      thumbnail: poster || "",
+      episodes: episodes.length || null,
+      score: null,
+      addedAt: Date.now(),
+    });
+  }, [toggleFavorite, numericFavId, favKey, seasons, displayTitle, title, titleAr, poster, episodes.length]);
 
   useEffect(() => {
     if (!curSeason?.animeId) return;
@@ -153,7 +176,20 @@ export default function AwDubbedDetailScreen() {
     <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <View style={{ width: 36 }} />
+        <Pressable
+          onPress={() => void handleFavorite()}
+          focusable={tvMode}
+          accessibilityRole="button"
+          accessibilityLabel={isFav ? "إزالة من المفضلة" : "إضافة للمفضلة"}
+          style={({ focused }) => [
+            styles.backBtn,
+            { backgroundColor: colors.input, borderColor: colors.border },
+            isFav && { backgroundColor: "rgba(239,68,68,0.16)", borderColor: "rgba(239,68,68,0.45)" },
+            tvMode && tvFocusStyle(focused),
+          ]}
+        >
+          <Ionicons name={isFav ? "heart" : "heart-outline"} size={18} color={isFav ? "#EF4444" : colors.textPrimary} />
+        </Pressable>
         <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>{displayTitle}</Text>
         <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} focusable={tvMode}
            style={({ focused }) => [

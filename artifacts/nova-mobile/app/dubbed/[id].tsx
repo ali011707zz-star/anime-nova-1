@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import {
   View, Text, Image, FlatList,
   ActivityIndicator, StyleSheet, Platform, ScrollView, I18nManager,
@@ -18,6 +18,7 @@ import {
   useTvListFocusScroll, useTvMetrics } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
 import { EpisodeDivider } from "@/components/EpisodeDivider";
+import { getWatchContentId, useApp } from "@/context/AppContext";
 const Pressable = TvPressable;
 
 interface Season { label: string; arabicToonsId: string; episodes?: Episode[]; }
@@ -132,7 +133,12 @@ export default function DubbedDetailScreen() {
   const isMovie = (Array.isArray(isMovieParam) ? isMovieParam[0] : isMovieParam) === "1";
   const langLabelStr = (Array.isArray(languageLabelParam) ? languageLabelParam[0] : languageLabelParam) || "";
   const legacySeasons: Season[] = (() => {
-    try { return JSON.parse(decodeURIComponent(seasonsParam || "[]")); } catch { return []; }
+    if (!seasonsParam) return [];
+    try {
+      return JSON.parse(decodeURIComponent(seasonsParam));
+    } catch {
+      try { return JSON.parse(seasonsParam); } catch { return []; }
+    }
   })();
   const [sd2Seasons, setSd2Seasons] = useState<Season[]>([]);
   const [epDescOrder, setEpDescOrder] = useState(false);
@@ -141,8 +147,16 @@ export default function DubbedDetailScreen() {
     : isCarateenEntry
       ? [{ label: "قائمة الحلقات", arabicToonsId: `${carateenProvider}:${showId}` }]
       : legacySeasons;
-  const imgSrc = img ? decodeURIComponent(img) : null;
+  const imgSrc = img ? (() => { try { return decodeURIComponent(img); } catch { return img; } })() : null;
   const posterSrc = imgSrc?.startsWith("http") ? imgSrc : (imgSrc ? `${apiBase()}${imgSrc}` : null);
+  const { isFavorite, toggleFavorite } = useApp();
+  const favKey = useMemo(() => {
+    if (isSd2Entry) return `sd2:${sd2Slug}`;
+    if (isCarateenEntry && carateenProvider) return `${carateenProvider}:${showId}`;
+    return `legacy:${String(id || title)}`;
+  }, [isSd2Entry, sd2Slug, isCarateenEntry, carateenProvider, showId, id, title]);
+  const numericFavId = useMemo(() => getWatchContentId("dubbed", favKey), [favKey]);
+  const isFav = isFavorite(numericFavId);
 
   const [selSeason, setSelSeason] = useState(0);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
@@ -317,6 +331,59 @@ export default function DubbedDetailScreen() {
     );
   };
 
+  const handleFavorite = useCallback(async () => {
+    const routeParams: Record<string, string> = {
+      id: isSd2Entry
+        ? `sd2-${sd2Slug}`
+        : isCarateenEntry && carateenProvider
+          ? `${carateenProvider}-${showId}`
+          : String(id || title),
+    };
+    if (isSd2Entry) {
+      routeParams.provider = "sd2";
+      routeParams.slug = sd2Slug;
+    } else if (isCarateenEntry && carateenProvider) {
+      routeParams.provider = carateenProvider;
+      routeParams.showId = String(showId);
+    } else if (legacySeasons.length > 0) {
+      routeParams.seasons = JSON.stringify(legacySeasons);
+    }
+    if (isMovie) routeParams.isMovie = "1";
+    if (langLabelStr) routeParams.languageLabel = langLabelStr;
+    if (imgSrc) routeParams.img = imgSrc;
+
+    await toggleFavorite({
+      id: numericFavId,
+      contentKind: "dubbed",
+      contentKey: favKey,
+      routeParams,
+      title,
+      english: title,
+      titleAr: title,
+      thumbnail: posterSrc || "",
+      episodes: episodes.length || null,
+      score: null,
+      addedAt: Date.now(),
+    });
+  }, [
+    isSd2Entry,
+    sd2Slug,
+    isCarateenEntry,
+    carateenProvider,
+    showId,
+    id,
+    title,
+    legacySeasons,
+    isMovie,
+    langLabelStr,
+    imgSrc,
+    toggleFavorite,
+    numericFavId,
+    favKey,
+    posterSrc,
+    episodes.length,
+  ]);
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
       {/* Header */}
@@ -326,6 +393,20 @@ export default function DubbedDetailScreen() {
           <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
         </Pressable>
         <Text numberOfLines={1} style={[styles.headerTitle, { color: colors.textPrimary }]}>{title}</Text>
+        <Pressable
+          onPress={() => void handleFavorite()}
+          focusable={tvMode}
+          accessibilityRole="button"
+          accessibilityLabel={isFav ? "إزالة من المفضلة" : "إضافة للمفضلة"}
+          style={({ focused }) => [
+            styles.backBtn,
+            { backgroundColor: colors.input, borderColor: colors.border },
+            isFav && { backgroundColor: "rgba(239,68,68,0.16)", borderColor: "rgba(239,68,68,0.45)" },
+            tvMode && tvFocusStyle(focused),
+          ]}
+        >
+          <Ionicons name={isFav ? "heart" : "heart-outline"} size={18} color={isFav ? "#EF4444" : colors.textPrimary} />
+        </Pressable>
       </View>
 
       <TvFocusGuideView autoFocus={tvMode} style={styles.tvFocusGuide}>

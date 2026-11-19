@@ -31,10 +31,21 @@ export type WatchProgress = {
   updatedAt: number;
 };
 
+export type FavoriteContentKind =
+  | "anime"
+  | "manga"
+  | "dubbed-anime"
+  | "dubbed"
+  | "aw-dubbed"
+  | "stardima";
+
 export type FavoriteAnime = {
   id: number;
   mangaId?: string;
   source?: "manga" | "manhwa";
+  contentKind?: FavoriteContentKind;
+  contentKey?: string;
+  routeParams?: Record<string, string>;
   title: string;
   english: string;
   titleAr?: string;
@@ -67,6 +78,7 @@ type AppContextType = {
   clearHistory: () => Promise<void>;
   favorites: FavoriteAnime[];
   toggleFavorite: (anime: FavoriteAnime) => Promise<void>;
+  updateFavorite: (anime: FavoriteAnime) => Promise<void>;
   clearFavorites: () => Promise<void>;
   isFavorite: (id: number) => boolean;
   currentUser: MobileUser | null;
@@ -223,11 +235,264 @@ function mapServerHistory(row: any): WatchProgress | null {
   };
 }
 
+function serverFavoriteType(item: FavoriteAnime): string {
+  if (item.mangaId) {
+    return `fav:manga:${encodeURIComponent(item.source || "manga")}:${encodeURIComponent(item.mangaId)}`;
+  }
+  const kind = item.contentKind;
+  if (!kind || kind === "anime") return "anime";
+  if (kind === "dubbed-anime") {
+    const slug = item.contentKey || item.routeParams?.slug || "";
+    return slug ? `fav:dubbed-anime:${encodeURIComponent(slug)}` : "anime";
+  }
+  if (kind === "stardima") {
+    const pid = item.contentKey || item.routeParams?.providerTitleId || "";
+    return pid ? `fav:stardima:${encodeURIComponent(pid)}` : "anime";
+  }
+  if (kind === "aw-dubbed") {
+    const payload = JSON.stringify({
+      key: item.contentKey || item.routeParams?.key || "",
+      seasons: item.routeParams?.seasons || "",
+    });
+    return `fav:aw-dubbed:${encodeURIComponent(payload)}`;
+  }
+  if (kind === "dubbed") {
+    const rp = item.routeParams || {};
+    const compact: Record<string, string> = {};
+    for (const k of ["id", "provider", "showId", "slug", "isMovie", "languageLabel", "seasons"]) {
+      if (rp[k]) compact[k] = rp[k];
+    }
+    if (!compact.id && item.contentKey) compact.id = item.contentKey;
+    return `fav:dubbed:${encodeURIComponent(JSON.stringify(compact))}`;
+  }
+  return "anime";
+}
+
+function decodeServerFavoriteType(value: unknown): Partial<FavoriteAnime> {
+  const raw = String(value ?? "");
+  if (!raw.startsWith("fav:")) return {};
+  const decode = (part?: string) => {
+    try { return decodeURIComponent(part || ""); } catch { return part || ""; }
+  };
+  const rest = raw.slice(4);
+  if (rest.startsWith("manga:")) {
+    const parts = rest.slice(6).split(":");
+    const src = decode(parts[0]) === "manhwa" ? "manhwa" : "manga";
+    const mangaId = decode(parts.slice(1).join(":"));
+    return mangaId ? { contentKind: "manga", mangaId, source: src } : {};
+  }
+  if (rest.startsWith("dubbed-anime:")) {
+    const slug = decode(rest.slice("dubbed-anime:".length));
+    return slug ? { contentKind: "dubbed-anime", contentKey: slug, routeParams: { slug } } : {};
+  }
+  if (rest.startsWith("stardima:")) {
+    const pid = decode(rest.slice("stardima:".length));
+    return pid ? { contentKind: "stardima", contentKey: pid, routeParams: { providerTitleId: pid } } : {};
+  }
+  if (rest.startsWith("aw-dubbed:")) {
+    try {
+      const parsed = JSON.parse(decode(rest.slice("aw-dubbed:".length)));
+      const key = String(parsed?.key || "");
+      const seasons = String(parsed?.seasons || "");
+      return key ? { contentKind: "aw-dubbed", contentKey: key, routeParams: { key, ...(seasons ? { seasons } : {}) } } : {};
+    } catch { return {}; }
+  }
+  if (rest.startsWith("dubbed:")) {
+    try {
+      const parsed = JSON.parse(decode(rest.slice("dubbed:".length)));
+      if (parsed && typeof parsed === "object") {
+        const routeParams: Record<string, string> = {};
+        for (const [k, v] of Object.entries(parsed)) {
+          if (typeof v === "string" && v) routeParams[k] = v;
+        }
+        const key = routeParams.provider && routeParams.slug
+          ? `${routeParams.provider}:${routeParams.slug}`
+          : routeParams.provider && routeParams.showId
+            ? `${routeParams.provider}:${routeParams.showId}`
+            : routeParams.id || "";
+        return { contentKind: "dubbed", contentKey: key, routeParams };
+      }
+    } catch { return {}; }
+  }
+  return {};
+}
+
+export type FavoriteRouteTarget = {
+  pathname: string;
+  params: Record<string, string>;
+};
+
+export function getFavoriteRouteTarget(item: FavoriteAnime): FavoriteRouteTarget {
+  if (item.mangaId) {
+    return {
+      pathname: "/manga/[id]",
+      params: {
+        id: item.mangaId,
+        title: item.title,
+        english: item.english,
+        cover: item.thumbnail || "",
+        source: item.source || (item.mangaId.startsWith("az--") ? "manhwa" : "manga"),
+      },
+    };
+  }
+  if (item.contentKind === "dubbed-anime") {
+    const slug = item.contentKey || item.routeParams?.slug || "";
+    if (slug) {
+      return {
+        pathname: "/dubbed-anime/[slug]",
+        params: {
+          slug,
+          title: item.titleAr || item.title,
+          poster: item.thumbnail || "",
+        },
+      };
+    }
+  }
+  if (item.contentKind === "dubbed") {
+    const rp = item.routeParams || {};
+    const params: Record<string, string> = {
+      id: rp.id || item.contentKey || String(item.id),
+      title: item.titleAr || item.title,
+      img: rp.img || item.thumbnail || "",
+    };
+    if (rp.provider) params.provider = rp.provider;
+    if (rp.showId) params.showId = rp.showId;
+    if (rp.slug) params.slug = rp.slug;
+    if (rp.seasons) params.seasons = rp.seasons;
+    if (rp.isMovie) params.isMovie = rp.isMovie;
+    if (rp.languageLabel) params.languageLabel = rp.languageLabel;
+    return { pathname: "/dubbed/[id]", params };
+  }
+  if (item.contentKind === "aw-dubbed") {
+    const key = item.contentKey || item.routeParams?.key || "";
+    const seasons = item.routeParams?.seasons || JSON.stringify([{ label: "الحلقات", animeId: key }]);
+    return {
+      pathname: "/aw-dubbed/[key]",
+      params: {
+        key: encodeURIComponent(key),
+        title: item.english || item.title,
+        titleAr: item.titleAr || item.title,
+        seasons: encodeURIComponent(seasons),
+        poster: encodeURIComponent(item.thumbnail || ""),
+      },
+    };
+  }
+  if (item.contentKind === "stardima") {
+    const providerTitleId = item.contentKey || item.routeParams?.providerTitleId || "";
+    if (providerTitleId) {
+      return {
+        pathname: "/stardima-title",
+        params: { providerTitleId },
+      };
+    }
+  }
+  return {
+    pathname: "/anime/[id]",
+    params: {
+      id: String(item.id),
+      title: item.title,
+      english: item.english || item.title,
+    },
+  };
+}
+
+export async function resolveFavoriteRouteTarget(
+  item: FavoriteAnime,
+  watchHistory: WatchProgress[] = [],
+): Promise<FavoriteRouteTarget & { upgraded?: FavoriteAnime }> {
+  if (item.mangaId || (item.contentKind && item.contentKind !== "anime")) {
+    return getFavoriteRouteTarget(item);
+  }
+  // Legacy dubbed-anime favorites saved before contentKind was persisted use synthetic IDs >= 100_000_000.
+  const isSyntheticDubbedId = item.id >= 100_000_000 || (item.thumbnail || "").includes("/api/dubbed/");
+  if (!isSyntheticDubbedId) {
+    return getFavoriteRouteTarget(item);
+  }
+
+  const normalizedScore =
+    typeof item.score === "number" && item.score > 0 && item.score <= 10
+      ? Math.round(item.score * 10)
+      : item.score;
+
+  // 1. Fast path: recover exact slug/key from local watchHistory if present.
+  const histMatch = watchHistory.find((h) => h.animeId === item.id && h.contentKey);
+  if (histMatch?.contentKey) {
+    if (histMatch.contentKey.startsWith("az:")) {
+      const slug = histMatch.contentKey.slice(3);
+      const upgraded: FavoriteAnime = {
+        ...item,
+        contentKind: "dubbed-anime",
+        contentKey: slug,
+        routeParams: { slug },
+        score: normalizedScore,
+      };
+      return { ...getFavoriteRouteTarget(upgraded), upgraded };
+    }
+    if (histMatch.contentKind === "stardima") {
+      const upgraded: FavoriteAnime = {
+        ...item,
+        contentKind: "stardima",
+        contentKey: histMatch.contentKey,
+        routeParams: { providerTitleId: histMatch.contentKey },
+      };
+      return { ...getFavoriteRouteTarget(upgraded), upgraded };
+    }
+    if (histMatch.contentKind === "aw-dubbed") {
+      const upgraded: FavoriteAnime = {
+        ...item,
+        contentKind: "aw-dubbed",
+        contentKey: histMatch.contentKey,
+        routeParams: { key: histMatch.contentKey },
+      };
+      return { ...getFavoriteRouteTarget(upgraded), upgraded };
+    }
+  }
+
+  // 2. Fallback: look up the dubbed anime slug on the AnimeZid catalog API and match by exact ID hash or title.
+  const base = getBaseUrl().replace(/\/$/, "");
+  const queries = [...new Set([item.titleAr, item.title, item.english].map((q) => (q || "").trim()).filter(Boolean))];
+  const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  const targetNorms = queries.map(norm).filter(Boolean);
+
+  for (const q of [...queries, ""]) {
+    try {
+      const url = q
+        ? `${base}/api/dubbed/animezid/catalog?page=1&q=${encodeURIComponent(q)}`
+        : `${base}/api/dubbed/animezid/catalog?page=1&sort=newest`;
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const data = await res.json();
+      const rows: any[] = Array.isArray(data?.results) ? data.results : [];
+      const exactHash = rows.find((r) => r?.slug && getWatchContentId("dubbed", `az:${r.slug}`) === item.id);
+      const titleMatch = exactHash || rows.find((r) => {
+        if (!r?.slug) return false;
+        const cand = norm(String(r.title || ""));
+        return cand && targetNorms.some((t) => cand === t || cand.includes(t) || t.includes(cand));
+      });
+      if (titleMatch?.slug) {
+        const slug = String(titleMatch.slug);
+        const upgraded: FavoriteAnime = {
+          ...item,
+          contentKind: "dubbed-anime",
+          contentKey: slug,
+          routeParams: { slug },
+          score: normalizedScore,
+        };
+        return { ...getFavoriteRouteTarget(upgraded), upgraded };
+      }
+    } catch {}
+  }
+
+  return getFavoriteRouteTarget(item);
+}
+
 function mapServerFavorite(row: any): FavoriteAnime | null {
   const id = asNumber(row?.anime_id ?? row?.animeId ?? row?.content_id);
   if (!id) return null;
+  const decoded = decodeServerFavoriteType(row?.anime_type ?? row?.animeType);
   return {
     id,
+    ...decoded,
     title: String(row?.anime_title ?? row?.title ?? ""),
     english: String(row?.english_title ?? row?.english ?? row?.anime_title ?? row?.title ?? ""),
     thumbnail: String(row?.anime_cover ?? row?.image ?? row?.poster ?? ""),
@@ -348,9 +613,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           animeId: item.id,
-          animeTitle: item.english || item.title,
+          animeTitle: item.titleAr || item.title || item.english,
           animeCover: item.thumbnail || null,
-          animeType: "anime",
+          animeType: serverFavoriteType(item),
         }),
       });
       return response.ok;
@@ -473,9 +738,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       for (const item of localFavorites) {
         if (deletedFavoritesSet.has(item.id)) continue;
         const remote = favoritesClearPending === "1" ? undefined : remoteFavoritesById.get(item.id);
-        if (!remote || item.addedAt >= remote.addedAt) {
+        const localHasRichRouting = Boolean((item.contentKind && item.contentKind !== "anime") || item.mangaId);
+        const remoteMissingRichRouting = Boolean(remote && !remote.contentKind && !remote.mangaId);
+        if (!remote || item.addedAt >= remote.addedAt || (localHasRichRouting && remoteMissingRichRouting)) {
           mergedFavorites.set(item.id, item);
-          if (!remote || item.addedAt > remote.addedAt || favoritesClearPending === "1") {
+          if (!remote || item.addedAt > remote.addedAt || favoritesClearPending === "1" || (localHasRichRouting && remoteMissingRichRouting)) {
             favoritesToUpload.push(item);
           }
         }
@@ -782,6 +1049,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, [accountUrl, currentUser?.id, favorites, postFavorite, readDeletedIds, writeDeletedIds]);
 
+  const updateFavorite = useCallback(async (anime: FavoriteAnime) => {
+    setFavorites((prev) => {
+      const idx = prev.findIndex((f) => f.id === anime.id);
+      if (idx < 0) return prev;
+      const next = [...prev];
+      next[idx] = { ...prev[idx], ...anime };
+      return next;
+    });
+    const userId = currentUser?.id;
+    if (userId) {
+      void postFavorite(userId, anime);
+    }
+  }, [currentUser?.id, postFavorite]);
+
   const clearFavorites = useCallback(async () => {
     setFavorites([]);
     const userId = currentUser?.id;
@@ -808,6 +1089,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     clearHistory,
     favorites,
     toggleFavorite,
+    updateFavorite,
     clearFavorites,
     isFavorite,
     currentUser,
@@ -829,6 +1111,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setTheme,
     theme,
     toggleFavorite,
+    updateFavorite,
     themeHydrated,
     watchHistory,
   ]);

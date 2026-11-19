@@ -10,7 +10,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useColors } from "@/hooks/useColors";
-import { historyRoute, useApp } from "@/context/AppContext";
+import { FavoriteAnime, historyRoute, resolveFavoriteRouteTarget, useApp } from "@/context/AppContext";
 import { tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { getGridColumnCount, getRailCardWidth } from "@/components/AnimeCard";
 import { getKnownArabicAnimeTitle } from "@/utils/arabicAnimeTitles";
@@ -72,7 +72,21 @@ export default function LibraryScreen() {
     ? tvPosterWidth * gridColumns + 8 * (gridColumns - 1) + 32
     : Math.min(Math.max(width - 24, 0), 900);
   const router = useRouter();
-  const { watchHistory, favorites, removeFromHistory, toggleFavorite } = useApp();
+  const { watchHistory, favorites, removeFromHistory, toggleFavorite, updateFavorite } = useApp();
+  const openingFavRef = React.useRef(false);
+  const openFavoriteItem = useCallback(async (item: FavoriteAnime) => {
+    if (openingFavRef.current) return;
+    openingFavRef.current = true;
+    try {
+      const target = await resolveFavoriteRouteTarget(item, watchHistory);
+      if (target.upgraded) {
+        void updateFavorite(target.upgraded);
+      }
+      router.push({ pathname: target.pathname as any, params: target.params });
+    } finally {
+      setTimeout(() => { openingFavRef.current = false; }, 250);
+    }
+  }, [router, updateFavorite, watchHistory]);
 
   const [activeTab, setActiveTab] = useState(0);
   const [search, setSearch] = useState("");
@@ -408,26 +422,15 @@ export default function LibraryScreen() {
             showsVerticalScrollIndicator={false}
             renderItem={({ item }) => (
               <Pressable
-                onPress={() => {
-                  if (item.mangaId) {
-                    router.push({
-                      pathname: "/manga/[id]" as any,
-                      params: {
-                        id: item.mangaId,
-                        title: item.title,
-                        english: item.english,
-                        cover: item.thumbnail || "",
-                        source: item.source || (item.mangaId.startsWith("az--") ? "manhwa" : "manga"),
-                      },
-                    });
-                  } else {
-                    router.push(`/anime/${item.id}?title=${encodeURIComponent(item.title)}&english=${encodeURIComponent(item.english)}`);
-                  }
-                }}
+                onPress={() => void openFavoriteItem(item)}
                 focusable={tvMode}
                 style={({ focused }) => [s.favCard, tvMode && s.tvFavCard, tvMode && tvFocusStyle(focused)]}
               >
-                <LibraryImage uri={item.thumbnail} fallbackId={item.id} style={[s.favImg, tvMode && s.tvFavImg, { backgroundColor: "#1C1C22" }]} />
+                <LibraryImage
+                  uri={item.thumbnail}
+                  fallbackId={(!item.mangaId && (!item.contentKind || item.contentKind === "anime") && item.id < 100_000_000) ? item.id : undefined}
+                  style={[s.favImg, tvMode && s.tvFavImg, { backgroundColor: "#1C1C22" }]}
+                />
                 <Pressable
                   onPress={() => toggleFavorite(item)}
                   focusable={tvMode}
@@ -438,7 +441,8 @@ export default function LibraryScreen() {
                 <View style={[s.favInfo, tvMode && s.tvFavInfo]}>
                   {(() => {
                     const favEn = item.english || item.title;
-                    const favAr = item.titleAr || (!item.mangaId ? getKnownArabicAnimeTitle(item.id, item.english, item.title) : null);
+                    const isRegularAnime = !item.mangaId && (!item.contentKind || item.contentKind === "anime") && item.id < 100_000_000;
+                    const favAr = item.titleAr || (isRegularAnime ? getKnownArabicAnimeTitle(item.id, item.english, item.title) : null);
                     return (
                       <>
                         <Text style={[s.favTitle, tvMode && s.tvFavTitle, { color: colors.text }]} numberOfLines={2}>
@@ -455,14 +459,14 @@ export default function LibraryScreen() {
                       </>
                     );
                   })()}
-                  {item.score && (
+                  {item.score ? (
                     <View style={[s.favScore, tvMode && s.tvFavScore]}>
                       <Ionicons name="star" size={tvMode ? 11 : 9} color="#FBBF24" />
                       <Text style={[s.favScoreText, tvMode && s.tvFavScoreText, { color: colors.mutedForeground }]}>
-                        {(item.score / 10).toFixed(1)}
+                        {(item.score > 10 ? item.score / 10 : item.score).toFixed(1)}
                       </Text>
                     </View>
-                  )}
+                  ) : null}
                 </View>
               </Pressable>
             )}
