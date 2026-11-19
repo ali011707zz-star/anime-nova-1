@@ -2374,15 +2374,86 @@ router.get("/aw-dubbed/mf-stream", async (req, res) => {
 });
 
 
+const ANIMEZID_POSTER_CACHE_DIR = "/opt/nova-cache/animezid-posters";
+try { fs.mkdirSync(ANIMEZID_POSTER_CACHE_DIR, { recursive: true }); } catch {}
+
+function proxyAnimeZidPosterUrl(raw: unknown): string {
+  const value = typeof raw === "string" ? raw.trim() : "";
+  if (!value) return "";
+  if (/^https?:\/\/(?:[a-z0-9-]+\.)*animezid\.org\//i.test(value)) {
+    return `https://animenovaa.duckdns.org/api/dubbed/animezid/poster?url=${encodeURIComponent(value)}`;
+  }
+  return value;
+}
+
+router.get("/dubbed/animezid/poster", async (req, res) => {
+  const rawUrl = String(req.query.url || "").trim();
+  if (!rawUrl || !/^https?:\/\/(?:[a-z0-9-]+\.)*animezid\.org\//i.test(rawUrl)) {
+    res.status(400).end();
+    return;
+  }
+  const hash = crypto.createHash("sha1").update(rawUrl).digest("hex");
+  const extMatch = rawUrl.match(/\.(webp|jpe?g|png)(?:[?#]|$)/i);
+  const ext = (extMatch ? extMatch[1] : "jpg").toLowerCase();
+  const fallbackContentType = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
+  const cacheFile = path.join(ANIMEZID_POSTER_CACHE_DIR, hash + "." + ext);
+  try {
+    if (fs.existsSync(cacheFile)) {
+      const buf = fs.readFileSync(cacheFile);
+      if (buf.length > 200) {
+        res.setHeader("Content-Type", fallbackContentType);
+        res.setHeader("Cache-Control", "public, max-age=2592000, immutable");
+        res.send(buf);
+        return;
+      }
+    }
+    const r = await fetch(rawUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+        Referer: "https://animezid.org/",
+        Accept: "image/avif,image/webp,image/png,image/jpeg,image/*,*/*;q=0.8",
+      },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!r.ok) {
+      res.status(502).end();
+      return;
+    }
+    const upstreamType = (r.headers.get("content-type") || "").toLowerCase();
+    const buf = Buffer.from(await r.arrayBuffer());
+    const headStr = buf.subarray(0, 64).toString("utf8").trim().toLowerCase();
+    const looksHtml = headStr.startsWith("<!doctype") || headStr.startsWith("<html") || upstreamType.includes("text/html");
+    if (buf.length <= 200 || looksHtml) {
+      res.status(502).end();
+      return;
+    }
+    try { fs.writeFileSync(cacheFile, buf); } catch {}
+    res.setHeader("Content-Type", upstreamType.startsWith("image/") ? upstreamType : fallbackContentType);
+    res.setHeader("Cache-Control", "public, max-age=2592000, immutable");
+    res.send(buf);
+  } catch {
+    res.status(502).end();
+  }
+});
+
 // ── AnimeZid (أنمي مدبلج) routes ──
 router.get("/dubbed/animezid/catalog", async (req, res) => {
   const page = Math.max(1, Number.parseInt(String(req.query.page || "1"), 10) || 1);
   const sort = String(req.query.sort || "newest").trim();
   const q = String(req.query.q || "").trim();
   try {
-    const data = await getAnimeZidCatalog({ page, sort, q });
+    const data: any = await getAnimeZidCatalog({ page, sort, q });
+    const proxied = data && Array.isArray(data.results)
+      ? {
+          ...data,
+          results: data.results.map((item: any) => ({
+            ...item,
+            poster: proxyAnimeZidPosterUrl(item?.poster),
+          })),
+        }
+      : data;
     res.setHeader("Cache-Control", "public, max-age=300");
-    res.json(data);
+    res.json(proxied);
   } catch (error) {
     logger.warn({ err: error }, "dubbed: AnimeZid catalog unavailable");
     res.status(502).json({ error: "تعذر تحميل قائمة الأنمي المدبلج" });
@@ -2397,9 +2468,15 @@ router.get("/dubbed/animezid/detail", async (req, res) => {
     return;
   }
   try {
-    const detail = await getAnimeZidDetail(slug, season);
+    const detail: any = await getAnimeZidDetail(slug, season);
+    const proxiedDetail = detail && typeof detail === "object"
+      ? {
+          ...detail,
+          poster: proxyAnimeZidPosterUrl(detail.poster),
+        }
+      : detail;
     res.setHeader("Cache-Control", "public, max-age=900");
-    res.json(detail);
+    res.json(proxiedDetail);
   } catch (error: any) {
     logger.warn({ err: error, slug }, "dubbed: AnimeZid detail unavailable");
     res.status(502).json({ error: error?.message || "تعذر تحميل تفاصيل الأنمي المدبلج" });
@@ -2567,7 +2644,7 @@ async function fetchAnimeZidLatestRows(): Promise<DubbedLatestItem[]> {
         titleAr: title,
         english: title,
         episode: epCount,
-        cover: String(r?.poster || "").trim(),
+        cover: proxyAnimeZidPosterUrl(r?.poster),
         year: String(r?.year || ""),
         isMovie,
         updatedAt: r?.updatedAt ? String(r.updatedAt) : null,

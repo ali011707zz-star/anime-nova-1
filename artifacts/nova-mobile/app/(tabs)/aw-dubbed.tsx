@@ -19,6 +19,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
+import { proxyPosterUrl } from "@/utils/media";
 import { tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
 import {
@@ -1729,7 +1730,7 @@ function DubbedAnimeList({ searchQ }: { searchQ: string }) {
             <View style={{ width: cardWidth }}>
               <PosterCard
                 onFocus={() => scrollRow(index)}
-                uri={item.poster || null}
+                uri={proxyPosterUrl(item.poster) || item.poster || null}
                 title={item.title}
                 seasons={item.seasonsCount}
                 tint="#06B6D4"

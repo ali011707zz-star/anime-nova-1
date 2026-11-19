@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View, Text, StyleSheet,
-  Image, ActivityIndicator, FlatList, Linking,
+  Image, ActivityIndicator, FlatList, Linking, ScrollView,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -10,6 +10,7 @@ import { useColors } from "@/hooks/useColors";
 import { getKnownArabicAnimeTitle } from "@/utils/arabicAnimeTitles";
 import { CommentsSheet } from "@/components/CommentsSheet";
 import { getBaseUrl } from "@/utils/api";
+import { proxyPosterUrl } from "@/utils/media";
 import { isTvDevice, useTvMetrics, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
 
 /* ═══════════════════════════════════════════════════════
@@ -49,7 +50,28 @@ const RECENTLY_AIRED_Q = `query {
 /* ═══════════════════════════════════════════════════════
    Types
 ═══════════════════════════════════════════════════════ */
-type Tab = "airing" | "upcoming" | "trending" | "latestnews";
+type Tab = "airing" | "upcoming" | "trending" | "latestnews" | "movies";
+type MoviesSubFilter = "all" | "news" | "upcoming" | "recent";
+
+interface AnimeMovieItem {
+  id: number;
+  title: { romaji?: string | null; english?: string | null };
+  coverImage?: { extraLarge?: string | null; large?: string | null };
+  bannerImage?: string | null;
+  startDate?: { year?: number | null; month?: number | null; day?: number | null } | null;
+  duration?: number | null;
+  averageScore?: number | null;
+  popularity?: number | null;
+  genres?: string[];
+  status?: string | null;
+  description?: string | null;
+}
+
+interface MoviesFeedResponse {
+  articles: NewsArticle[];
+  upcomingMovies: AnimeMovieItem[];
+  recentMovies: AnimeMovieItem[];
+}
 
 interface NewsArticle {
   id: string;
@@ -108,6 +130,22 @@ async function fetchNewsArticles(page = 1): Promise<{ articles: NewsArticle[]; t
   }
 }
 
+async function fetchMoviesNewsFeed(): Promise<MoviesFeedResponse | null> {
+  try {
+    const base = getBaseUrl();
+    const r = await fetch(`${base}/api/news/movies`);
+    if (!r.ok) return null;
+    const data = await r.json();
+    return {
+      articles: Array.isArray(data?.articles) ? data.articles : [],
+      upcomingMovies: Array.isArray(data?.upcomingMovies) ? data.upcomingMovies : [],
+      recentMovies: Array.isArray(data?.recentMovies) ? data.recentMovies : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
 /* ═══════════════════════════════════════════════════════
    Main Screen
 ═══════════════════════════════════════════════════════ */
@@ -134,6 +172,15 @@ export default function NewsScreen() {
   const [newsTotal, setNewsTotal]     = useState(0);
   const [newsLoadingMore, setNewsLoadingMore] = useState(false);
 
+  /* Anime Movies News & Releases state */
+  const [movieArticles, setMovieArticles]   = useState<NewsArticle[]>([]);
+  const [upcomingMovies, setUpcomingMovies] = useState<AnimeMovieItem[]>([]);
+  const [recentMovies, setRecentMovies]     = useState<AnimeMovieItem[]>([]);
+  const [moviesLoading, setMoviesLoading]   = useState(false);
+  const [moviesError, setMoviesError]       = useState(false);
+  const [moviesLoaded, setMoviesLoaded]     = useState(false);
+  const [moviesFilter, setMoviesFilter]     = useState<MoviesSubFilter>("all");
+
   /* Comments sheet */
   const [commentsVisible, setCommentsVisible] = useState(false);
   const [activeArticle, setActiveArticle]     = useState<NewsArticle | null>(null);
@@ -146,9 +193,32 @@ export default function NewsScreen() {
   /* ── load AniList data only when switching to those tabs ── */
   useEffect(() => {
     if (tab === "latestnews") return;
+    if (tab === "movies") {
+      if (!moviesLoaded && !moviesLoading) void loadMoviesFeed();
+      return;
+    }
     if (aniLoaded || aniLoading) return;
     loadAniList();
   }, [tab]);
+
+  async function loadMoviesFeed() {
+    setMoviesLoading(true);
+    setMoviesError(false);
+    const data = await fetchMoviesNewsFeed();
+    if (!data || (data.articles.length === 0 && data.upcomingMovies.length === 0 && data.recentMovies.length === 0)) {
+      setMoviesError(true);
+      setMoviesLoading(false);
+      return;
+    }
+    setMovieArticles(data.articles);
+    setUpcomingMovies(data.upcomingMovies);
+    setRecentMovies(data.recentMovies);
+    setMoviesLoaded(true);
+    setMoviesLoading(false);
+    if (data.articles.length > 0) {
+      void fetchCommentCountsBatch(data.articles);
+    }
+  }
 
   function loadAniList() {
     aniAbortRef.current?.abort();
@@ -234,6 +304,7 @@ export default function NewsScreen() {
   ═══════════════════════════════════════ */
   const TABS: { id: Tab; label: string; icon: keyof typeof Ionicons.glyphMap; color: string }[] = [
     { id: "latestnews", label: "آخر الأخبار",      icon: "newspaper",    color: "#06b6d4" },
+    { id: "movies",     label: "أفلام الأنمي",      icon: "film",         color: "#a855f7" },
     { id: "airing",     label: "يُبث الآن",        icon: "radio",        color: "#22c55e" },
     { id: "upcoming",   label: "قريباً",            icon: "time",         color: "#f59e0b" },
     { id: "trending",   label: "تريندنج",           icon: "trending-up",  color: "#ef4444" },
@@ -483,7 +554,147 @@ export default function NewsScreen() {
     </Pressable>
   );
 
-  /* ─── News footer (تحميل المزيد) ─── */
+  /* ─── Anime Movie card ─── */
+  const renderMovieCard = (item: AnimeMovieItem, kind: "upcoming" | "recent") => {
+    const enTitle = item.title?.english || item.title?.romaji || "";
+    const arTitle = getKnownArabicAnimeTitle(item.id, item.title?.english || undefined, item.title?.romaji || undefined);
+    const poster = proxyPosterUrl(item.coverImage?.extraLarge || item.coverImage?.large || "");
+    const isUpcoming = kind === "upcoming" || item.status === "NOT_YET_RELEASED";
+    const badgeBg = isUpcoming ? "rgba(245,158,11,0.15)" : "rgba(168,85,247,0.16)";
+    const badgeBorder = isUpcoming ? "rgba(245,158,11,0.3)" : "rgba(168,85,247,0.32)";
+    const badgeColor = isUpcoming ? "#f59e0b" : "#c084fc";
+    return (
+      <Pressable
+        key={`movie-${kind}-${item.id}`}
+        onPress={() => goAnime(item.id)}
+        focusable={tvMode}
+        style={({ pressed, focused }) => [
+          s.card,
+          { backgroundColor: colors.card, borderColor: colors.border },
+          pressed && { opacity: 0.78 },
+          tvMode && tvFocusStyle(focused),
+        ]}
+      >
+        {poster ? (
+          <Image source={{ uri: poster }} style={s.movieCover} resizeMode="cover" />
+        ) : (
+          <View style={[s.movieCover, s.newsThumbPlaceholder]}>
+            <Ionicons name="film-outline" size={22} color="#a855f7" />
+          </View>
+        )}
+        <View style={s.cardInfo}>
+          <View style={s.tagRow}>
+            <View style={[s.tag, { backgroundColor: badgeBg, borderColor: badgeBorder }]}>
+              <Ionicons name={isUpcoming ? "time-outline" : "film-outline"} size={9} color={badgeColor} />
+              <Text style={[s.tagText, { color: badgeColor }]}>
+                {isUpcoming ? "فيلم قادم" : "فيلم أنمي"}
+              </Text>
+            </View>
+            {item.averageScore ? (
+              <View style={[s.tag, { backgroundColor: "rgba(250,204,21,0.12)", borderColor: "rgba(250,204,21,0.28)" }]}>
+                <Text style={[s.tagText, { color: "#facc15" }]}>⭐ {(item.averageScore / 10).toFixed(1)}</Text>
+              </View>
+            ) : null}
+          </View>
+          <Text
+            style={[
+              s.cardTitle,
+              {
+                color: colors.textPrimary,
+                textAlign: arTitle ? "right" : "left",
+                writingDirection: arTitle ? "rtl" : "ltr",
+              },
+            ]}
+            numberOfLines={2}
+          >
+            {arTitle || enTitle}
+          </Text>
+          {arTitle && enTitle && arTitle.trim() !== enTitle.trim() ? (
+            <Text style={[s.cardSubtitle, { color: colors.textSecondary, textAlign: "right", writingDirection: "ltr" }]} numberOfLines={1}>
+              {enTitle}
+            </Text>
+          ) : null}
+          <View style={s.metaRow}>
+            {item.startDate?.year ? (
+              <>
+                <Ionicons name="calendar-outline" size={11} color={badgeColor} />
+                <Text style={[s.metaText, { color: badgeColor }]}>
+                  {item.startDate.month ? `${MONTHS_AR[item.startDate.month - 1]} ` : ""}{item.startDate.year}
+                </Text>
+              </>
+            ) : null}
+            {item.duration ? (
+              <>
+                {item.startDate?.year ? <Text style={[s.metaSep, { color: colors.textMuted }]}>·</Text> : null}
+                <Text style={[s.metaText, { color: colors.textSecondary }]}>{item.duration} دقيقة</Text>
+              </>
+            ) : null}
+            {item.genres?.[0] ? (
+              <>
+                <Text style={[s.metaSep, { color: colors.textMuted }]}>·</Text>
+                <Text style={[s.metaText, { color: colors.textSecondary }]}>{item.genres[0]}</Text>
+              </>
+            ) : null}
+          </View>
+        </View>
+        <Ionicons name="chevron-back" size={16} color="rgba(255,255,255,0.2)" />
+      </Pressable>
+    );
+  };
+
+  type MoviesListRow =
+    | { kind: "section"; id: string; title: string; icon: keyof typeof Ionicons.glyphMap; color: string; count: number }
+    | { kind: "article"; id: string; article: NewsArticle }
+    | { kind: "movie"; id: string; movie: AnimeMovieItem; movieKind: "upcoming" | "recent" };
+
+  const moviesFeedRows: MoviesListRow[] = [];
+  if (moviesFilter === "all" || moviesFilter === "news") {
+    if (movieArticles.length > 0) {
+      moviesFeedRows.push({
+        kind: "section",
+        id: "sec-movie-news",
+        title: "آخر أخبار أفلام الأنمي",
+        icon: "newspaper-outline",
+        color: "#a855f7",
+        count: movieArticles.length,
+      });
+      for (const art of movieArticles) {
+        moviesFeedRows.push({ kind: "article", id: `art-${art.id}`, article: art });
+      }
+    }
+  }
+  if (moviesFilter === "all" || moviesFilter === "upcoming") {
+    if (upcomingMovies.length > 0) {
+      moviesFeedRows.push({
+        kind: "section",
+        id: "sec-upcoming-movies",
+        title: "أفلام أنمي قادمة قريباً",
+        icon: "time-outline",
+        color: "#f59e0b",
+        count: upcomingMovies.length,
+      });
+      for (const m of upcomingMovies) {
+        moviesFeedRows.push({ kind: "movie", id: `up-${m.id}`, movie: m, movieKind: "upcoming" });
+      }
+    }
+  }
+  if (moviesFilter === "all" || moviesFilter === "recent") {
+    if (recentMovies.length > 0) {
+      moviesFeedRows.push({
+        kind: "section",
+        id: "sec-recent-movies",
+        title: "أحدث وأبرز أفلام الأنمي",
+        icon: "film-outline",
+        color: "#c084fc",
+        count: recentMovies.length,
+      });
+      for (const m of recentMovies) {
+        moviesFeedRows.push({ kind: "movie", id: `rec-${m.id}`, movie: m, movieKind: "recent" });
+      }
+    }
+  }
+
+    /* ─── News footer (تحميل المزيد) ─── */
   const NewsFooter = () => {
     if (!newsLoadingMore) return null;
     return (
@@ -527,24 +738,37 @@ export default function NewsScreen() {
 
       {/* ── Tab selector ── */}
       <View style={s.tabScrollWrap}>
-        <View style={s.tabRow}>
-          {TABS.map(t => (
-            <Pressable
-              key={t.id}
-              onPress={() => setTab(t.id)}
-              style={[s.tabBtn, { backgroundColor: colors.surface, borderColor: colors.border }, tab === t.id && { backgroundColor: colors.button, borderColor: colors.accent }]}
-            >
-              <Ionicons
-                name={t.icon}
-                size={11}
-                color={tab === t.id ? colors.buttonText : colors.textSecondary}
-              />
-              <Text style={[s.tabText, { color: tab === t.id ? colors.buttonText : colors.textSecondary }]}>
-                {t.label}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={s.tabRow}
+        >
+          {TABS.map(t => {
+            const active = tab === t.id;
+            return (
+              <Pressable
+                key={t.id}
+                onPress={() => setTab(t.id)}
+                focusable={tvMode}
+                style={({ focused }) => [
+                  s.tabBtn,
+                  { backgroundColor: colors.surface, borderColor: colors.border },
+                  active && { backgroundColor: t.id === "movies" ? "#a855f7" : colors.button, borderColor: t.id === "movies" ? "#c084fc" : colors.accent },
+                  tvMode && tvFocusStyle(focused),
+                ]}
+              >
+                <Ionicons
+                  name={t.icon}
+                  size={12}
+                  color={active ? "#fff" : t.color}
+                />
+                <Text style={[s.tabText, { color: active ? "#fff" : colors.textSecondary }]}>
+                  {t.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
       </View>
 
       {/* ══ Content ══ */}
@@ -585,8 +809,94 @@ export default function NewsScreen() {
         )
       )}
 
+      {/* ── Anime Movies News & Releases tab ── */}
+      {tab === "movies" && (
+        moviesLoading ? (
+          <View style={s.loading}>
+            <ActivityIndicator size="large" color="#a855f7" />
+            <Text style={[s.loadingText, { color: colors.textSecondary }]}>جاري تحميل أخبار وإصدارات أفلام الأنمي...</Text>
+          </View>
+        ) : moviesError ? (
+          <View style={s.loading}>
+            <Ionicons name="film-outline" size={48} color="rgba(168,85,247,0.35)" />
+            <Text style={[s.errorTitle, { color: colors.textSecondary }]}>تعذّر تحميل قسم أفلام الأنمي</Text>
+            <Text style={[s.loadingText, { color: colors.textSecondary }]}>تحقق من اتصالك بالإنترنت ثم أعد المحاولة</Text>
+            <Pressable onPress={() => void loadMoviesFeed()} style={[s.retryBtn, { borderColor: "rgba(168,85,247,0.35)" }]}>
+              <Ionicons name="refresh" size={14} color="#c084fc" />
+              <Text style={[s.retryText, { color: colors.buttonText }]}>إعادة المحاولة</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <View style={{ flex: 1 }}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={{ flexGrow: 0 }}
+              contentContainerStyle={s.subFilterRow}
+            >
+              {([
+                { id: "all",      label: "الكل" },
+                { id: "news",     label: `أخبار الأفلام (${movieArticles.length})` },
+                { id: "upcoming", label: `قادمة (${upcomingMovies.length})` },
+                { id: "recent",   label: `حديثة (${recentMovies.length})` },
+              ] as { id: MoviesSubFilter; label: string }[]).map((chip) => {
+                const selected = moviesFilter === chip.id;
+                return (
+                  <Pressable
+                    key={chip.id}
+                    onPress={() => setMoviesFilter(chip.id)}
+                    style={[
+                      s.subFilterChip,
+                      { backgroundColor: colors.surface, borderColor: colors.border },
+                      selected && { backgroundColor: "rgba(168,85,247,0.2)", borderColor: "#a855f7" },
+                    ]}
+                  >
+                    <Text style={[s.subFilterText, { color: selected ? "#c084fc" : colors.textSecondary }]}>
+                      {chip.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+            <FlatList
+              key={`movies-${moviesFilter}`}
+              data={moviesFeedRows}
+              keyExtractor={(row) => row.id}
+              removeClippedSubviews={false}
+              contentContainerStyle={s.list}
+              showsVerticalScrollIndicator={false}
+              ListEmptyComponent={
+                <View style={[s.loading, { paddingTop: 60 }]}>
+                  <Ionicons name="film-outline" size={40} color={colors.textMuted} />
+                  <Text style={[s.loadingText, { color: colors.textSecondary }]}>لا توجد عناصر في هذا التصنيف حالياً</Text>
+                </View>
+              }
+              renderItem={({ item: row }) => {
+                if (row.kind === "section") {
+                  return (
+                    <View style={s.sectionHeader}>
+                      <View style={[s.sectionIconBox, { backgroundColor: `${row.color}22`, borderColor: `${row.color}44` }]}>
+                        <Ionicons name={row.icon} size={14} color={row.color} />
+                      </View>
+                      <Text style={[s.sectionTitle, { color: colors.textPrimary }]}>{row.title}</Text>
+                      <View style={[s.sectionCount, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                        <Text style={[s.sectionCountText, { color: colors.textSecondary }]}>{row.count}</Text>
+                      </View>
+                    </View>
+                  );
+                }
+                if (row.kind === "article") {
+                  return renderNewsItem({ item: row.article });
+                }
+                return renderMovieCard(row.movie, row.movieKind);
+              }}
+            />
+          </View>
+        )
+      )}
+
       {/* ── AniList tabs ── */}
-      {tab !== "latestnews" && (
+      {tab !== "latestnews" && tab !== "movies" && (
         aniLoading ? (
           <View style={s.loading}>
             <ActivityIndicator size="large" color={colors.accent} />
@@ -651,14 +961,37 @@ const s = StyleSheet.create({
   headerSub:   { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.35)", marginTop: 1 },
 
   tabScrollWrap: { paddingVertical: 10 },
-  tabRow:  { flexDirection: "row", gap: 7, paddingHorizontal: 12 },
+  tabRow:  { flexDirection: "row", gap: 8, paddingHorizontal: 12, alignItems: "center" },
   tabBtn: {
-    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: 4, paddingVertical: 8, borderRadius: 12,
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 5, paddingHorizontal: 13, paddingVertical: 8, borderRadius: 12,
     backgroundColor: "#18181B",
     borderWidth: 1, borderColor: "rgba(255,255,255,0.06)",
   },
-  tabText: { fontSize: 9, fontFamily: "Cairo_700Bold" },
+  tabText: { fontSize: 11, fontFamily: "Cairo_700Bold" },
+  subFilterRow: { flexDirection: "row", gap: 7, paddingHorizontal: 14, paddingBottom: 10 },
+  subFilterChip: {
+    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20,
+    borderWidth: 1,
+  },
+  subFilterText: { fontSize: 10, fontFamily: "Cairo_700Bold" },
+  sectionHeader: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    marginTop: 6, marginBottom: 2,
+  },
+  sectionIconBox: {
+    width: 26, height: 26, borderRadius: 8, borderWidth: 1,
+    alignItems: "center", justifyContent: "center",
+  },
+  sectionTitle: { flex: 1, fontSize: 13, fontFamily: "Cairo_800ExtraBold" },
+  sectionCount: {
+    paddingHorizontal: 8, paddingVertical: 2, borderRadius: 12, borderWidth: 1,
+  },
+  sectionCountText: { fontSize: 10, fontFamily: "Cairo_700Bold" },
+  movieCover: {
+    width: 60, height: 86, borderRadius: 10,
+    borderWidth: 1, borderColor: "rgba(168,85,247,0.22)",
+  },
 
   loading:     { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
   loadingText: { fontSize: 12, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.35)", textAlign: "center", paddingHorizontal: 24 },

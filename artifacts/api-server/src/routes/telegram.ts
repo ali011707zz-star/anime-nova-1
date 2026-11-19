@@ -79,20 +79,246 @@ async function sendMessage(chatId: number | string, text: string, extra: Record<
   return true;
 }
 
-async function sendChannelPhoto(photoUrl: string, caption: string) {
+interface TelegramPosterHint {
+  anilistId?: number;
+  title?: string;
+  englishTitle?: string;
+  type?: "ANIME" | "MANGA";
+}
+
+const anilistSearchPosterCache = new Map<string, { url: string | null; at: number }>();
+const ANILIST_POSTER_SEARCH_TTL = 6 * 60 * 60 * 1000;
+
+async function searchAniListPosterHD(title: string, type: "ANIME" | "MANGA"): Promise<string | null> {
+  const cleaned = String(title || "")
+    .replace(/\((?:dub|sub|ar|arabic|مدبلج|مترجم)\)/gi, "")
+    .replace(/\s+(?:season|part|cour|الموسم|الجزء)\s*\d+.*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned || cleaned.length < 2) return null;
+  const cacheKey = `${type}:${cleaned.toLowerCase()}`;
+  const cached = anilistSearchPosterCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < ANILIST_POSTER_SEARCH_TTL) return cached.url;
+  try {
+    const res = await fetch("https://graphql.anilist.co", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        Origin: "https://anilist.co",
+        Referer: "https://anilist.co/",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+      },
+      body: JSON.stringify({
+        query: `query ($search: String, $type: MediaType) { Media(search: $search, type: $type) { coverImage { extraLarge large } } }`,
+        variables: { search: cleaned, type },
+      }),
+      signal: AbortSignal.timeout(8_000),
+    });
+    const data = (await res.json().catch(() => ({}))) as any;
+    const img = data?.data?.Media?.coverImage;
+    const url = (img?.extraLarge || img?.large || null) as string | null;
+    anilistSearchPosterCache.set(cacheKey, { url, at: Date.now() });
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+function expandHighResPosterCandidates(rawUrl: string): string[] {
+  const out: string[] = [];
+  const push = (u?: string | null) => {
+    const s = String(u || "").trim();
+    if (!s || !/^https?:\/\//i.test(s)) return;
+    if (!out.includes(s)) out.push(s);
+  };
+  let unwrapped = rawUrl.trim();
+  // Unwrap local VPS proxy URLs to get direct upstream originals
+  try {
+    const u = new URL(unwrapped);
+    if (/\/api\/(?:dubbed\/(?:animezid|carateen|sd2)\/poster|manga\/image)$/i.test(u.pathname)) {
+      const inner = u.searchParams.get("url");
+      if (inner && /^https?:\/\//i.test(inner)) unwrapped = inner.trim();
+    }
+    const localTmdb = u.pathname.match(/\/api\/source-catalog\/tmdb-poster\/(?:w\d+|original)\/([A-Za-z0-9_-]+\.(?:jpe?g|png|webp))$/i);
+    if (localTmdb) {
+      push(`https://image.tmdb.org/t/p/original/${localTmdb[1]}`);
+      push(`https://image.tmdb.org/t/p/w780/${localTmdb[1]}`);
+    }
+  } catch {}
+
+  // Upgrade direct TMDB URLs to full resolution
+  const tmdbDirect = unwrapped.match(/^https?:\/\/image\.tmdb\.org\/t\/p\/(w\d+|original)\/([A-Za-z0-9_-]+\.(?:jpe?g|png|webp))(.*)$/i);
+  if (tmdbDirect) {
+    push(`https://image.tmdb.org/t/p/original/${tmdbDirect[2]}`);
+    push(`https://image.tmdb.org/t/p/w780/${tmdbDirect[2]}`);
+  }
+
+  // Strip WordPress / Madara thumbnail resize suffixes like -193x278.jpg or -300x430.webp
+  const wpStripped = unwrapped.replace(/-\d{2,4}x\d{2,4}(?=\.(?:jpe?g|png|webp)(?:[?#]|$))/i, "");
+  if (wpStripped !== unwrapped) {
+    push(wpStripped);
+  }
+
+  // Upgrade AniList medium/large URLs to extraLarge when possible
+  if (/s4\.anilist\.co\/file\/anilistcdn\/media\/(?:anime|manga)\/cover\/(?:small|medium)\//i.test(unwrapped)) {
+    push(unwrapped.replace(/\/cover\/(?:small|medium)\//i, "/cover/large/"));
+  }
+
+  push(unwrapped);
+  push(rawUrl);
+  return out;
+}
+
+function inferImageReferer(targetUrl: string): string | undefined {
+  try {
+    const host = new URL(targetUrl).hostname.toLowerCase();
+    if (host.includes("mangalik")) return "https://mangalik.net/";
+    if (host.includes("azorafly") || host.includes("azora")) return "https://azorafly.com/";
+    if (host.includes("animezid")) return "https://animezid.org/";
+    if (host.includes("carateen")) return "https://carateen.tv/";
+    if (host.includes("spacetoongo")) return "https://spacetoongo.com/";
+    if (host.includes("stardima")) return "https://watch-79.stardima.com.im/";
+    if (host.includes("anilist")) return "https://anilist.co/";
+    return `https://${host}/`;
+  } catch {
+    return undefined;
+  }
+}
+
+interface DownloadedPoster {
+  buffer: Buffer;
+  contentType: string;
+  url: string;
+  isWebp: boolean;
+}
+
+async function fetchImageCandidate(url: string): Promise<DownloadedPoster | null> {
+  try {
+    const referer = inferImageReferer(url);
+    const headers: Record<string, string> = {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+      Accept: "image/jpeg,image/png,image/webp,image/*,*/*;q=0.8",
+    };
+    if (referer) headers.Referer = referer;
+    const r = await fetch(url, { headers, signal: AbortSignal.timeout(12_000) });
+    if (!r.ok) return null;
+    const ctRaw = (r.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (buf.length < 2_500 || buf.length > 9_500_000) return null;
+    const headStr = buf.subarray(0, 64).toString("utf8").trim().toLowerCase();
+    if (headStr.startsWith("<!doctype") || headStr.startsWith("<html") || ctRaw.includes("text/html")) return null;
+    // Detect magic bytes for JPEG / PNG / WebP
+    const isJpeg = buf[0] === 0xff && buf[1] === 0xd8;
+    const isPng = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+    const isWebp = buf.subarray(0, 4).toString("ascii") === "RIFF" && buf.subarray(8, 12).toString("ascii") === "WEBP";
+    const contentType = isJpeg ? "image/jpeg" : isPng ? "image/png" : isWebp ? "image/webp" : (ctRaw.startsWith("image/") ? ctRaw : "image/jpeg");
+    return { buffer: buf, contentType, url, isWebp };
+  } catch {
+    return null;
+  }
+}
+
+async function resolveHighResPosterForTelegram(
+  photoUrl: string,
+  hint?: TelegramPosterHint,
+): Promise<{ downloaded: DownloadedPoster | null; fallbackUrl: string }> {
+  const candidates: string[] = [];
+  const add = (u?: string | null) => {
+    const s = String(u || "").trim();
+    if (s && /^https?:\/\//i.test(s) && !candidates.includes(s)) candidates.push(s);
+  };
+
+  // For Anime with known AniList ID, prefer AniList extraLarge first
+  if (hint?.anilistId && hint.anilistId > 0) {
+    const aniPoster = await fetchAnimePoster(hint.anilistId);
+    add(aniPoster);
+  }
+
+  for (const c of expandHighResPosterCandidates(photoUrl)) add(c);
+
+  let best: DownloadedPoster | null = null;
+  const pickBetter = (cand: DownloadedPoster | null) => {
+    if (!cand) return;
+    if (!best) { best = cand; return; }
+    // Strongly prefer crisp JPEG/PNG over WebP for Telegram sendPhoto
+    if (best.isWebp && !cand.isWebp && cand.buffer.length >= 25_000) {
+      best = cand;
+      return;
+    }
+    if (!best.isWebp && cand.isWebp && best.buffer.length >= 25_000) return;
+    if (cand.buffer.length > best.buffer.length) best = cand;
+  };
+
+  for (const url of candidates) {
+    const dl = await fetchImageCandidate(url);
+    pickBetter(dl);
+    // Fast-path: already have a crisp non-WebP HD poster (>= 90 KB)
+    if (best && !best.isWebp && best.buffer.length >= 90_000) break;
+  }
+
+  // If image is still small (< 65 KB), missing, or WebP, try AniList extraLarge by title!
+  if ((!best || best.isWebp || best.buffer.length < 65_000) && hint?.type && (hint.title || hint.englishTitle)) {
+    const queries = Array.from(new Set([hint.title, hint.englishTitle].filter(Boolean) as string[]));
+    for (const q of queries) {
+      const aniUrl = await searchAniListPosterHD(q, hint.type);
+      if (aniUrl && !candidates.includes(aniUrl)) {
+        const dl = await fetchImageCandidate(aniUrl);
+        pickBetter(dl);
+        if (best && !best.isWebp && best.buffer.length >= 65_000) break;
+      }
+    }
+  }
+
+  return { downloaded: best, fallbackUrl: best?.url || candidates[0] || photoUrl };
+}
+
+async function sendChannelPhoto(photoUrl: string, caption: string, hint?: TelegramPosterHint) {
   const channelId = process.env.TELEGRAM_CHANNEL_ID;
   const tok = await getToken();
   if (!channelId || !tok) return false;
+
+  const { downloaded, fallbackUrl } = await resolveHighResPosterForTelegram(photoUrl, hint);
+
+  // Primary path: upload HD binary via multipart/form-data (bypasses hotlink Referer & preserves crisp HD!)
+  if (downloaded && !downloaded.isWebp) {
+    try {
+      const ext = downloaded.contentType === "image/png" ? "png" : "jpg";
+      const form = new FormData();
+      form.append("chat_id", channelId);
+      form.append("caption", caption);
+      form.append("parse_mode", "HTML");
+      form.append("photo", new Blob([new Uint8Array(downloaded.buffer)], { type: downloaded.contentType }), `poster.${ext}`);
+
+      const r = await fetch(`https://api.telegram.org/bot${tok}/sendPhoto`, {
+        method: "POST",
+        body: form,
+        signal: AbortSignal.timeout(20_000),
+      });
+      const body = (await r.json().catch(() => ({}))) as any;
+      if (r.ok && body?.ok === true) {
+        console.log(`[telegram] 🖼️ HD photo uploaded (${Math.round(downloaded.buffer.length / 1024)} KB) from ${downloaded.url.slice(0, 80)}`);
+        return true;
+      }
+      console.warn("[telegram] sendChannelPhoto multipart error:", body?.description || r.status);
+    } catch (e: any) {
+      console.warn("[telegram] sendChannelPhoto multipart failed:", e?.message || String(e));
+    }
+  }
+
+  // Fallback path: URL mode (using the highest-res resolved URL)
+  const targetUrl = fallbackUrl || photoUrl;
+  if (!targetUrl) return false;
   const r = await fetch(`https://api.telegram.org/bot${tok}/sendPhoto`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       chat_id: channelId,
-      photo:   photoUrl,
+      photo:   targetUrl,
       caption,
       parse_mode: "HTML",
     }),
-    signal: AbortSignal.timeout(12_000),
+    signal: AbortSignal.timeout(15_000),
   }).catch(() => { console.warn("[telegram] sendChannelPhoto request failed"); return null; });
   if (!r) return false;
   const body = await r.json().catch(() => ({})) as any;
@@ -374,7 +600,7 @@ async function sendTelegramEpisodeOnce(
       return true;
     }
 
-    let sent = poster ? await sendChannelPhoto(poster, caption) : false;
+    let sent = (poster || anilistId > 0) ? await sendChannelPhoto(poster || "", caption, { anilistId, type: "ANIME" }) : false;
     if (!sent) sent = await sendMessage(channelId, caption);
     if (!sent) return false;
 
@@ -733,7 +959,7 @@ async function pollDubbedLatest(): Promise<void> {
 
       const caption = buildDubbedEpisodeCaption(item);
       const poster = typeof item?.cover === "string" && /^https?:\/\//i.test(item.cover) ? item.cover : "";
-      const photoSent = poster ? await sendChannelPhoto(poster, caption) : false;
+      const photoSent = await sendChannelPhoto(poster, caption, { title: String(item?.english || item?.name || ""), englishTitle: String(item?.titleAr || ""), type: "ANIME" });
       const delivered = photoSent || await sendMessage(channelId, caption);
       // سجل الحلقة المدبلجة الجديدة في قائمة أحدث الحلقات (آخر 14 يوماً) حتى تظهر للمستخدمين
       await recordDubbedRecentRelease(item).catch(() => {});
@@ -817,7 +1043,7 @@ async function pollMangaLatest(): Promise<void> {
       const story = await resolveMangaStory(item);
       const caption = buildMangaCaption(item, story);
       const poster = typeof item?.poster === "string" && /^https?:\/\//i.test(item.poster) ? item.poster : "";
-      const photoSent = poster ? await sendChannelPhoto(poster, caption) : false;
+      const photoSent = await sendChannelPhoto(poster, caption, { title: String(item?.title || ""), englishTitle: String(item?.arabicTitle || ""), type: "MANGA" });
       const delivered = photoSent || await sendMessage(channelId, caption);
       if (delivered) {
         await markNotifKeys(keys);
@@ -1163,7 +1389,7 @@ router.post("/api/telegram/notify-test", async (_req: Request, res: Response) =>
   const poster  = await fetchAnimePoster(testAnilistId);
   const caption = buildEpisodeCaption(testTitle, testEp);
 
-  const photoSent = poster ? await sendChannelPhoto(poster, caption) : false;
+  const photoSent = await sendChannelPhoto(poster || "", caption, { anilistId: testAnilistId, type: "ANIME" });
   const sent = photoSent || await sendMessage(channelId, caption);
   if (!sent) {
     res.status(502).json({

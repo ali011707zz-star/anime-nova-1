@@ -30,6 +30,9 @@ export function proxyPosterUrl(raw: unknown): string {
   if (/^https?:\/\/(?:(?:www\.)?carateen\.tv|cdn\.spacetoongo\.com)\//i.test(trimmed)) {
     return `${base}/api/dubbed/carateen/poster?url=${encodeURIComponent(trimmed)}`;
   }
+  if (/^https?:\/\/(?:[a-z0-9-]+\.)*animezid\.org\//i.test(trimmed)) {
+    return `${base}/api/dubbed/animezid/poster?url=${encodeURIComponent(trimmed)}`;
+  }
   return trimmed;
 }
 
