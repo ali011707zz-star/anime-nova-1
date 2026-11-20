@@ -1502,8 +1502,8 @@ function unpackPacked(html: string): string | null {
       if (packed !== null && keywordsStr !== null && Number.isFinite(base) && Number.isFinite(count)) {
         const k = keywordsStr.split("|");
         const toS = (n: number, b: number): string => {
-          const c = "0123456789abcdefghijklmnopqrstuvwxyz";
-          return n < b ? c[n] : toS(Math.floor(n / b), b) + c[n % b];
+          const c = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+          return n < b ? (c[n] ?? "") : toS(Math.floor(n / b), b) + (c[n % b] ?? "");
         };
         let unpacked = packed;
         for (let i = count - 1; i >= 0; i--) {
@@ -2168,8 +2168,8 @@ async function parseShareMaxStreams(
             }
           } catch {}
         } else if (
-          drv === "earnvids" || drv === "vidhide" || drv === "lulustream" || drv === "mixdrop" ||
-          /lulustream|morencius|mixdrop|mxdrop/i.test(link)
+          drv === "lulustream" || drv === "earnvids" || drv === "vidhide" ||
+          /lulustream|lplaygo|morencius|vidhide/i.test(link)
         ) {
           try {
             const r = await fetch(link, {
@@ -2179,10 +2179,11 @@ async function parseShareMaxStreams(
             });
             if (r.ok) {
               const html = await r.text();
-              const vh = parseVidhidePro(html);
-              if (vh) return { url: vh, type: "hls" };
+              const finalOrigin = (() => { try { return new URL(r.url).origin; } catch { return ""; } })();
               const sw = parseStreamwish(html);
               if (sw?.url) return sw;
+              const vh = parseVidhidePro(html, finalOrigin);
+              if (vh) return { url: vh, type: "hls" };
             }
           } catch {}
         }
@@ -2190,6 +2191,125 @@ async function parseShareMaxStreams(
     }
   } catch {}
   return null;
+}
+
+/** Multi-quality extractor for MegaMax / Share4Max (returns 1080p / 720p / 480p direct HLS). */
+async function parseShareMaxMultiStreams(
+  host: string,
+  fileId: string,
+  referer: string,
+): Promise<Array<{ url: string; type: "hls" | "mp4"; quality: string; referer: string }>> {
+  const iframeUrl = `https://${host}/iframe/${fileId}`;
+  const FALLBACK_VERSION = "d98bcc9c79d1c5ff36a86cc41dfcd275";
+  try {
+    const pageRes = await fetch(iframeUrl, {
+      headers: { "User-Agent": BROWSER_UA, Referer: referer, Accept: "text/html" },
+      signal: AbortSignal.timeout(8000),
+      redirect: "follow",
+    });
+    if (!pageRes.ok) return [];
+    const pageHtml = await pageRes.text();
+    if (isCloudflareBlock(pageHtml)) return [];
+    const version = pageHtml.match(/"version"\s*:\s*"([a-f0-9]{20,})"/)?.[1] || FALLBACK_VERSION;
+    const rawCookies = pageRes.headers.getSetCookie?.() ?? [pageRes.headers.get("set-cookie") ?? ""];
+    const cookieStr = rawCookies.map(c => c.split(";")[0]).filter(Boolean).join("; ");
+
+    const reload = await fetch(iframeUrl, {
+      headers: {
+        "User-Agent": BROWSER_UA,
+        "X-Inertia": "true",
+        "X-Inertia-Version": version,
+        "X-Inertia-Partial-Data": "streams",
+        "X-Inertia-Partial-Component": "files/mirror/video",
+        Referer: iframeUrl,
+        Accept: "application/json, text/plain, */*",
+        ...(cookieStr ? { Cookie: cookieStr } : {}),
+      },
+      signal: AbortSignal.timeout(9000),
+    });
+    if (!reload.ok) return [];
+    const data = (await reload.json()) as any;
+    const streams = data?.props?.streams;
+    if (streams?.status !== "success" || !Array.isArray(streams.data) || !streams.data.length) {
+      return [];
+    }
+
+    const normalizeQ = (lbl: string): string => {
+      const l = String(lbl || "").toLowerCase();
+      if (l.includes("1080") || l.includes("fhd")) return "1080p";
+      if (l.includes("720") || l.includes("hd")) return "720p";
+      if (l.includes("480") || l.includes("sd")) return "480p";
+      if (l.includes("360")) return "360p";
+      return "720p";
+    };
+
+    const extractOneQuality = async (qObj: any): Promise<{ url: string; type: "hls" | "mp4"; quality: string; referer: string } | null> => {
+      const quality = normalizeQ(qObj?.label || qObj?.quality || qObj?.name || "");
+      const mirrors: any[] = Array.isArray(qObj?.mirrors) ? qObj.mirrors : [];
+      const scoreMirror = (m: any): number => {
+        const d = String(m?.driver || "").toLowerCase();
+        const l = String(m?.link || "").toLowerCase();
+        if (d === "earnvids" || d === "vidhide" || l.includes("morencius")) return 100;
+        if (d === "ok" || l.includes("ok.ru")) return 90;
+        if (d === "streamhg" || l.includes("streamwish")) return 80;
+        if (d === "streamtape") return 60;
+        if (d === "lulustream" || l.includes("lulustream") || l.includes("lplaygo")) return 40;
+        return 0;
+      };
+      const sorted = mirrors
+        .filter(m => scoreMirror(m) > 0)
+        .sort((a, b) => scoreMirror(b) - scoreMirror(a));
+
+      for (const mirror of sorted) {
+        let link: string = mirror.link ?? "";
+        if (link.startsWith("//")) link = "https:" + link;
+        if (!link.startsWith("http")) continue;
+        const drv = String(mirror.driver || "").toLowerCase();
+        try {
+          if (drv === "ok" || link.includes("ok.ru/videoembed/")) {
+            const okm = link.match(/\/videoembed\/(\d+)/);
+            if (okm) {
+              const vids = await extractOkRuVideo(okm[1]);
+              const hlsSrc = vids.find((v: any) => v.type === "hls" && v.url);
+              if (hlsSrc) return { url: hlsSrc.url, type: "hls", quality, referer: "https://ok.ru/" };
+            }
+          } else {
+            const r = await fetch(link, {
+              headers: { "User-Agent": BROWSER_UA, Referer: iframeUrl },
+              signal: AbortSignal.timeout(6500),
+              redirect: "follow",
+            });
+            if (!r.ok) continue;
+            const html = await r.text();
+            const finalOrigin = (() => { try { return new URL(r.url).origin; } catch { return ""; } })();
+            if (drv === "streamtape") {
+              const st = parseStreamtape(html);
+              if (st?.url) return { url: st.url, type: st.type, quality, referer: finalOrigin ? `${finalOrigin}/` : iframeUrl };
+            } else {
+              const sw = parseStreamwish(html);
+              if (sw?.url) return { url: sw.url, type: sw.type, quality, referer: finalOrigin ? `${finalOrigin}/` : iframeUrl };
+              const vh = parseVidhidePro(html, finalOrigin);
+              if (vh) return { url: vh, type: "hls", quality, referer: finalOrigin ? `${finalOrigin}/` : iframeUrl };
+            }
+          }
+        } catch {}
+      }
+      return null;
+    };
+
+    const settled = await Promise.allSettled(streams.data.slice(0, 4).map(extractOneQuality));
+    const out: Array<{ url: string; type: "hls" | "mp4"; quality: string; referer: string }> = [];
+    const seenQ = new Set<string>();
+    for (const r of settled) {
+      if (r.status === "fulfilled" && r.value && !seenQ.has(r.value.quality)) {
+        seenQ.add(r.value.quality);
+        out.push(r.value);
+      }
+    }
+    return out;
+  } catch {
+    return [];
+  }
 }
 
 function extractIframeSrc(html: string, baseUrl: string): string | null {
@@ -2284,33 +2404,36 @@ async function parseVidHls(
 // ────── VIDHIDEPRO / FILELIONS CDN ──────────────────────────────────
 // vidhidepro.com (FileLions) uses packed JS with var links={hls4,hls2,hls3}
 // hls4 is a relative /stream/... URL that follows redirects to callistanise.com CDN
-function parseVidhidePro(html: string): string | null {
-  // Enhanced packed-JS regex that handles escaped single-quotes inside the encoded string
-  const re = /eval\(function\(p,a,c,k,e,?d?\)\{[^}]+\}\('((?:[^'\\]|\\[\s\S])*)',\s*(\d+)\s*,\s*(\d+)\s*,\s*'((?:[^'\\]|\\[\s\S])*)'\s*\.split\('\|'\)/;
-  const m = html.match(re);
-  if (!m) return null;
+function parseVidhidePro(html: string, pageOrigin?: string): string | null {
   try {
-    const packed = m[1].replace(/\\'/g, "'");
-    const base   = parseInt(m[2]);
-    const count  = parseInt(m[3]);
-    const k      = m[4].replace(/\\'/g, "'").split("|");
-    const toS = (n: number, b: number): string => {
-      const chars = "0123456789abcdefghijklmnopqrstuvwxyz";
-      return n < b ? chars[n] : toS(Math.floor(n / b), b) + chars[n % b];
-    };
-    let unpacked = packed;
-    for (let i = count - 1; i >= 0; i--) {
-      if (k[i]) unpacked = unpacked.replace(new RegExp("\\b" + toS(i, base) + "\\b", "g"), k[i]);
+    let unpacked: string | null = null;
+    const re = /eval\(function\(p,a,c,k,e,?d?\)\{[\s\S]*?\}\('((?:[^'\\]|\\[\s\S])*)',\s*(\d+)\s*,\s*(\d+)\s*,\s*'((?:[^'\\]|\\[\s\S])*)'\s*\.split\('\|'\)/;
+    const m = html.match(re);
+    if (m) {
+      const packed = m[1].replace(/\\'/g, "'");
+      const base   = parseInt(m[2], 10);
+      const count  = parseInt(m[3], 10);
+      const k      = m[4].replace(/\\'/g, "'").split("|");
+      const toS = (n: number, b: number): string => {
+        const chars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        return n < b ? (chars[n] ?? "") : toS(Math.floor(n / b), b) + (chars[n % b] ?? "");
+      };
+      unpacked = packed;
+      for (let i = count - 1; i >= 0; i--) {
+        if (k[i]) unpacked = unpacked.replace(new RegExp("\\b" + toS(i, base) + "\\b", "g"), k[i]);
+      }
+    } else {
+      unpacked = unpackPacked(html);
     }
+    if (!unpacked) return null;
     // Extract var links={hls4:"/stream/...", hls2:"https://...m3u8?..."}
     const linksM = unpacked.match(/var\s+links\s*=\s*\{([^}]+)\}/);
     if (linksM) {
       const ls = linksM[1];
-      // hls4 is a stable relative URL (CDN redirects: vidhidepro→vidhidefast→callistanise)
-      const hls4M = ls.match(/"hls4"\s*:\s*"(\/[^"]+)"/);
       const hls2M = ls.match(/"hls2"\s*:\s*"(https?:\/\/[^"]+\.m3u8[^"]*)"/);
-      if (hls4M) return `https://vidhidepro.com${hls4M[1]}`;
+      const hls4M = ls.match(/"hls4"\s*:\s*"(\/[^"]+)"/);
       if (hls2M) return hls2M[1];
+      if (hls4M) return `${pageOrigin || "https://vidhidepro.com"}${hls4M[1]}`;
     }
     // Fallback: generic parseVideoUrl on the unpacked content
     return parseVideoUrl(unpacked)?.url ?? null;
@@ -5580,7 +5703,7 @@ async function getAnime4up2HardsubSources(
   ep: number,
   availabilityOnly = false,
 ): Promise<UnifiedSource[]> {
-  const ck = `a4up2hard:${(title + "|" + (english ?? "")).toLowerCase()}:${ep}`;
+  const ck = `a4up2hard:${(title + "|" + (english ?? "")).toLowerCase()}:${ep}:${availabilityOnly ? "chk" : "play"}`;
   const hit = a4up2HardSrcCache.get(ck);
   if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
 
@@ -5618,7 +5741,36 @@ async function getAnime4up2HardsubSources(
     const html = await a4up2Fetch(epUrl, availabilityOnly ? 3800 : 4800);
     if (!html || isCloudflareBlock(html)) return null;
     const srcs = parseHardsubDataWatch(html);
-    return srcs.length ? srcs : null;
+    if (!srcs.length) return null;
+    if (availabilityOnly) return srcs;
+
+    // Playback mode: extract direct 1080p/720p/480p hardsubbed HLS from MegaMax/Share4Max first
+    const megaEntry = srcs.find(s => /(?:megamax\.me|share4max\.com)\/iframe\//i.test(s.url));
+    if (megaEntry) {
+      const hm = megaEntry.url.match(/\/iframe\/([^/?#]+)/);
+      if (hm) {
+        let hn = "megamax.me";
+        try { hn = new URL(megaEntry.url).hostname; } catch {}
+        const directStreams = await parseShareMaxMultiStreams(hn, hm[1], epUrl);
+        if (directStreams.length > 0) {
+          const qRank = (q: string) => q === "1080p" ? 10 : q === "720p" ? 8 : q === "480p" ? 6 : 4;
+          return directStreams.map((ds): UnifiedSource => ({
+            name: `أنمي فور أب (مدمج) · ${ds.quality}`,
+            url: megaEntry.url,
+            directUrl: ds.type === "hls"
+              ? `/api/anime/hls-proxy?url=${encodeURIComponent(ds.url)}&ref=${encodeURIComponent(ds.referer)}`
+              : ds.url,
+            directType: ds.type,
+            isEmbed: false,
+            referer: ds.referer,
+            quality: ds.quality,
+            qualityRank: qRank(ds.quality),
+            site: "anime4up2_hard",
+          }));
+        }
+      }
+    }
+    return srcs;
   }
 
   const searchPromise = searchAnime4up2(title, english);
@@ -15537,9 +15689,12 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
         break;
       }
       case "anime4up2_hard": {
-        const a4uHardRaw = await race(getAnime4up2HardsubSources(title, english, ep, false), 9_000, []);
-        if (a4uHardRaw.length) {
-          await runExtract(a4uHardRaw);
+        const a4uHardRaw = await race(getAnime4up2HardsubSources(title, english, ep, false), 14_000, []);
+        const a4uHardDirect = a4uHardRaw.filter(s => Boolean(s.directUrl && !s.isEmbed));
+        const a4uHardEmbeds = a4uHardRaw.filter(s => !s.directUrl || s.isEmbed);
+        a4uHardDirect.forEach(collectSrc);
+        if (!a4uHardDirect.length && a4uHardEmbeds.length) {
+          await runExtract(a4uHardEmbeds);
           for (let i = sources.length - 1; i >= 0; i--) {
             if (sources[i].site === "anime4up2_hard" && (sources[i].isEmbed || /mega\.nz|mega\.co\.nz|mp4upload/i.test(sources[i].directUrl || sources[i].url))) {
               sources.splice(i, 1);
