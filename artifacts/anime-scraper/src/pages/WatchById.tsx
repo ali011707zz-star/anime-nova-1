@@ -10,7 +10,13 @@ export default function WatchById() {
 
   useEffect(() => {
     if (params.id) {
-      navigate(`/watch?anime=${params.id}&ep=1`, { replace: true });
+      const sp = new URLSearchParams(window.location.search);
+      const ep = Math.max(1, parseInt(sp.get('ep') || '1', 10) || 1);
+      sp.set('anime', params.id);
+      if (!sp.get('anilistId')) sp.set('anilistId', params.id);
+      sp.set('ep', String(ep));
+      if (!sp.get('totalEps')) sp.set('totalEps', String(ep));
+      navigate(`/watch?${sp.toString()}`, { replace: true });
     } else {
       navigate('/', { replace: true });
     }

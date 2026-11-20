@@ -52,38 +52,63 @@ type TelegramInlineMarkup = {
   inline_keyboard: Array<Array<{ text: string; url: string }>>;
 };
 
-function buildEpisodeWatchUrl(anilistId: number, ep: number): string {
+type EpisodeWatchMeta = {
+  romaji?: string;
+  english?: string;
+  anslayerId?: number;
+  site?: string;
+  cover?: string;
+};
+
+function buildEpisodeWatchUrl(anilistId: number, ep: number, meta?: EpisodeWatchMeta): string {
   const base = SITE_URL.replace(/\/+$/, "");
   if (Number.isFinite(anilistId) && anilistId > 0) {
-    return `${base}/watch/${anilistId}?ep=${Math.max(1, ep)}`;
+    const safeEp = Math.max(1, ep);
+    const qs = new URLSearchParams({
+      anime: String(anilistId),
+      anilistId: String(anilistId),
+      ep: String(safeEp),
+      totalEps: String(safeEp),
+      fromLatest: "1",
+    });
+    if (meta?.anslayerId && meta.anslayerId > 0) qs.set("anslayerId", String(meta.anslayerId));
+    const titleVal = (meta?.romaji || meta?.english || "").trim();
+    const engVal = (meta?.english || "").trim();
+    if (titleVal) qs.set("title", titleVal);
+    if (engVal) qs.set("english", engVal);
+    if (meta?.site) qs.set("site", meta.site);
+    return `${base}/watch?${qs.toString()}`;
   }
   return base;
 }
 
-function buildEpisodeMarkup(anilistId: number, ep: number): TelegramInlineMarkup {
+function buildEpisodeMarkup(anilistId: number, ep: number, meta?: EpisodeWatchMeta): TelegramInlineMarkup {
   return {
     inline_keyboard: [
       [
-        { text: "▶️ شاهد الحلقة الآن", url: buildEpisodeWatchUrl(anilistId, ep) },
+        { text: "▶️ شاهد الحلقة الآن", url: buildEpisodeWatchUrl(anilistId, ep, meta) },
         { text: "📲 تحميل التطبيق", url: APK_DOWNLOAD_URL },
       ],
     ],
   };
 }
 
-function buildEpisodeCaption(title: string, ep: number, anilistId = 0): string {
-  const watchUrl = buildEpisodeWatchUrl(anilistId, ep);
+function buildEpisodeCaption(title: string, ep: number, anilistId = 0, meta?: EpisodeWatchMeta): string {
+  const watchUrl = buildEpisodeWatchUrl(anilistId, ep, {
+    ...meta,
+    romaji: meta?.romaji || title,
+    english: meta?.english || title,
+  });
   return [
     `🍿 <b>حان وقت المتعة! حلقة جديدة من أنميك المفضل أصبحت متاحة الآن على نوفا 🔥</b>`,
     ``,
     `🎬 <b>${escapeTelegramHtml(title)}</b>`,
     `🎞️ <b>الحلقة ${escapeTelegramHtml(ep)}</b> · مترجمة بأعلى جودة وبدون إعلانات`,
     ``,
-    `▶️ <b>شاهد الحلقة مباشرة:</b>`,
-    `🔗 ${watchUrl}`,
+    `▶️ <b>شاهد الحلقة مباشرة:</b> <a href="${escapeTelegramHtml(watchUrl)}">اضغط هنا لفتح الحلقة ${escapeTelegramHtml(ep)}</a>`,
     ``,
     `━━━━━━━━━━━━━━━`,
-    `📱 <b>تطبيق الهاتف (APK):</b> ${APK_DOWNLOAD_URL}`,
+    `📱 <b>تطبيق الهاتف (APK):</b> <a href="${APK_DOWNLOAD_URL}">تحميل مباشر</a>`,
     `📺 <b>كود التلفاز (Downloader):</b> <code>${TV_DOWNLOADER_CODE}</code>`,
   ].join("\n");
 }
@@ -396,6 +421,7 @@ export async function notifyNewEpisode(
   title: string,
   ep: number,
   posterUrl?: string,
+  meta?: EpisodeWatchMeta,
 ): Promise<boolean> {
   const key = `${anilistId}:${ep}`;
   if (notifiedEpisodes.has(key)) return true;
@@ -403,7 +429,7 @@ export async function notifyNewEpisode(
   if (existingFlight) return existingFlight;
 
   const flight = Promise.resolve().then(() =>
-    deliverNewEpisodeNotification(anilistId, title, ep, posterUrl),
+    deliverNewEpisodeNotification(anilistId, title, ep, posterUrl, meta),
   );
   episodeNotificationFlights.set(key, flight);
   try {
@@ -420,6 +446,7 @@ async function deliverNewEpisodeNotification(
   title: string,
   ep: number,
   posterUrl?: string,
+  meta?: EpisodeWatchMeta,
 ): Promise<boolean> {
   const key = `${anilistId}:${ep}`;
   if (await wasNotified(anilistId, ep)) {
@@ -438,7 +465,7 @@ async function deliverNewEpisodeNotification(
     title,
     body: `الحلقة ${ep} متاحة الآن`,
     image_url: poster ?? undefined,
-    link_path: `/watch?id=${anilistId}&ep=${ep}`,
+    link_path: `/watch?anime=${anilistId}&anilistId=${anilistId}&ep=${ep}&totalEps=${ep}&title=${encodeURIComponent(meta?.romaji || title)}&english=${encodeURIComponent(meta?.english || title)}&fromLatest=1`,
     anime_id: anilistId,
     episode_num: ep,
   }).catch(() => {});
@@ -455,11 +482,18 @@ async function deliverNewEpisodeNotification(
 
   const channelId = process.env.TELEGRAM_CHANNEL_ID;
   const tok = await getToken();
-  const caption = buildEpisodeCaption(title, ep, anilistId);
+  const watchMeta: EpisodeWatchMeta = {
+    romaji: meta?.romaji || title,
+    english: meta?.english || title,
+    anslayerId: meta?.anslayerId,
+    site: meta?.site,
+    cover: poster || meta?.cover,
+  };
+  const caption = buildEpisodeCaption(title, ep, anilistId, watchMeta);
 
   let telegramSent = true;
   if (channelId && tok) {
-    telegramSent = await sendTelegramEpisodeOnce(anilistId, ep, caption, poster || undefined);
+    telegramSent = await sendTelegramEpisodeOnce(anilistId, ep, caption, poster || undefined, watchMeta);
   }
 
   // Decoupled delivery: Telegram should succeed even if no mobile push tokens are registered yet,
@@ -612,6 +646,7 @@ async function sendTelegramEpisodeOnce(
   ep: number,
   caption: string,
   poster?: string,
+  meta?: EpisodeWatchMeta,
 ): Promise<boolean> {
   const channelId = process.env.TELEGRAM_CHANNEL_ID;
   if (!channelId || !(await getToken())) return true;
@@ -630,7 +665,7 @@ async function sendTelegramEpisodeOnce(
       return true;
     }
 
-    const epMarkup = buildEpisodeMarkup(anilistId, ep);
+    const epMarkup = buildEpisodeMarkup(anilistId, ep, meta);
     let sent = (poster || anilistId > 0) ? await sendChannelPhoto(poster || "", caption, { anilistId, type: "ANIME" }, epMarkup) : false;
     if (!sent) sent = await sendMessage(channelId, caption, { reply_markup: epMarkup });
     if (!sent) return false;
@@ -791,7 +826,13 @@ async function pollAnimeSlayerDirect(): Promise<void> {
       console.log(`[scheduler] 🎯 حلقة جديدة في أحدث الحلقات (#${idx + 1}): ${name} ح${ep}`);
 
       try {
-        if (await notifyNewEpisode(primaryId, name, ep, cover || undefined)) {
+        if (await notifyNewEpisode(primaryId, name, ep, cover || undefined, {
+          romaji: item.romaji || item.name || name,
+          english: item.english || item.name || name,
+          anslayerId: anslayerId || undefined,
+          site: item.source || undefined,
+          cover: cover || undefined,
+        })) {
           sent++;
           schedulerSentToday++;
           await markNotified(primaryId, ep, anslayerId !== primaryId ? anslayerId : undefined, titles);
@@ -887,7 +928,7 @@ function buildDubbedEpisodeCaption(item: any): string {
     epLine,
     ``,
     `━━━━━━━━━━━━━━━`,
-    `📱 <b>تطبيق الهاتف (APK):</b> ${APK_DOWNLOAD_URL}`,
+    `📱 <b>تطبيق الهاتف (APK):</b> <a href="${APK_DOWNLOAD_URL}">تحميل مباشر</a>`,
     `📺 <b>كود التلفاز (Downloader):</b> <code>${TV_DOWNLOADER_CODE}</code>`,
     `🌐 <b>الموقع:</b> ${SITE_URL}`,
   ].join("\n");
@@ -936,7 +977,7 @@ function buildMangaCaption(item: any, story: string): string {
   lines.push(``);
   lines.push(`🔒 <b>حصرياً داخل تطبيق Anime NOVA</b> (يدعم التحميل والقراءة أوفلاين!)`);
   lines.push(`━━━━━━━━━━━━━━━`);
-  lines.push(`📱 <b>حمّل التطبيق الآن:</b> ${APK_DOWNLOAD_URL}`);
+  lines.push(`📱 <b>حمّل التطبيق الآن:</b> <a href="${APK_DOWNLOAD_URL}">تحميل مباشر (APK)</a>`);
   lines.push(`📺 <b>كود التلفاز (Downloader):</b> <code>${TV_DOWNLOADER_CODE}</code>`);
   return lines.join("\n");
 }
@@ -1209,7 +1250,7 @@ function buildNewsCaption(article: any): string {
     "",
     "💬 <i>شاركنا رأيك وتابع بقية الأخبار والتفاصيل داخل تطبيق Anime NOVA!</i>",
     "━━━━━━━━━━━━━━━",
-    `📱 <b>تحميل التطبيق:</b> ${APK_DOWNLOAD_URL}`,
+    `📱 <b>تحميل التطبيق:</b> <a href="${APK_DOWNLOAD_URL}">تحميل مباشر (APK)</a>`,
     `📺 <b>كود التلفاز (Downloader):</b> <code>${TV_DOWNLOADER_CODE}</code>`,
   );
   return lines.join("\n");

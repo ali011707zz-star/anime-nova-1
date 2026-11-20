@@ -543,6 +543,61 @@ export async function createApp(): Promise<Express> {
     }
   };
 
+  // Smart redirect for /watch/:id?ep=N (fixes legacy / Telegram direct links so Watch opens the exact episode & title!)
+  const watchMetaCache = new Map<number, { romaji: string; english: string; cover: string; at: number }>();
+  app.get("/watch/:id", async (req, res, next) => {
+    const id = parseInt(String(req.params.id || ""), 10);
+    if (!Number.isFinite(id) || id <= 0) return next();
+    const ep = Math.max(1, parseInt(String(req.query.ep || "1"), 10) || 1);
+    const params = new URLSearchParams();
+    for (const [k, v] of Object.entries(req.query || {})) {
+      if (typeof v === "string" && v.trim()) params.set(k, v);
+    }
+    params.set("anime", String(id));
+    params.set("anilistId", String(id));
+    params.set("ep", String(ep));
+    if (!params.get("totalEps")) params.set("totalEps", String(ep));
+    params.set("fromLatest", "1");
+
+    if (!params.get("title") || !params.get("english")) {
+      let meta = watchMetaCache.get(id);
+      if (!meta || Date.now() - meta.at > 6 * 3600_000) {
+        try {
+          const r = await fetch("https://graphql.anilist.co", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            body: JSON.stringify({
+              query: "query($id:Int){Media(id:$id,type:ANIME){title{romaji english}coverImage{large}}}",
+              variables: { id },
+            }),
+            signal: AbortSignal.timeout(3_500),
+          });
+          if (r.ok) {
+            const j: any = await r.json();
+            const m = j?.data?.Media;
+            if (m) {
+              meta = {
+                romaji: String(m.title?.romaji || m.title?.english || "").trim(),
+                english: String(m.title?.english || m.title?.romaji || "").trim(),
+                cover: String(m.coverImage?.large || "").trim(),
+                at: Date.now(),
+              };
+              watchMetaCache.set(id, meta);
+            }
+          }
+        } catch {}
+      }
+      if (meta) {
+        if (!params.get("title") && (meta.romaji || meta.english)) params.set("title", meta.romaji || meta.english);
+        if (!params.get("english") && meta.english) params.set("english", meta.english);
+        if (!params.get("cover") && meta.cover) params.set("cover", meta.cover);
+      }
+    }
+
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    res.redirect(302, `/watch?${params.toString()}`);
+  });
+
   // Serve static files except index.html so "/" also goes through renderSeoHtml with no-cache
   app.use(express.static(frontendDist, { maxAge: 0, etag: true, index: false }));
 
