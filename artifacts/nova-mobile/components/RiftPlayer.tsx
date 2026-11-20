@@ -213,6 +213,7 @@ const SUBTITLE_DISABLED_SITES = new Set([
   "animewitcher", "aw",
   "sanime", "sa",
   "anifox", "fx",
+  "anime4up2_hard", "ad 1", "ad1",
   "anslayer", "as",
   "stardima_catalog",
 ]);

@@ -223,7 +223,7 @@ const CURATED_IDS: Record<number, string> = {
   150672: "أوشي نو كو (نجمتي المفضلة)",
   166531: "أوشي نو كو الموسم 2",
   163134: "كاسر الرياح (ويند بريكر)",
-  171627: "أيام ساكاموتو",
+  171627: "رجل المنشار الفيلم: آرك ريزي",
   163132: "أيام ساكاموتو",
   170942: "الصندوق الأزرق",
   163270: "الصندوق الأزرق",
@@ -724,9 +724,84 @@ function persistResolvedTitle(
     else dbCache.anilist.set(sourceId, titleAr);
   }
   pool.query(
-    "INSERT INTO anime_meta_ar (source_id, source_type, title_ar, overview_ar, updated_at) VALUES ($1, $2, $3, $4, NOW()) ON CONFLICT (source_id, source_type) DO NOTHING",
+    "INSERT INTO anime_meta_ar (source_id, source_type, title_ar, overview_ar, updated_at) VALUES ($1, $2, $3, $4, NOW()) ON CONFLICT (source_id, source_type) DO UPDATE SET title_ar = EXCLUDED.title_ar, overview_ar = COALESCE(EXCLUDED.overview_ar, anime_meta_ar.overview_ar), updated_at = NOW()",
     [String(sourceId), sourceType, titleAr.trim(), cleanTitleKey(englishKey) || null],
   ).catch(() => {});
+}
+
+function isPoisonedArabicTitle(arTitle: string | null | undefined, english?: string | null): boolean {
+  const t = String(arTitle || "").trim();
+  if (!t) return true;
+  // Mixed Latin words inside Arabic title (broken half-transliteration like "سيكاي سايكيو نو Majo")
+  if (/[a-zA-Z]{2,}/.test(t)) return true;
+  // Obvious Japanese Romaji transliterated into Arabic when a real English title is available
+  if (english && english.trim().length >= 3) {
+    if (/(?:^|\s)(?:سورو|ديشيتا|ديسو|شيتارا|ماجوتسوشي|تسويهو|ساريتا|هاجيميماشيتا|كيماما|سوبيرو|توكوبيتسو|أرايورو|هيتوتاتشي|دايجوبو|سيكاي|بيسكوي|جوهيكي|كيكانشا|تشيات)(?:\s|$)/.test(t)) {
+      return true;
+    }
+    const jpParticles = (t.match(/(?:^|\s)(?:نو|وا|غا|ني|دي|و)(?:\s|$)/g) || []).length;
+    if (jpParticles >= 2) return true;
+  }
+  return false;
+}
+
+function polishArabicAnimeTitle(ar: string, sourceEn?: string | null): string {
+  let out = String(ar || "")
+    .replace(/[​-‏﻿]/g, "")
+    .replace(/[«»"""]/g, "")
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!out) return "";
+  const enLower = String(sourceEn || "").toLowerCase();
+  // Anime-specific fixes for common literal Google Translate mistakes
+  out = out
+    .replace(/تلوين شين تشان/g, "كرايون شين تشان")
+    .replace(/سيد الشيطان/g, "ملك الشياطين")
+    .replace(/سيد الشياطين/g, "ملك الشياطين")
+    .replace(/أسياد الشياطين/g, "ملوك الشياطين")
+    .replace(/قطعة واحدة/g, "ون بيس")
+    .replace(/تسوية منفردة/g, "سولو ليفلينغ")
+    .replace(/الوحل/g, enLower.includes("slime") ? "السلايم" : "الوحل")
+    .replace(/قزم الأميرة/g, "أميرة الإلف")
+    .replace(/القزم(?=$|\s)/g, enLower.includes("elf") ? "الإلف" : "القزم")
+    .replace(/قزم(?=$|\s)/g, enLower.includes("elf") ? "إلف" : "قزم")
+    .replace(/المستوى الأعلى/g, enLower.includes("level") ? "الارتقاء بالمستوى" : "المستوى الأعلى")
+    .replace(/\s*:\s*/g, ": ")
+    .replace(/\s+/g, " ")
+    .trim();
+  // Clean remaining stray Latin tokens gracefully
+  out = out.replace(/[a-zA-Z]{2,}/g, (m) => transliterateRomajiTitle(m)).replace(/\s+/g, " ").trim();
+  return out;
+}
+
+function stripTitleNoise(raw: string): string {
+  return String(raw || "")
+    .replace(/\(\d{4}\)/g, "")
+    .replace(/\(TV\)/gi, "")
+    .replace(/\b(?:the\s*final\s*season|final\s*season|season\s*\d+|\d+(?:st|nd|rd|th)\s*season|part\s*\d+|cour\s*\d+|the\s*movie|movie|ova|ona)\b/gi, "")
+    .replace(/[:\-–—]+\s*$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function tmdbResultMatchesQuery(hit: any, coreTitle: string): boolean {
+  const tokenize = (s: string) =>
+    String(s || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter((w) => w.length >= 3 && !/^(the|and|for|with|from|into|that|this|season|movie|part|arc)$/.test(w));
+  const qTokens = tokenize(coreTitle);
+  if (!qTokens.length) return true;
+  const candText = [hit?.original_name, hit?.name, hit?.original_title, hit?.title].filter(Boolean).join(" ");
+  const cTokens = new Set(tokenize(candText));
+  if (!cTokens.size) return false;
+  let matched = 0;
+  for (const qt of qTokens) {
+    if (cTokens.has(qt)) matched++;
+  }
+  return matched / qTokens.length >= 0.45;
 }
 
 async function fetchTmdbArabicTitle(coreTitle: string, isMovie: boolean): Promise<string | null> {
@@ -739,10 +814,12 @@ async function fetchTmdbArabicTitle(coreTitle: string, isMovie: boolean): Promis
     );
     if (!r.ok) return null;
     const d: any = await r.json();
-    const hit = (d.results || []).find((x: any) => Array.isArray(x.genre_ids) && x.genre_ids.includes(16));
+    const hit = (d.results || []).find(
+      (x: any) => Array.isArray(x.genre_ids) && x.genre_ids.includes(16) && tmdbResultMatchesQuery(x, coreTitle),
+    );
     if (!hit) return null;
     const name = String(hit.name || hit.title || "").trim();
-    if (isArabicTitle(name)) return name;
+    if (isArabicTitle(name) && !isPoisonedArabicTitle(name)) return name;
     const trRes = await fetch(
       `https://api.themoviedb.org/3/${endpoint}/${hit.id}/translations?api_key=${TMDB_API_KEY}`,
       { signal: AbortSignal.timeout(2200) },
@@ -750,7 +827,7 @@ async function fetchTmdbArabicTitle(coreTitle: string, isMovie: boolean): Promis
     if (trRes.ok) {
       const trData: any = await trRes.json();
       const arTr = (trData.translations || []).find(
-        (t: any) => t.iso_639_1 === "ar" && isArabicTitle(t.data?.name || t.data?.title),
+        (t: any) => t.iso_639_1 === "ar" && isArabicTitle(t.data?.name || t.data?.title) && !isPoisonedArabicTitle(t.data?.name || t.data?.title),
       );
       if (arTr) return String(arTr.data.name || arTr.data.title).trim();
     }
@@ -758,24 +835,38 @@ async function fetchTmdbArabicTitle(coreTitle: string, isMovie: boolean): Promis
   return null;
 }
 
+async function translateTitlesBatch(items: Array<{ core: string; english?: string | null }>): Promise<Array<string | null>> {
+  if (!items.length) return [];
+  try {
+    const body = new URLSearchParams();
+    for (const it of items) body.append("q", it.core);
+    const r = await fetch("https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=en&tl=ar", {
+      method: "POST",
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Content-Type": "application/x-www-form-urlencoded;charset=utf-8",
+      },
+      body: body.toString(),
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!r.ok) return items.map(() => null);
+    const d: any = await r.json();
+    const arr: any[] = Array.isArray(d) ? d : [];
+    return items.map((it, idx) => {
+      const entry = arr[idx];
+      const raw = typeof entry === "string" ? entry : (Array.isArray(entry) ? entry[0] : "");
+      const polished = polishArabicAnimeTitle(String(raw || ""), it.english || it.core);
+      return isArabicTitle(polished) && !isPoisonedArabicTitle(polished, it.english) ? polished : null;
+    });
+  } catch {
+    return items.map(() => null);
+  }
+}
+
 async function translateDescriptiveEnglish(coreTitle: string): Promise<string | null> {
   if (!coreTitle) return null;
-  try {
-    const url = "https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=en&tl=ar&q=" + encodeURIComponent(coreTitle);
-    const r = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0" },
-      signal: AbortSignal.timeout(2200),
-    });
-    if (!r.ok) return null;
-    const d: any = await r.json();
-    const raw = Array.isArray(d) ? (typeof d[0] === "string" ? d[0] : (Array.isArray(d[0]) ? d[0][0] : "")) : "";
-    let ar = String(raw || "").trim();
-    if (!ar) return null;
-    ar = ar.replace(/[a-zA-Z]{2,}/g, (m) => transliterateRomajiTitle(m)).replace(/\s+/g, " ").trim();
-    return isArabicTitle(ar) ? ar : null;
-  } catch {
-    return null;
-  }
+  const [single] = await translateTitlesBatch([{ core: coreTitle, english: coreTitle }]);
+  return single || null;
 }
 
 function isMangaLike(input: ResolveArabicInput): boolean {
@@ -796,9 +887,18 @@ function resolveFromMemorySync(input: ResolveArabicInput, cache: DbCacheState): 
   const arSyn = Array.isArray(input.synonyms) ? input.synonyms.find((s) => isArabicTitle(s)) : null;
   if (arSyn) return arSyn.trim();
 
-  if (aniId && cache.anilist.has(aniId)) return cache.anilist.get(aniId)!;
-  if (aniId && curatedJsonMap.has(aniId)) return curatedJsonMap.get(aniId)!;
-  if (malId && cache.mal.has(malId)) return cache.mal.get(malId)!;
+  if (aniId && cache.anilist.has(aniId)) {
+    const cachedAr = cache.anilist.get(aniId)!;
+    if (!isPoisonedArabicTitle(cachedAr, input.english)) return cachedAr;
+  }
+  if (aniId && curatedJsonMap.has(aniId)) {
+    const curAr = curatedJsonMap.get(aniId)!;
+    if (!isPoisonedArabicTitle(curAr, input.english)) return curAr;
+  }
+  if (malId && cache.mal.has(malId)) {
+    const cachedMalAr = cache.mal.get(malId)!;
+    if (!isPoisonedArabicTitle(cachedMalAr, input.english)) return cachedMalAr;
+  }
 
   const suffix = extractSeasonAndPartSuffix((input.english || "") + " " + (input.romaji || ""));
   if (aniId && wdAnilistMap.has(aniId)) return appendSuffixIfNeeded(wdAnilistMap.get(aniId)!, suffix);
@@ -840,13 +940,20 @@ export async function resolveArabicAnimeTitle(
   const suffix = extractSeasonAndPartSuffix((input.english || "") + " " + (input.romaji || ""));
 
   if (!isDescriptiveEnglishTitle(input.english, input.romaji)) {
-    const phon = transliterateRomajiTitle(rawTitle);
-    if (isArabicTitle(phon)) {
-      if (aniId) persistResolvedTitle(aniId, "anime_title_ar", phon, rawTitle);
-      else if (malId) persistResolvedTitle(malId, "mal_title_ar", phon, rawTitle);
-      return phon;
+    // Try TMDB Arabic first even for proper-noun anime (e.g., Dandadan, Frieren, Gachiakuta)
+    if (options.allowExternal !== false) {
+      const core = stripTitleNoise(input.english || rawTitle);
+      const tmdbAr = await fetchTmdbArabicTitle(core || rawTitle, String(input.format || "").toUpperCase() === "MOVIE");
+      if (tmdbAr && isArabicTitle(tmdbAr)) {
+        const finalTmdb = appendSuffixIfNeeded(tmdbAr, suffix);
+        if (aniId) persistResolvedTitle(aniId, "anime_title_ar", finalTmdb, rawTitle);
+        else if (malId) persistResolvedTitle(malId, "mal_title_ar", finalTmdb, rawTitle);
+        return finalTmdb;
+      }
     }
-    return null;
+    const phon = transliterateRomajiTitle(rawTitle);
+    // Do NOT persist crude phonetic transliteration to DB so future English/TMDB titles can supersede it
+    return isArabicTitle(phon) ? phon : null;
   }
 
   if (options.allowExternal === false) {
@@ -961,29 +1068,50 @@ export async function attachArabicTitles<T>(data: T): Promise<T> {
     if (isMangaLike(input)) continue;
     const raw = (input.english || input.romaji || "").trim();
     if (!raw) continue;
-    if (isDescriptiveEnglishTitle(input.english, input.romaji)) {
+    if (input.english && input.english.trim().length >= 3) {
       pendingDescriptive.push({ media, input });
     } else {
       const phon = transliterateRomajiTitle(raw);
       if (isArabicTitle(phon)) {
         resolvedByNode.set(media, phon);
-        const aniId = !input.idSource && input.id && input.id > 0 ? input.id : null;
-        const malId = input.idSource === "mal" && input.id && input.id > 0 ? input.id : input.malId;
-        if (aniId) persistResolvedTitle(aniId, "anime_title_ar", phon, raw);
-        else if (malId) persistResolvedTitle(malId, "mal_title_ar", phon, raw);
       }
     }
   }
 
   if (pendingDescriptive.length > 0) {
-    const batch = pendingDescriptive.slice(0, 8);
-    await Promise.race([
-      Promise.all(batch.map(async ({ media, input }) => {
-        const ar = await resolveArabicAnimeTitle(input, { allowExternal: true });
-        if (ar) resolvedByNode.set(media, ar);
-      })),
-      new Promise<void>((resolve) => setTimeout(resolve, 2600)),
+    const batch = pendingDescriptive.slice(0, 25);
+    const prepared = batch.map(({ media, input }) => {
+      const rawT = (input.english || input.romaji || "").trim();
+      const core = stripTitleNoise(input.english || rawT) || rawT;
+      const suffix = extractSeasonAndPartSuffix((input.english || "") + " " + (input.romaji || ""));
+      return { media, input, rawT, core, suffix };
+    });
+
+    // Run ONE single fast batch Google Translate POST for all 25 titles (~250ms) + TMDB for top 5 in parallel
+    const tmdbMap = new Map<number, string>();
+    const [batchTranslated] = await Promise.all([
+      translateTitlesBatch(prepared.map((p) => ({ core: p.core, english: p.input.english }))),
+      Promise.race([
+        Promise.all(prepared.slice(0, 5).map(async (p, idx) => {
+          const tmdbAr = await fetchTmdbArabicTitle(p.core, String(p.input.format || "").toUpperCase() === "MOVIE");
+          if (tmdbAr && isArabicTitle(tmdbAr)) tmdbMap.set(idx, tmdbAr);
+        })),
+        new Promise<void>((resolve) => setTimeout(resolve, 1800)),
+      ]),
     ]);
+
+    prepared.forEach((p, idx) => {
+      const baseAr = tmdbMap.get(idx) || batchTranslated[idx];
+      if (baseAr && isArabicTitle(baseAr)) {
+        const finalAr = appendSuffixIfNeeded(baseAr, p.suffix);
+        resolvedByNode.set(p.media, finalAr);
+        const aniId = !p.input.idSource && p.input.id && p.input.id > 0 ? p.input.id : null;
+        const malId = p.input.idSource === "mal" && p.input.id && p.input.id > 0 ? p.input.id : p.input.malId;
+        if (aniId) persistResolvedTitle(aniId, "anime_title_ar", finalAr, p.rawT);
+        else if (malId) persistResolvedTitle(malId, "mal_title_ar", finalAr, p.rawT);
+      }
+    });
+
     for (const { media, input } of pendingDescriptive) {
       if (!resolvedByNode.has(media)) {
         const fallback = transliterateRomajiTitle(input.english || input.romaji || "");

@@ -606,7 +606,7 @@ const KAWAII_SUBTITLE_SITES = new Set([
 const RAW_AUDIO_ONLY_SITES = new Set<string>();
 /* AnimeSlayer's external tracks are intentionally disabled. Keep this
    client-side guard even when a stale cache row still contains subtitleUrl. */
-const SUBTITLE_DISABLED_SITES = new Set(["anslayer", "as"]);
+const SUBTITLE_DISABLED_SITES = new Set(["anslayer", "as", "anime4up2_hard", "ad 1", "ad1", "animewitcher", "aw", "animeify", "af", "sanime", "sa", "anifox", "fx"]);
 
 type SlotStatus = "idle" | "fetching" | "ready" | "failed";
 
