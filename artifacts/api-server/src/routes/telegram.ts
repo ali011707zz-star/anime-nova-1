@@ -665,9 +665,8 @@ async function sendTelegramEpisodeOnce(
       return true;
     }
 
-    const epMarkup = buildEpisodeMarkup(anilistId, ep, meta);
-    let sent = (poster || anilistId > 0) ? await sendChannelPhoto(poster || "", caption, { anilistId, type: "ANIME" }, epMarkup) : false;
-    if (!sent) sent = await sendMessage(channelId, caption, { reply_markup: epMarkup });
+    let sent = (poster || anilistId > 0) ? await sendChannelPhoto(poster || "", caption, { anilistId, type: "ANIME" }) : false;
+    if (!sent) sent = await sendMessage(channelId, caption);
     if (!sent) return false;
 
     telegramNotifiedEpisodes.add(memoryKey);
@@ -1055,9 +1054,8 @@ async function pollDubbedLatest(): Promise<void> {
 
       const caption = buildDubbedEpisodeCaption(item);
       const poster = typeof item?.cover === "string" && /^https?:\/\//i.test(item.cover) ? item.cover : "";
-      const dubbedMarkup = buildDubbedMarkup();
-      const photoSent = await sendChannelPhoto(poster, caption, { title: String(item?.english || item?.name || ""), englishTitle: String(item?.titleAr || ""), type: "ANIME" }, dubbedMarkup);
-      const delivered = photoSent || await sendMessage(channelId, caption, { reply_markup: dubbedMarkup });
+      const photoSent = await sendChannelPhoto(poster, caption, { title: String(item?.english || item?.name || ""), englishTitle: String(item?.titleAr || ""), type: "ANIME" });
+      const delivered = photoSent || await sendMessage(channelId, caption);
       // سجل الحلقة المدبلجة الجديدة في قائمة أحدث الحلقات (آخر 14 يوماً) حتى تظهر للمستخدمين
       await recordDubbedRecentRelease(item).catch(() => {});
       if (delivered) {
@@ -1140,9 +1138,8 @@ async function pollMangaLatest(): Promise<void> {
       const story = await resolveMangaStory(item);
       const caption = buildMangaCaption(item, story);
       const poster = typeof item?.poster === "string" && /^https?:\/\//i.test(item.poster) ? item.poster : "";
-      const mangaMarkup = buildAppOnlyMarkup("📲 حمّل التطبيق واقرأ الآن");
-      const photoSent = await sendChannelPhoto(poster, caption, { title: String(item?.title || ""), englishTitle: String(item?.arabicTitle || ""), type: "MANGA" }, mangaMarkup);
-      const delivered = photoSent || await sendMessage(channelId, caption, { reply_markup: mangaMarkup });
+      const photoSent = await sendChannelPhoto(poster, caption, { title: String(item?.title || ""), englishTitle: String(item?.arabicTitle || ""), type: "MANGA" });
+      const delivered = photoSent || await sendMessage(channelId, caption);
       if (delivered) {
         await markNotifKeys(keys);
         sent++;
@@ -1296,12 +1293,11 @@ async function pollNewsLatest(): Promise<void> {
 
       const caption = buildNewsCaption(art);
       const thumb = typeof art?.thumbnail === "string" && /^https?:\/\//i.test(art.thumbnail) ? art.thumbnail : "";
-      const newsMarkup = buildAppOnlyMarkup("📲 فتح / تحميل تطبيق Anime NOVA");
       const photoSent = await sendChannelPhoto(thumb, caption, {
         title: String(art?.originalTitle || art?.title || ""),
         type: "ANIME",
-      }, newsMarkup);
-      const delivered = photoSent || await sendMessage(channelId, caption, { reply_markup: newsMarkup });
+      });
+      const delivered = photoSent || await sendMessage(channelId, caption);
 
       if (delivered) {
         await markNotifKeys(keys);

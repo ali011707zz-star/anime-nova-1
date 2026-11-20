@@ -69,7 +69,13 @@
       ],
       "expo-font",
       "expo-web-browser",
-      "expo-notifications",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/notification-icon.png",
+          "color": "#8B5CF6"
+        }
+      ],
       "expo-video",
       "expo-screen-orientation",
       "expo-brightness",
@@ -111,6 +117,10 @@
       "url": "https://animenovaa.duckdns.org/api/ota/manifest",
       "checkAutomatically": "ON_LOAD",
       "fallbackToCacheTimeout": 0
+    },
+    "notification": {
+      "icon": "./assets/images/notification-icon.png",
+      "color": "#8B5CF6"
     }
   }
 }
