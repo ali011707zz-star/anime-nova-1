@@ -14843,6 +14843,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
     "consumet_reanime",
     "animekai",
     "anineko",
+    "anslayer",
   ]);
   if (DISABLED_SOURCE_SITES.has(requestedSite)) {
     res.json({ sources: [], disabled: true });
