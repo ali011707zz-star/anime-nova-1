@@ -2193,6 +2193,99 @@ async function parseShareMaxStreams(
   return null;
 }
 
+/** Decode VOE.sx obfuscated JSON payload and extract fast direct HLS master URL. */
+async function parseVoe(
+  embedUrl: string,
+  referer?: string,
+): Promise<{ url: string; type: "hls"; referer: string } | null> {
+  try {
+    const r1 = await fetch(embedUrl, {
+      headers: { "User-Agent": BROWSER_UA, ...(referer ? { Referer: referer } : {}) },
+      signal: AbortSignal.timeout(4500),
+      redirect: "follow",
+    });
+    if (!r1.ok) return null;
+    let html = await r1.text();
+    let finalUrl = r1.url || embedUrl;
+
+    // VOE redirects via JS window.location.href on the initial embed page
+    const redir = html.match(/window\.location\.href\s*=\s*["'](https?:\/\/[^"']+)["']/)?.[1];
+    if (redir) {
+      const r2 = await fetch(redir, {
+        headers: { "User-Agent": BROWSER_UA, Referer: finalUrl },
+        signal: AbortSignal.timeout(4500),
+        redirect: "follow",
+      });
+      if (!r2.ok) return null;
+      html = await r2.text();
+      finalUrl = r2.url || redir;
+    }
+
+    const finalOrigin = (() => { try { return new URL(finalUrl).origin; } catch { return "https://voe.sx"; } })();
+    const outRef = `${finalOrigin}/`;
+
+    // Primary: VOE <script type="application/json">["<obfuscated>"]</script>
+    const jsonScripts = html.matchAll(/<script[^>]*type=["']application\/json["'][^>]*>([\s\S]*?)<\/script>/gi);
+    for (const jm of jsonScripts) {
+      try {
+        const arr = JSON.parse(jm[1].trim());
+        const raw = Array.isArray(arr) ? arr[0] : null;
+        if (typeof raw !== "string" || raw.length < 40) continue;
+        // 1. ROT13
+        let s = raw.replace(/[a-zA-Z]/g, c => {
+          const base = c <= "Z" ? 65 : 97;
+          return String.fromCharCode(((c.charCodeAt(0) - base + 13) % 26) + base);
+        });
+        // 2. Strip junk tokens
+        for (const tok of ["@$", "^^", "~@", "%?", "*~", "!!", "#&"]) {
+          s = s.split(tok).join("");
+        }
+        // 3. Base64 decode -> shift -3 -> reverse -> Base64 decode -> JSON
+        s = Buffer.from(s, "base64").toString("utf8");
+        s = [...s].map(ch => String.fromCharCode(ch.charCodeAt(0) - 3)).join("");
+        s = [...s].reverse().join("");
+        s = Buffer.from(s, "base64").toString("utf8");
+        const parsed = JSON.parse(s);
+        const hlsUrl = typeof parsed?.source === "string" ? parsed.source
+          : typeof parsed?.hls === "string" ? parsed.hls
+          : null;
+        if (hlsUrl && /^https?:\/\//i.test(hlsUrl)) {
+          return { url: hlsUrl, type: "hls", referer: outRef };
+        }
+      } catch {}
+    }
+
+    // Fallback: legacy VOE direct or base64-encoded HLS URL
+    const directHls = html.match(/["']hls["']\s*:\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i)?.[1];
+    if (directHls) return { url: directHls, type: "hls", referer: outRef };
+    const b64Hls = html.match(/["']hls["']\s*:\s*["'](aHR0cHM6Ly9[A-Za-z0-9+/=]+)["']/i)?.[1];
+    if (b64Hls) {
+      const decoded = Buffer.from(b64Hls, "base64").toString("utf8");
+      if (/^https?:\/\//i.test(decoded)) return { url: decoded, type: "hls", referer: outRef };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Quick manifest sanity check so broken/stalled mirrors automatically fall through. */
+async function verifyHlsManifestFast(url: string, referer: string, timeoutMs = 2800): Promise<boolean> {
+  try {
+    const hdrs: Record<string, string> = { "User-Agent": BROWSER_UA, Accept: "*/*" };
+    if (referer) {
+      hdrs.Referer = referer;
+      try { hdrs.Origin = new URL(referer).origin; } catch {}
+    }
+    const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(timeoutMs), redirect: "follow" });
+    if (!r.ok) return false;
+    const text = await r.text();
+    return text.includes("#EXTM3U") || text.includes("#EXT-X-");
+  } catch {
+    return false;
+  }
+}
+
 /** Multi-quality extractor for MegaMax / Share4Max (returns 1080p / 720p / 480p direct HLS). */
 async function parseShareMaxMultiStreams(
   host: string,
@@ -2249,9 +2342,10 @@ async function parseShareMaxMultiStreams(
       const scoreMirror = (m: any): number => {
         const d = String(m?.driver || "").toLowerCase();
         const l = String(m?.link || "").toLowerCase();
-        if (d === "earnvids" || d === "vidhide" || l.includes("morencius")) return 100;
-        if (d === "ok" || l.includes("ok.ru")) return 90;
-        if (d === "streamhg" || l.includes("streamwish")) return 80;
+        if (d === "voe" || l.includes("voe.sx")) return 120;
+        if (d === "ok" || l.includes("ok.ru")) return 95;
+        if (d === "streamhg" || l.includes("streamwish")) return 85;
+        if (d === "earnvids" || d === "vidhide" || l.includes("morencius")) return 70;
         if (d === "streamtape") return 60;
         if (d === "lulustream" || l.includes("lulustream") || l.includes("lplaygo")) return 40;
         return 0;
@@ -2266,30 +2360,44 @@ async function parseShareMaxMultiStreams(
         if (!link.startsWith("http")) continue;
         const drv = String(mirror.driver || "").toLowerCase();
         try {
-          if (drv === "ok" || link.includes("ok.ru/videoembed/")) {
+          if (drv === "voe" || link.includes("voe.sx")) {
+            const voe = await parseVoe(link, iframeUrl);
+            if (voe && await verifyHlsManifestFast(voe.url, voe.referer, 2800)) {
+              return { url: voe.url, type: "hls", quality, referer: voe.referer };
+            }
+          } else if (drv === "ok" || link.includes("ok.ru/videoembed/")) {
             const okm = link.match(/\/videoembed\/(\d+)/);
             if (okm) {
               const vids = await extractOkRuVideo(okm[1]);
               const hlsSrc = vids.find((v: any) => v.type === "hls" && v.url);
-              if (hlsSrc) return { url: hlsSrc.url, type: "hls", quality, referer: "https://ok.ru/" };
+              if (hlsSrc && await verifyHlsManifestFast(hlsSrc.url, "https://ok.ru/", 2800)) {
+                return { url: hlsSrc.url, type: "hls", quality, referer: "https://ok.ru/" };
+              }
             }
           } else {
             const r = await fetch(link, {
               headers: { "User-Agent": BROWSER_UA, Referer: iframeUrl },
-              signal: AbortSignal.timeout(6500),
+              signal: AbortSignal.timeout(5000),
               redirect: "follow",
             });
             if (!r.ok) continue;
             const html = await r.text();
             const finalOrigin = (() => { try { return new URL(r.url).origin; } catch { return ""; } })();
+            const outRef = finalOrigin ? `${finalOrigin}/` : iframeUrl;
             if (drv === "streamtape") {
               const st = parseStreamtape(html);
-              if (st?.url) return { url: st.url, type: st.type, quality, referer: finalOrigin ? `${finalOrigin}/` : iframeUrl };
+              if (st?.url) return { url: st.url, type: st.type, quality, referer: outRef };
             } else {
               const sw = parseStreamwish(html);
-              if (sw?.url) return { url: sw.url, type: sw.type, quality, referer: finalOrigin ? `${finalOrigin}/` : iframeUrl };
+              if (sw?.url) {
+                if (sw.type !== "hls" || await verifyHlsManifestFast(sw.url, outRef, 2800)) {
+                  return { url: sw.url, type: sw.type, quality, referer: outRef };
+                }
+              }
               const vh = parseVidhidePro(html, finalOrigin);
-              if (vh) return { url: vh, type: "hls", quality, referer: finalOrigin ? `${finalOrigin}/` : iframeUrl };
+              if (vh && await verifyHlsManifestFast(vh, outRef, 2800)) {
+                return { url: vh, type: "hls", quality, referer: outRef };
+              }
             }
           }
         } catch {}
@@ -3329,6 +3437,13 @@ async function probeDirectUrl(url: string, referer?: string): Promise<boolean> {
     });
     const ct = r.headers.get("content-type") || "";
     if (ct.includes("text/html")) return false;
+    // Reject SendVid's 5-second "This video is temporarily unavailable" placeholder MP4 (~36KB)
+    if (/sendvid\.com|sendvid\.net/i.test(url)) {
+      const cl = parseInt(r.headers.get("content-length") || "0", 10);
+      const crTotal = parseInt((r.headers.get("content-range") || "").split("/")[1] || "0", 10);
+      const totalBytes = crTotal || cl;
+      if (totalBytes > 0 && totalBytes < 1_500_000) return false;
+    }
     // Accept 403/405 — CDN blocks HEAD but serves GET (URL is valid)
     return r.ok || r.status === 206 || r.status === 302 || r.status === 301 || r.status === 403 || r.status === 405;
   } catch { return true; }
@@ -5629,8 +5744,9 @@ async function getAnime4up2Sources(
       const vnx = await fetchAnime4upVnxServers(parseInt(malMatch[1], 10), ep);
       if (vnx.length) return vnx;
     }
-    const srcs = parseDataWatch(html);
-    return srcs.length ? srcs : null;
+    // AD 2 is strictly VnxPlayer (external-sub). Never fall back to raw data-watch embeds
+    // (which are hardsubbed or broken SendVid 5-second placeholders — handled by AD 1).
+    return null;
   }
 
   const searchPromise = searchAnime4up2(title, english);
@@ -5704,8 +5820,9 @@ async function getAnime4up2HardsubSources(
   availabilityOnly = false,
 ): Promise<UnifiedSource[]> {
   const ck = `a4up2hard:${(title + "|" + (english ?? "")).toLowerCase()}:${ep}:${availabilityOnly ? "chk" : "play"}`;
+  const hardTtl = availabilityOnly ? SRC_TTL : 45 * 60 * 1000;
   const hit = a4up2HardSrcCache.get(ck);
-  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+  if (hit && Date.now() - hit.ts < hardTtl) return hit.sources;
 
   const epStr = String(ep);
 
@@ -5722,8 +5839,8 @@ async function getAnime4up2HardsubSources(
         const url = m[1].trim();
         if (seenUrls.has(url)) continue;
         seenUrls.add(url);
-        // Skip VnxPlayer external-subtitle servers (handled by AD 2) & unplayable hosts
-        if (/Anime4up-S[12]\/mal\/|4n\.kiuy6h1\.shop|mega\.nz|mega\.co\.nz|mp4upload/i.test(url)) continue;
+        // Skip VnxPlayer external-subtitle servers (handled by AD 2) & broken/placeholder hosts
+        if (/Anime4up-S[12]\/mal\/|4n\.kiuy6h1\.shop|mega\.nz|mega\.co\.nz|mp4upload|sendvid\.com|sendvid\.net/i.test(url)) continue;
         const label = m[2].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
         sources.push({
           name: `أنمي فور أب (مدمج) · ${label || "سيرفر"}`,
@@ -5770,6 +5887,26 @@ async function getAnime4up2HardsubSources(
         }
       }
     }
+
+    // Fallback: direct VOE embed on the episode page itself
+    const voeEntry = srcs.find(s => /voe\.sx\/e\//i.test(s.url));
+    if (voeEntry) {
+      const voe = await parseVoe(voeEntry.url, epUrl);
+      if (voe && await verifyHlsManifestFast(voe.url, voe.referer, 2800)) {
+        return [{
+          name: "أنمي فور أب (مدمج) · 1080p",
+          url: voeEntry.url,
+          directUrl: `/api/anime/hls-proxy?url=${encodeURIComponent(voe.url)}&ref=${encodeURIComponent(voe.referer)}`,
+          directType: "hls",
+          isEmbed: false,
+          referer: voe.referer,
+          quality: "1080p",
+          qualityRank: 10,
+          site: "anime4up2_hard",
+        }];
+      }
+    }
+
     return srcs;
   }
 
@@ -14496,6 +14633,8 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
       const cacheSite = site === "anineko" ? "anineko-v2"
         : site === "sanime" ? "sanime-v2"
         : site === "anslayer" ? "anslayer-v2"
+        : site === "anime4up2" ? "anime4up2-v2"
+        : site === "anime4up2_hard" ? "anime4up2_hard-v2"
         : site;
       // AnimeWitcher latest cards carry the provider's own catalog id. Keep
       // their availability/source caches separate from title/AniList lookups;
@@ -15398,6 +15537,8 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
     : anilistId || anslayerId;
   const cacheSite = site === "sanime" ? "sanime-v3"
     : site === "anslayer" ? "anslayer-v2"
+    : site === "anime4up2" ? "anime4up2-v2"
+    : site === "anime4up2_hard" ? "anime4up2_hard-v2"
     : site;
   const cKey = makeSourceCacheKey(cacheSite, title, ep, cacheAnimeIdentity);
   let cached: Awaited<ReturnType<typeof getFromSourceCache>> = null;
