@@ -3106,16 +3106,35 @@ export default function WatchScreen() {
                               )}
                             </View>
 
-                            {/* Right: السيرفر XX مع شارة نوع الترجمة والنقطة الخضراء */}
-                            <View style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 8 }}>
+                            {/* Right: السيرفر XX بالعرض الكامل في الأعلى وتحته شارة نوع الترجمة */}
+                            <View style={{ flex: 1, flexDirection: "column", alignItems: "flex-end", justifyContent: "center", gap: 4 }}>
+                              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 7 }}>
+                                <Text
+                                  style={[
+                                    d.webRowTag,
+                                    tvMode && d.tvWebRowTag,
+                                    { textAlign: "right", color: colors.textPrimary, fontSize: tvMode ? 16 : 14, fontFamily: "Cairo_700Bold" },
+                                    isFailed && { color: colors.destructive },
+                                  ]}
+                                  numberOfLines={1}
+                                >
+                                  السيرفر {slot.tag}
+                                </Text>
+                                <View style={[d.webRowDot, tvMode && d.tvWebRowDot, {
+                                  width: 8,
+                                  height: 8,
+                                  borderRadius: 4,
+                                  backgroundColor: isFailed ? colors.destructive : "#34d399",
+                                }]} />
+                              </View>
                               {!isAwDubbed && (
                                 (() => {
                                   const isHardsub = HARDSUB_ARABIC_SITES.has(slot.site.toLowerCase());
                                   return (
                                     <View
                                       style={{
-                                        paddingHorizontal: tvMode ? 10 : 7,
-                                        paddingVertical: tvMode ? 3 : 2,
+                                        paddingHorizontal: tvMode ? 10 : 8,
+                                        paddingVertical: tvMode ? 2.5 : 2,
                                         borderRadius: 6,
                                         borderWidth: 1,
                                         backgroundColor: isHardsub ? "rgba(16,185,129,0.13)" : "rgba(245,158,11,0.11)",
@@ -3136,23 +3155,6 @@ export default function WatchScreen() {
                                   );
                                 })()
                               )}
-                              <Text
-                                style={[
-                                  d.webRowTag,
-                                  tvMode && d.tvWebRowTag,
-                                  { textAlign: "right", color: colors.textPrimary, fontSize: tvMode ? 15 : 13, fontFamily: "Cairo_700Bold" },
-                                  isFailed && { color: colors.destructive },
-                                ]}
-                                numberOfLines={1}
-                              >
-                                السيرفر {slot.tag}
-                              </Text>
-                              <View style={[d.webRowDot, tvMode && d.tvWebRowDot, {
-                                width: 8,
-                                height: 8,
-                                borderRadius: 4,
-                                backgroundColor: isFailed ? colors.destructive : "#34d399",
-                              }]} />
                             </View>
                           </Pressable>
                         );

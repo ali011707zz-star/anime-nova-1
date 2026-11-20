@@ -15165,7 +15165,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
   };
   const sendProgressiveCandidate = (source: UnifiedSource) => {
     if (!progressive || progressiveFinished || progressiveSent >= 2 || res.destroyed) return;
-    if (source.isEmbed && (isMobileClient || site === "anime4up2" || site === "animedar" || source.site === "anime4up2" || source.site === "animedar")) return;
+    if (source.isEmbed && (isMobileClient || site === "anime4up2" || site === "anime4up2_hard" || site === "animedar" || source.site === "anime4up2" || source.site === "anime4up2_hard" || source.site === "animedar")) return;
     if (isMobileClient && /mega\.nz|mega\.co\.nz|mp4upload/i.test(String(source.directUrl || source.url || ""))) return;
     if (!matchesRequestedQuality(source)) return;
     const candidateKey = progressiveCandidateKey(source);
@@ -15300,7 +15300,8 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
     "sanime",        // 🎌 MP4 مباشر عربي مدبلج ✅
     "anslayer",      // ⚡ بحث متوازٍ + dedupe للطلبات + cache
     "animeify",      // 🎬 أنمي فاي — MEGA/Streamtape/MediaFire ✅ (مُعاد تفعيله)
-    "anime4up2",     // 🎌 أنمي فور أب (AD)
+    "anime4up2_hard", // 🎌 أنمي فور أب — ترجمة مدمجة (AD 1)
+    "anime4up2",     // 🎌 أنمي فور أب — ترجمة خارجية (AD 2)
     "reflix",        // 🎌 ReAnime (FlixCloud HLS + ترجمة Kawaii)
     "reanime",
     "animekai",      // 🎌 AnimeKai direct scraper — HLS/MP4
@@ -15379,7 +15380,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
 
   // ── فحص الكاش أولاً ─────────────────────────────────────────────
   // مواقع ذات tokens/URLs قصيرة الأجل — لا نقدّم بياناتها إذا كانت قديمة
-  const SHORT_TTL_FETCH_SITES = new Set(["anineko", "animewitcher", "animeify", "kawaii", "anime4up2"]);
+  const SHORT_TTL_FETCH_SITES = new Set(["anineko", "animewitcher", "animeify", "kawaii", "anime4up2", "anime4up2_hard"]);
   // Shirayuki returns short-lived CDN URLs; never serve its cached rows.
   const FORCE_LIVE_FETCH_SITES = new Set([
     "shirayuki_anikoto",
