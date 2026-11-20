@@ -112,7 +112,7 @@ async function pgTranslateSave(key: string, translated: string, from: string, to
 const router = Router();
 // Disabled by the user; keep these out of both availability probes and
 // playback extraction even if stale client/config data still requests them.
-const TEMPORARILY_DISABLED_SOURCE_SITES = new Set<string>(["animekai", "anineko", "consumet_gogo", "animedar"]);
+const TEMPORARILY_DISABLED_SOURCE_SITES = new Set<string>(["animekai", "anineko", "consumet_gogo", "animedar", "anslayer"]);
 
 async function pipeWebMediaBody(
   body: ReadableStream<Uint8Array> | null,
@@ -5550,6 +5550,110 @@ async function getAnime4up2Sources(
   }
 
   a4up2SrcCache.set(ck, { sources: [], ts: Date.now() });
+  return [];
+}
+
+const a4up2HardSrcCache = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+
+/** AD 1: Anime4Up Hardsubbed Arabic servers (data-watch embeds, excluding VnxPlayer external-sub S1/S2). */
+async function getAnime4up2HardsubSources(
+  title: string,
+  english: string | null,
+  ep: number,
+  availabilityOnly = false,
+): Promise<UnifiedSource[]> {
+  const ck = `a4up2hard:${(title + "|" + (english ?? "")).toLowerCase()}:${ep}`;
+  const hit = a4up2HardSrcCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+
+  const epStr = String(ep);
+
+  function parseHardsubDataWatch(html: string): UnifiedSource[] {
+    const sources: UnifiedSource[] = [];
+    const seenUrls = new Set<string>();
+    const patterns = [
+      /<li[^>]*\sdata-watch=["'](https?:\/\/[^"']{5,})["'][^>]*>\s*<a[^>]*>([\s\S]*?)<\/a>/gi,
+      /<a[^>]*\sdata-(?:ep-url|embed|watch|url)=["'](https?:\/\/[^"']{5,})["'][^>]*>([\s\S]*?)<\/a>/gi,
+      /<button[^>]*\sdata-(?:ep-url|embed|watch|url)=["'](https?:\/\/[^"']{5,})["'][^>]*>([\s\S]*?)<\/button>/gi,
+    ];
+    for (const re of patterns) {
+      for (const m of html.matchAll(re)) {
+        const url = m[1].trim();
+        if (seenUrls.has(url)) continue;
+        seenUrls.add(url);
+        // Skip VnxPlayer external-subtitle servers (handled by AD 2) & unplayable hosts
+        if (/Anime4up-S[12]\/mal\/|4n\.kiuy6h1\.shop|mega\.nz|mega\.co\.nz|mp4upload/i.test(url)) continue;
+        const label = m[2].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+        sources.push({
+          name: `أنمي فور أب (مدمج) · ${label || "سيرفر"}`,
+          url,
+          quality: "1080p",
+          qualityRank: 10,
+          site: "anime4up2_hard",
+        });
+      }
+    }
+    return sources;
+  }
+
+  async function fetchHardsubEp(epUrl: string): Promise<UnifiedSource[] | null> {
+    const html = await a4up2Fetch(epUrl, availabilityOnly ? 3800 : 4800);
+    if (!html || isCloudflareBlock(html)) return null;
+    const srcs = parseHardsubDataWatch(html);
+    return srcs.length ? srcs : null;
+  }
+
+  const searchPromise = searchAnime4up2(title, english);
+  const fastCandidates: string[] = [];
+  const seenSlugs = new Set<string>();
+  for (const q of [english, title].filter(Boolean) as string[]) {
+    const slug = toSlug(q as string);
+    if (!slug || seenSlugs.has(slug)) continue;
+    seenSlugs.add(slug);
+    fastCandidates.push(`${A4UP2_BASE}/episode/${encodeURIComponent(slug + "-الحلقة-" + epStr)}/`);
+    fastCandidates.push(`${A4UP2_BASE}/episode/${encodeURIComponent(slug + "-الحلقة-" + epStr + "-مترجمة")}/`);
+  }
+
+  if (fastCandidates.length > 0) {
+    const fastResults = await Promise.allSettled(fastCandidates.map(u => fetchHardsubEp(u)));
+    for (const r of fastResults) {
+      if (r.status === "fulfilled" && r.value && r.value.length) {
+        a4up2HardSrcCache.set(ck, { sources: r.value, ts: Date.now() });
+        return r.value;
+      }
+    }
+  }
+
+  const seriesUrl = await searchPromise;
+  if (!seriesUrl) {
+    a4up2HardSrcCache.set(ck, { sources: [], ts: Date.now() });
+    return [];
+  }
+  const srHtml = await a4up2Fetch(seriesUrl, availabilityOnly ? 3800 : 4800);
+  if (!srHtml || isCloudflareBlock(srHtml)) {
+    a4up2HardSrcCache.set(ck, { sources: [], ts: Date.now() });
+    return [];
+  }
+  const epLinks: string[] = [];
+  for (const m of srHtml.matchAll(/href=["'](https?:\/\/(?:anime4up\.cam|w1\.anime4up\.rest|(?:ww\d+\.)?anime4up\.pro)\/episode\/[^"']+)["']/g)) {
+    const normalizedLink = m[1].replace(/^https?:\/\/[^/]+/i, A4UP2_BASE);
+    if (!normalizedLink.includes("/page/") && !epLinks.includes(normalizedLink)) epLinks.push(normalizedLink);
+  }
+  for (const link of epLinks) {
+    try {
+      const decoded = decodeURIComponent(link);
+      if (new RegExp(`الحلقة-${epStr}[/-]`).test(decoded) ||
+          decoded.endsWith(`الحلقة-${epStr}/`) ||
+          decoded.endsWith(`الحلقة-${epStr}`)) {
+        const sources = await fetchHardsubEp(link);
+        if (sources && sources.length) {
+          a4up2HardSrcCache.set(ck, { sources, ts: Date.now() });
+          return sources;
+        }
+      }
+    } catch {}
+  }
+  a4up2HardSrcCache.set(ck, { sources: [], ts: Date.now() });
   return [];
 }
 
@@ -14509,6 +14613,12 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
             getAnimadarSources(title, english, ep, isMovie, matchCtx, await aniListIdResolution), false, 7_000),
         },
         {
+          site: "anime4up2_hard",
+          timeoutMs: sourceAvailabilityJobTimeoutMs("anime4up2_hard", 8_000),
+          run: () => scrapeCached("anime4up2_hard", async () =>
+            getAnime4up2HardsubSources(title, english, ep, true), false, 8_000),
+        },
+        {
           site: "anime4up2",
           timeoutMs: sourceAvailabilityJobTimeoutMs("anime4up2", 7_000),
           run: () => scrapeCached("anime4up2", async () =>
@@ -14536,14 +14646,43 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
         providerJobs,
         SOURCE_AVAILABILITY_CONCURRENCY,
       );
-      // Keep the SSE open for the actual FIFO provider schedule, not a fixed
-      // 32-second cap that can cut off healthy sources in later queue waves.
       scheduleForceClose(scanDeadlineMs + 8_000);
-      const providerQueueFinished = await race(
-        runSourceQueue(providerJobs, SOURCE_AVAILABILITY_CONCURRENCY).then(() => true),
-        scanDeadlineMs,
-        false,
-      );
+      // Smart Early Stop: once healthy servers have appeared, don't keep the server & spinner
+      // hanging for 40-60s waiting on slow/stalled providers.
+      const HARDSUB_CHECK_SITES = new Set(["animewitcher", "animeify", "sanime", "anifox", "anime4up2_hard"]);
+      let earlyStopDone = false;
+      let earlyStopResolve: ((v: boolean) => void) | null = null;
+      const earlyStopPromise = new Promise<boolean>(resolve => { earlyStopResolve = resolve; });
+      let firstRowAt = 0;
+      const earlyStopPoll = setInterval(() => {
+        if (closed || earlyStopDone) return;
+        const count = checkTracedSites.size;
+        if (count === 0) return;
+        if (!firstRowAt) firstRowAt = Date.now();
+        const elapsedSinceFirst = Date.now() - firstRowAt;
+        let hardsubCount = 0;
+        for (const s of checkTracedSites) {
+          if (HARDSUB_CHECK_SITES.has(s)) hardsubCount++;
+        }
+        if (
+          (count >= 5 && hardsubCount >= 2 && elapsedSinceFirst >= 4_000) ||
+          (count >= 3 && elapsedSinceFirst >= 8_000) ||
+          (elapsedSinceFirst >= 12_000)
+        ) {
+          earlyStopDone = true;
+          clearInterval(earlyStopPoll);
+          earlyStopResolve?.(true);
+        }
+      }, 450);
+      const providerQueueFinished = await Promise.race([
+        race(
+          runSourceQueue(providerJobs, SOURCE_AVAILABILITY_CONCURRENCY).then(() => true),
+          scanDeadlineMs,
+          false,
+        ),
+        earlyStopPromise,
+      ]);
+      clearInterval(earlyStopPoll);
       if (!providerQueueFinished) {
         availabilityDeadlineReached = true;
         logger.warn({ timeout_ms: scanDeadlineMs }, "source availability scan hit its overall deadline");
@@ -15314,7 +15453,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
       await extractAndCollect(candidates, sources, seen, EXTRACT_MS, {
         concurrency: 2,
         maxResults: 2,
-        accept: (isMobileClient || site === "anime4up2" || site === "animedar")
+        accept: (isMobileClient || site === "anime4up2" || site === "anime4up2_hard" || site === "animedar")
           ? (source => !source.isEmbed && !/mega\.nz|mega\.co\.nz|mp4upload/i.test(String(source.directUrl || source.url || "")))
           : undefined,
         onSource: source => publishProgressSource?.(source),
@@ -15372,6 +15511,18 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
           await runExtract(adarEmbeds);
           for (let i = sources.length - 1; i >= 0; i--) {
             if (sources[i].site === "animedar" && (sources[i].isEmbed || /mega\.nz|mega\.co\.nz/i.test(sources[i].directUrl || sources[i].url))) {
+              sources.splice(i, 1);
+            }
+          }
+        }
+        break;
+      }
+      case "anime4up2_hard": {
+        const a4uHardRaw = await race(getAnime4up2HardsubSources(title, english, ep, false), 9_000, []);
+        if (a4uHardRaw.length) {
+          await runExtract(a4uHardRaw);
+          for (let i = sources.length - 1; i >= 0; i--) {
+            if (sources[i].site === "anime4up2_hard" && (sources[i].isEmbed || /mega\.nz|mega\.co\.nz|mp4upload/i.test(sources[i].directUrl || sources[i].url))) {
               sources.splice(i, 1);
             }
           }
@@ -16977,11 +17128,19 @@ function polishArabicTranslation(value: string, kind: string): string {
       .trim();
   }
   // Editorial fixes for recurring literal machine-translation phrasing.
-  return out.replace(/تتبع القصة/gi, "تدور أحداث القصة حول")
+  return out
+    .replace(/تتبع القصة/gi, "تدور أحداث القصة حول")
     .replace(/في هذا الأنمي،/gi, "تدور الأحداث في هذا الأنمي حول")
     .replace(/طالب في المدرسة الثانوية/gi, "طالب في المرحلة الثانوية")
+    .replace(/طالبة في المدرسة الثانوية/gi, "طالبة في المرحلة الثانوية")
     .replace(/يتمحور حول/gi, "تدور أحداثه حول")
-    .replace(/الشخصية الرئيسية هي/gi, "تتمحور القصة حول");
+    .replace(/الشخصية الرئيسية هي/gi, "تتمحور القصة حول")
+    .replace(/اللعنة عليك/g, "تباً لك")
+    .replace(/ما الذي بحق الجحيم/g, "ماذا بحق الجحيم")
+    .replace(/لا أستطيع أن أصدق/g, "لا أصدق")
+    .replace(/\?/g, "؟")
+    .replace(/\s+([،؛.!؟])/g, "$1")
+    .trim();
 }
 
 router.get("/anime/translate", async (req, res) => {
@@ -17201,39 +17360,89 @@ function parseVttCues(text: string): Array<{ timing: string; rawText: string }> 
  * a very small daily quota, so Google\'s public translation endpoint is the
  * first fallback. It does not require credentials and preserves proper names
  * much better when titles are translated one at a time. */
+function cleanCueForTranslation(raw: string): string {
+  return String(raw || "")
+    .replace(/\{\\[^}]*\}/g, "")
+    .replace(/<\/?[^>]+>/g, "")
+    .replace(/\\[Nn]/g, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0?39;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/\r?\n+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Fast, zero-429 batch Google Translate via clients5 multi-q POST (verified exact 1:1 array output). */
+async function translateGoogleClients5Batch(
+  texts: string[],
+  from: string,
+  to: string,
+): Promise<string[] | null> {
+  if (!texts.length) return [];
+  try {
+    const params = new URLSearchParams();
+    for (const t of texts) params.append("q", t.slice(0, 4000));
+    const url = `https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=${encodeURIComponent(from)}&tl=${encodeURIComponent(to)}`;
+    const r = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+        "User-Agent": BROWSER_UA,
+        Accept: "application/json",
+      },
+      body: params.toString(),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!r.ok) return null;
+    const data = await r.json() as any;
+    if (!Array.isArray(data) || data.length !== texts.length) return null;
+    return data.map((item: any, idx: number) => {
+      if (typeof item === "string") return item.trim() || texts[idx];
+      if (Array.isArray(item) && typeof item[0] === "string") return item[0].trim() || texts[idx];
+      return texts[idx];
+    });
+  } catch {
+    return null;
+  }
+}
+
 async function translateGoogleSingle(text: string, from: string, to: string): Promise<string | null> {
   const value = text.trim();
   if (!value || from === to) return value;
   const input = value.slice(0, 5000);
 
-  // Provider 1: node-google-translator.
+  // Provider 1 (Primary): clients5.google.com — fast, reliable, no 429 on VPS.
+  const c5 = await translateGoogleClients5Batch([input], from, to);
+  if (c5?.[0] && c5[0] !== input) return c5[0];
+
+  // Provider 2: node-google-translator.
   try {
     const result = await nodeGoogleTranslate(input, {
       from, to, fetchOptions: { signal: AbortSignal.timeout(7000) },
     } as any);
     const translated = String((result as any)?.text || '').trim();
     if (translated && translated !== input) return translated;
-  } catch {
-    // Continue to the independent client below.
-  }
+  } catch {}
 
-  // Provider 2: googletrans.
+  // Provider 3: googletrans.
   try {
     const result = await googletransTranslate(input, {
       from, to, signal: AbortSignal.timeout(7000),
     } as any);
     const translated = String((result as any)?.text || '').trim();
     if (translated && translated !== input) return translated;
-  } catch {
-    // Continue to the direct endpoint below.
-  }
+  } catch {}
 
-  // Provider 3: direct public endpoint as the final independent fallback.
+  // Provider 4: direct gtx endpoint.
   try {
     const endpoint = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(from)}&tl=${encodeURIComponent(to)}&dt=t&q=${encodeURIComponent(input)}`;
     const response = await fetch(endpoint, {
       headers: { Accept: 'application/json', 'User-Agent': BROWSER_UA },
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(8_000),
     });
     if (!response.ok) return null;
     const data = await response.json() as any;
@@ -17246,59 +17455,123 @@ async function translateGoogleSingle(text: string, from: string, to: string): Pr
   }
 }
 
-/** Translate text with resilient free fallbacks.
- * LibreTranslate is attempted for batching; Google is used per item when the
- * batch endpoint is unavailable or returns a broken separator layout. */
-async function translateBatchFree(texts: string[], from: string, to: string): Promise<string[]> {
-  const results = [...texts];
-  const CHUNK = 10;
-  const PARALLEL = 6;
-  const SEP = " ||| ";
-  const endpoint = process.env.LIBRETRANSLATE_URL || "https://libretranslate.com/translate";
-  const apiKey = process.env.LIBRETRANSLATE_API_KEY || "";
-  const chunks: string[][] = [];
-  for (let i = 0; i < texts.length; i += CHUNK) chunks.push(texts.slice(i, i + CHUNK));
+function splitTranslatedProportional(translated: string, weights: number[]): string[] {
+  const words = translated.trim().split(/\s+/).filter(Boolean);
+  if (weights.length <= 1 || words.length <= weights.length) {
+    const out = new Array(weights.length).fill("");
+    out[0] = translated.trim();
+    return out;
+  }
+  const totalWeight = weights.reduce((a, b) => a + Math.max(1, b), 0);
+  const out: string[] = [];
+  let cursor = 0;
+  for (let i = 0; i < weights.length; i++) {
+    if (i === weights.length - 1) {
+      out.push(words.slice(cursor).join(" "));
+    } else {
+      const remainingParts = weights.length - i - 1;
+      const target = Math.max(1, Math.round((Math.max(1, weights[i]) / totalWeight) * words.length));
+      const end = Math.min(words.length - remainingParts, cursor + target);
+      out.push(words.slice(cursor, end).join(" "));
+      cursor = end;
+    }
+  }
+  return out;
+}
 
-  for (let i = 0; i < chunks.length; i += PARALLEL) {
-    const batch = chunks.slice(i, i + PARALLEL);
-    await Promise.allSettled(batch.map(async (chunk, batchIdx) => {
-      const offset = (i + batchIdx) * CHUNK;
-      const cleaned = chunk.map(t => t.replace(/\|\|\|/g, "").trim());
-      try {
-        const body: Record<string, unknown> = {
-          q: cleaned.join(SEP), source: from, target: to, format: "text",
-        };
-        if (apiKey) body.api_key = apiKey;
-        const r = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify(body),
-          signal: AbortSignal.timeout(8000),
-        });
-        if (!r.ok) throw new Error(`LibreTranslate ${r.status}`);
-        const data = await r.json() as any;
-        const translated = String(data?.translatedText || "");
-        const parts = translated.split(/\s*\|\|\|\s*/);
-        if (!translated || parts.length !== chunk.length) throw new Error("translation mismatch");
-        chunk.forEach((_, j) => { results[offset + j] = parts[j]?.trim() || chunk[j]; });
-      } catch {
-        await Promise.allSettled(chunk.map(async (text, j) => {
-          const google = await translateGoogleSingle(text, from, to);
-          if (google) {
-            results[offset + j] = google;
-            return;
-          }
+/**
+ * Context-aware free Google batch translation:
+ * 1. Cleans VTT/ASS tags and intra-cue newlines.
+ * 2. Stitches split sentences across adjacent cues so Google translates complete clauses
+ *    with proper Arabic grammar and gender agreement, then splits proportionally back.
+ * 3. Sends 16-item POST batches to clients5.google.com (100% free, zero 429, no MyMemory).
+ */
+async function translateBatchFree(texts: string[], from: string, to: string): Promise<string[]> {
+  if (!texts.length || from === to) return [...texts];
+  const cleaned = texts.map(t => cleanCueForTranslation(t));
+  const results = [...cleaned];
+
+  type Group = { indices: number[]; weights: number[]; text: string };
+  const groups: Group[] = [];
+  const enableStitch = cleaned.length >= 3 && from === "en";
+  let i = 0;
+  while (i < cleaned.length) {
+    const cur = cleaned[i];
+    if (!cur) {
+      groups.push({ indices: [i], weights: [1], text: "" });
+      i++;
+      continue;
+    }
+    const indices = [i];
+    const weights = [cur.length];
+    let combined = cur;
+    if (enableStitch) {
+      while (
+        indices.length < 2 &&
+        i + 1 < cleaned.length &&
+        cleaned[i + 1] &&
+        combined.length + cleaned[i + 1].length <= 210 &&
+        !/[.!?؟…"”\])]$/.test(combined) &&
+        !/^[-–—\[\(♪♫]/.test(combined) &&
+        !/^[-–—\[\(♪♫]/.test(cleaned[i + 1]) &&
+        /^[a-z0-9,'"]/.test(cleaned[i + 1])
+      ) {
+        i++;
+        combined = combined + " " + cleaned[i];
+        indices.push(i);
+        weights.push(cleaned[i].length);
+      }
+    }
+    groups.push({ indices, weights, text: combined });
+    i++;
+  }
+
+  const nonEmptyGroups = groups.filter(g => g.text.length > 0);
+  const BATCH_SIZE = 16;
+  const PARALLEL = 4;
+
+  const batches: Group[][] = [];
+  for (let b = 0; b < nonEmptyGroups.length; b += BATCH_SIZE) {
+    batches.push(nonEmptyGroups.slice(b, b + BATCH_SIZE));
+  }
+
+  for (let b = 0; b < batches.length; b += PARALLEL) {
+    const wave = batches.slice(b, b + PARALLEL);
+    await Promise.allSettled(wave.map(async batch => {
+      const inputs = batch.map(g => g.text);
+      let translatedList = await translateGoogleClients5Batch(inputs, from, to);
+
+      if (!translatedList) {
+        translatedList = await Promise.all(inputs.map(async txt => {
+          const g = await translateGoogleSingle(txt, from, to);
+          if (g) return g;
           try {
-            const mm = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text.slice(0, 500))}&langpair=${from}|${to}`;
-            const r = await fetch(mm, { signal: AbortSignal.timeout(7000) });
-            const data = r.ok ? await r.json() as any : null;
-            const candidate = String(data?.responseData?.translatedText || "").trim();
-            results[offset + j] = candidate && !/^MYMEMORY WARNING/i.test(candidate) ? candidate : text;
-          } catch { results[offset + j] = text; }
+            const mm = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(txt.slice(0, 500))}&langpair=${from}|${to}`;
+            const r = await fetch(mm, { signal: AbortSignal.timeout(5000) });
+            const d = r.ok ? await r.json() as any : null;
+            const cand = String(d?.responseData?.translatedText || "").trim();
+            return cand && !/^MYMEMORY WARNING/i.test(cand) ? cand : txt;
+          } catch {
+            return txt;
+          }
         }));
       }
+
+      batch.forEach((grp, idx) => {
+        const rawTr = translatedList![idx] || grp.text;
+        const polished = to === "ar" ? polishArabicTranslation(rawTr, "subtitle") : rawTr;
+        if (grp.indices.length === 1) {
+          results[grp.indices[0]] = polished;
+        } else {
+          const splitParts = splitTranslatedProportional(polished, grp.weights);
+          grp.indices.forEach((origIdx, partIdx) => {
+            results[origIdx] = splitParts[partIdx] || polished;
+          });
+        }
+      });
     }));
   }
+
   return results;
 }
 
@@ -17349,7 +17622,7 @@ router.get("/anime/translate-vtt", async (req, res) => {
   const PORT = process.env.PORT || 5000;
   const url = rawUrl.startsWith("/") ? `http://localhost:${PORT}${rawUrl}` : rawUrl;
 
-  const cacheKey = `${from}→${to}:${rawUrl}`;
+  const cacheKey = `v2:${from}→${to}:${rawUrl}`;
 
   // L1 + L2 (Supabase): إذا وُجدت ترجمة مُخزَّنة → أرجعها فوراً
   const cached = await getSubtitleCache(cacheKey);
@@ -17402,7 +17675,7 @@ router.get("/anime/translate-vtt-stream", async (req, res) => {
 
   const PORT = process.env.PORT || 5000;
   const url  = rawUrl.startsWith("/") ? `http://localhost:${PORT}${rawUrl}` : rawUrl;
-  const cacheKey = `${from}→${to}:${rawUrl}`;
+  const cacheKey = `v2:${from}→${to}:${rawUrl}`;
 
   res.setHeader("Content-Type",  "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");

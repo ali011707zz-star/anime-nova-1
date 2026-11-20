@@ -446,73 +446,62 @@ const SCRAPER_DEFS: {
   audioLang?: "en";
   isArabic?: true;
 }[] = [
-  { site: "kawaii", name: "كواي أنمي", desc: "1080p · مباشر", tag: "KW" },
-  {
-    site: "megaplay",
-    name: "MegaPlay",
-    desc: "HLS · صوت خام · ترجمة Kawaii",
-    tag: "MP",
-  },
-  { site: "anineko", name: "AniNeko", desc: "HLS · متعدد الجودات", tag: "AN" },
-  // hianime: معطّل بطلب المستخدم 2026-07-30 — تفوّت حلقات
+  // ── ترجمة عربية مدمجة (الأولوية العليا) ──
   {
     site: "animewitcher",
     name: "AnimeWitcher",
-    desc: "PD/ST · مباشر",
+    desc: "ترجمة عربية مدمجة · مباشر",
     tag: "AW",
-    isArabic: true,
-  },
-  // direct Reanime was retired; RE below is the approved Anivexa/Reanime adapter
-  {
-    site: "anslayer",
-    name: "أنمي سلاير",
-    desc: "مشغلات خارجية · MixDrop/MediaFire",
-    tag: "AS",
     isArabic: true,
   },
   {
     site: "animeify",
     name: "أنمي فاي",
-    desc: "عربي · ميغا",
+    desc: "ترجمة عربية مدمجة",
     tag: "AF",
     isArabic: true,
   },
   {
-    site: "anime4up2",
-    name: "أنمي فور أب",
-    desc: "سيرفرات متعددة · جودات متعددة",
-    tag: "AD",
-    isArabic: true,
-  },
-  // anipub: معطّل بطلب المستخدم 2026-07-27
-  // allmanga: معطّل 2026-07-17 — AllAnime أضافت AA_CRYPTO_MISSING على endpoint الحلقات (anti-scraping)
-  // xpass_anim: محذوف — CDN يحجب VPS/CF IPs، المقاطع تفشل للمستخدم 2026-07-15
-  // vaplayer_anim: محذوف من الأنمي — مصدره إنجليزي فقط، أُبقي في الأنيميشن 2026-07-15
-  // faselhd_db (FH) / moviz_time (MT): معطّلة بطلب المستخدم 2026-07-14
-  // mitanime: محذوف بطلب المستخدم 2026-07-27
-  // nflixmovies_anim: حُذف 2026-07-30 — 0 مصادر (ميت)
-  // vidbolt_anim: معطّل 2026-07-30 — كود محفوظ (10 مصادر HLS)، يُفعَّل لاحقاً
-  {
     site: "sanime",
     name: "سـAnime",
-    desc: "عربي · MP4 مباشر",
+    desc: "ترجمة عربية مدمجة · MP4 مباشر",
     tag: "SA",
     isArabic: true,
   },
   {
     site: "anifox",
     name: "ANIFOX",
-    desc: "Archive · MediaFire · MP4Upload · Uqload",
+    desc: "ترجمة عربية مدمجة",
     tag: "FX",
     isArabic: true,
   },
   {
-    site: "animekai",
-    name: "AnimeKai",
-    desc: "HLS · ياباني + ترجمة",
-    tag: "AK",
+    site: "anime4up2_hard",
+    name: "أنمي فور أب (مدمج)",
+    desc: "ترجمة عربية مدمجة",
+    tag: "AD 1",
+    isArabic: true,
   },
-  // akoam: حُذف 2026-07-28 — كان يستخدم hopxBrowserExtract (browser) على كل طلب
+  // ── ترجمة آلية خارجية ──
+  {
+    site: "anime4up2",
+    name: "أنمي فور أب (خارجي)",
+    desc: "ترجمة آلية خارجية · HLS مباشر",
+    tag: "AD 2",
+  },
+  { site: "kawaii", name: "كواي أنمي", desc: "ترجمة آلية خارجية · 1080p", tag: "KW" },
+  {
+    site: "megaplay",
+    name: "MegaPlay",
+    desc: "ترجمة آلية خارجية · HLS",
+    tag: "MP",
+  },
+  {
+    site: "reflix",
+    name: "ReAnime",
+    desc: "ترجمة آلية خارجية · HLS",
+    tag: "RE",
+  },
 ];
 
 /** مجموعة المصادر العربية — لا تعرض زر الترجمة الخارجية لها */
@@ -528,35 +517,35 @@ const STATIC_PICKER_WEB: Record<
   { site: string; tag: string; serverLabel?: string }[]
 > = {
   "1080p": [
+    { site: "animewitcher", tag: "AW" },
+    { site: "animeify", tag: "AF" },
+    { site: "sanime", tag: "SA" },
+    { site: "anifox", tag: "FX" },
+    { site: "anime4up2_hard", tag: "AD 1" },
+    { site: "anime4up2", tag: "AD 2" },
     { site: "kawaii", tag: "KW" },
     { site: "megaplay", tag: "MP" },
-    { site: "anineko", tag: "AN" },
-    { site: "animewitcher", tag: "AW" },
-    { site: "anslayer", tag: "AS" },
-    { site: "sanime", tag: "SA" },
-    { site: "animeify", tag: "AF" },
-    { site: "anime4up2", tag: "AD" },
-    { site: "anifox", tag: "FX" },
-    { site: "animekai", tag: "AK" },
+    { site: "reflix", tag: "RE" },
   ],
   "720p": [
-    { site: "megaplay", tag: "MP" },
-    { site: "anineko", tag: "AN" },
     { site: "animewitcher", tag: "AW" },
-    { site: "anslayer", tag: "AS" },
-    { site: "sanime", tag: "SA" },
     { site: "animeify", tag: "AF" },
-    { site: "anime4up2", tag: "AD" },
+    { site: "sanime", tag: "SA" },
     { site: "anifox", tag: "FX" },
-    { site: "animekai", tag: "AK" },
+    { site: "anime4up2_hard", tag: "AD 1" },
+    { site: "anime4up2", tag: "AD 2" },
+    { site: "megaplay", tag: "MP" },
+    { site: "reflix", tag: "RE" },
   ],
   "360p": [
-    { site: "megaplay", tag: "MP" },
-    { site: "anineko", tag: "AN" },
     { site: "animewitcher", tag: "AW" },
     { site: "animeify", tag: "AF" },
+    { site: "sanime", tag: "SA" },
     { site: "anifox", tag: "FX" },
-    { site: "animekai", tag: "AK" },
+    { site: "anime4up2_hard", tag: "AD 1" },
+    { site: "anime4up2", tag: "AD 2" },
+    { site: "megaplay", tag: "MP" },
+    { site: "reflix", tag: "RE" },
   ],
 };
 const WEB_Q_KEYS: WebQualityKey[] = ["1080p", "720p", "360p"];
@@ -1583,7 +1572,8 @@ const SITE_SHORT: Record<string, string> = {
   shahiid: "شاهيد",
   animelek: "أنمي ليك",
   animedar: "أنمي دار",
-  anime4up2: "أنمي فور أب",
+  anime4up2_hard: "أنمي فور أب 1",
+  anime4up2: "أنمي فور أب 2",
   okanime: "أوك أنمي",
   toonstream: "تون ستريم",
   animeify: "أنمي فاي",
@@ -2544,37 +2534,64 @@ function ScraperPicker({
                             }}
                           />
                         )}
-                        {/* Source name: "السيرفر KW" */}
-                        <span
+                        {/* Source name + subtitle type badge */}
+                        <div
                           style={{
                             flex: 1,
-                            fontSize: 13,
-                            fontWeight: 800,
-                            fontFamily: "'Cairo', sans-serif",
-                            color: isReady
-                              ? "rgba(255,255,255,0.90)"
-                              : isFailed
-                                ? "rgba(255,255,255,0.28)"
-                                : "rgba(255,255,255,0.65)",
-                            textAlign: "right",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "flex-start",
+                            gap: 8,
                             direction: "rtl",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
+                            minWidth: 0,
                           }}
                         >
-                          السيرفر{" "}
                           <span
                             style={{
-                              fontFamily: "monospace",
-                              direction: "ltr",
-                              display: "inline-block",
+                              fontSize: 13,
+                              fontWeight: 800,
+                              fontFamily: "'Cairo', sans-serif",
+                              color: isReady
+                                ? "rgba(255,255,255,0.90)"
+                                : isFailed
+                                  ? "rgba(255,255,255,0.28)"
+                                  : "rgba(255,255,255,0.65)",
+                              whiteSpace: "nowrap",
                             }}
                           >
-                            {slot.tag}
-                            {slot.serverLabel ? ` · ${slot.serverLabel}` : ""}
+                            السيرفر{" "}
+                            <span
+                              style={{
+                                fontFamily: "monospace",
+                                direction: "ltr",
+                                display: "inline-block",
+                              }}
+                            >
+                              {slot.tag}
+                              {slot.serverLabel ? ` · ${slot.serverLabel}` : ""}
+                            </span>
                           </span>
-                        </span>
+                          <span
+                            style={{
+                              fontSize: 10,
+                              fontWeight: 700,
+                              fontFamily: "'Cairo', sans-serif",
+                              padding: "2px 7px",
+                              borderRadius: 6,
+                              whiteSpace: "nowrap",
+                              flexShrink: 0,
+                              background: defInfo?.isArabic
+                                ? "rgba(16,185,129,0.14)"
+                                : "rgba(245,158,11,0.12)",
+                              border: defInfo?.isArabic
+                                ? "1px solid rgba(16,185,129,0.34)"
+                                : "1px solid rgba(245,158,11,0.30)",
+                              color: defInfo?.isArabic ? "#34d399" : "#fbbf24",
+                            }}
+                          >
+                            {defInfo?.isArabic ? "ترجمة عربية مدمجة" : "ترجمة آلية خارجية"}
+                          </span>
+                        </div>
                         {/* Action button */}
                         {isReady ? (
                           <div

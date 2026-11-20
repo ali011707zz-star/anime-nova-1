@@ -96,23 +96,31 @@ const SUBTITLE_DISABLED_SITES = new Set([
   "animewitcher", "aw",
   "sanime", "sa",
   "anifox", "fx",
+  "anime4up2_hard", "ad 1", "ad1",
   "anslayer", "as",
+]);
+const HARDSUB_ARABIC_SITES = new Set([
+  "animewitcher",
+  "animeify",
+  "sanime",
+  "anifox",
+  "anime4up2_hard",
 ]);
 const ARABIC_PLAYBACK_SITES = new Set([
   "shahiid", "animelek", "animedar", "okanime", "arabseed", "animeify",
-  "animeday", "mycima", "topcinemaa", "anime4up2", "animewitcher",
-  "ristoanime", "faselhd_db", "animetime", "sanime",
+  "animeday", "mycima", "topcinemaa", "anime4up2_hard", "animewitcher",
+  "ristoanime", "faselhd_db", "animetime", "sanime", "anifox",
 ]);
 
 /* Playback and download providers are separate product surfaces. */
 const DOWNLOAD_SOURCE_SITES = new Set([
-  "animedar",     // AnimeDar
-  "anime4up2",    // AD — أنمي فور أب
-  "animewitcher", // AW
-  "sanime",       // SA
-  "anslayer",     // AS
-  "animeify",     // AF — direct MediaFire/FileMoon sources
-  "anifox",       // FX
+  "animedar",       // AnimeDar
+  "anime4up2_hard", // AD 1 — أنمي فور أب (مدمج)
+  "anime4up2",      // AD 2 — أنمي فور أب (خارجي)
+  "animewitcher",   // AW
+  "sanime",         // SA
+  "animeify",       // AF — direct MediaFire/FileMoon sources
+  "anifox",         // FX
 ]);
 
 function subtitlesDisabledForSite(site?: string): boolean {
@@ -124,7 +132,7 @@ const SITE_TAG: Record<string, string> = {
   shahiid: "SH", animelek: "EK", animedar: "AD", okanime: "OK",
   ristoanime: "RS", animeify: "AF", animeday: "DY", arabseed: "AR",
   mycima: "MC", topcinemaa: "TC",
-  animewitcher: "AW", kawaii: "KW", megaplay: "MP", reflix: "RE", reanime: "RE", anineko: "AN",
+  animewitcher: "AW", anime4up2_hard: "AD 1", anime4up2: "AD 2", kawaii: "KW", megaplay: "MP", reflix: "RE", reanime: "RE", anineko: "AN",
   animekai: "AK",
   vidlink_anim: "VL", vidfast: "VF",
   animetime: "AT", animepahe: "AP", dulo_anim: "DL",
@@ -145,7 +153,7 @@ const SITE_LABEL: Record<string, string> = {
   animepahe: "AnimePahe", shahiid: "Shahiid", animelek: "Animelek",
   animedar: "أنمي فور أب", okanime: "OkAnime", ristoanime: "RistoAnime",
   animeify: "AnimeIfy", animeday: "AnimeDay", arabseed: "ArabSeed",
-  anime4up2: "AD", mycima: "MyCima", topcinemaa: "TopCinema",
+  anime4up2_hard: "أنمي فور أب (مدمج)", anime4up2: "أنمي فور أب (خارجي)", mycima: "MyCima", topcinemaa: "TopCinema",
   faselhd_db: "FaselHD", animetime: "AnimeTime",
   notorrent: "Notorrent", sanime: "SAnime", anipm: "AniPm", anslayer: "AnimeSlayer",
   akwam: "Akwam",
@@ -171,7 +179,7 @@ const SITE_DESC: Record<string, string> = {
   animedar: "عربي مترجم", okanime: "عربي مترجم",
   ristoanime: "عربي مترجم · MP4 مباشر", animeify: "عربي · ميغا",
   animeday: "عربي مدبلج · HLS مباشر", arabseed: "عربي مدبلج/مترجم · MP4",
-  anime4up2: "AD", mycima: "عربي مترجم · HLS/فيديو",
+  anime4up2_hard: "ترجمة عربية مدمجة", anime4up2: "ترجمة آلية خارجية", mycima: "عربي مترجم · HLS/فيديو",
   topcinemaa: "عربي مترجم · HLS/فيديو",
   faselhd_db: "عربي مترجم · GitHub DB", animetime: "عربي مترجم · مباشر",
   notorrent: "IMDB · مصادر متعددة", sanime: "عربي مدبلج/مترجم · MP4",
@@ -192,6 +200,9 @@ function getSiteDesc(site: string): string {
 const BLOCKED_SOURCE_SITES = new Set([
   "hianime", "hi",
   "consumet_reanime",
+  "animekai", "ak",
+  "anineko", "an",
+  "anslayer", "as",
 ]);
 function isBlockedSource(src: Pick<Src, "site">): boolean {
   return BLOCKED_SOURCE_SITES.has(String(src.site || "").trim().toLowerCase());
@@ -543,49 +554,45 @@ type QualityKey = "1080p" | "720p" | "480p" | "360p";
 
 const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: string }[]> = {
   "1080p": [
-    { site: "kawaii",       name: "كواي أنمي",   tag: "KW" },
-    { site: "megaplay",     name: "MegaPlay",    tag: "MP" },
-    { site: "reflix",       name: "ReAnime",     tag: "RE" },
-    { site: "anineko",      name: "AniNeko",      tag: "AN" },
-    { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
-    { site: "anime4up2", name: "أنمي فور أب", tag: "AD" },
-    { site: "anslayer",     name: "AnimeSlayer",  tag: "AS" },
-    { site: "sanime",       name: "سـAnime",      tag: "SA" },
-    { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
-    { site: "anifox",        name: "ANIFOX",      tag: "FX" },
-    { site: "animekai",      name: "AnimeKai",   tag: "AK" },
+    { site: "animewitcher",   name: "AnimeWitcher",       tag: "AW" },
+    { site: "animeify",       name: "أنمي فاي",          tag: "AF" },
+    { site: "sanime",         name: "سـAnime",            tag: "SA" },
+    { site: "anifox",         name: "ANIFOX",             tag: "FX" },
+    { site: "anime4up2_hard", name: "أنمي فور أب (مدمج)", tag: "AD 1" },
+    { site: "anime4up2",      name: "أنمي فور أب (خارجي)", tag: "AD 2" },
+    { site: "kawaii",         name: "كواي أنمي",          tag: "KW" },
+    { site: "megaplay",       name: "MegaPlay",           tag: "MP" },
+    { site: "reflix",         name: "ReAnime",            tag: "RE" },
   ],
   "720p": [
-    { site: "megaplay",     name: "MegaPlay",    tag: "MP" },
-    { site: "reflix",       name: "ReAnime",     tag: "RE" },
-    { site: "anineko",      name: "AniNeko",      tag: "AN" },
-    { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
-    { site: "anime4up2", name: "أنمي فور أب", tag: "AD" },
-    { site: "anslayer",     name: "AnimeSlayer",  tag: "AS" },
-    { site: "sanime",       name: "سـAnime",      tag: "SA" },
-    { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
-    { site: "anifox",        name: "ANIFOX",      tag: "FX" },
-    { site: "animekai",      name: "AnimeKai",   tag: "AK" },
-  ],
-  "360p": [
-    { site: "megaplay",     name: "MegaPlay",    tag: "MP" },
-    { site: "reflix",       name: "ReAnime",     tag: "RE" },
-    { site: "anineko",      name: "AniNeko",      tag: "AN" },
-    { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
-    { site: "anime4up2", name: "أنمي فور أب", tag: "AD" },
-    { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
-    { site: "anifox",        name: "ANIFOX",      tag: "FX" },
-    { site: "animekai",      name: "AnimeKai",   tag: "AK" },
+    { site: "animewitcher",   name: "AnimeWitcher",       tag: "AW" },
+    { site: "animeify",       name: "أنمي فاي",          tag: "AF" },
+    { site: "sanime",         name: "سـAnime",            tag: "SA" },
+    { site: "anifox",         name: "ANIFOX",             tag: "FX" },
+    { site: "anime4up2_hard", name: "أنمي فور أب (مدمج)", tag: "AD 1" },
+    { site: "anime4up2",      name: "أنمي فور أب (خارجي)", tag: "AD 2" },
+    { site: "megaplay",       name: "MegaPlay",           tag: "MP" },
+    { site: "reflix",         name: "ReAnime",            tag: "RE" },
   ],
   "480p": [
-    { site: "megaplay",     name: "MegaPlay",    tag: "MP" },
-    { site: "reflix",       name: "ReAnime",     tag: "RE" },
-    { site: "anineko",      name: "AniNeko",      tag: "AN" },
-    { site: "animewitcher", name: "AnimeWitcher", tag: "AW" },
-    { site: "anime4up2", name: "أنمي فور أب", tag: "AD" },
-    { site: "animeify",     name: "أنمي فاي",    tag: "AF" },
-    { site: "anifox",        name: "ANIFOX",      tag: "FX" },
-    { site: "animekai",      name: "AnimeKai",   tag: "AK" },
+    { site: "animewitcher",   name: "AnimeWitcher",       tag: "AW" },
+    { site: "animeify",       name: "أنمي فاي",          tag: "AF" },
+    { site: "sanime",         name: "سـAnime",            tag: "SA" },
+    { site: "anifox",         name: "ANIFOX",             tag: "FX" },
+    { site: "anime4up2_hard", name: "أنمي فور أب (مدمج)", tag: "AD 1" },
+    { site: "anime4up2",      name: "أنمي فور أب (خارجي)", tag: "AD 2" },
+    { site: "megaplay",       name: "MegaPlay",           tag: "MP" },
+    { site: "reflix",         name: "ReAnime",            tag: "RE" },
+  ],
+  "360p": [
+    { site: "animewitcher",   name: "AnimeWitcher",       tag: "AW" },
+    { site: "animeify",       name: "أنمي فاي",          tag: "AF" },
+    { site: "sanime",         name: "سـAnime",            tag: "SA" },
+    { site: "anifox",         name: "ANIFOX",             tag: "FX" },
+    { site: "anime4up2_hard", name: "أنمي فور أب (مدمج)", tag: "AD 1" },
+    { site: "anime4up2",      name: "أنمي فور أب (خارجي)", tag: "AD 2" },
+    { site: "megaplay",       name: "MegaPlay",           tag: "MP" },
+    { site: "reflix",         name: "ReAnime",            tag: "RE" },
   ],
 };
 const Q_KEYS: QualityKey[] = ["1080p", "720p", "480p", "360p"];
@@ -1637,10 +1644,7 @@ export default function WatchScreen() {
         }
       }
     };
-    const availabilityTimeoutMs =
-      isFromLatest && latestSource === "anslayer"
-        ? 110_000
-        : AVAILABILITY_TIMEOUT_MS;
+    const availabilityTimeoutMs = AVAILABILITY_TIMEOUT_MS;
     const timeoutId = setTimeout(() => {
       timedOut = true;
       controller.abort();
@@ -2986,7 +2990,7 @@ export default function WatchScreen() {
               for (const qk of Q_KEYS) {
                 const pickerDefs = STATIC_PICKER[qk] || [];
                 const matchingSites = Object.entries(availableSlots)
-                  .filter(([, tiers]) => !!tiers[qk])
+                  .filter(([site, tiers]) => !!tiers[qk] && !BLOCKED_SOURCE_SITES.has(site.toLowerCase()))
                   .map(([site]) => site)
                   .sort((a, b) => {
                     const ai = pickerDefs.findIndex(def => def.site === a);
@@ -3002,7 +3006,7 @@ export default function WatchScreen() {
               return hasAvailableSlot && Q_KEYS.map(qk => {
                 const pickerDefs = STATIC_PICKER[qk] || [];
                 const dynamicSlots = Object.entries(availableSlots)
-                  .filter(([, tiers]) => !!tiers[qk])
+                  .filter(([site, tiers]) => !!tiers[qk] && !BLOCKED_SOURCE_SITES.has(site.toLowerCase()))
                   .map(([site, tiers]) => {
                     const pickerDef = pickerDefs.find(def => def.site === site);
                     return {
@@ -3102,8 +3106,36 @@ export default function WatchScreen() {
                               )}
                             </View>
 
-                            {/* Right: السيرفر XX مع النقطة الخضراء */}
+                            {/* Right: السيرفر XX مع شارة نوع الترجمة والنقطة الخضراء */}
                             <View style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 8 }}>
+                              {!isAwDubbed && (
+                                (() => {
+                                  const isHardsub = HARDSUB_ARABIC_SITES.has(slot.site.toLowerCase());
+                                  return (
+                                    <View
+                                      style={{
+                                        paddingHorizontal: tvMode ? 10 : 7,
+                                        paddingVertical: tvMode ? 3 : 2,
+                                        borderRadius: 6,
+                                        borderWidth: 1,
+                                        backgroundColor: isHardsub ? "rgba(16,185,129,0.13)" : "rgba(245,158,11,0.11)",
+                                        borderColor: isHardsub ? "rgba(16,185,129,0.34)" : "rgba(245,158,11,0.30)",
+                                      }}
+                                    >
+                                      <Text
+                                        style={{
+                                          color: isHardsub ? "#10b981" : "#f59e0b",
+                                          fontSize: tvMode ? 12 : 10,
+                                          fontFamily: "Cairo_700Bold",
+                                        }}
+                                        numberOfLines={1}
+                                      >
+                                        {isHardsub ? "ترجمة عربية مدمجة" : "ترجمة آلية خارجية"}
+                                      </Text>
+                                    </View>
+                                  );
+                                })()
+                              )}
                               <Text
                                 style={[
                                   d.webRowTag,
