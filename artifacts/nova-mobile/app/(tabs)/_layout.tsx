@@ -3,7 +3,7 @@ import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { Platform, StyleSheet, Text, View } from "react-native";
 import { useColors } from "@/hooks/useColors";
-import { TvPressable, useTvFullScreenOverlay, useTvMetrics } from "@/utils/tv";
+import { isNativeTvRingActive, TvPressable, useTvFullScreenOverlay, useTvMetrics } from "@/utils/tv";
 
 type TabIconProps = {
   name: keyof typeof Ionicons.glyphMap;
@@ -61,7 +61,7 @@ export default function TabLayout() {
                   style={({ focused }) => [
                     typeof rawStyle === "function" ? (rawStyle as any)({ pressed: false }) : rawStyle,
                     styles.tvTabButton,
-                    focused && styles.tvTabDpadFocused,
+                    focused && (isNativeTvRingActive() ? styles.tvTabDpadFocusedTintOnly : styles.tvTabDpadFocused),
                   ]}
                 />
               );
@@ -170,6 +170,9 @@ const styles = StyleSheet.create({
   tvTabDpadFocused: {
     borderColor: "#FACC15",
     backgroundColor: "rgba(250, 204, 21, 0.16)",
+  },
+  tvTabDpadFocusedTintOnly: {
+    backgroundColor: "rgba(250, 204, 21, 0.14)",
   },
   tabLabel: {
     fontSize: 8.5,

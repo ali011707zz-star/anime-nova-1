@@ -489,11 +489,11 @@ export default function HomeScreen() {
   const railStride = railCardWidth + railGap;
   const getRailItemLayout = useCallback(
     (_data: ArrayLike<any> | null | undefined, index: number) => ({
-      length: railCardWidth,
+      length: railStride,
       offset: railStride * index,
       index,
     }),
-    [railCardWidth, railStride],
+    [railStride],
   );
 
   const renderHomeSection = ({ item: section }: { item: HomeSectionItem; index: number }) => {
@@ -1917,6 +1917,89 @@ export default function HomeScreen() {
   const headerTvFocusable = true;
   const heroTvFocusable = true;
 
+  const listHeaderElement = useMemo(
+    () => (
+      <View>
+        {/* Header */}
+        <View style={[styles.header, { paddingTop: topPad + 6, paddingHorizontal: scaleSize(14, 40), flexDirection: I18nManager.isRTL ? "row-reverse" : "row" }]}>
+          <Pressable
+            accessibilityLabel="فتح القائمة"
+            testID="nova-tv-header-action"
+            onPress={() => setShowDrawer(true)}
+            focusable={isTvLayout && headerTvFocusable}
+            hitSlop={isTvLayout ? 10 : 6}
+            style={({ focused }) => [
+              styles.iconBtn,
+              {
+                width: scaleSize(42, 54),
+                height: scaleSize(42, 54),
+                borderRadius: scaleSize(13, 16),
+                backgroundColor: colors.surface,
+                borderColor: colors.border,
+              },
+              isTvLayout && tvFocusStyle(focused),
+            ]}
+          >
+            <Ionicons name="menu" size={scaleSize(21, 28)} color={colors.text} />
+          </Pressable>
+          <View style={styles.headerSpacer} />
+          <View style={styles.headerBrandGroup}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="البحث عن أنمي"
+              testID="nova-tv-header-action"
+              onPress={() => router.push("/(tabs)/search" as any)}
+              focusable={isTvLayout && headerTvFocusable}
+              style={({ focused }) => [
+                styles.headerSearch,
+                {
+                  height: scaleSize(38, 48),
+                  width: scaleSize(116, 180),
+                  borderRadius: scaleSize(13, 16),
+                  backgroundColor: colors.input,
+                  borderColor: colors.border,
+                },
+                isTvLayout && tvFocusStyle(focused),
+              ]}
+            >
+              <Ionicons name="search" size={scaleSize(14, 18)} color={colors.textMuted} />
+              <Text style={[styles.headerSearchInput, { fontSize: scaleSize(12, 16), color: colors.textMuted }]} numberOfLines={1}>
+                ...بحث
+              </Text>
+            </Pressable>
+            <View style={styles.logoRow}>
+              <View style={[styles.logoAccent, { height: scaleSize(22, 30), backgroundColor: "#06b6d4" }]} />
+              <Text style={[styles.logoText, { fontSize: scaleSize(15, 22), color: colors.text }]}>
+                ANIME <Text style={{ color: "#06b6d4" }}>NOVA</Text>
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        <AnnouncementBanner />
+
+        {isLoading ? (
+          <View style={{ height: 420, backgroundColor: colors.card }} />
+        ) : (
+          <HeroSection
+            items={heroItems}
+            initialTVFocus={isTvLayout && ready}
+            tvFocusable={heroTvFocusable}
+          />
+        )}
+
+        {isLoading && (
+          <View style={{ marginTop: 24 }}>
+            <SkeletonRow />
+            <SkeletonRow />
+            <SkeletonRow />
+          </View>
+        )}
+      </View>
+    ),
+    [colors.card, colors.border, colors.input, colors.surface, colors.text, colors.textMuted, headerTvFocusable, heroItems, heroTvFocusable, isLoading, isTvLayout, ready, router, scaleSize, topPad],
+  );
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <FlatList
@@ -1925,85 +2008,7 @@ export default function HomeScreen() {
         extraData={{ activeLatestTab, activeAnimeTab, activeDubbedTab, activeMangaTab, newsLen: homeNewsList.length, newsLoading: homeNewsLoading, newsErr: homeNewsError }}
         keyExtractor={(item) => item.key}
         renderItem={renderHomeSection}
-        ListHeaderComponent={
-          <View>
-            {/* Header */}
-            <View style={[styles.header, { paddingTop: topPad + 6, paddingHorizontal: scaleSize(14, 40), flexDirection: I18nManager.isRTL ? "row-reverse" : "row" }]}>
-              <Pressable
-                accessibilityLabel="فتح القائمة"
-                testID="nova-tv-header-action"
-                onPress={() => setShowDrawer(true)}
-                focusable={isTvLayout && headerTvFocusable}
-                hitSlop={isTvLayout ? 10 : 6}
-                style={({ focused }) => [
-                  styles.iconBtn,
-                  {
-                    width: scaleSize(42, 54),
-                    height: scaleSize(42, 54),
-                    borderRadius: scaleSize(13, 16),
-                    backgroundColor: colors.surface,
-                    borderColor: colors.border,
-                  },
-                  isTvLayout && tvFocusStyle(focused),
-                ]}
-              >
-                <Ionicons name="menu" size={scaleSize(21, 28)} color={colors.text} />
-              </Pressable>
-              <View style={styles.headerSpacer} />
-              <View style={styles.headerBrandGroup}>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="البحث عن أنمي"
-                  testID="nova-tv-header-action"
-                  onPress={() => router.push("/(tabs)/search" as any)}
-                  focusable={isTvLayout && headerTvFocusable}
-                  style={({ focused }) => [
-                    styles.headerSearch,
-                    {
-                      height: scaleSize(38, 48),
-                      width: scaleSize(116, 180),
-                      borderRadius: scaleSize(13, 16),
-                      backgroundColor: colors.input,
-                      borderColor: colors.border,
-                    },
-                    isTvLayout && tvFocusStyle(focused),
-                  ]}
-                >
-                  <Ionicons name="search" size={scaleSize(14, 18)} color={colors.textMuted} />
-                  <Text style={[styles.headerSearchInput, { fontSize: scaleSize(12, 16), color: colors.textMuted }]} numberOfLines={1}>
-                    ...بحث
-                  </Text>
-                </Pressable>
-                <View style={styles.logoRow}>
-                  <View style={[styles.logoAccent, { height: scaleSize(22, 30), backgroundColor: "#06b6d4" }]} />
-                  <Text style={[styles.logoText, { fontSize: scaleSize(15, 22), color: colors.text }]}>
-                    ANIME <Text style={{ color: "#06b6d4" }}>NOVA</Text>
-                  </Text>
-                </View>
-              </View>
-            </View>
-
-            <AnnouncementBanner />
-
-            {isLoading ? (
-              <View style={{ height: 420, backgroundColor: colors.card }} />
-            ) : (
-              <HeroSection
-                items={heroItems}
-                initialTVFocus={isTvLayout && ready}
-                tvFocusable={heroTvFocusable}
-              />
-            )}
-
-            {isLoading && (
-              <View style={{ marginTop: 24 }}>
-                <SkeletonRow />
-                <SkeletonRow />
-                <SkeletonRow />
-              </View>
-            )}
-          </View>
-        }
+        ListHeaderComponent={listHeaderElement}
         ListFooterComponent={<View style={{ height: 90 }} />}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}

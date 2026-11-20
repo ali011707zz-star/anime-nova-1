@@ -189,6 +189,33 @@ export function isTvDevice(_width?: number, _height?: number): boolean {
   return detectAndroidTvHardware();
 }
 
+/**
+ * True when Android MainActivity's native GPU foreground focus ring is actively
+ * drawing the single yellow TV focus outline. When active, JS must NOT draw a
+ * second yellow border or double-scroll horizontal rails.
+ */
+export function isNativeTvRingActive(): boolean {
+  ensureTvOverrideHydrated();
+  if (Platform.OS !== "android") return false;
+  if (currentTvOverride === "off") return false;
+  return hardwareDpadDetected || detectAndroidTvHardware();
+}
+
+function subscribeTvStore(listener: () => void): () => void {
+  tvListeners.add(listener);
+  return () => {
+    tvListeners.delete(listener);
+  };
+}
+
+function getTvDeviceSnapshot(): boolean {
+  return isTvDevice();
+}
+
+function getNativeTvRingSnapshot(): boolean {
+  return isNativeTvRingActive();
+}
+
 let activeFullScreenOverlay = false;
 const overlayListeners = new Set<() => void>();
 
@@ -234,7 +261,7 @@ try {
  * and background color without triggering Android elevation shadow artifacts.
  */
 export function tvFocusStyle(focused: boolean, isWhite?: boolean): ViewStyle {
-  if (!focused) return {};
+  if (!focused || isNativeTvRingActive()) return {};
   const white = typeof isWhite === "boolean" ? isWhite : activeThemeIsWhite;
   if (white) {
     return {
@@ -294,6 +321,7 @@ export function useTvListFocusScroll<T>(
   }, []);
 
   const scrollToFocusedIndex = React.useCallback((index: number) => {
+    if (isNativeTvRingActive()) return;
     if (!listRef?.current || typeof index !== "number" || index < 0) return;
 
     const prevIndex = lastIndexRef.current;
@@ -370,12 +398,16 @@ export const TvPressable = React.forwardRef<View, TvPressableProps>(function TvP
   }: TvPressableProps,
   ref: React.ForwardedRef<View>,
 ) {
-  const [tv, setTv] = React.useState<boolean>(() => isTvDevice());
+  const tv = React.useSyncExternalStore(subscribeTvStore, getTvDeviceSnapshot, getTvDeviceSnapshot);
+  const nativeRing = React.useSyncExternalStore(subscribeTvStore, getNativeTvRingSnapshot, getNativeTvRingSnapshot);
+  const needsJsFocusState = !nativeRing || typeof style === "function" || typeof children === "function";
   const [focused, setFocused] = React.useState<boolean>(false);
   const innerRef = React.useRef<View | null>(null);
+  const focusedRef = React.useRef(false);
 
   const clearSelfFocus = React.useCallback(() => {
-    setFocused(false);
+    focusedRef.current = false;
+    setFocused((prev) => (prev ? false : prev));
   }, []);
 
   const setCombinedRef = React.useCallback(
@@ -391,24 +423,13 @@ export const TvPressable = React.forwardRef<View, TvPressableProps>(function TvP
   );
 
   React.useEffect(() => {
-    const sync = () => {
-      const next = isTvDevice();
-      setTv((prev: boolean) => (prev !== next ? next : prev));
-    };
-    sync();
-    tvListeners.add(sync);
     return () => {
-      tvListeners.delete(sync);
       releaseTvFocus(clearSelfFocus);
     };
   }, [clearSelfFocus]);
 
   const isDisabled = Boolean(props.disabled);
 
-  const focusedRef = React.useRef(false);
-  React.useEffect(() => {
-    focusedRef.current = focused;
-  }, [focused]);
   React.useEffect(() => {
     if (!tv || !hasTVPreferredFocus || isDisabled) return;
     const t1 = setTimeout(() => {
@@ -435,14 +456,20 @@ export const TvPressable = React.forwardRef<View, TvPressableProps>(function TvP
       android_disableSound={false}
       android_ripple={tv ? null : props.android_ripple}
       onFocus={(event: any) => {
-        const tag = innerRef.current ? findNodeHandle(innerRef.current) : null;
-        claimTvFocus(clearSelfFocus, tag);
-        setFocused(true);
+        focusedRef.current = true;
+        if (needsJsFocusState) {
+          const tag = innerRef.current ? findNodeHandle(innerRef.current) : null;
+          claimTvFocus(clearSelfFocus, tag);
+          setFocused(true);
+        }
         onFocus?.(event);
       }}
       onBlur={(event: any) => {
-        releaseTvFocus(clearSelfFocus);
-        setFocused(false);
+        focusedRef.current = false;
+        if (needsJsFocusState) {
+          releaseTvFocus(clearSelfFocus);
+          setFocused(false);
+        }
         onBlur?.(event);
       }}
       style={(state: PressableStateCallbackType) => {
@@ -450,8 +477,12 @@ export const TvPressable = React.forwardRef<View, TvPressableProps>(function TvP
           const baseStyle = typeof style === "function" ? style({ ...state, focused: false } as any) : style;
           return state.pressed ? [baseStyle, { opacity: 0.85 }] : baseStyle;
         }
-        const isFocused = Boolean(focused || (state as any)?.focused);
+        // Strictly use tracked focus state (never stale RN state.focused) to prevent duplicate rings
+        const isFocused = needsJsFocusState ? focused : false;
         const baseStyle = typeof style === "function" ? style({ ...state, focused: isFocused }) : style;
+        if (nativeRing) {
+          return state.pressed ? [baseStyle, { opacity: 0.85 }] : baseStyle;
+        }
         return [
           { borderWidth: 1.5, borderColor: "transparent" },
           baseStyle,
@@ -464,7 +495,7 @@ export const TvPressable = React.forwardRef<View, TvPressableProps>(function TvP
         ? (state: PressableStateCallbackType) =>
             (children as any)({
               ...state,
-              focused: tv ? Boolean(focused || (state as any)?.focused) : false,
+              focused: tv ? focused : false,
             })
         : children}
     </Pressable>

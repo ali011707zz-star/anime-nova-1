@@ -8,6 +8,7 @@ const KOTLIN_METHODS = `
   private var novaTvEngineInstalled = false
   private var novaLastKeyRepeatMs = 0L
   private var novaLastManualScrollMs = 0L
+  private var novaStickyColumnX = -1
   private var novaCenterConsumed = false
   private var novaCurrentFocusedView: android.view.View? = null
   private var novaFocusRecoveryPosted = false
@@ -162,11 +163,16 @@ const KOTLIN_METHODS = `
       if (newFocus == null || newFocus === window?.decorView) return
       if (!novaDpadMode && !novaIsTvDevice()) return
       val clsName = newFocus.javaClass.name
+      val focusDesc = newFocus.contentDescription?.toString() ?: ""
       if (
         newFocus is android.widget.ScrollView ||
         newFocus is android.widget.HorizontalScrollView ||
         clsName.contains("ScrollView") ||
-        clsName.contains("ReactRootView")
+        clsName.contains("ReactRootView") ||
+        focusDesc == "إظهار التحكم" ||
+        focusDesc == "إظهار أدوات المشغل" ||
+        focusDesc == "إظهار أدوات مشغل التلفاز" ||
+        focusDesc == "مشغل الفيديو النشط"
       ) {
         return
       }
@@ -423,17 +429,29 @@ const KOTLIN_METHODS = `
     val curRect = android.graphics.Rect()
     cur.getDrawingRect(curRect)
     scrollView.offsetDescendantRectToMyCoords(cur, curRect)
+    val curScreenLoc = IntArray(2)
+    cur.getLocationOnScreen(curScreenLoc)
+    val curScreenCenterX = curScreenLoc[0] + cur.width / 2
+    if (novaStickyColumnX < 0) {
+      novaStickyColumnX = curScreenCenterX
+    }
+    val anchorX = novaStickyColumnX
     val curHScroll = novaFindHorizontalScrollViewAncestor(cur)
     val d = resources.displayMetrics.density
 
-    var target: android.view.View? = null
     val candidates = java.util.ArrayList<android.view.View>()
     novaCollectFocusableViews(scrollView, candidates)
     val tol = (14 * d).toInt()
-    val rowTol = (28 * d).toInt()
+    val rowTol = (32 * d).toInt()
     val minRowSep = (18 * d).toInt()
-    var bestVDist = Int.MAX_VALUE
-    var bestHDist = Int.MAX_VALUE
+
+    // Two-Pass Row-then-Column Snap:
+    // Pass 1: collect strictly above/below candidates and find the nearest row's minimum vDist.
+    val validCands = java.util.ArrayList<android.view.View>()
+    val validVDists = java.util.ArrayList<Int>()
+    val validScreenX = java.util.ArrayList<Int>()
+    var minVDist = Int.MAX_VALUE
+
     for (cand in candidates) {
       if (cand === cur) continue
       if (novaIsDescendantOf(cand, cur) || novaIsDescendantOf(cur, cand)) continue
@@ -441,25 +459,33 @@ const KOTLIN_METHODS = `
       val candRect = android.graphics.Rect()
       cand.getDrawingRect(candRect)
       scrollView.offsetDescendantRectToMyCoords(cand, candRect)
-      if (isUp) {
+      val vDist = if (isUp) {
         val isAbove = candRect.bottom <= curRect.top + tol || (candRect.centerY() < curRect.centerY() - minRowSep && candRect.top < curRect.top - tol)
         if (!isAbove) continue
-        val vDist = (curRect.top - candRect.bottom).coerceAtLeast(0)
-        val hDist = kotlin.math.abs(candRect.centerX() - curRect.centerX())
-        if (vDist < bestVDist - rowTol || (kotlin.math.abs(vDist - bestVDist) <= rowTol && hDist < bestHDist)) {
-          target = cand
-          if (vDist < bestVDist) bestVDist = vDist
-          bestHDist = hDist
-        }
+        (curRect.top - candRect.bottom).coerceAtLeast(0)
       } else {
         val isBelow = candRect.top >= curRect.bottom - tol || (candRect.centerY() > curRect.centerY() + minRowSep && candRect.bottom > curRect.bottom + tol)
         if (!isBelow) continue
-        val vDist = (candRect.top - curRect.bottom).coerceAtLeast(0)
-        val hDist = kotlin.math.abs(candRect.centerX() - curRect.centerX())
-        if (vDist < bestVDist - rowTol || (kotlin.math.abs(vDist - bestVDist) <= rowTol && hDist < bestHDist)) {
-          target = cand
-          if (vDist < bestVDist) bestVDist = vDist
+        (candRect.top - curRect.bottom).coerceAtLeast(0)
+      }
+      val candScreenLoc = IntArray(2)
+      cand.getLocationOnScreen(candScreenLoc)
+      val candScreenCenterX = candScreenLoc[0] + cand.width / 2
+      validCands.add(cand)
+      validVDists.add(vDist)
+      validScreenX.add(candScreenCenterX)
+      if (vDist < minVDist) minVDist = vDist
+    }
+
+    // Pass 2: among candidates in the nearest row ONLY, pick the one closest horizontally to anchorX.
+    var target: android.view.View? = null
+    var bestHDist = Int.MAX_VALUE
+    for (i in 0 until validCands.size) {
+      if (validVDists[i] <= minVDist + rowTol) {
+        val hDist = kotlin.math.abs(validScreenX[i] - anchorX)
+        if (hDist < bestHDist) {
           bestHDist = hDist
+          target = validCands[i]
         }
       }
     }
@@ -620,23 +646,13 @@ const KOTLIN_METHODS = `
   private fun novaHookDecorView(rootView: android.view.View) {
     if (novaHookedDecorViews.contains(rootView)) return
     novaHookedDecorViews.add(rootView)
-    rootView.viewTreeObserver.addOnGlobalFocusChangeListener { oldFocus, newFocus ->
-      val prevFocused = novaCurrentFocusedView
-      if (oldFocus != null && oldFocus !== newFocus) {
-        novaDispatchRnFocusEvent(oldFocus, false)
-      }
-      if (prevFocused != null && prevFocused !== oldFocus && prevFocused !== newFocus) {
-        novaDispatchRnFocusEvent(prevFocused, false)
-      }
+    rootView.viewTreeObserver.addOnGlobalFocusChangeListener { _, newFocus ->
       novaCurrentFocusedView = newFocus
       if (newFocus != null && newFocus !== rootView && newFocus !== window?.decorView) {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
           try { newFocus.defaultFocusHighlightEnabled = false } catch (_: Throwable) {}
         }
         novaEmitFocusChangedToJs(newFocus.id)
-        if (newFocus !== oldFocus) {
-          novaDispatchRnFocusEvent(newFocus, true)
-        }
         novaApplyNativeFocusRing(newFocus)
         if (novaDpadMode || novaIsTvDevice()) {
           novaScrollFocusedIntoView(newFocus)
@@ -754,6 +770,9 @@ const KOTLIN_METHODS = `
         if (isDirKey && event.repeatCount > 0 && now - novaLastKeyRepeatMs < 110L) {
           return true
         }
+        if (keyCode == android.view.KeyEvent.KEYCODE_DPAD_LEFT || keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT) {
+          novaStickyColumnX = -1
+        }
         novaLastKeyRepeatMs = now
         novaEmitKeyEventToJs(keyCode, event.action, event.repeatCount)
       }
@@ -793,7 +812,7 @@ const KOTLIN_METHODS = `
       val focused = currentFocus
       val desc = focused?.contentDescription?.toString() ?: ""
       if (
-        (desc == "شريط التقدم" || desc == "شريط تقدم الحلقة" || desc == "مشغل الفيديو النشط" || desc == "إظهار التحكم" || desc == "إظهار أدوات المشغل") &&
+        (desc == "شريط التقدم" || desc == "شريط تقدم الحلقة" || desc == "مشغل الفيديو النشط" || desc == "إظهار التحكم" || desc == "إظهار أدوات المشغل" || desc == "إظهار أدوات مشغل التلفاز") &&
         (keyCode == android.view.KeyEvent.KEYCODE_DPAD_LEFT || keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT)
       ) {
         return true

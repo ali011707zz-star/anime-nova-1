@@ -20,7 +20,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch } from "@/utils/secureApi";
-import { TvPressable, useTvMetrics } from "@/utils/tv";
+import { isNativeTvRingActive, TvPressable, useTvMetrics } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
 import {
   buildSkipScopeKey,
@@ -2378,24 +2378,12 @@ function ExpoRiftPlayer({
   const syncTvProgressHandles = useCallback(() => {
     if (!tvMode) return;
     try {
-      const left = findNodeHandle(tvProgressLeftBumperRef.current) ?? undefined;
       const center = findNodeHandle(tvProgressRef.current) ?? undefined;
-      const right = findNodeHandle(tvProgressRightBumperRef.current) ?? undefined;
       setTvProgressHandles(prev =>
-        prev.left === left && prev.center === center && prev.right === right
-          ? prev
-          : { left, center, right }
+        prev.center === center ? prev : { left: center, center, right: center }
       );
-      if (center && left && right) {
+      if (center) {
         (tvProgressRef.current as any)?.setNativeProps?.({
-          nextFocusLeft: left,
-          nextFocusRight: right,
-        });
-        (tvProgressLeftBumperRef.current as any)?.setNativeProps?.({
-          nextFocusLeft: center,
-          nextFocusRight: center,
-        });
-        (tvProgressRightBumperRef.current as any)?.setNativeProps?.({
           nextFocusLeft: center,
           nextFocusRight: center,
         });
@@ -2420,6 +2408,17 @@ function ExpoRiftPlayer({
       setIsTvProgressFocused(false);
     }, 80);
   }, []);
+
+  useEffect(() => {
+    if (!showControls) {
+      if (tvProgressBlurTimerRef.current) {
+        clearTimeout(tvProgressBlurTimerRef.current);
+        tvProgressBlurTimerRef.current = null;
+      }
+      progressFocusedRef.current = false;
+      setIsTvProgressFocused(false);
+    }
+  }, [showControls]);
 
   const performTvStepSeek = useCallback((direction: 1 | -1, repeatCount = 0) => {
     const maxDuration = durationRef.current;
@@ -2548,10 +2547,8 @@ function ExpoRiftPlayer({
       }
     };
     const sub1 = DeviceEventEmitter.addListener("novaTvKeyEvent", handleRemoteKey);
-    const sub2 = DeviceEventEmitter.addListener("onHWKeyEvent", handleRemoteKey);
     return () => {
       sub1.remove();
-      sub2.remove();
     };
   }, [fadeIn, isLocked, markTvProgressFocused, performTvStepSeek, showControls, togglePlay]);
 
@@ -3500,31 +3497,39 @@ function ExpoRiftPlayer({
                 <Pressable onPress={handleBack} style={[s.topCloseBtn, tvMode && s.tvTopCloseBtn]} hitSlop={10}>
                   <Ionicons name="close" size={21} color="rgba(239,68,68,0.90)" />
                 </Pressable>
-                <Pressable onPress={togglePortrait} style={[s.topRotateBtn, tvMode && s.tvTopActionBtn, isPortrait && s.topRotateBtnActive]} hitSlop={10}>
-                  <Ionicons
-                    name={isPortrait ? "phone-landscape-outline" : "phone-portrait-outline"}
-                    size={tvMode ? 28 : 17}
-                    color={isPortrait ? PLAYER_ACTIVE_ICON : "rgba(255,255,255,0.85)"}
-                  />
-                 </Pressable>
+                {!tvMode && (
+                  <Pressable onPress={togglePortrait} style={[s.topRotateBtn, isPortrait && s.topRotateBtnActive]} hitSlop={10}>
+                    <Ionicons
+                      name={isPortrait ? "phone-landscape-outline" : "phone-portrait-outline"}
+                      size={17}
+                      color={isPortrait ? PLAYER_ACTIVE_ICON : "rgba(255,255,255,0.85)"}
+                    />
+                  </Pressable>
+                )}
                 {ccBtn}
-                 <Pressable onPress={takeScreenshot} style={[s.topIconBtn, tvMode && s.tvTopActionBtn]} hitSlop={10}>
-                  <Ionicons name="camera-outline" size={tvMode ? 28 : 18} color="rgba(255,255,255,0.85)" />
-                 </Pressable>
+                {!tvMode && (
+                  <Pressable onPress={takeScreenshot} style={s.topIconBtn} hitSlop={10}>
+                    <Ionicons name="camera-outline" size={18} color="rgba(255,255,255,0.85)" />
+                  </Pressable>
+                )}
               </View>
             ) : (
               <View style={[s.topRightRow, tvMode && s.tvTopRightRow]}>
-                <Pressable onPress={takeScreenshot} style={[s.topIconBtn, tvMode && s.tvTopActionBtn]} hitSlop={10}>
-                  <Ionicons name="camera-outline" size={tvMode ? 28 : 18} color="rgba(255,255,255,0.85)" />
-               </Pressable>
+                {!tvMode && (
+                  <Pressable onPress={takeScreenshot} style={s.topIconBtn} hitSlop={10}>
+                    <Ionicons name="camera-outline" size={18} color="rgba(255,255,255,0.85)" />
+                  </Pressable>
+                )}
                 {ccBtn}
-                <Pressable onPress={togglePortrait} style={[s.topRotateBtn, tvMode && s.tvTopActionBtn, isPortrait && s.topRotateBtnActive]} hitSlop={10}>
-                  <Ionicons
-                    name={isPortrait ? "phone-landscape-outline" : "phone-portrait-outline"}
-                    size={tvMode ? 28 : 17}
-                    color={isPortrait ? PLAYER_ACTIVE_ICON : "rgba(255,255,255,0.85)"}
-                  />
-                 </Pressable>
+                {!tvMode && (
+                  <Pressable onPress={togglePortrait} style={[s.topRotateBtn, isPortrait && s.topRotateBtnActive]} hitSlop={10}>
+                    <Ionicons
+                      name={isPortrait ? "phone-landscape-outline" : "phone-portrait-outline"}
+                      size={17}
+                      color={isPortrait ? PLAYER_ACTIVE_ICON : "rgba(255,255,255,0.85)"}
+                    />
+                  </Pressable>
+                )}
                 <Pressable onPress={handleBack} style={[s.topCloseBtn, tvMode && s.tvTopCloseBtn]} hitSlop={10}>
                   <Ionicons name="close" size={21} color="rgba(239,68,68,0.90)" />
                 </Pressable>
@@ -3621,67 +3626,39 @@ function ExpoRiftPlayer({
                   {...(tvMode ? {} : (seekBarPan.current?.panHandlers ?? {}))}
                 >
                   {tvMode && (
-                    <>
-                      <Pressable
-                        ref={tvProgressLeftBumperRef}
-                        accessibilityRole="adjustable"
-                        accessibilityLabel="شريط التقدم"
-                        focusable={true}
-                        nextFocusLeft={tvProgressHandles.center}
-                        nextFocusRight={tvProgressHandles.center}
-                        onPress={togglePlay}
-                        onFocus={() => handleTvBumperFocus(-1)}
-                        onBlur={markTvProgressBlurred}
-                        onKeyDown={handleTvProgressKeyDown}
-                        style={{ position: "absolute", left: 6, right: 6, top: 0, bottom: 0, zIndex: 19 }}
-                      />
-                      <Pressable
-                        ref={tvProgressRef}
-                        testID={!inIntroRange && !inOutroRange ? "nova-tv-preferred-focus" : undefined}
-                        accessibilityRole="adjustable"
-                        accessibilityLabel="شريط التقدم"
-                        hasTVPreferredFocus={tvMode && !inIntroRange && !inOutroRange}
-                        focusable={true}
-                        nextFocusLeft={tvProgressHandles.left}
-                        nextFocusRight={tvProgressHandles.right}
-                        onLayout={syncTvProgressHandles}
-                        onPress={handleTvProgressPress}
-                        onFocus={() => {
-                          markTvProgressFocused();
-                          syncTvProgressHandles();
-                          fadeIn();
-                        }}
-                        onBlur={markTvProgressBlurred}
-                        onKeyDown={handleTvProgressKeyDown}
-                        style={({ focused }) => [
-                          { position: "absolute", left: 6, right: 6, top: 0, bottom: 0, zIndex: 20 },
-                          (focused || isTvProgressFocused) && [
-                            s.tvProgressFocus,
-                            {
-                              borderColor: colors.accent,
-                              backgroundColor: colors.overlay,
-                              shadowColor: "transparent",
-                              shadowOpacity: 0,
-                              shadowRadius: 0,
-                              elevation: 0,
-                            },
-                          ],
-                        ]}
-                      />
-                      <Pressable
-                        ref={tvProgressRightBumperRef}
-                        accessibilityRole="adjustable"
-                        accessibilityLabel="شريط التقدم"
-                        focusable={true}
-                        nextFocusLeft={tvProgressHandles.center}
-                        nextFocusRight={tvProgressHandles.center}
-                        onPress={togglePlay}
-                        onFocus={() => handleTvBumperFocus(1)}
-                        onBlur={markTvProgressBlurred}
-                        onKeyDown={handleTvProgressKeyDown}
-                        style={{ position: "absolute", left: 6, right: 6, top: 0, bottom: 0, zIndex: 19 }}
-                      />
-                    </>
+                    <Pressable
+                      ref={tvProgressRef}
+                      testID={!inIntroRange && !inOutroRange ? "nova-tv-preferred-focus" : undefined}
+                      accessibilityRole="adjustable"
+                      accessibilityLabel="شريط التقدم"
+                      hasTVPreferredFocus={tvMode && !inIntroRange && !inOutroRange}
+                      focusable={true}
+                      nextFocusLeft={tvProgressHandles.center}
+                      nextFocusRight={tvProgressHandles.center}
+                      onLayout={syncTvProgressHandles}
+                      onPress={handleTvProgressPress}
+                      onFocus={() => {
+                        markTvProgressFocused();
+                        syncTvProgressHandles();
+                        fadeIn();
+                      }}
+                      onBlur={markTvProgressBlurred}
+                      onKeyDown={handleTvProgressKeyDown}
+                      style={({ focused }) => [
+                        { position: "absolute", left: 6, right: 6, top: 0, bottom: 0, zIndex: 20 },
+                        (focused || isTvProgressFocused) && [
+                          s.tvProgressFocus,
+                          {
+                            borderColor: isNativeTvRingActive() ? "transparent" : colors.accent,
+                            backgroundColor: colors.overlay,
+                            shadowColor: "transparent",
+                            shadowOpacity: 0,
+                            shadowRadius: 0,
+                            elevation: 0,
+                          },
+                        ],
+                      ]}
+                    />
                   )}
                   <View style={[s.progressBg, tvMode && s.tvProgressBg, { backgroundColor: colors.playerTrack }]} />
                   {bufferedPct > 0 && (
@@ -3736,7 +3713,7 @@ function ExpoRiftPlayer({
                 </View>
                 <View style={s.controlButtonSlot}>
                   {showFitMenu && (
-                    <View style={s.fitDropdown}>
+                    <View testID={tvMode ? "nova-tv-modal-root" : undefined} style={s.fitDropdown}>
                       {([
                         { fit: "contain", label: "مع الحواف",   icon: "expand-outline"  },
                         { fit: "cover",   label: "ملء الشاشة", icon: "scan-outline"    },
@@ -3744,6 +3721,7 @@ function ExpoRiftPlayer({
                       ] as const).map(({ fit, label, icon }) => (
                         <Pressable
                           key={fit}
+                          hasTVPreferredFocus={tvMode && contentFit === fit}
                           onPress={() => { setContentFit(fit); setShowFitMenu(false); fadeIn(); }}
                           style={[s.dropItem, contentFit === fit && s.dropItemActive]}
                         >
@@ -3797,10 +3775,11 @@ function ExpoRiftPlayer({
                </View>
                 <View style={s.controlButtonSlot}>
                   {showSpeedMenu && (
-                    <View style={s.speedDropdown}>
+                    <View testID={tvMode ? "nova-tv-modal-root" : undefined} style={s.speedDropdown}>
                       {SPEEDS.map(sp => (
                         <Pressable
                           key={sp}
+                          hasTVPreferredFocus={tvMode && speed === sp}
                           onPress={() => { changeSpeed(sp); setShowSpeedMenu(false); }}
                           style={[s.dropItem, speed === sp && s.dropItemActive]}
                         >
@@ -3846,11 +3825,13 @@ function ExpoRiftPlayer({
       {showSubPanel && !subtitlesDisabled && (
         <View style={[StyleSheet.absoluteFill, { zIndex: 70 }]} pointerEvents="box-none">
           <Pressable
+            focusable={!tvMode}
             style={[StyleSheet.absoluteFill, s.subPanelBackdrop]}
             onPress={() => setShowSubPanel(false)}
             accessibilityLabel="إغلاق إعدادات الترجمة"
           />
           <Animated.View
+            testID={tvMode ? "nova-tv-modal-root" : undefined}
             style={[
               s.subPanel,
               isPortrait ? s.subPanelPortrait : s.subPanelLandscape,
@@ -3867,6 +3848,7 @@ function ExpoRiftPlayer({
                   <Text style={s.subPanelTitle}>إعدادات الترجمة</Text>
                 </View>
                 <Pressable
+                  hasTVPreferredFocus={tvMode}
                   style={s.subPanelClose}
                   onPress={() => setShowSubPanel(false)}
                   hitSlop={12}

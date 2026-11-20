@@ -122,11 +122,12 @@ function TvSubtitleSettingsPanel({
   return (
     <View style={styles.tvSettingsLayer} pointerEvents="box-none">
       <Pressable
+        focusable={false}
         accessibilityLabel="إغلاق إعدادات الترجمة"
         style={styles.tvSettingsBackdrop}
         onPress={onClose}
       />
-      <View style={styles.tvSettingsPanel}>
+      <View testID="nova-tv-modal-root" style={styles.tvSettingsPanel}>
         <View style={styles.tvSettingsHeader}>
           <View>
             <Text style={styles.tvSettingsTitle}>مظهر الترجمة</Text>
@@ -599,11 +600,12 @@ function TvPlayerSurface({
               </Pressable>
               <View style={styles.tvMenuAnchor}>
                 {showSources && (
-                  <View style={styles.tvCinemaMenu}>
+                  <View testID="nova-tv-modal-root" style={styles.tvCinemaMenu}>
                     {playableSources.map((item, index) => (
                       <Pressable
                         key={`${item.url}-${index}`}
                         accessibilityRole="button"
+                        hasTVPreferredFocus={index === sourceIndex}
                         onPress={() => { changeSource(index); closeMenus(); }}
                         onFocus={onTvFocus}
                         focusable
@@ -635,11 +637,12 @@ function TvPlayerSurface({
               </View>
               <View style={styles.tvMenuAnchor}>
                 {showSpeeds && (
-                  <View style={styles.tvCinemaMenu}>
+                  <View testID="nova-tv-modal-root" style={styles.tvCinemaMenu}>
                     {SPEEDS.map((item) => (
                       <Pressable
                         key={item}
                         accessibilityRole="button"
+                        hasTVPreferredFocus={item === speed}
                         onPress={() => { chooseSpeed(item); closeMenus(); }}
                         onFocus={onTvFocus}
                         focusable
@@ -704,10 +707,9 @@ function TvPlayerSurface({
       {!controlsVisible && !showSubtitleSettings && (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="إظهار أدوات مشغل التلفاز"
+          accessibilityLabel="إظهار التحكم"
           hasTVPreferredFocus
           focusable
-          onFocus={onTvFocus}
           onPress={onTvFocus}
           style={styles.tvRevealTarget}
         >
@@ -1088,10 +1090,8 @@ export function RiftPlayer({
       }
     };
     const sub1 = DeviceEventEmitter.addListener("novaTvKeyEvent", handleEvent);
-    const sub2 = DeviceEventEmitter.addListener("onHWKeyEvent", handleEvent);
     return () => {
       sub1.remove();
-      sub2.remove();
       if (tvHoldCommitTimerRef.current) {
         clearTimeout(tvHoldCommitTimerRef.current);
         tvHoldCommitTimerRef.current = null;
