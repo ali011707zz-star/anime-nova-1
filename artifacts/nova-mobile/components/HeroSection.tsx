@@ -8,7 +8,7 @@ import {
   AppState, ScrollView, StyleSheet, Text, View, useWindowDimensions,
 } from "react-native";
 import { useColors } from "@/hooks/useColors";
-import { isTvDevice, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
+import { TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { getKnownArabicAnimeTitle } from "@/utils/arabicAnimeTitles";
 
 type Props = {
@@ -18,7 +18,7 @@ type Props = {
   onSectionFocus?: () => void;
 };
 
-export function HeroSection({
+export const HeroSection = React.memo(function HeroSection({
   items,
   initialTVFocus = false,
   tvFocusable = true,
@@ -39,11 +39,18 @@ export function HeroSection({
   const scrollRef = useRef<ScrollView>(null);
   const [activeIdx, setActiveIdx] = useState(0);
   const initialFocusDoneRef = useRef(false);
+  const isTouchingRef = useRef(false);
+  const pauseAutoUntilRef = useRef(0);
+
+  const pauseAutoScroll = (ms = 6500) => {
+    pauseAutoUntilRef.current = Math.max(pauseAutoUntilRef.current, Date.now() + ms);
+  };
 
   useEffect(() => {
     if (items.length <= 1) return;
     const timer = setInterval(() => {
       if (AppState.currentState && AppState.currentState !== "active") return;
+      if (isTouchingRef.current || Date.now() < pauseAutoUntilRef.current) return;
       setActiveIdx((i) => {
         const next = (i + 1) % items.length;
         if (!tvMode) {
@@ -51,7 +58,7 @@ export function HeroSection({
         }
         return next;
       });
-    }, tvMode ? 6500 : 4000);
+    }, tvMode ? 6500 : 5500);
     return () => clearInterval(timer);
   }, [heroWidth, items.length, tvMode]);
 
@@ -60,6 +67,18 @@ export function HeroSection({
   const pad = tvMode ? 22 : Math.round(13 * s);
   const radius = tvMode ? 20 : Math.round(20 * s);
   const safeIndex = activeIdx % items.length;
+
+  const openDetails = (anime: AnilistMedia) => {
+    pauseAutoScroll(5000);
+    router.push(
+      `/anime/${anime.id}?title=${encodeURIComponent(anime.title.romaji)}&english=${encodeURIComponent(anime.title.english || "")}` as any,
+    );
+  };
+
+  const openWatch = (anime: AnilistMedia) => {
+    pauseAutoScroll(5000);
+    router.push({ pathname: "/episodes/[id]", params: { id: anime.id } } as any);
+  };
 
   const renderSlideContent = (anime: AnilistMedia, index: number) => {
     const title = anime.title.english || anime.title.romaji;
@@ -77,13 +96,27 @@ export function HeroSection({
           resizeMethod="resize"
           fadeDuration={tvMode ? 0 : 250}
         />
+        {/* Backdrop tap area sits BEHIND the CTA buttons (no nested Pressable conflict on Android) */}
+        {!tvMode && (
+          <Pressable
+            focusable={false}
+            hitSlop={0}
+            pressRetentionOffset={16}
+            onPressIn={() => pauseAutoScroll(6500)}
+            onPress={() => openDetails(anime)}
+            style={StyleSheet.absoluteFill}
+            accessibilityRole="button"
+            accessibilityLabel={heroArabic || title}
+          />
+        )}
         <LinearGradient
+          pointerEvents="box-none"
           colors={["rgba(9,9,11,0.12)", "rgba(9,9,11,0.52)", "rgba(9,9,11,0.94)"]}
           locations={[0, 0.42, 1]}
           style={[StyleSheet.absoluteFill, { justifyContent: "space-between", padding: pad }]}
         >
           {/* Top Badges Row */}
-          <View style={styles.topBadgesRow}>
+          <View pointerEvents="none" style={styles.topBadgesRow}>
             {anime.averageScore ? (
               <View
                 style={[
@@ -119,9 +152,9 @@ export function HeroSection({
           </View>
 
           {/* Bottom Details Section */}
-          <View style={{ gap: Math.round(2 * s) }}>
+          <View pointerEvents="box-none" style={{ gap: Math.round(2 * s) }}>
             {/* Genre Tags */}
-            <View style={[styles.genreRow, { gap: Math.round(5 * s), marginBottom: Math.round(3 * s) }]}>
+            <View pointerEvents="none" style={[styles.genreRow, { gap: Math.round(5 * s), marginBottom: Math.round(3 * s) }]}>
               {anime.genres?.slice(0, 3).map((g) => (
                 <View
                   key={g}
@@ -141,6 +174,7 @@ export function HeroSection({
 
             {/* Title & Arabic Title */}
             <Text
+              pointerEvents="none"
               style={[
                 styles.heroTitleArabic,
                 {
@@ -154,6 +188,7 @@ export function HeroSection({
             </Text>
             {heroArabic && title && heroArabic.trim() !== title.trim() ? (
               <Text
+                pointerEvents="none"
                 style={[
                   styles.heroTitleEnglish,
                   {
@@ -171,23 +206,26 @@ export function HeroSection({
             ) : null}
 
             {/* Metadata Row */}
-            <View style={[styles.infoRow, { marginBottom: Math.round(6 * s) }]}>
+            <View pointerEvents="none" style={[styles.infoRow, { marginBottom: Math.round(6 * s) }]}>
               <Text style={[styles.infoText, { fontSize: Math.round(10 * s) }]} numberOfLines={1}>
                 {anime.episodes ? `${anime.episodes} حلقة` : "مستمر"} • {(anime as any).seasonYear || "2024"} • {anime.format || "TV"}
               </Text>
             </View>
 
-            {/* CTAs */}
-            <View style={[styles.btnRow, { gap: Math.round(8 * s), alignItems: "center" }]}>
+            {/* CTAs — independent non-nested Pressables with generous touch area */}
+            <View pointerEvents="box-none" style={[styles.btnRow, { gap: Math.round(8 * s), alignItems: "center", zIndex: 10, elevation: 6 }]}>
               <Pressable
-                onPress={() => router.push({ pathname: "/episodes/[id]", params: { id: anime.id } } as any)}
+                onPressIn={() => pauseAutoScroll(6500)}
+                onPress={() => openWatch(anime)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                pressRetentionOffset={{ top: 24, bottom: 24, left: 24, right: 24 }}
                 focusable={tvMode && tvFocusable}
                 hasTVPreferredFocus={tvMode && initialTVFocus && !initialFocusDoneRef.current}
                 onFocus={() => {
                   initialFocusDoneRef.current = true;
                   onSectionFocus?.();
                 }}
-                style={({ focused }) => [
+                style={({ focused, pressed }) => [
                   styles.watchBtn,
                   {
                     paddingHorizontal: Math.round(15 * s),
@@ -196,6 +234,7 @@ export function HeroSection({
                     gap: Math.round(5 * s),
                     borderWidth: 2,
                     borderColor: focused ? "#FACC15" : "transparent",
+                    opacity: pressed ? 0.78 : 1,
                   },
                 ]}
               >
@@ -203,13 +242,16 @@ export function HeroSection({
                 <Text style={[styles.watchBtnText, { fontSize: Math.round(11.5 * s) }]}>مشاهدة الآن</Text>
               </Pressable>
               <Pressable
-                onPress={() => router.push(`/anime/${anime.id}?title=${encodeURIComponent(anime.title.romaji)}&english=${encodeURIComponent(anime.title.english || "")}`)}
+                onPressIn={() => pauseAutoScroll(6500)}
+                onPress={() => openDetails(anime)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                pressRetentionOffset={{ top: 24, bottom: 24, left: 24, right: 24 }}
                 focusable={tvMode && tvFocusable}
                 onFocus={() => {
                   initialFocusDoneRef.current = true;
                   onSectionFocus?.();
                 }}
-                style={({ focused }) => [
+                style={({ focused, pressed }) => [
                   styles.detailBtn,
                   {
                     paddingHorizontal: Math.round(13 * s),
@@ -218,13 +260,13 @@ export function HeroSection({
                     gap: Math.round(5 * s),
                     borderWidth: 2,
                     borderColor: focused ? "#FACC15" : "rgba(255, 255, 255, 0.22)",
+                    opacity: pressed ? 0.78 : 1,
                   },
                 ]}
               >
                 <Ionicons name="information-circle-outline" size={Math.round(14.5 * s)} color="#fff" />
                 <Text style={[styles.detailBtnText, { fontSize: Math.round(11.5 * s) }]}>تفاصيل</Text>
               </Pressable>
-
               {tvMode && items.length > 1 && (
                 <View style={styles.tvSlideNavRow}>
                   <Pressable
@@ -281,20 +323,45 @@ export function HeroSection({
           ref={scrollRef}
           horizontal
           pagingEnabled
+          nestedScrollEnabled
+          keyboardShouldPersistTaps="handled"
           focusable={false}
           style={[styles.heroViewport, { width: heroWidth, height: heroHeight, borderRadius: radius }]}
           contentContainerStyle={styles.heroTrack}
           showsHorizontalScrollIndicator={false}
           scrollEventThrottle={16}
+          onTouchStart={() => {
+            isTouchingRef.current = true;
+            pauseAutoScroll(7000);
+          }}
+          onTouchEnd={() => {
+            isTouchingRef.current = false;
+            pauseAutoScroll(6500);
+          }}
+          onTouchCancel={() => {
+            isTouchingRef.current = false;
+            pauseAutoScroll(6500);
+          }}
+          onScrollBeginDrag={() => {
+            isTouchingRef.current = true;
+            pauseAutoScroll(7000);
+          }}
+          onScrollEndDrag={() => {
+            isTouchingRef.current = false;
+            pauseAutoScroll(6500);
+          }}
           onMomentumScrollEnd={(e) => {
+            isTouchingRef.current = false;
+            pauseAutoScroll(6500);
             const idx = Math.round(e.nativeEvent.contentOffset.x / heroWidth);
-            setActiveIdx(idx);
+            if (Number.isFinite(idx) && idx >= 0 && idx < items.length) {
+              setActiveIdx(idx);
+            }
           }}
         >
           {items.map((anime, index) => (
-            <Pressable
+            <View
               key={anime.id}
-              focusable={false}
               style={[
                 styles.heroSlide,
                 {
@@ -305,10 +372,9 @@ export function HeroSection({
                   borderWidth: 1,
                 },
               ]}
-              onPress={() => router.push(`/anime/${anime.id}?title=${encodeURIComponent(anime.title.romaji)}&english=${encodeURIComponent(anime.title.english || "")}`)}
             >
               {renderSlideContent(anime, index)}
-            </Pressable>
+            </View>
           ))}
         </ScrollView>
       )}
@@ -330,7 +396,7 @@ export function HeroSection({
       )}
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   carousel: { alignSelf: "center", alignItems: "center", overflow: "visible" },

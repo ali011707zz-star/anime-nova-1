@@ -2005,6 +2005,7 @@ export default function HomeScreen() {
           </View>
         }
         ListFooterComponent={<View style={{ height: 90 }} />}
+        keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
         refreshControl={isTvLayout ? undefined : <RefreshControl refreshing={false} onRefresh={refresh} tintColor={colors.primary} />}
         removeClippedSubviews={false}
