@@ -2167,6 +2167,24 @@ async function parseShareMaxStreams(
               if (v?.url) return v;
             }
           } catch {}
+        } else if (
+          drv === "earnvids" || drv === "vidhide" || drv === "lulustream" || drv === "mixdrop" ||
+          /lulustream|morencius|mixdrop|mxdrop/i.test(link)
+        ) {
+          try {
+            const r = await fetch(link, {
+              headers: { "User-Agent": BROWSER_UA, Referer: iframeUrl },
+              signal: AbortSignal.timeout(7000),
+              redirect: "follow",
+            });
+            if (r.ok) {
+              const html = await r.text();
+              const vh = parseVidhidePro(html);
+              if (vh) return { url: vh, type: "hls" };
+              const sw = parseStreamwish(html);
+              if (sw?.url) return sw;
+            }
+          } catch {}
         }
       }
     }
