@@ -45,18 +45,46 @@ function escapeTelegramHtml(value: unknown): string {
     .replace(/"/g, "&quot;");
 }
 
-function buildEpisodeCaption(title: string, ep: number): string {
+const APK_DOWNLOAD_URL = "https://animenovaa.duckdns.org/Anime-Nova.apk";
+const TV_DOWNLOADER_CODE = "2576388";
+
+type TelegramInlineMarkup = {
+  inline_keyboard: Array<Array<{ text: string; url: string }>>;
+};
+
+function buildEpisodeWatchUrl(anilistId: number, ep: number): string {
+  const base = SITE_URL.replace(/\/+$/, "");
+  if (Number.isFinite(anilistId) && anilistId > 0) {
+    return `${base}/watch/${anilistId}?ep=${Math.max(1, ep)}`;
+  }
+  return base;
+}
+
+function buildEpisodeMarkup(anilistId: number, ep: number): TelegramInlineMarkup {
+  return {
+    inline_keyboard: [
+      [
+        { text: "▶️ شاهد الحلقة الآن", url: buildEpisodeWatchUrl(anilistId, ep) },
+        { text: "📲 تحميل التطبيق", url: APK_DOWNLOAD_URL },
+      ],
+    ],
+  };
+}
+
+function buildEpisodeCaption(title: string, ep: number, anilistId = 0): string {
+  const watchUrl = buildEpisodeWatchUrl(anilistId, ep);
   return [
-    `🌸 <b>حلقة جديدة وصلت!</b>`,
+    `🍿 <b>حان وقت المتعة! حلقة جديدة من أنميك المفضل أصبحت متاحة الآن على نوفا 🔥</b>`,
     ``,
-    `✨ ${escapeTelegramHtml(title)}`,
-    `🎬 الحلقة ${escapeTelegramHtml(ep)}`,
+    `🎬 <b>${escapeTelegramHtml(title)}</b>`,
+    `🎞️ <b>الحلقة ${escapeTelegramHtml(ep)}</b> · مترجمة بأعلى جودة وبدون إعلانات`,
     ``,
-    `✅ متاحة الآن للمشاهدة على Anime NOVA 🎮`,
+    `▶️ <b>شاهد الحلقة مباشرة:</b>`,
+    `🔗 ${watchUrl}`,
     ``,
-    `شاهد بجودة عالية · بدون إعلانات 🚀`,
-    `📲 شاهد الأنمي وحمّل تطبيق Anime NOVA من هنا:`,
-    `🔗 ${SITE_URL}`,
+    `━━━━━━━━━━━━━━━`,
+    `📱 <b>تطبيق الهاتف (APK):</b> ${APK_DOWNLOAD_URL}`,
+    `📺 <b>كود التلفاز (Downloader):</b> <code>${TV_DOWNLOADER_CODE}</code>`,
   ].join("\n");
 }
 
@@ -273,7 +301,7 @@ async function resolveHighResPosterForTelegram(
   return { downloaded: best, fallbackUrl: best?.url || candidates[0] || photoUrl };
 }
 
-async function sendChannelPhoto(photoUrl: string, caption: string, hint?: TelegramPosterHint) {
+async function sendChannelPhoto(photoUrl: string, caption: string, hint?: TelegramPosterHint, replyMarkup?: TelegramInlineMarkup) {
   const channelId = process.env.TELEGRAM_CHANNEL_ID;
   const tok = await getToken();
   if (!channelId || !tok) return false;
@@ -288,6 +316,7 @@ async function sendChannelPhoto(photoUrl: string, caption: string, hint?: Telegr
       form.append("chat_id", channelId);
       form.append("caption", caption);
       form.append("parse_mode", "HTML");
+      if (replyMarkup) form.append("reply_markup", JSON.stringify(replyMarkup));
       form.append("photo", new Blob([new Uint8Array(downloaded.buffer)], { type: downloaded.contentType }), `poster.${ext}`);
 
       const r = await fetch(`https://api.telegram.org/bot${tok}/sendPhoto`, {
@@ -317,6 +346,7 @@ async function sendChannelPhoto(photoUrl: string, caption: string, hint?: Telegr
       photo:   targetUrl,
       caption,
       parse_mode: "HTML",
+      ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
     }),
     signal: AbortSignal.timeout(15_000),
   }).catch(() => { console.warn("[telegram] sendChannelPhoto request failed"); return null; });
@@ -425,7 +455,7 @@ async function deliverNewEpisodeNotification(
 
   const channelId = process.env.TELEGRAM_CHANNEL_ID;
   const tok = await getToken();
-  const caption = buildEpisodeCaption(title, ep);
+  const caption = buildEpisodeCaption(title, ep, anilistId);
 
   let telegramSent = true;
   if (channelId && tok) {
@@ -600,8 +630,9 @@ async function sendTelegramEpisodeOnce(
       return true;
     }
 
-    let sent = (poster || anilistId > 0) ? await sendChannelPhoto(poster || "", caption, { anilistId, type: "ANIME" }) : false;
-    if (!sent) sent = await sendMessage(channelId, caption);
+    const epMarkup = buildEpisodeMarkup(anilistId, ep);
+    let sent = (poster || anilistId > 0) ? await sendChannelPhoto(poster || "", caption, { anilistId, type: "ANIME" }, epMarkup) : false;
+    if (!sent) sent = await sendMessage(channelId, caption, { reply_markup: epMarkup });
     if (!sent) return false;
 
     telegramNotifiedEpisodes.add(memoryKey);
@@ -845,34 +876,48 @@ function buildDubbedEpisodeCaption(item: any): string {
   const title = String(item?.titleAr || item?.name || "عمل مدبلج").trim();
   const isMovie = Boolean(item?.isMovie);
   const epNum = Number(item?.episode || 1);
-  const epLine = isMovie ? "🎞️ فيلم كامل متاح الآن" : `🎬 الحلقة ${escapeTelegramHtml(epNum)}`;
+  const epLine = isMovie
+    ? "🎞️ <b>فيلم كامل</b> · دبلجة عربية عالية الجودة وبدون إعلانات"
+    : `🎬 <b>الحلقة ${escapeTelegramHtml(epNum)}</b> · دبلجة عربية عالية الجودة وبدون تقطيع`;
   return [
-    `🔊 <b>إصدار مدبلج جديد وصل!</b>`,
-    `${sectionBadge}`,
+    `🍿 <b>حان وقت المتعة! إصدار مدبلج جديد أصبح متاحاً الآن على نوفا 🔥</b>`,
+    `🏷️ <b>${sectionBadge}</b>`,
     ``,
     `✨ <b>${escapeTelegramHtml(title)}</b>`,
     epLine,
     ``,
-    `✅ متاح الآن للمشاهدة على Anime NOVA 🎮`,
-    `📲 حمّل تطبيق Anime NOVA من هنا:`,
-    `🔗 ${SITE_URL}`,
+    `━━━━━━━━━━━━━━━`,
+    `📱 <b>تطبيق الهاتف (APK):</b> ${APK_DOWNLOAD_URL}`,
+    `📺 <b>كود التلفاز (Downloader):</b> <code>${TV_DOWNLOADER_CODE}</code>`,
+    `🌐 <b>الموقع:</b> ${SITE_URL}`,
   ].join("\n");
+}
+
+function buildDubbedMarkup(): TelegramInlineMarkup {
+  return {
+    inline_keyboard: [
+      [
+        { text: "📲 تحميل التطبيق", url: APK_DOWNLOAD_URL },
+        { text: "🌐 فتح الموقع", url: SITE_URL },
+      ],
+    ],
+  };
 }
 
 function buildMangaCaption(item: any, story: string): string {
   const isManhwa = item?.source === "manhwa" || item?.typeLabel === "مانهوا";
-  const typeBadge = isManhwa ? "🇰🇷 مانهوا" : "🇯🇵 مانجا";
+  const typeBadge = isManhwa ? "🇰🇷 مانهوا ملونة" : "🇯🇵 مانجا مترجمة";
   const titleAr = String(item?.arabicTitle || item?.title || "عمل جديد").trim();
   const titleEn = String(item?.englishTitle || "").trim();
   const chNum = Number(item?.latestChapter || 0);
   const isChapterUpdate = Number.isFinite(chNum) && chNum > 0;
   const headline = isChapterUpdate
-    ? `📖 <b>فصل جديد وصل!</b>`
-    : `📚 <b>عمل جديد أُضيف الآن!</b>`;
+    ? `⚡ <b>فصل جديد متاح الآن.. استعد لأحداث مشوّقة! 🔥</b>`
+    : `📚 <b>عمل جديد ينضم لمكتبة نوفا الآن! 🔥</b>`;
 
   const lines: string[] = [
     headline,
-    `${typeBadge}`,
+    `<b>${typeBadge}</b>`,
     ``,
     `✨ <b>${escapeTelegramHtml(titleAr)}</b>`,
   ];
@@ -880,17 +925,26 @@ function buildMangaCaption(item: any, story: string): string {
     lines.push(`🏷️ ${escapeTelegramHtml(titleEn)}`);
   }
   if (isChapterUpdate) {
-    lines.push(`📑 الفصل ${escapeTelegramHtml(chNum)}`);
+    lines.push(`📑 <b>الفصل ${escapeTelegramHtml(chNum)}</b> · متاح الآن للقراءة بجودة عالية وبدون إنترنت`);
   }
-  const excerpt = truncateStoryForTelegram(story, 270);
+  const excerpt = truncateStoryForTelegram(story, 260);
   if (excerpt) {
     lines.push(``);
-    lines.push(`📝 <b>القصة:</b> ${escapeTelegramHtml(excerpt)}`);
+    lines.push(`📖 <b>لمحة عن القصة:</b>`);
+    lines.push(`${escapeTelegramHtml(excerpt)}`);
   }
   lines.push(``);
-  lines.push(`✅ متاح الآن للقراءة على Anime NOVA 🎮`);
-  lines.push(`🔗 ${SITE_URL}`);
+  lines.push(`🔒 <b>حصرياً داخل تطبيق Anime NOVA</b> (يدعم التحميل والقراءة أوفلاين!)`);
+  lines.push(`━━━━━━━━━━━━━━━`);
+  lines.push(`📱 <b>حمّل التطبيق الآن:</b> ${APK_DOWNLOAD_URL}`);
+  lines.push(`📺 <b>كود التلفاز (Downloader):</b> <code>${TV_DOWNLOADER_CODE}</code>`);
   return lines.join("\n");
+}
+
+function buildAppOnlyMarkup(label = "📲 تحميل تطبيق Anime NOVA"): TelegramInlineMarkup {
+  return {
+    inline_keyboard: [[{ text: label, url: APK_DOWNLOAD_URL }]],
+  };
 }
 
 function collectDubbedKeys(item: any): string[] {
@@ -960,8 +1014,9 @@ async function pollDubbedLatest(): Promise<void> {
 
       const caption = buildDubbedEpisodeCaption(item);
       const poster = typeof item?.cover === "string" && /^https?:\/\//i.test(item.cover) ? item.cover : "";
-      const photoSent = await sendChannelPhoto(poster, caption, { title: String(item?.english || item?.name || ""), englishTitle: String(item?.titleAr || ""), type: "ANIME" });
-      const delivered = photoSent || await sendMessage(channelId, caption);
+      const dubbedMarkup = buildDubbedMarkup();
+      const photoSent = await sendChannelPhoto(poster, caption, { title: String(item?.english || item?.name || ""), englishTitle: String(item?.titleAr || ""), type: "ANIME" }, dubbedMarkup);
+      const delivered = photoSent || await sendMessage(channelId, caption, { reply_markup: dubbedMarkup });
       // سجل الحلقة المدبلجة الجديدة في قائمة أحدث الحلقات (آخر 14 يوماً) حتى تظهر للمستخدمين
       await recordDubbedRecentRelease(item).catch(() => {});
       if (delivered) {
@@ -1044,8 +1099,9 @@ async function pollMangaLatest(): Promise<void> {
       const story = await resolveMangaStory(item);
       const caption = buildMangaCaption(item, story);
       const poster = typeof item?.poster === "string" && /^https?:\/\//i.test(item.poster) ? item.poster : "";
-      const photoSent = await sendChannelPhoto(poster, caption, { title: String(item?.title || ""), englishTitle: String(item?.arabicTitle || ""), type: "MANGA" });
-      const delivered = photoSent || await sendMessage(channelId, caption);
+      const mangaMarkup = buildAppOnlyMarkup("📲 حمّل التطبيق واقرأ الآن");
+      const photoSent = await sendChannelPhoto(poster, caption, { title: String(item?.title || ""), englishTitle: String(item?.arabicTitle || ""), type: "MANGA" }, mangaMarkup);
+      const delivered = photoSent || await sendMessage(channelId, caption, { reply_markup: mangaMarkup });
       if (delivered) {
         await markNotifKeys(keys);
         sent++;
@@ -1085,20 +1141,77 @@ function escapeHtmlBasic(str: string): string {
     .replace(/>/g, "&gt;");
 }
 
+function polishAndSummarizeNewsForTelegram(raw: string, maxChars = 250): string {
+  let clean = String(raw || "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\(\s*(?:في الصورة|pictured|in picture)\s*\)/gi, "")
+    .replace(/مرئي\s+رئيسي|صورة\s+مرئية\s+رئيسية|المرئي\s+الرئيسي/g, "البوستر الرسمي")
+    .replace(/أول\s+فيديو\s+ترويجي|فيديو\s+ترويجي\s+أول/g, "العرض التشويقي الأول")
+    .replace(/فيديو\s+ترويجي/g, "العرض التشويقي")
+    .replace(/أغاني\s+مميزة|أغاني\s+رئيسية/g, "أغاني الشارة")
+    .replace(/طاقم\s+عمل\s+إضافي|طاقم\s+إضافي/g, "مؤدو أصوات جدد")
+    // Strip noisy cast dumps and Japanese local channel schedules
+    .replace(/(?:\s+|^)(?:الممثلون|طاقم التمثيل|الأصوات|Cast\s*:)\s*[\s\S]*$/i, "")
+    .replace(/الساعة\s+\d{1,2}:\d{2}[^.،]*?(?:Tokyo\s*MX|BS11|AT-X|MBS|TBS|TV\s*Tokyo)[^.]*/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([،.؛!؟])/g, "$1")
+    .trim();
+
+  if (!clean) return "";
+
+  // Split into complete sentences and take 1-2 clean sentences without cutting mid-sentence!
+  const sentences = clean
+    .split(/(?<=[.!؟])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 12);
+
+  if (sentences.length > 0) {
+    let acc = sentences[0];
+    if (sentences.length > 1 && acc.length + 1 + sentences[1].length <= maxChars) {
+      acc = `${acc} ${sentences[1]}`;
+    }
+    if (acc.length <= maxChars + 40) return acc;
+    clean = acc;
+  }
+
+  if (clean.length <= maxChars) return clean;
+  const cut = clean.slice(0, maxChars);
+  const lastPeriod = Math.max(cut.lastIndexOf("."), cut.lastIndexOf("؟"), cut.lastIndexOf("!"));
+  if (lastPeriod >= Math.floor(maxChars * 0.55)) {
+    return cut.slice(0, lastPeriod + 1).trim();
+  }
+  const lastSpace = cut.lastIndexOf(" ");
+  return (lastSpace > 40 ? cut.slice(0, lastSpace) : cut).trim() + "…";
+}
+
 function buildNewsCaption(article: any): string {
-  const title = escapeHtmlBasic(String(article?.title || "خبر أنمي جديد").trim());
-  const descRaw = String(article?.description || "").trim();
-  const desc = descRaw ? escapeHtmlBasic(descRaw.slice(0, 440) + (descRaw.length > 440 ? "..." : "")) : "";
-  const cat = escapeHtmlBasic(String(article?.category || "أخبار الأنمي").trim());
+  const titlePolished = String(article?.title || "خبر أنمي جديد")
+    .replace(/مرئي\s+رئيسي/g, "البوستر الرسمي")
+    .replace(/أغاني\s+مميزة|أغاني\s+رئيسية/g, "أغاني الشارة")
+    .replace(/طاقم\s+عمل\s+إضافي|طاقم\s+إضافي/g, "مؤدو أصوات جدد")
+    .replace(/فيديو\s+ترويجي/g, "العرض التشويقي")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  const title = escapeHtmlBasic(titlePolished);
+  const summary = polishAndSummarizeNewsForTelegram(String(article?.description || ""), 250);
+  const isMovie = Boolean(article?.isMovieNews) || String(article?.category || "").includes("أفلام");
+  const header = isMovie ? "🎬 <b>عاجل في عالم أفلام الأنمي!</b>" : "📰 <b>عاجل في عالم الأنمي!</b>";
+
   const lines = [
-    `📰 <b>${cat} · خبر جديد!</b>`,
+    header,
     "",
     `✨ <b>${title}</b>`,
   ];
-  if (desc) {
-    lines.push("", `📝 <b>التفاصيل:</b> ${desc}`);
+  if (summary) {
+    lines.push("", "📌 <b>ملخص الخبر:</b>", escapeHtmlBasic(summary));
   }
-  lines.push("", "🎬 <i>تابع آخر الأخبار والتفاصيل والنقاش داخل تطبيق Anime NOVA</i>");
+  lines.push(
+    "",
+    "💬 <i>شاركنا رأيك وتابع بقية الأخبار والتفاصيل داخل تطبيق Anime NOVA!</i>",
+    "━━━━━━━━━━━━━━━",
+    `📱 <b>تحميل التطبيق:</b> ${APK_DOWNLOAD_URL}`,
+    `📺 <b>كود التلفاز (Downloader):</b> <code>${TV_DOWNLOADER_CODE}</code>`,
+  );
   return lines.join("\n");
 }
 
@@ -1142,11 +1255,12 @@ async function pollNewsLatest(): Promise<void> {
 
       const caption = buildNewsCaption(art);
       const thumb = typeof art?.thumbnail === "string" && /^https?:\/\//i.test(art.thumbnail) ? art.thumbnail : "";
+      const newsMarkup = buildAppOnlyMarkup("📲 فتح / تحميل تطبيق Anime NOVA");
       const photoSent = await sendChannelPhoto(thumb, caption, {
         title: String(art?.originalTitle || art?.title || ""),
         type: "ANIME",
-      });
-      const delivered = photoSent || await sendMessage(channelId, caption);
+      }, newsMarkup);
+      const delivered = photoSent || await sendMessage(channelId, caption, { reply_markup: newsMarkup });
 
       if (delivered) {
         await markNotifKeys(keys);

@@ -276,6 +276,22 @@ async function resolvePosterFromAniList(title: string): Promise<string | null> {
   }
 }
 
+function polishArabicAnimeTerms(text: string): string {
+  return text
+    .replace(/\(\s*(?:في الصورة|pictured|in picture)\s*\)/gi, "")
+    .replace(/مرئي\s+رئيسي|صورة\s+مرئية\s+رئيسية|المرئي\s+الرئيسي/g, "البوستر الرسمي")
+    .replace(/أول\s+فيديو\s+ترويجي|فيديو\s+ترويجي\s+أول/g, "العرض التشويقي الأول")
+    .replace(/فيديو\s+ترويجي/g, "العرض التشويقي")
+    .replace(/أغاني\s+مميزة|أغاني\s+رئيسية/g, "أغاني الشارة")
+    .replace(/الأغنية\s+الرئيسية/g, "أغنية الشارة")
+    .replace(/طاقم\s+عمل\s+إضافي|طاقم\s+إضافي/g, "مؤدو أصوات جدد")
+    .replace(/فيلم\s+الحركة\s+الحية/g, "فيلم الواقع الحي (Live-Action)")
+    .replace(/سلسلة\s+أحداث\s+حية/g, "مسلسل واقع حي (Live-Action)")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([،.؛!؟])/g, "$1")
+    .trim();
+}
+
 async function translateToArabic(text: string): Promise<string> {
   const clean = cleanRssText(text);
   if (!clean) return "";
@@ -306,7 +322,7 @@ async function translateToArabic(text: string): Promise<string> {
         if (typeof json[0] === "string") translated = json[0];
         else if (Array.isArray(json[0]) && typeof json[0][0] === "string") translated = json[0][0];
       }
-      translated = cleanRssText(String(translated || ""));
+      translated = polishArabicAnimeTerms(cleanRssText(String(translated || "")));
       if (translated && /[\u0600-\u06FF]/.test(translated)) {
         _translationCache.set(clean, { text: translated, at: Date.now() });
         return translated;
