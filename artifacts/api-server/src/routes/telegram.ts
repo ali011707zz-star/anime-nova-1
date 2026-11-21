@@ -1275,10 +1275,7 @@ async function pollNewsLatest(): Promise<void> {
       return;
     }
 
-    const channelId = process.env.TELEGRAM_CHANNEL_ID;
-    const tok = await getToken();
-    if (!channelId || !tok) return;
-
+    // إرسال أخبار الأنمي إلى قناة تليجرام موقوف — يتم فقط حفظ الإشعار داخل التطبيق (والحلقات/المدبلج/المانجا مستمرة في تليجرام)
     let sent = 0;
     for (let idx = 0; idx < list.length; idx++) {
       const art = list[idx];
@@ -1291,28 +1288,17 @@ async function pollNewsLatest(): Promise<void> {
         continue;
       }
 
-      const caption = buildNewsCaption(art);
       const thumb = typeof art?.thumbnail === "string" && /^https?:\/\//i.test(art.thumbnail) ? art.thumbnail : "";
-      const photoSent = await sendChannelPhoto(thumb, caption, {
-        title: String(art?.originalTitle || art?.title || ""),
-        type: "ANIME",
-      });
-      const delivered = photoSent || await sendMessage(channelId, caption);
-
-      if (delivered) {
-        await markNotifKeys(keys);
-        sent++;
-        schedulerSentToday++;
-        await saveNotification({
-          type: "anime_news",
-          title: String(art?.title || "خبر أنمي جديد").slice(0, 140),
-          body: String(art?.description || "خبر جديد في عالم الأنمي").slice(0, 220),
-          image_url: thumb || undefined,
-          link_path: "/news",
-        }).catch(() => {});
-        console.log(`[scheduler] 📰 أُرسل خبر أنمي → ${String(art?.title || "").slice(0, 60)}`);
-        await new Promise((r) => setTimeout(r, 1_500));
-      }
+      await markNotifKeys(keys);
+      sent++;
+      await saveNotification({
+        type: "anime_news",
+        title: String(art?.title || "خبر أنمي جديد").slice(0, 140),
+        body: String(art?.description || "خبر جديد في عالم الأنمي").slice(0, 220),
+        image_url: thumb || undefined,
+        link_path: "/news",
+      }).catch(() => {});
+      console.log(`[scheduler] 📰 حُفظ إشعار خبر أنمي للتطبيق فقط (تليجرام موقوف) → ${String(art?.title || "").slice(0, 60)}`);
       if (sent >= 3) break;
     }
   } catch (e: any) {
