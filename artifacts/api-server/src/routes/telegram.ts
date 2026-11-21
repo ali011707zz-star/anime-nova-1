@@ -6,7 +6,7 @@ import { recordDubbedRecentRelease } from "./dubbed.js";
  */
 
 import { Router, type Request, type Response } from "express";
-import { sbInsert, sbSelect } from "../lib/supabaseClient.js";
+import { sbInsert, sbSelect , sbUpsert } from "../lib/supabaseClient.js";
 import { getEnvOrDb } from "../lib/dbConfig.js";
 import { saveNotification } from "./notifications.js";
 import { sendNewEpisodePushDetailed, sendSubscribedAlertPush } from "./push.js";
