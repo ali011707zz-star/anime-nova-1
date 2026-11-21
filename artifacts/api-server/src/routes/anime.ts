@@ -64,6 +64,7 @@ import {
 import { stardimaPlayableType } from "../jobs/stardima-catalog-utils.mjs";
 import { ANIVEXA_SOURCES, getAnivexaSources, isAnivexaSite } from "../lib/anivexa.js";
 import { decodeReanimeImageSegment } from "../lib/reanimeSource.js";
+import { selectHlsPreferredAudio } from "../lib/hlsAudioRewrite.mjs";
 import {
   CONSUMET_SOURCES,
   decodeEncryptedHlsPlaylist,
@@ -10418,26 +10419,22 @@ async function re_decryptEmbed(html: string): Promise<{ url: string; subtitles: 
 }
 
 const reanimeSrcCache = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+const reanimeFlixApiCache = new Map<string, { servers: any[]; ts: number }>();
+const reanimeFlixInFlight = new Map<string, Promise<any[]>>();
 const REANIME_TTL = 5 * 60_000;
-
+const REANIME_FLIX_API_TTL = 2 * 60 * 1000;
 const REANIME_DISABLED = false;
-async function getReanímeSources(
-  title: string,
-  english: string | null,
-  ep: number,
-  anilistId?: number,
-  availabilityOnly = false,
-  signal?: AbortSignal,
-): Promise<UnifiedSource[]> {
-  if (REANIME_DISABLED) return [];
-  if (!anilistId) return [];
-  const ck = `reanime:${anilistId}:${ep}`;
-  if (!availabilityOnly) {
-    const cached = reanimeSrcCache.get(ck);
-    if (cached && Date.now() - cached.ts < REANIME_TTL) return cached.sources;
+
+async function fetchReanimeFlixServers(anilistId: number, ep: number, signal?: AbortSignal): Promise<any[]> {
+  const apiKey = `${anilistId}:${ep}`;
+  const cached = reanimeFlixApiCache.get(apiKey);
+  if (cached && Date.now() - cached.ts < REANIME_FLIX_API_TTL) {
+    return cached.servers;
   }
-  try {
-    // رانيمي يستخدم AniList ID مباشرة عبر endpoint مخصص بدون متصفح
+  const existing = reanimeFlixInFlight.get(apiKey);
+  if (existing) return existing;
+
+  const flight = (async () => {
     const flixRes = await fetch(`${REANIME_BASE}/api/flix/${anilistId}/${ep}`, {
       headers: { ...REANIME_H, "Referer": `${REANIME_BASE}/` },
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(8000)]) : AbortSignal.timeout(8000),
@@ -10445,25 +10442,91 @@ async function getReanímeSources(
     if (!flixRes.ok) return [];
     const flixData: any = await flixRes.json();
     const servers: any[] = flixData?.servers ?? flixData?.episode_links ?? [];
-    const subServers = servers.filter((server: any) => {
-      const kind = String(server.dataType || server.type || "").toLowerCase();
-      const srvName = String(server.serverName || server.name || "").toUpperCase();
-      return kind.includes("sub") && !kind.includes("dub") && !srvName.includes("H-SUB");
+    if (servers.length) {
+      if (reanimeFlixApiCache.size > 200) reanimeFlixApiCache.clear();
+      reanimeFlixApiCache.set(apiKey, { servers, ts: Date.now() });
+    }
+    return servers;
+  })()
+    .catch(() => [])
+    .finally(() => {
+      reanimeFlixInFlight.delete(apiKey);
     });
-    const fallbackServers = servers.filter((server: any) => !subServers.includes(server));
-    const candidates = [...subServers, ...fallbackServers].sort((a: any, b: any) => {
-      const av = String(a.dataLink || a.link || "").includes("?v=2") ? 1 : 0;
-      const bv = String(b.dataLink || b.link || "").includes("?v=2") ? 1 : 0;
-      return bv - av;
-    });
-    if (!candidates.length) return [];
+  reanimeFlixInFlight.set(apiKey, flight);
+  return flight;
+}
 
+async function getReanímeSources(
+  title: string,
+  english: string | null,
+  ep: number,
+  anilistId?: number,
+  availabilityOnly = false,
+  signal?: AbortSignal,
+  audioMode: "sub" | "dub" = "sub",
+): Promise<UnifiedSource[]> {
+  if (REANIME_DISABLED) return [];
+  if (!anilistId) return [];
+  const isDubMode = audioMode === "dub";
+  const targetSite = isDubMode ? "reflix_dub" : "reflix";
+  const ck = `reanime:${audioMode}:${anilistId}:${ep}`;
+  if (!availabilityOnly) {
+    const cached = reanimeSrcCache.get(ck);
+    if (cached && Date.now() - cached.ts < REANIME_TTL) return cached.sources;
+  }
+  try {
+    // رانيمي يستخدم AniList ID مباشرة عبر endpoint مخصص بدون متصفح (مع كاش مشترك بين sub و dub)
+    const servers = await fetchReanimeFlixServers(anilistId, ep, signal);
+    if (!servers.length) return [];
+
+    let candidates: any[];
+    if (isDubMode) {
+      const dubServers = servers.filter((server: any) => {
+        const kind = String(server.dataType || server.type || "").toLowerCase();
+        const srvName = String(server.serverName || server.name || "").toUpperCase();
+        return kind.includes("dub") || srvName.includes("DUB");
+      });
+      if (!dubServers.length) return [];
+      candidates = [...dubServers].sort((a: any, b: any) => {
+        const av = String(a.dataLink || a.link || "").includes("?v=2") ? 1 : 0;
+        const bv = String(b.dataLink || b.link || "").includes("?v=2") ? 1 : 0;
+        return bv - av;
+      });
+    } else {
+      const subServers = servers.filter((server: any) => {
+        const kind = String(server.dataType || server.type || "").toLowerCase();
+        const srvName = String(server.serverName || server.name || "").toUpperCase();
+        return kind.includes("sub") && !kind.includes("dub") && !srvName.includes("H-SUB");
+      });
+      const fallbackServers = servers.filter((server: any) => !subServers.includes(server));
+      candidates = [...subServers, ...fallbackServers].sort((a: any, b: any) => {
+        const av = String(a.dataLink || a.link || "").includes("?v=2") ? 1 : 0;
+        const bv = String(b.dataLink || b.link || "").includes("?v=2") ? 1 : 0;
+        return bv - av;
+      });
+    }
+    if (!candidates.length) return [];
     if (availabilityOnly) {
-      return [
-        { name: "Reanime · 1080p", url: "", quality: "1080p", qualityRank: 18, site: "reflix", verified: true } as UnifiedSource,
-        { name: "Reanime · 720p",  url: "", quality: "720p",  qualityRank: 13, site: "reflix", verified: true } as UnifiedSource,
-        { name: "Reanime · 480p",  url: "", quality: "480p",  qualityRank: 9,  site: "reflix", verified: true } as UnifiedSource,
+      const availRows: UnifiedSource[] = [
+        { name: isDubMode ? "Reanime (EN Dub) · 1080p" : "Reanime · 1080p", url: "", quality: "1080p", qualityRank: 18, site: targetSite, verified: true } as UnifiedSource,
+        { name: isDubMode ? "Reanime (EN Dub) · 720p"  : "Reanime · 720p",  url: "", quality: "720p",  qualityRank: 13, site: targetSite, verified: true } as UnifiedSource,
+        { name: isDubMode ? "Reanime (EN Dub) · 480p"  : "Reanime · 480p",  url: "", quality: "480p",  qualityRank: 9,  site: targetSite, verified: true } as UnifiedSource,
       ];
+      if (!isDubMode) {
+        const hasDubServer = servers.some((server: any) => {
+          const kind = String(server.dataType || server.type || "").toLowerCase();
+          const srvName = String(server.serverName || server.name || "").toUpperCase();
+          return kind.includes("dub") || srvName.includes("DUB");
+        });
+        if (hasDubServer) {
+          availRows.push(
+            { name: "Reanime (EN Dub) · 1080p", url: "", quality: "1080p", qualityRank: 18, site: "reflix_dub", verified: true } as UnifiedSource,
+            { name: "Reanime (EN Dub) · 720p",  url: "", quality: "720p",  qualityRank: 13, site: "reflix_dub", verified: true } as UnifiedSource,
+            { name: "Reanime (EN Dub) · 480p",  url: "", quality: "480p",  qualityRank: 9,  site: "reflix_dub", verified: true } as UnifiedSource,
+          );
+        }
+      }
+      return availRows;
     }
 
     // تمرير نفس ترجمة Kawaii التي تُمرَّر لـ KW و MP + تجهيز تخطي البداية/النهاية بالتوازي
@@ -10551,7 +10614,8 @@ async function getReanímeSources(
         const manifestKeyParam = manifestKey
           ? `&mk=${encodeURIComponent(encryptParam(manifestKey))}`
           : "";
-        const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8Url)}&ref=${encodeURIComponent(embedUrl)}${manifestKeyParam}`;
+        const audioParam = isDubMode ? "&audio=eng" : "";
+        const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8Url)}&ref=${encodeURIComponent(embedUrl)}${manifestKeyParam}${audioParam}`;
         const tiers: Array<{ q: string; rank: number }> = [
           { q: "1080p", rank: embedUrl.includes("?v=2") ? 17 : 15 },
           { q: "720p",  rank: embedUrl.includes("?v=2") ? 12 : 11 },
@@ -10559,11 +10623,13 @@ async function getReanímeSources(
           { q: "360p",  rank: 5 },
         ];
         return tiers.map(t => ({
-          name: `Reanime · FlixCloud ${srvTag} · ${t.q}${subtitleUrl ? " · ترجمة Kawaii" : ""}`,
+          name: isDubMode
+            ? `Reanime · EN Dub ${srvTag} · ${t.q}`
+            : `Reanime · FlixCloud ${srvTag} · ${t.q}${subtitleUrl ? " · ترجمة Kawaii" : ""}`,
           url: proxied,
           quality: t.q,
           qualityRank: t.rank,
-          site: "reflix",
+          site: targetSite,
           directUrl: proxied,
           directType: "hls",
           rawUrl: m3u8Url,
@@ -14722,6 +14788,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
         : site === "anslayer" ? "anslayer-v2"
         : site === "anime4up2" ? "anime4up2-v2"
         : site === "anime4up2_hard" ? "anime4up2_hard-v2"
+        : site === "reflix" ? (checkOnly ? "reflix-avail-v3" : "reflix-v2")
         : site;
       // AnimeWitcher latest cards carry the provider's own catalog id. Keep
       // their availability/source caches separate from title/AniList lookups;
@@ -15035,7 +15102,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
           site: "reflix",
           timeoutMs: sourceAvailabilityJobTimeoutMs("reflix", 6_000),
           run: () => scrapeCached("reflix", async signal =>
-            getReanímeSources(title, english, ep, await aniListIdResolution, true, signal), false, 6000),
+            getReanímeSources(title, english, ep, await aniListIdResolution, true, signal, "sub"), false, 6000),
         },
       ].filter(job => !TEMPORARILY_DISABLED_SOURCE_SITES.has(job.site)));
       const scanDeadlineMs = sourceAvailabilityScanTimeoutMs(
@@ -15530,6 +15597,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
     "anime4up2_hard", // 🎌 أنمي فور أب — ترجمة مدمجة (AD 1)
     "anime4up2",     // 🎌 أنمي فور أب — ترجمة خارجية (AD 2)
     "reflix",        // 🎌 ReAnime (FlixCloud HLS + ترجمة Kawaii)
+    "reflix_dub",    // 🇺🇸 ReAnime English Dub (FlixCloud HLS EN audio)
     "reanime",
     "animekai",      // 🎌 AnimeKai direct scraper — HLS/MP4
     ...ANIVEXA_SOURCES.map(source => source.site),
@@ -15617,6 +15685,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
     // while an episode is still being added. Always ask Kawaii for a fresh URL.
     "kawaii",
     "reflix",
+    "reflix_dub",
     "reanime", // FlixCloud HLS URLs are signed and must be fetched live
     "anivexa_re",
   ]);
@@ -15966,7 +16035,8 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
       )).forEach(collectSrc); break;
       case "megaplay":    (await race(getMegaPlayAnimeSources(title, english, ep, anilistId), 32_000, [])).forEach(collectSrc); break;
       case "reflix":
-      case "reanime":     (await race(getReanímeSources(title, english, ep, anilistId), 20_000, [])).forEach(collectSrc); break;
+      case "reanime":     (await race(getReanímeSources(title, english, ep, anilistId, false, undefined, "sub"), 20_000, [])).forEach(collectSrc); break;
+      case "reflix_dub":  (await race(getReanímeSources(title, english, ep, anilistId, false, undefined, "dub"), 20_000, [])).forEach(collectSrc); break;
       case "anineko":     (await race(getAninekoSources(title, english, ep, titleVariants), 40_000, [])).forEach(collectSrc); break;
       case "anikototv":   (await race(getAnikototvSources(title, english, ep),              25000, [])).forEach(collectSrc); break;
       case "animekai":    (await race(getAnimeKaiSources(title, english, ep, anilistId),  30000, [])).forEach(collectSrc); break;
@@ -18579,8 +18649,10 @@ function rewriteM3u8ForVPS(
   ref: string,
   manifestKey = "",
   trace = "",
+  preferredAudio = "",
 ): string {
-  const lines = manifest.split("\n");
+  const normalizedManifest = preferredAudio ? selectHlsPreferredAudio(manifest, preferredAudio) : manifest;
+  const lines = normalizedManifest.split("\n");
   const out: string[] = [];
   let nextIsPlaylist = false;
 
@@ -18665,6 +18737,7 @@ async function serveHlsVPS(
   trace: string,
   traceRoute: string,
   res: import("express").Response,
+  preferredAudio = "",
 ): Promise<void> {
   const requestStartedAt = Date.now();
   mediaMetrics.activeManifests++;
@@ -18676,7 +18749,7 @@ async function serveHlsVPS(
   // مساعد: إرسال manifest مُعاد كتابته للعميل
   function sendManifest(body: string): void {
     if (res.headersSent) return;
-    const rewritten = rewriteM3u8ForVPS(body, url, ref, manifestKey, trace);
+    const rewritten = rewriteM3u8ForVPS(body, url, ref, manifestKey, trace, preferredAudio);
     res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Cache-Control", "public, max-age=2, stale-while-revalidate=2");
@@ -19202,7 +19275,8 @@ router.get("/anime/hls-proxy", async (req, res) => {
   res.setHeader("Access-Control-Allow-Headers", "Range, Content-Type");
   res.setHeader("Access-Control-Expose-Headers", "Accept-Ranges, Content-Length, Content-Range, Content-Type");
 
-  await serveHlsVPS(url, ref, manifestKey, trace, traceRoute, res);
+  const preferredAudio = String(req.query.audio || "").trim().toLowerCase();
+  await serveHlsVPS(url, ref, manifestKey, trace, traceRoute, res, preferredAudio);
 });
 
 // ── video-proxy: VPS يبث الفيديو مع Referer الصحيح ─────────────────────────
