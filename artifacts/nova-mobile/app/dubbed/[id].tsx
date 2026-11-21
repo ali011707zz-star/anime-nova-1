@@ -21,6 +21,7 @@ import { useColors } from "@/hooks/useColors";
 import { EpisodeDivider } from "@/components/EpisodeDivider";
 import { getWatchContentId, useApp } from "@/context/AppContext";
 import { WatchlistStatusModal } from "@/components/WatchlistStatusModal";
+import { EpisodeAlertBell } from "@/components/EpisodeAlertBell";
 import { getWatchlistStatusMeta, WatchlistStatus } from "@/utils/watchlistStatus";
 const Pressable = TvPressable;
 
@@ -459,20 +460,31 @@ export default function DubbedDetailScreen() {
           <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
         </Pressable>
         <Text numberOfLines={1} style={[styles.headerTitle, { color: colors.textPrimary }]}>{title}</Text>
-        <Pressable
-          onPress={() => setShowWatchlist(true)}
-          focusable={tvMode}
-          accessibilityRole="button"
-          accessibilityLabel={watchStatusMeta ? watchStatusMeta.label : "إضافة إلى قائمتي"}
-          style={({ focused }) => [
-            styles.backBtn,
-            { backgroundColor: colors.input, borderColor: colors.border },
-            watchStatusMeta && { backgroundColor: watchStatusMeta.bg, borderColor: watchStatusMeta.border },
-            tvMode && tvFocusStyle(focused),
-          ]}
-        >
-          <Ionicons name={(watchStatusMeta ? watchStatusMeta.activeIcon : "bookmark-outline") as any} size={18} color={watchStatusMeta ? watchStatusMeta.color : colors.textPrimary} />
-        </Pressable>
+        <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 6 }}>
+          {!tvMode && favKey ? (
+            <EpisodeAlertBell
+              contentKind="dubbed"
+              contentKey={favKey}
+              title={title}
+              titleAr={title}
+              posterUrl={posterSrc}
+            />
+          ) : null}
+          <Pressable
+            onPress={() => setShowWatchlist(true)}
+            focusable={tvMode}
+            accessibilityRole="button"
+            accessibilityLabel={watchStatusMeta ? watchStatusMeta.label : "إضافة إلى قائمتي"}
+            style={({ focused }) => [
+              styles.backBtn,
+              { backgroundColor: colors.input, borderColor: colors.border },
+              watchStatusMeta && { backgroundColor: watchStatusMeta.bg, borderColor: watchStatusMeta.border },
+              tvMode && tvFocusStyle(focused),
+            ]}
+          >
+            <Ionicons name={(watchStatusMeta ? watchStatusMeta.activeIcon : "bookmark-outline") as any} size={18} color={watchStatusMeta ? watchStatusMeta.color : colors.textPrimary} />
+          </Pressable>
+        </View>
       </View>
 
       <TvFocusGuideView autoFocus={tvMode} style={styles.tvFocusGuide}>

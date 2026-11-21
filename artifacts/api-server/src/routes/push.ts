@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { randomUUID } from "node:crypto";
-import { sbInsertIgnore, sbPatch, sbSelect, sbUpsert } from "../lib/supabaseClient.js";
+import { sbDelete, sbInsertIgnore, sbPatch, sbSelect, sbUpsert } from "../lib/supabaseClient.js";
 import { getMobileUserId } from "../lib/security.js";
 import { sendFcmMessage } from "../lib/fcm.js";
 
@@ -9,6 +9,55 @@ const EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send";
 const EXPO_RECEIPTS_URL = "https://exp.host/--/api/v2/push/getReceipts";
 const EXPO_TOKEN_RE = /^(?:Expo|Exponent)PushToken\[[A-Za-z0-9_-]+\]$/;
 const PUSH_DELIVERIES_TABLE = "mobile_push_deliveries";
+const EPISODE_ALERTS_TABLE = "mobile_episode_alerts";
+const ALLOWED_ALERT_KINDS = new Set(["anime", "dubbed-anime", "dubbed", "aw-dubbed", "stardima"]);
+
+type EpisodeAlertRow = {
+  id: number;
+  token: string;
+  user_id?: string | null;
+  content_kind: string;
+  content_key: string;
+  anime_id?: number | null;
+  title: string;
+  title_ar?: string | null;
+  normalized_title: string;
+  poster_url?: string | null;
+  created_at: string;
+};
+
+function normalizeAlertKind(raw: unknown): string {
+  const k = String(raw || "").trim().toLowerCase();
+  return ALLOWED_ALERT_KINDS.has(k) ? k : "anime";
+}
+
+function normalizeAlertContentKey(kind: string, raw: unknown): string {
+  const val = String(raw || "").trim();
+  if (!val) return "";
+  if (kind === "anime") {
+    const digits = val.replace(/[^0-9]/g, "");
+    return digits || val.toLowerCase();
+  }
+  return val.toLowerCase();
+}
+
+function normalizeAlertTitle(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  return raw
+    .normalize("NFKC")
+    .replace(/[\u064B-\u065F\u0670\u0640]/g, "")
+    .replace(/[أإآٱ]/g, "ا")
+    .replace(/ة/g, "ه")
+    .replace(/ى/g, "ي")
+    .toLowerCase()
+    .replace(/[^a-z0-9\u0621-\u064A]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function stripSd2Prefix(value: string): string {
+  return String(value || "").trim().toLowerCase().replace(/^sd2[:_-]+/, "");
+}
 const RECEIPT_DELAY_MS = 15 * 60_000;
 const MAX_RETRY_DELAY_MS = 24 * 60 * 60_000;
 const TRANSIENT_EXPO_ERRORS = new Set([
@@ -126,6 +175,38 @@ router.post(["/push/register", "/register"], async (req: Request, res: Response)
       console.warn(`[push] registration unavailable platform=${platform} version=${appVersion || "unknown"}`);
       return res.status(503).json({ error: "Push registration unavailable" });
     }
+    if (previousToken && previousToken !== token && validToken(previousToken)) {
+      try {
+        const oldAlerts = await sbSelect<EpisodeAlertRow>(
+          EPISODE_ALERTS_TABLE,
+          { token: `eq.${previousToken}` },
+          { limit: 500 },
+        );
+        for (const alert of oldAlerts) {
+          await sbUpsert(
+            EPISODE_ALERTS_TABLE,
+            {
+              token,
+              ...(resolvedUserId || alert.user_id ? { user_id: resolvedUserId || alert.user_id } : {}),
+              content_kind: alert.content_kind,
+              content_key: alert.content_key,
+              ...(alert.anime_id ? { anime_id: alert.anime_id } : {}),
+              title: alert.title,
+              ...(alert.title_ar ? { title_ar: alert.title_ar } : {}),
+              normalized_title: alert.normalized_title || normalizeAlertTitle(alert.title_ar || alert.title),
+              ...(alert.poster_url ? { poster_url: alert.poster_url } : {}),
+            },
+            "token,content_kind,content_key",
+          ).catch(() => {});
+        }
+        if (oldAlerts.length > 0) {
+          await sbDelete(EPISODE_ALERTS_TABLE, { token: `eq.${previousToken}` }).catch(() => {});
+          console.log(`[push] migrated ${oldAlerts.length} episode alerts to refreshed token`);
+        }
+      } catch (migrateErr: any) {
+        console.warn("[push] episode alerts token migration warning:", migrateErr?.message || String(migrateErr));
+      }
+    }
     console.log(`[push] registered device platform=${platform} version=${appVersion || "unknown"}${resolvedUserId ? ` user=${resolvedUserId.slice(0, 8)}` : ""}`);
   } catch (error: any) {
     console.error("[push] registration failed:", error?.message || String(error));
@@ -146,6 +227,121 @@ router.post(["/push/unregister", "/unregister"], async (req: Request, res: Respo
     return res.status(503).json({ error: "Push token unregister unavailable" });
   }
   return res.json({ ok: true });
+});
+
+router.get(["/push/alerts", "/alerts"], async (req: Request, res: Response) => {
+  const token = typeof req.query.token === "string" ? req.query.token.trim() : "";
+  if (!validToken(token)) {
+    return res.status(400).json({ error: "Invalid push token" });
+  }
+  try {
+    const rows = await sbSelect<EpisodeAlertRow>(
+      EPISODE_ALERTS_TABLE,
+      { token: `eq.${token}`, order: "created_at.desc" },
+      { limit: 500, strict: true },
+    );
+    return res.json({
+      alerts: rows.map((row) => ({
+        contentKind: row.content_kind,
+        contentKey: row.content_key,
+        animeId: row.anime_id ?? null,
+        title: row.title,
+        titleAr: row.title_ar ?? null,
+        posterUrl: row.poster_url ?? null,
+        createdAt: row.created_at,
+      })),
+    });
+  } catch (error: any) {
+    console.error("[push] GET /push/alerts failed:", error?.message || String(error));
+    return res.status(503).json({ error: "Alerts unavailable" });
+  }
+});
+
+router.post(["/push/alerts/toggle", "/alerts/toggle"], async (req: Request, res: Response) => {
+  const token = typeof req.body?.token === "string" ? req.body.token.trim() : "";
+  if (!validToken(token)) {
+    return res.status(400).json({ error: "Invalid push token" });
+  }
+  const contentKind = normalizeAlertKind(req.body?.contentKind);
+  const contentKey = normalizeAlertContentKey(contentKind, req.body?.contentKey);
+  if (!contentKey) {
+    return res.status(400).json({ error: "Missing contentKey" });
+  }
+  const rawAnimeId = Number(req.body?.animeId);
+  const animeId = Number.isFinite(rawAnimeId) && rawAnimeId > 0 ? Math.trunc(rawAnimeId) : null;
+  const title = String(req.body?.title || req.body?.titleAr || contentKey).trim().slice(0, 200);
+  const titleAr = typeof req.body?.titleAr === "string" && req.body.titleAr.trim()
+    ? req.body.titleAr.trim().slice(0, 200)
+    : null;
+  const posterUrl = typeof req.body?.posterUrl === "string" && /^https?:\/\//i.test(req.body.posterUrl.trim())
+    ? req.body.posterUrl.trim().slice(0, 600)
+    : null;
+  const normalizedTitle = normalizeAlertTitle(titleAr || title);
+  const resolvedUserId =
+    getMobileUserId(req) ||
+    (req.session as any)?.userId ||
+    (req.session as any)?.emailUserId ||
+    null;
+
+  try {
+    const existing = await sbSelect<EpisodeAlertRow>(
+      EPISODE_ALERTS_TABLE,
+      {
+        token: `eq.${token}`,
+        content_kind: `eq.${contentKind}`,
+        content_key: `eq.${contentKey}`,
+      },
+      { limit: 1, strict: true },
+    );
+    const shouldEnable = typeof req.body?.enabled === "boolean"
+      ? req.body.enabled
+      : existing.length === 0;
+
+    if (!shouldEnable) {
+      await sbDelete(EPISODE_ALERTS_TABLE, {
+        token: `eq.${token}`,
+        content_kind: `eq.${contentKind}`,
+        content_key: `eq.${contentKey}`,
+      });
+      return res.json({ ok: true, subscribed: false });
+    }
+
+    // Ensure token is active in mobile_push_tokens so alerts always deliver
+    await sbUpsert(
+      "mobile_push_tokens",
+      {
+        token,
+        ...(resolvedUserId ? { user_id: resolvedUserId } : {}),
+        platform: isExpoToken(token) ? "ios" : "android",
+        last_seen_at: new Date().toISOString(),
+        disabled_at: null,
+      },
+      "token",
+    ).catch(() => {});
+
+    const saved = await sbUpsert<EpisodeAlertRow>(
+      EPISODE_ALERTS_TABLE,
+      {
+        token,
+        ...(resolvedUserId ? { user_id: resolvedUserId } : {}),
+        content_kind: contentKind,
+        content_key: contentKey,
+        ...(animeId ? { anime_id: animeId } : {}),
+        title,
+        ...(titleAr ? { title_ar: titleAr } : {}),
+        normalized_title: normalizedTitle,
+        ...(posterUrl ? { poster_url: posterUrl } : {}),
+      },
+      "token,content_kind,content_key",
+    );
+    if (!saved) {
+      return res.status(503).json({ error: "Could not save alert" });
+    }
+    return res.json({ ok: true, subscribed: true });
+  } catch (error: any) {
+    console.error("[push] POST /push/alerts/toggle failed:", error?.message || String(error));
+    return res.status(503).json({ error: "Could not update alert" });
+  }
 });
 
 async function disableToken(token: string): Promise<boolean> {
@@ -480,6 +676,8 @@ export async function sendMobilePushDetailed(input: {
   body: string;
   posterUrl?: string;
   userId?: string;
+  targetTokens?: string[];
+  excludeTokens?: Set<string>;
   data?: Record<string, unknown>;
   eventKey?: string;
 }): Promise<PushDeliverySummary> {
@@ -504,7 +702,14 @@ export async function sendMobilePushDetailed(input: {
     return { eventKey, targets: 0, delivered: 0, pending: 1, failed: 0, queueReady: false, complete: false };
   }
 
-  const validRows = rows.filter((row) => validToken(row.token));
+  const targetSet = Array.isArray(input.targetTokens) ? new Set(input.targetTokens) : null;
+  const excludeSet = input.excludeTokens;
+  const filteredRows = rows.filter((row) => {
+    if (targetSet && !targetSet.has(row.token)) return false;
+    if (excludeSet && excludeSet.has(row.token)) return false;
+    return true;
+  });
+  const validRows = filteredRows.filter((row) => validToken(row.token));
   const invalidRows = rows.filter((row) => !validToken(row.token));
   for (const row of invalidRows) {
     const disabled = await disableToken(row.token);
@@ -589,17 +794,125 @@ export async function sendMobilePush(input: Parameters<typeof sendMobilePushDeta
   return result.delivered;
 }
 
+export async function sendSubscribedAlertPush(input: {
+  contentKind: string;
+  contentKey?: string;
+  animeId?: number;
+  title: string;
+  titleAr?: string;
+  english?: string;
+  episode: number;
+  isMovie?: boolean;
+  posterUrl?: string;
+  eventKey: string;
+  sectionLabel?: string;
+  routeData?: Record<string, string | number | boolean>;
+}): Promise<{ matchedTokens: string[]; summary: PushDeliverySummary | null }> {
+  const kind = normalizeAlertKind(input.contentKind);
+  const eventKeyNorm = normalizeAlertContentKey(kind, input.contentKey);
+  const eventSd2Bare = stripSd2Prefix(eventKeyNorm);
+  const eventTitles = new Set(
+    [input.titleAr, input.title, input.english]
+      .map((t) => normalizeAlertTitle(t))
+      .filter((t) => t.length >= 4),
+  );
+
+  let allAlerts: EpisodeAlertRow[] = [];
+  try {
+    for (let offset = 0; ; offset += 1000) {
+      const page = await sbSelect<EpisodeAlertRow>(
+        EPISODE_ALERTS_TABLE,
+        { order: "id.asc" },
+        { limit: 1000, offset, strict: true },
+      );
+      allAlerts.push(...page);
+      if (page.length < 1000) break;
+    }
+  } catch (error) {
+    console.warn("[push] episode alerts lookup failed:", error instanceof Error ? error.message : String(error));
+    return { matchedTokens: [], summary: null };
+  }
+
+  const matchedTokens = new Set<string>();
+  const isEventAnime = kind === "anime";
+  for (const alert of allAlerts) {
+    if (!validToken(alert.token)) continue;
+    const alertKind = normalizeAlertKind(alert.content_kind);
+    const alertKey = normalizeAlertContentKey(alertKind, alert.content_key);
+
+    if (isEventAnime && alertKind === "anime" && input.animeId && Number(alert.anime_id) === Number(input.animeId)) {
+      matchedTokens.add(alert.token);
+      continue;
+    }
+    if (alertKind === kind && alertKey && eventKeyNorm && alertKey === eventKeyNorm) {
+      matchedTokens.add(alert.token);
+      continue;
+    }
+    if (
+      (alertKind === "dubbed" || alertKind === "stardima") &&
+      (kind === "dubbed" || kind === "stardima") &&
+      eventSd2Bare &&
+      stripSd2Prefix(alertKey) === eventSd2Bare
+    ) {
+      matchedTokens.add(alert.token);
+      continue;
+    }
+    if ((alertKind === "anime") === isEventAnime && eventTitles.size > 0) {
+      const alertTitles = [
+        alert.normalized_title,
+        normalizeAlertTitle(alert.title_ar),
+        normalizeAlertTitle(alert.title),
+      ].filter((t) => t.length >= 4);
+      if (alertTitles.some((t) => eventTitles.has(t))) {
+        matchedTokens.add(alert.token);
+      }
+    }
+  }
+
+  const tokens = Array.from(matchedTokens);
+  if (!tokens.length) {
+    return { matchedTokens: [], summary: null };
+  }
+
+  const displayTitle = String(input.titleAr || input.title || "عملك المفضّل").trim();
+  const body = input.isMovie
+    ? `🎬 ${input.sectionLabel ? `${input.sectionLabel} · ` : ""}الفيلم متاح الآن للمشاهدة`
+    : `🎬 ${input.sectionLabel ? `${input.sectionLabel} · ` : ""}الحلقة ${input.episode} متاحة الآن — اضغط للمشاهدة`;
+
+  const summary = await sendMobilePushDetailed({
+    title: `🔔 حلقة جديدة · ${displayTitle}`,
+    body,
+    posterUrl: input.posterUrl,
+    targetTokens: tokens,
+    eventKey: `bell:${input.eventKey}`,
+    data: {
+      type: "episode-alert",
+      contentKind: kind,
+      contentKey: eventKeyNorm,
+      ...(input.animeId ? { animeId: input.animeId } : {}),
+      episode: input.episode,
+      title: displayTitle,
+      poster: input.posterUrl || "",
+      ...(input.routeData || {}),
+    },
+  });
+  console.info(`[push] 🔔 bell alert queued event=bell:${input.eventKey} subscribers=${tokens.length} delivered=${summary.delivered}`);
+  return { matchedTokens: tokens, summary };
+}
+
 export async function sendNewEpisodePushDetailed(input: {
   animeId: number;
   title: string;
   episode: number;
   posterUrl?: string;
+  excludeTokens?: Set<string>;
 }): Promise<PushDeliverySummary> {
   // Episode alerts are broadcasts: leave userId unset so every active device gets them.
   return sendMobilePushDetailed({
     title: "🌸 حلقة جديدة وصلت!",
     body: `✨ ${input.title}\n🎬 الحلقة ${input.episode}`,
     posterUrl: input.posterUrl,
+    excludeTokens: input.excludeTokens,
     eventKey: `episode:${input.animeId}:${input.episode}`,
     data: {
       type: "new-episode",

@@ -18,6 +18,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { SafePosterImage } from "@/components/SafePosterImage";
+import { EpisodeAlertBell } from "@/components/EpisodeAlertBell";
 import { getWatchContentId, useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import type { ThemePalette } from "@/constants/colors";
@@ -369,6 +370,16 @@ export default function DubbedAnimeEpisodesScreen() {
         </View>
 
         <View style={ep_s.topBarLeftTools}>
+          {!tvMode && slug ? (
+            <EpisodeAlertBell
+              compact
+              contentKind="dubbed-anime"
+              contentKey={slug}
+              title={displayTitle}
+              titleAr={displayTitle}
+              posterUrl={posterUri || null}
+            />
+          ) : null}
           <Pressable
             onPress={scrollToTop}
             focusable={tvMode}

@@ -21,6 +21,7 @@ import * as ScreenOrientation from "expo-screen-orientation";
 import { SafePosterImage } from "@/components/SafePosterImage";
 import { YoutubeTrailerModal } from "@/components/YoutubeTrailerModal";
 import { WatchlistStatusModal } from "@/components/WatchlistStatusModal";
+import { EpisodeAlertBell } from "@/components/EpisodeAlertBell";
 import { getWatchlistStatusMeta, WatchlistStatus } from "@/utils/watchlistStatus";
 import { getWatchContentId, useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
@@ -699,6 +700,15 @@ export default function DubbedAnimeDetailScreen() {
               <View style={d.topBarStatusDot} />
               <Text style={[d.topBarStatusText, tvMode && d.tvTopBarStatusText]}>{statusText}</Text>
             </View>
+          ) : null}
+          {!tvMode && slug ? (
+            <EpisodeAlertBell
+              contentKind="dubbed-anime"
+              contentKey={slug}
+              title={englishTitle || displayTitle}
+              titleAr={displayTitle}
+              posterUrl={posterUri || null}
+            />
           ) : null}
           <Pressable
             onPress={() => setShowWatchlist(true)}

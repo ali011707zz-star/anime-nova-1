@@ -10,7 +10,7 @@ import { focusManager, QueryClient, QueryClientProvider } from "@tanstack/react-
 import { Stack, usePathname, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import * as SplashScreen from "expo-splash-screen";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Animated, AppState, BackHandler, Dimensions, I18nManager, Image, Platform, StatusBar, StyleSheet, Text, TextInput, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -414,18 +414,97 @@ function RootContent({
 
 function PushRegistrationBridge({ disabled }: { disabled: boolean }) {
   const { authReady, currentUser } = useApp();
+  const router = useRouter();
+  const handledNotifIdsRef = useRef<Set<string>>(new Set());
+
+  const openNotificationPayload = useCallback((rawData: Record<string, any> | undefined) => {
+    if (!rawData || typeof rawData !== "object") return;
+    const contentKind = String(rawData.contentKind || "").trim().toLowerCase();
+    const title = String(rawData.title || "").trim();
+    const poster = String(rawData.poster || "").trim();
+
+    if (contentKind === "dubbed-anime" && rawData.slug) {
+      router.push({
+        pathname: "/dubbed-anime/[slug]",
+        params: { slug: String(rawData.slug), ...(title ? { title } : {}), ...(poster ? { poster } : {}) },
+      } as any);
+      return;
+    }
+    if (contentKind === "aw-dubbed" && (rawData.awKey || rawData.contentKey)) {
+      router.push({
+        pathname: "/aw-dubbed/[key]",
+        params: {
+          key: String(rawData.awKey || rawData.contentKey),
+          ...(title ? { title } : {}),
+          ...(poster ? { poster } : {}),
+        },
+      } as any);
+      return;
+    }
+    if (contentKind === "dubbed" && (rawData.sd2Slug || rawData.contentKey)) {
+      const sd2Slug = String(rawData.sd2Slug || rawData.contentKey).replace(/^sd2:/i, "");
+      router.push({
+        pathname: "/dubbed/[id]",
+        params: {
+          id: sd2Slug,
+          ...(title ? { title } : {}),
+          ...(poster ? { img: poster } : {}),
+          provider: "sd2",
+          slug: sd2Slug,
+          ...(rawData.isMovie ? { isMovie: String(rawData.isMovie) } : {}),
+        },
+      } as any);
+      return;
+    }
+    if (contentKind === "stardima" && (rawData.providerTitleId || rawData.contentKey)) {
+      router.push({
+        pathname: "/stardima-title",
+        params: { providerTitleId: String(rawData.providerTitleId || rawData.contentKey) },
+      } as any);
+      return;
+    }
+
+    const animeId = Number(rawData.animeId || 0);
+    const episode = Number(rawData.episode || 0);
+    if (animeId > 0) {
+      if (episode > 0) {
+        const romaji = String(rawData.romaji || title || "");
+        const english = String(rawData.english || title || "");
+        router.push(
+          `/watch?anime=${animeId}&anilistId=${animeId}&ep=${episode}&totalEps=${episode}&title=${encodeURIComponent(romaji)}&english=${encodeURIComponent(english)}&fromLatest=1${poster ? `&cover=${encodeURIComponent(poster)}` : ""}` as any,
+        );
+      } else {
+        router.push({ pathname: "/episodes/[id]", params: { id: String(animeId), ...(title ? { title } : {}) } } as any);
+      }
+    }
+  }, [router]);
+
   useEffect(() => {
     if (disabled || Platform.OS === "web" || !authReady) return;
     let disposed = false;
     let stopEpisodeSync: (() => void) | undefined;
+    let removeNotifSub: (() => void) | undefined;
+    let lastRegisterAt = 0;
     const stopTokenListener = subscribeToPushTokenChanges();
-    const timer = setTimeout(() => {
+
+    const runRegistration = async () => {
       if (disposed || AppState.currentState === "background") return;
-      void registerPushNotifications()
+      const now = Date.now();
+      if (now - lastRegisterAt < 60_000) return;
+      lastRegisterAt = now;
+      await registerPushNotifications()
         .catch((error) => {
           console.warn("[push] startup registration failed:", error instanceof Error ? error.message : String(error));
           return false;
-        })
+        });
+      if (disposed) return;
+      const { hydrateEpisodeAlerts } = await import("@/utils/episodeAlerts");
+      await hydrateEpisodeAlerts().catch(() => {});
+    };
+
+    const timer = setTimeout(() => {
+      if (disposed || AppState.currentState === "background") return;
+      void runRegistration()
         .then(async () => {
           if (disposed || AppState.currentState === "background") return;
           const { startEpisodeNotificationSync } = await import("@/utils/episodeNotifications");
@@ -435,13 +514,42 @@ function PushRegistrationBridge({ disabled }: { disabled: boolean }) {
           console.warn("[push] local notification fallback startup failed:", error instanceof Error ? error.message : String(error));
         });
     }, 1500);
+
+    const appStateSub = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active" && !disposed) {
+        void runRegistration();
+      }
+    });
+
+    void import("expo-notifications")
+      .then((Notifications) => {
+        if (disposed) return;
+        const handleResponse = (response: any) => {
+          const id = response?.notification?.request?.identifier;
+          if (id && handledNotifIdsRef.current.has(id)) return;
+          if (id) handledNotifIdsRef.current.add(id);
+          const data = response?.notification?.request?.content?.data as Record<string, any> | undefined;
+          openNotificationPayload(data);
+        };
+        const sub = Notifications.addNotificationResponseReceivedListener(handleResponse);
+        removeNotifSub = () => sub.remove();
+        void Notifications.getLastNotificationResponseAsync()
+          .then((last) => {
+            if (!disposed && last) handleResponse(last);
+          })
+          .catch(() => {});
+      })
+      .catch(() => {});
+
     return () => {
       disposed = true;
       clearTimeout(timer);
+      appStateSub.remove();
       stopTokenListener();
       stopEpisodeSync?.();
+      removeNotifSub?.();
     };
-  }, [authReady, currentUser?.id, disabled]);
+  }, [authReady, currentUser?.id, disabled, openNotificationPayload]);
   return null;
 }
 

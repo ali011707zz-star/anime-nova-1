@@ -22,6 +22,7 @@ import { catalogBadge } from "@/hooks/useDubbedCatalogFeed";
 import { getStardimaProgressKey } from "@/utils/stardimaProgress";
 import { getWatchContentId, useApp } from "@/context/AppContext";
 import { WatchlistStatusModal } from "@/components/WatchlistStatusModal";
+import { EpisodeAlertBell } from "@/components/EpisodeAlertBell";
 import { getWatchlistStatusMeta, WatchlistStatus } from "@/utils/watchlistStatus";
 
 const Pressable = TvPressable;
@@ -586,19 +587,30 @@ export default function StardimaTitleScreen() {
     <View style={[styles.screen, { paddingTop: topPad }]}>
       <RewardedAdPrompt />
       <View style={[styles.header, { minHeight: tvMode ? 68 : 54 }]}>
-        <Pressable
-          onPress={() => setShowWatchlist(true)}
-          focusable={tvMode}
-          accessibilityRole="button"
-          accessibilityLabel={watchStatusMeta ? watchStatusMeta.label : "إضافة إلى قائمتي"}
-          style={({ focused }) => [
-            styles.back,
-            watchStatusMeta && { backgroundColor: watchStatusMeta.bg, borderColor: watchStatusMeta.border },
-            tvMode && focused && tvFocusStyle(true),
-          ]}
-        >
-          <Ionicons name={(watchStatusMeta ? watchStatusMeta.activeIcon : "bookmark-outline") as any} size={18} color={watchStatusMeta ? watchStatusMeta.color : colors.textPrimary} />
-        </Pressable>
+        <View style={{ flexDirection: ROW_LTR, alignItems: "center", gap: 6 }}>
+          <Pressable
+            onPress={() => setShowWatchlist(true)}
+            focusable={tvMode}
+            accessibilityRole="button"
+            accessibilityLabel={watchStatusMeta ? watchStatusMeta.label : "إضافة إلى قائمتي"}
+            style={({ focused }) => [
+              styles.back,
+              watchStatusMeta && { backgroundColor: watchStatusMeta.bg, borderColor: watchStatusMeta.border },
+              tvMode && focused && tvFocusStyle(true),
+            ]}
+          >
+            <Ionicons name={(watchStatusMeta ? watchStatusMeta.activeIcon : "bookmark-outline") as any} size={18} color={watchStatusMeta ? watchStatusMeta.color : colors.textPrimary} />
+          </Pressable>
+          {!tvMode && providerTitleId ? (
+            <EpisodeAlertBell
+              contentKind="stardima"
+              contentKey={providerTitleId}
+              title={title?.title_en || title?.title || titleText(title)}
+              titleAr={title?.title_ar || titleText(title)}
+              posterUrl={title?.poster_url || null}
+            />
+          ) : null}
+        </View>
         <Text numberOfLines={1} style={[styles.heading, tvMode && { fontSize: 22 }]}>
           {titleText(title)}
         </Text>

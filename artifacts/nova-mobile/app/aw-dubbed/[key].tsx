@@ -22,6 +22,7 @@ import {
 import { useColors } from "@/hooks/useColors";
 import { getWatchContentId, useApp } from "@/context/AppContext";
 import { WatchlistStatusModal } from "@/components/WatchlistStatusModal";
+import { EpisodeAlertBell } from "@/components/EpisodeAlertBell";
 import { getWatchlistStatusMeta, WatchlistStatus } from "@/utils/watchlistStatus";
 const Pressable = TvPressable;
 const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
@@ -244,20 +245,31 @@ export default function AwDubbedDetailScreen() {
     <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <Pressable
-          onPress={() => setShowWatchlist(true)}
-          focusable={tvMode}
-          accessibilityRole="button"
-          accessibilityLabel={watchStatusMeta ? watchStatusMeta.label : "إضافة إلى قائمتي"}
-          style={({ focused }) => [
-            styles.backBtn,
-            { backgroundColor: colors.input, borderColor: colors.border },
-            watchStatusMeta && { backgroundColor: watchStatusMeta.bg, borderColor: watchStatusMeta.border },
-            tvMode && tvFocusStyle(focused),
-          ]}
-        >
-          <Ionicons name={(watchStatusMeta ? watchStatusMeta.activeIcon : "bookmark-outline") as any} size={18} color={watchStatusMeta ? watchStatusMeta.color : colors.textPrimary} />
-        </Pressable>
+        <View style={{ flexDirection: ROW_LTR, alignItems: "center", gap: 6 }}>
+          <Pressable
+            onPress={() => setShowWatchlist(true)}
+            focusable={tvMode}
+            accessibilityRole="button"
+            accessibilityLabel={watchStatusMeta ? watchStatusMeta.label : "إضافة إلى قائمتي"}
+            style={({ focused }) => [
+              styles.backBtn,
+              { backgroundColor: colors.input, borderColor: colors.border },
+              watchStatusMeta && { backgroundColor: watchStatusMeta.bg, borderColor: watchStatusMeta.border },
+              tvMode && tvFocusStyle(focused),
+            ]}
+          >
+            <Ionicons name={(watchStatusMeta ? watchStatusMeta.activeIcon : "bookmark-outline") as any} size={18} color={watchStatusMeta ? watchStatusMeta.color : colors.textPrimary} />
+          </Pressable>
+          {!tvMode && favKey ? (
+            <EpisodeAlertBell
+              contentKind="aw-dubbed"
+              contentKey={favKey}
+              title={title || displayTitle}
+              titleAr={titleAr || displayTitle}
+              posterUrl={poster || null}
+            />
+          ) : null}
+        </View>
         <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>{displayTitle}</Text>
         <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} focusable={tvMode}
            style={({ focused }) => [

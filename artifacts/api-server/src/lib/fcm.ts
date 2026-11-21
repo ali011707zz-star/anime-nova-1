@@ -203,9 +203,15 @@ export async function sendFcmMessage(token: string, payload: FcmPayload): Promis
       ...(data ? { data } : {}),
       android: {
         priority: "HIGH",
+        ttl: "86400s",
+        direct_boot_ok: true,
         notification: {
           channel_id: typeof payload.channelId === "string" ? payload.channelId : "nova-new-episodes",
           ...(typeof payload.sound === "string" ? { sound: payload.sound } : {}),
+          default_sound: true,
+          default_vibrate_timings: true,
+          notification_priority: "PRIORITY_MAX",
+          visibility: "PUBLIC",
           ...(image ? { image } : {}),
         },
       },

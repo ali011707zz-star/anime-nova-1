@@ -19,6 +19,7 @@ import { secureFetch } from "@/utils/secureApi";
 import { getYoutubeEmbedUrl, getYoutubeReferer } from "@/utils/youtube";
 import { YoutubeTrailerModal } from "@/components/YoutubeTrailerModal";
 import { WatchlistStatusModal } from "@/components/WatchlistStatusModal";
+import { EpisodeAlertBell } from "@/components/EpisodeAlertBell";
 import { getWatchlistStatusMeta, WatchlistStatus } from "@/utils/watchlistStatus";
 import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { useTvFocusMemory } from "@/utils/tvFocus";
@@ -600,14 +601,26 @@ export default function AnimeDetailScreen() {
         <Text style={[d.topBarTitle, tvMode && d.tvTopBarTitle]} numberOfLines={1}>
           {arabicTitle || anime.title?.english || anime.title?.romaji || "تفاصيل الأنمي"}
         </Text>
-        {anime.status ? (
-          <View style={[d.topBarStatus, tvMode && d.tvTopBarStatus]}>
-            <View style={d.topBarStatusDot} />
-            <Text style={[d.topBarStatusText, tvMode && d.tvTopBarStatusText]}>
-              {STATUS_MAP[anime.status] || anime.status}
-            </Text>
-          </View>
-        ) : <View style={d.topBarSpacer} />}
+        <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 6 }}>
+          {anime.status ? (
+            <View style={[d.topBarStatus, tvMode && d.tvTopBarStatus]}>
+              <View style={d.topBarStatusDot} />
+              <Text style={[d.topBarStatusText, tvMode && d.tvTopBarStatusText]}>
+                {STATUS_MAP[anime.status] || anime.status}
+              </Text>
+            </View>
+          ) : (tvMode ? <View style={d.topBarSpacer} /> : null)}
+          {!tvMode && anime.id ? (
+            <EpisodeAlertBell
+              contentKind="anime"
+              contentKey={String(anime.id)}
+              animeId={Number(anime.id)}
+              title={anime.title?.english || anime.title?.romaji || arabicTitle || "أنمي"}
+              titleAr={arabicTitle || null}
+              posterUrl={anime.coverImage?.extraLarge || anime.coverImage?.large || null}
+            />
+          ) : null}
+        </View>
       </View>
       <ScrollView focusable={false} showsVerticalScrollIndicator={false} contentContainerStyle={[{ paddingBottom: 100 }, tvMode && d.tvContent]}>
 

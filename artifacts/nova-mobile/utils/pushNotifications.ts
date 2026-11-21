@@ -90,13 +90,17 @@ async function registerPushNotificationsOnce(forceTokenRefresh = false): Promise
     }
     const previousToken = await AsyncStorage.getItem(PUSH_TOKEN_KEY);
     const checkedAt = Number(await AsyncStorage.getItem(FCM_TOKEN_CHECKED_AT_KEY) || 0);
-    let token = useDirectFcm && !shouldRefreshFcmToken(previousToken, checkedAt, Date.now(), forceTokenRefresh)
-      ? previousToken || undefined
-      : undefined;
+    // Always query Play Services for the live native FCM token on Android so
+    // rotated/unregistered tokens self-heal immediately; fall back to previousToken
+    // only if Play Services temporarily throws.
+    const shouldFetchNow = useDirectFcm
+      ? true
+      : shouldRefreshFcmToken(previousToken, checkedAt, Date.now(), forceTokenRefresh);
+    let token = !shouldFetchNow ? previousToken || undefined : undefined;
     let fetchedDeviceToken = false;
 
     if (token) {
-      console.info("[push] reusing recently checked native FCM token");
+      console.info("[push] reusing recently checked push token");
     } else {
       for (let attempt = 1; attempt <= 3; attempt += 1) {
         try {
@@ -265,6 +269,51 @@ export async function setPushNotificationsEnabled(enabled: boolean): Promise<boo
  * The native token listener covers FCM/APNs. Refresh the platform's registered
  * token through the same registration path when the native token rolls.
  */
+export async function getCachedPushToken(): Promise<string | null> {
+  if (Platform.OS === "web") return null;
+  try {
+    const token = await AsyncStorage.getItem(PUSH_TOKEN_KEY);
+    return token && token.trim().length >= 20 ? token.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getActivePushToken(options: { requestPermission?: boolean } = {}): Promise<{
+  token: string | null;
+  permissionDenied?: boolean;
+}> {
+  if (Platform.OS === "web") return { token: null };
+  try {
+    const current = await Notifications.getPermissionsAsync();
+    const permission = current.granted
+      ? current
+      : options.requestPermission
+        ? await Notifications.requestPermissionsAsync()
+        : current;
+    if (!permission.granted) {
+      return { token: null, permissionDenied: true };
+    }
+    if (options.requestPermission) {
+      await AsyncStorage.setItem(PUSH_ENABLED_KEY, "1").catch(() => {});
+    }
+    await registerPushNotifications({ forceTokenRefresh: true }).catch(() => false);
+    const cached = await getCachedPushToken();
+    if (cached) return { token: cached };
+    if (Platform.OS === "android") {
+      const resp = await Notifications.getDevicePushTokenAsync().catch(() => null);
+      const raw = String(resp?.data || "").trim();
+      if (raw.length >= 20) {
+        await AsyncStorage.setItem(PUSH_TOKEN_KEY, raw).catch(() => {});
+        return { token: raw };
+      }
+    }
+    return { token: null };
+  } catch {
+    return { token: await getCachedPushToken() };
+  }
+}
+
 export function subscribeToPushTokenChanges(): () => void {
   if (Platform.OS === "web") return () => {};
   tokenListener?.remove();

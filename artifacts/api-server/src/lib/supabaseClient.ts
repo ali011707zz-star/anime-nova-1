@@ -14,7 +14,7 @@ let _pool: pg.Pool | null = null;
 // when their Supabase migration has not been applied. Once a table returns 404
 // from PostgREST (or is known to live in PG), route directly to PostgreSQL so
 // background workers do not log 404 PGRST205 on every cycle.
-const DEVICE_STORAGE_TABLES = new Set(["device_link_codes", "linked_devices", "mobile_push_tokens", "mobile_push_deliveries"]);
+const DEVICE_STORAGE_TABLES = new Set(["device_link_codes", "linked_devices", "mobile_push_tokens", "mobile_push_deliveries", "mobile_episode_alerts"]);
 const pgOnlyDeviceTables = new Set<string>();
 
 function shouldUseSupabaseForTable(table: string): boolean {
@@ -109,6 +109,28 @@ async function ensureDeviceStorageSchema(): Promise<void> {
         );
         CREATE INDEX IF NOT EXISTS idx_mobile_push_deliveries_due
           ON mobile_push_deliveries(status, next_attempt_at);
+        CREATE TABLE IF NOT EXISTS mobile_episode_alerts (
+          id BIGSERIAL PRIMARY KEY,
+          token TEXT NOT NULL,
+          user_id UUID,
+          content_kind TEXT NOT NULL,
+          content_key TEXT NOT NULL,
+          anime_id INTEGER,
+          title TEXT NOT NULL,
+          title_ar TEXT,
+          normalized_title TEXT NOT NULL DEFAULT '',
+          poster_url TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE(token, content_kind, content_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_mobile_episode_alerts_anime_id
+          ON mobile_episode_alerts(anime_id) WHERE anime_id IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_mobile_episode_alerts_kind_key
+          ON mobile_episode_alerts(content_kind, content_key);
+        CREATE INDEX IF NOT EXISTS idx_mobile_episode_alerts_norm_title
+          ON mobile_episode_alerts(normalized_title);
+        CREATE INDEX IF NOT EXISTS idx_mobile_episode_alerts_token
+          ON mobile_episode_alerts(token);
       `);
     })().catch(error => {
       _deviceStorageSchemaPromise = null;
@@ -612,11 +634,16 @@ export async function sbUpsert<T = any>(
 
     let conflictClause = "";
     if (onConflict) {
+      const conflictCols = onConflict.split(",").map((c) => c.trim()).filter(Boolean);
+      const conflictSet = new Set(conflictCols);
+      const conflictTarget = conflictCols.map((c) => `"${c}"`).join(", ");
       const updateCols = entries
-        .filter(([k]) => k !== onConflict)
+        .filter(([k]) => !conflictSet.has(k))
         .map(([k]) => `"${k}" = EXCLUDED."${k}"`)
         .join(", ");
-      conflictClause = `ON CONFLICT ("${onConflict}") DO UPDATE SET ${updateCols}`;
+      conflictClause = updateCols
+        ? `ON CONFLICT (${conflictTarget}) DO UPDATE SET ${updateCols}`
+        : `ON CONFLICT (${conflictTarget}) DO NOTHING`;
     } else {
       conflictClause = "ON CONFLICT DO NOTHING";
     }

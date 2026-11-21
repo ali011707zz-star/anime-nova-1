@@ -9,7 +9,7 @@ import { Router, type Request, type Response } from "express";
 import { sbInsert, sbSelect } from "../lib/supabaseClient.js";
 import { getEnvOrDb } from "../lib/dbConfig.js";
 import { saveNotification } from "./notifications.js";
-import { sendNewEpisodePushDetailed } from "./push.js";
+import { sendNewEpisodePushDetailed, sendSubscribedAlertPush } from "./push.js";
 
 const router = Router();
 
@@ -470,11 +470,33 @@ async function deliverNewEpisodeNotification(
     episode_num: ep,
   }).catch(() => {});
 
+  const bellResult = await sendSubscribedAlertPush({
+    contentKind: "anime",
+    contentKey: String(anilistId),
+    animeId: anilistId,
+    title,
+    titleAr: title,
+    english: meta?.english || meta?.romaji || title,
+    episode: ep,
+    posterUrl: poster ?? undefined,
+    eventKey: `anime:${anilistId}:${ep}`,
+    routeData: {
+      animeId: anilistId,
+      episode: ep,
+      romaji: meta?.romaji || title,
+      english: meta?.english || title,
+    },
+  }).catch((error) => {
+    console.warn(`[push] bell alert failed title=${title} episode=${ep}:`, error instanceof Error ? error.message : String(error));
+    return { matchedTokens: [] as string[], summary: null };
+  });
+
   const pushResult = await sendNewEpisodePushDetailed({
     animeId: anilistId,
     title,
     episode: ep,
     posterUrl: poster ?? undefined,
+    excludeTokens: bellResult.matchedTokens.length ? new Set(bellResult.matchedTokens) : undefined,
   }).catch((error) => {
     console.warn(`[push] episode delivery failed title=${title} episode=${ep}:`, error instanceof Error ? error.message : String(error));
     return null;
@@ -1036,8 +1058,7 @@ async function pollDubbedLatest(): Promise<void> {
     }
 
     const channelId = process.env.TELEGRAM_CHANNEL_ID;
-    const tok = await getToken();
-    if (!channelId || !tok) return;
+    const tok = await getToken().catch(() => null);
 
     let sent = 0;
     for (let idx = 0; idx < list.length; idx++) {
@@ -1054,22 +1075,59 @@ async function pollDubbedLatest(): Promise<void> {
 
       const caption = buildDubbedEpisodeCaption(item);
       const poster = typeof item?.cover === "string" && /^https?:\/\//i.test(item.cover) ? item.cover : "";
-      const photoSent = await sendChannelPhoto(poster, caption, { title: String(item?.english || item?.name || ""), englishTitle: String(item?.titleAr || ""), type: "ANIME" });
-      const delivered = photoSent || await sendMessage(channelId, caption);
+      const photoSent = (channelId && tok) ? await sendChannelPhoto(poster, caption, { title: String(item?.english || item?.name || ""), englishTitle: String(item?.titleAr || ""), type: "ANIME" }) : false;
+      const delivered = photoSent || ((channelId && tok) ? await sendMessage(channelId, caption) : false);
       // سجل الحلقة المدبلجة الجديدة في قائمة أحدث الحلقات (آخر 14 يوماً) حتى تظهر للمستخدمين
       await recordDubbedRecentRelease(item).catch(() => {});
-      if (delivered) {
+      const dubbedKindRaw = String(item?.dubbedKind || item?.source || "dubbed").trim().toLowerCase();
+      const alertContentKind =
+        dubbedKindRaw === "dubbed-anime"
+          ? "dubbed-anime"
+          : dubbedKindRaw === "aw-dubbed"
+            ? "aw-dubbed"
+            : "dubbed";
+      const alertContentKey =
+        alertContentKind === "dubbed-anime"
+          ? String(item?.dubbedSlug || item?.id || "").trim()
+          : alertContentKind === "aw-dubbed"
+            ? String(item?.awKey || item?.awSeries || item?.id || "").trim()
+            : item?.sd2Slug
+              ? `sd2:${String(item.sd2Slug).trim()}`
+              : String(item?.id || item?.titleAr || item?.name || "").trim();
+      const epNum = Math.max(1, Number(item?.episode || 1) || 1);
+      const bellPush = await sendSubscribedAlertPush({
+        contentKind: alertContentKind,
+        contentKey: alertContentKey,
+        title: String(item?.titleAr || item?.name || "عمل مدبلج"),
+        titleAr: String(item?.titleAr || item?.name || ""),
+        english: String(item?.english || item?.name || ""),
+        episode: epNum,
+        isMovie: Boolean(item?.isMovie),
+        posterUrl: poster || undefined,
+        eventKey: `dubbed:${alertContentKind}:${alertContentKey || "item"}:${epNum}`,
+        sectionLabel: String(item?.sectionLabel || "مدبلج"),
+        routeData: {
+          ...(item?.dubbedSlug ? { slug: String(item.dubbedSlug) } : {}),
+          ...(item?.awKey ? { awKey: String(item.awKey) } : {}),
+          ...(item?.sd2Slug ? { sd2Slug: String(item.sd2Slug) } : {}),
+          ...(item?.isMovie ? { isMovie: "1" } : {}),
+        },
+      }).catch((err) => {
+        console.warn("[push] dubbed bell push failed:", err instanceof Error ? err.message : String(err));
+        return { matchedTokens: [] as string[], summary: null };
+      });
+      if (delivered || bellPush.matchedTokens.length > 0) {
         await markNotifKeys(keys);
         sent++;
         schedulerSentToday++;
         await saveNotification({
           type: "dubbed_episode",
           title: String(item?.titleAr || item?.name || "عمل مدبلج"),
-          body: item?.isMovie ? `${item?.sectionLabel || "مدبلج"} · فيلم متاح الآن` : `${item?.sectionLabel || "مدبلج"} · الحلقة ${item?.episode || 1}`,
+          body: item?.isMovie ? `${item?.sectionLabel || "مدبلج"} · فيلم متاح الآن` : `${item?.sectionLabel || "مدبلج"} · الحلقة ${epNum}`,
           image_url: poster || undefined,
-          episode_num: Number(item?.episode || 1),
+          episode_num: epNum,
         }).catch(() => {});
-        console.log(`[scheduler] 🎙️ أُرسل إشعار مدبلج → ${item?.sectionLabel} · ${item?.titleAr || item?.name} ح${item?.episode || 1}`);
+        console.log(`[scheduler] 🎙️ أُرسل إشعار مدبلج → ${item?.sectionLabel} · ${item?.titleAr || item?.name} ح${epNum} (bell=${bellPush.matchedTokens.length})`);
         await new Promise((r) => setTimeout(r, 1_500));
       }
       if (sent >= 5) break;

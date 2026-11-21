@@ -1,4 +1,5 @@
 import { SafePosterImage } from "@/components/SafePosterImage";
+import { EpisodeAlertBell } from "@/components/EpisodeAlertBell";
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   View, Text, TextInput, Image, FlatList,
@@ -933,6 +934,26 @@ export default function EpisodeListScreen() {
           </View>
         </View>
         <View style={ep_s.topBarLeftTools}>
+              {!tvMode && (selectedAnime?.id || selectedAnimeId) ? (
+                <EpisodeAlertBell
+                  compact
+                  contentKind="anime"
+                  contentKey={String(selectedAnime?.id || selectedAnimeId)}
+                  animeId={Number(selectedAnime?.id || selectedAnimeId) || null}
+                  title={
+                    selectedAnime?.title?.english ||
+                    selectedAnime?.title?.romaji ||
+                    (Array.isArray(title) ? title[0] : title) ||
+                    "أنمي"
+                  }
+                  titleAr={
+                    extractArabicTitle(selectedAnime?.synonyms) ||
+                    (Array.isArray(title) ? title[0] : title) ||
+                    null
+                  }
+                  posterUrl={selectedAnime?.coverImage?.extraLarge || selectedAnime?.coverImage?.large || null}
+                />
+              ) : null}
               <Pressable
                 onPress={scrollToTop}
                 focusable={tvMode}
