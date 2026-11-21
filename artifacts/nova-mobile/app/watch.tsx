@@ -131,7 +131,7 @@ const SITE_TAG: Record<string, string> = {
   shahiid: "SH", animelek: "EK", animedar: "AD", okanime: "OK",
   ristoanime: "RS", animeify: "AF", animeday: "DY", arabseed: "AR",
   mycima: "MC", topcinemaa: "TC",
-  animewitcher: "AW", anime4up2_hard: "AD 1", anime4up2: "AD 2", kawaii: "KW", megaplay: "MP", reflix: "RE", reflix_dub: "RE DUB", reanime: "RE", anineko: "AN",
+  animewitcher: "AW", anime4up2_hard: "AD 1", anime4up2: "AD 2", kawaii: "KW", megaplay: "MP", megaplay_dub: "MP DUB", reflix: "RE", reflix_dub: "RE DUB", reanime: "RE", anineko: "AN",
   animekai: "AK",
   vidlink_anim: "VL", vidfast: "VF",
   animetime: "AT", animepahe: "AP", dulo_anim: "DL",
@@ -144,7 +144,7 @@ const SITE_TAG: Record<string, string> = {
 
 /* ── اسم عرض لكل موقع في منتقي المصادر ── */
 const SITE_LABEL: Record<string, string> = {
-  kawaii: "Kawaii", megaplay: "MegaPlay", reflix: "ReAnime", reflix_dub: "ReAnime (إنجليزي)", reanime: "ReAnime", animekai: "AnimeKai",
+  kawaii: "Kawaii", megaplay: "MegaPlay", megaplay_dub: "MegaPlay (إنجليزي)", reflix: "ReAnime", reflix_dub: "ReAnime (إنجليزي)", reanime: "ReAnime", animekai: "AnimeKai",
   animewitcher: "AnimeWitcher",
   anineko: "AniNeko",
   dulo_anim: "Dulo",
@@ -167,7 +167,7 @@ function getSiteTag(site: string): string {
 
 /* ── وصف قصير لكل مصدر في شبكة الاختيار (يطابق نظام الويب) ── */
 const SITE_DESC: Record<string, string> = {
-  kawaii: "1080p · مباشر", megaplay: "HLS · صوت خام · ترجمة Kawaii", reflix: "HLS · صوت خام · ترجمة Kawaii", reflix_dub: "دبلجة إنجليزية · HLS مباشر", reanime: "HLS · صوت خام · ترجمة Kawaii",
+  kawaii: "1080p · مباشر", megaplay: "HLS · صوت خام · ترجمة Kawaii", megaplay_dub: "دبلجة إنجليزية · ترجمة عربية", reflix: "HLS · صوت خام · ترجمة Kawaii", reflix_dub: "دبلجة إنجليزية · ترجمة عربية", reanime: "HLS · صوت خام · ترجمة Kawaii",
   anineko: "HLS · متعدد الجودات", animekai: "HLS · ياباني + ترجمة",
   animewitcher: "PD/ST · مباشر",
   dulo_anim: "ياباني/إنجليزي · HLS مباشر",
@@ -482,8 +482,8 @@ function buildEmbeddedDownloadUrl(
 
 /* Web's canonical Arabic subtitle policy: KW supplies the track for the
    Japanese raw-audio providers AN/AK/MP as well as for KW itself. */
-const KAWAII_SUBTITLE_SITES = new Set(["kawaii", "anineko", "animekai", "megaplay", "reflix", "reflix_dub", "reanime"]);
-const ENGLISH_DUB_SITES = new Set(["reflix_dub"]);
+const KAWAII_SUBTITLE_SITES = new Set(["kawaii", "anineko", "animekai", "megaplay", "megaplay_dub", "reflix", "reflix_dub", "reanime"]);
+const ENGLISH_DUB_SITES = new Set(["reflix_dub", "megaplay_dub"]);
 const DOWNLOAD_SUBTITLE_SITES = KAWAII_SUBTITLE_SITES;
 
 function normalizeProviderSubtitleUrl(
@@ -564,6 +564,7 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "megaplay",       name: "MegaPlay",           tag: "MP" },
     { site: "reflix",         name: "ReAnime",            tag: "RE" },
     { site: "reflix_dub",     name: "ReAnime (إنجليزي)",  tag: "RE DUB" },
+    { site: "megaplay_dub",   name: "MegaPlay (إنجليزي)", tag: "MP DUB" },
   ],
   "720p": [
     { site: "animewitcher",   name: "AnimeWitcher",       tag: "AW" },
@@ -575,6 +576,7 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "megaplay",       name: "MegaPlay",           tag: "MP" },
     { site: "reflix",         name: "ReAnime",            tag: "RE" },
     { site: "reflix_dub",     name: "ReAnime (إنجليزي)",  tag: "RE DUB" },
+    { site: "megaplay_dub",   name: "MegaPlay (إنجليزي)", tag: "MP DUB" },
   ],
   "480p": [
     { site: "animewitcher",   name: "AnimeWitcher",       tag: "AW" },
@@ -586,6 +588,7 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "megaplay",       name: "MegaPlay",           tag: "MP" },
     { site: "reflix",         name: "ReAnime",            tag: "RE" },
     { site: "reflix_dub",     name: "ReAnime (إنجليزي)",  tag: "RE DUB" },
+    { site: "megaplay_dub",   name: "MegaPlay (إنجليزي)", tag: "MP DUB" },
   ],
   "360p": [
     { site: "animewitcher",   name: "AnimeWitcher",       tag: "AW" },
@@ -597,6 +600,7 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "megaplay",       name: "MegaPlay",           tag: "MP" },
     { site: "reflix",         name: "ReAnime",            tag: "RE" },
     { site: "reflix_dub",     name: "ReAnime (إنجليزي)",  tag: "RE DUB" },
+    { site: "megaplay_dub",   name: "MegaPlay (إنجليزي)", tag: "MP DUB" },
   ],
 };
 const Q_KEYS: QualityKey[] = ["1080p", "720p", "480p", "360p"];
@@ -3087,15 +3091,7 @@ export default function WatchScreen() {
             </View>
           )}
 
-          {hasAvailableSlot && !showingAvailabilityHints && !tvMode && (
-            <View style={[d.availabilityPartialState, { marginBottom: 8 }]}>
-              <Text style={d.availabilityPartialText}>
-                التوفر مؤشر أولي وليس تأكيداً للتشغيل. عند الاختيار يُجلب رابط الحلقة المطلوب، وتُجرّب الروابط الاحتياطية عند فشل التشغيل.
-              </Text>
-            </View>
-          )}
-
-          {/* خيار 1: شريط تبديل الصوت (ياباني مترجم / دبلجة إنجليزية) — يظهر فقط عند توفر دبلجة إنجليزية */}
+          {/* خيار 1: شريط تبديل الصوت (🇯🇵 ياباني مترجم / 🇬🇧 دبلجة إنجليزية) — يظهر أعلى التنبيه عند توفر دبلجة إنجليزية */}
             {(() => {
               const hasEnglishDubSlot = !isAwDubbed && Object.entries(availableSlots).some(
                 ([site, tiers]) => ENGLISH_DUB_SITES.has(site.toLowerCase()) && Object.keys(tiers).length > 0,
@@ -3139,7 +3135,7 @@ export default function WatchScreen() {
                     borderRadius: 14,
                     padding: tvMode ? 6 : 4,
                     gap: tvMode ? 8 : 6,
-                    marginBottom: 14,
+                    marginBottom: 10,
                   }}
                 >
                   <Pressable
@@ -3165,11 +3161,7 @@ export default function WatchScreen() {
                       pressed && { opacity: 0.82 },
                     ]}
                   >
-                    <Ionicons
-                      name="language-outline"
-                      size={tvMode ? 18 : 15}
-                      color={effectiveAudioTab === "sub" ? "#10b981" : colors.textSecondary}
-                    />
+                    <Text style={{ fontSize: tvMode ? 18 : 15 }}>🇯🇵</Text>
                     <Text
                       style={{
                         color: effectiveAudioTab === "sub" ? "#10b981" : colors.textSecondary,
@@ -3204,11 +3196,7 @@ export default function WatchScreen() {
                       pressed && { opacity: 0.82 },
                     ]}
                   >
-                    <Ionicons
-                      name="mic-outline"
-                      size={tvMode ? 18 : 15}
-                      color={effectiveAudioTab === "dub" ? "#38bdf8" : colors.textSecondary}
-                    />
+                    <Text style={{ fontSize: tvMode ? 18 : 15 }}>🇬🇧</Text>
                     <Text
                       style={{
                         color: effectiveAudioTab === "dub" ? "#38bdf8" : colors.textSecondary,
@@ -3226,6 +3214,13 @@ export default function WatchScreen() {
               return (
                 <>
                   {audioToggleBar}
+                  {hasAvailableSlot && !showingAvailabilityHints && !tvMode && (
+                    <View style={[d.availabilityPartialState, { marginBottom: 10 }]}>
+                      <Text style={d.availabilityPartialText}>
+                        التوفر مؤشر أولي وليس تأكيداً للتشغيل. عند الاختيار يُجلب رابط الحلقة المطلوب، وتُجرّب الروابط الاحتياطية عند فشل التشغيل.
+                      </Text>
+                    </View>
+                  )}
                   {hasAvailableSlot && Q_KEYS.map(qk => {
                 const pickerDefs = STATIC_PICKER[qk] || [];
                 const dynamicSlots = Object.entries(availableSlots)
@@ -3366,7 +3361,7 @@ export default function WatchScreen() {
                                       : "rgba(245,158,11,0.30)";
                                   const badgeColor = isEngDub ? "#38bdf8" : isHardsub ? "#10b981" : "#f59e0b";
                                   const badgeText = isEngDub
-                                    ? "دبلجة إنجليزية · صوت EN"
+                                    ? "دبلجة إنجليزية · ترجمة عربية"
                                     : isHardsub
                                       ? "ترجمة عربية مدمجة"
                                       : "ترجمة آلية خارجية";

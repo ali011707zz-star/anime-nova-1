@@ -8276,8 +8276,12 @@ async function getMegaPlayAnimeSources(
   anilistId?: number,
   availabilityOnly = false,
   signal?: AbortSignal,
+  audioMode: "sub" | "dub" = "sub",
 ): Promise<UnifiedSource[]> {
   if (!anilistId || !Number.isFinite(ep) || ep < 1) return [];
+  const isDubMode = audioMode === "dub";
+  const targetSite = isDubMode ? "megaplay_dub" : "megaplay";
+  const category = isDubMode ? "dub" : "sub";
   try {
     const kawaiiSubPromise = (!availabilityOnly && anilistId)
       ? Promise.all([
@@ -8285,7 +8289,25 @@ async function getMegaPlayAnimeSources(
           getKawaiiSubForSource(anilistId, ep).catch(() => undefined),
         ]).then(([ad2, kw]) => ad2 || kw)
       : Promise.resolve(undefined);
-    const embedUrl = `${MEGAPLAY_RAW_BASE}/stream/ani/${anilistId}/${ep}/sub`;
+    const dubAvailPromise = (availabilityOnly && !isDubMode)
+      ? (async () => {
+          try {
+            const dubUrl = `${MEGAPLAY_RAW_BASE}/stream/ani/${anilistId}/${ep}/dub`;
+            const dp = await fetchSourceWithRetry(dubUrl, {
+              headers: { ...BASE_HDRS, Referer: "https://hianimez.to/", Accept: "text/html" },
+            }, 4_500, 1, signal);
+            if (!dp?.ok) return false;
+            const dHtml = await dp.text();
+            return Boolean(
+              dHtml.match(/data-id\s*=\s*["']([^"']+)["']/i)?.[1]
+              || dHtml.match(/["']data-id["']\s*:\s*["']([^"']+)["']/i)?.[1]
+            );
+          } catch {
+            return false;
+          }
+        })()
+      : Promise.resolve(false);
+    const embedUrl = `${MEGAPLAY_RAW_BASE}/stream/ani/${anilistId}/${ep}/${category}`;
     const page = await fetchSourceWithRetry(embedUrl, {
       headers: { ...BASE_HDRS, Referer: "https://hianimez.to/", Accept: "text/html" },
     }, availabilityOnly ? 8_000 : 14_000, availabilityOnly ? 1 : 2, signal);
@@ -8296,11 +8318,12 @@ async function getMegaPlayAnimeSources(
     if (!fileId) return [];
 
     const sourceEndpoints = [
-      `${MEGAPLAY_RAW_BASE}/stream/getSourcesNew?id=${encodeURIComponent(fileId)}&category=sub`,
+      `${MEGAPLAY_RAW_BASE}/stream/getSourcesNew?id=${encodeURIComponent(fileId)}&category=${category}`,
       `${MEGAPLAY_RAW_BASE}/stream/getSources?id=${encodeURIComponent(fileId)}`,
     ];
     let data: {
       sources?: { file?: string; url?: string } | Array<{ file?: string; url?: string }>;
+      tracks?: Array<{ file?: string; label?: string; kind?: string }>;
       enc?: string;
       intro?: { start?: number; end?: number };
       outro?: { start?: number; end?: number };
@@ -8347,16 +8370,29 @@ async function getMegaPlayAnimeSources(
     if (!rawMasterUrl.startsWith("https://") || !/\.m3u8(?:[?#]|$)/i.test(rawMasterUrl)) return [];
     const masterUrl = signMegaPlayCdnUrl(rawMasterUrl);
     if (availabilityOnly) {
-      return [
+      const availRows: UnifiedSource[] = [
         {
-          name: "MegaPlay · 1080p", url: "", quality: "1080p",
-          qualityRank: 18, site: "megaplay", verified: true,
+          name: isDubMode ? "MegaPlay (EN Dub) · 1080p" : "MegaPlay · 1080p", url: "", quality: "1080p",
+          qualityRank: 18, site: targetSite, verified: true,
         } as UnifiedSource,
         {
-          name: "MegaPlay · 720p", url: "", quality: "720p",
-          qualityRank: 13, site: "megaplay", verified: true,
+          name: isDubMode ? "MegaPlay (EN Dub) · 720p" : "MegaPlay · 720p", url: "", quality: "720p",
+          qualityRank: 13, site: targetSite, verified: true,
         } as UnifiedSource,
       ];
+      if (!isDubMode && await dubAvailPromise) {
+        availRows.push(
+          {
+            name: "MegaPlay (EN Dub) · 1080p", url: "", quality: "1080p",
+            qualityRank: 18, site: "megaplay_dub", verified: true,
+          } as UnifiedSource,
+          {
+            name: "MegaPlay (EN Dub) · 720p", url: "", quality: "720p",
+            qualityRank: 13, site: "megaplay_dub", verified: true,
+          } as UnifiedSource,
+        );
+      }
+      return availRows;
     }
 
     const manifestResponse = await fetchSourceWithRetry(masterUrl, {
@@ -8374,8 +8410,18 @@ async function getMegaPlayAnimeSources(
 
     const kawaiiSubtitle = await Promise.race([
       kawaiiSubPromise,
-      new Promise<undefined>(r => setTimeout(() => r(undefined), 1200)),
+      new Promise<undefined>(r => setTimeout(() => r(undefined), 1500)),
     ]);
+    const megaArabicTrack = Array.isArray(data.tracks)
+      ? data.tracks.find(t =>
+          t?.file && /^https?:///i.test(t.file)
+          && (/arab|ar|عرب/i.test(String(t.label || "")) || /arab/i.test(String(t.file || "")))
+        )?.file
+      : undefined;
+    const arabicSubtitle = kawaiiSubtitle
+      || (megaArabicTrack
+        ? `/api/anime/proxy-text?url=${encodeURIComponent(megaArabicTrack)}&ref=${encodeURIComponent(MEGAPLAY_RAW_REF)}`
+        : undefined);
     const skipIntro = data.intro && Number(data.intro.start) >= 0 && Number(data.intro.end) > Number(data.intro.start)
       ? { start: Number(data.intro.start), end: Number(data.intro.end) } : undefined;
     const skipOutro = data.outro && Number(data.outro.start) >= 0 && Number(data.outro.end) > Number(data.outro.start)
@@ -8384,17 +8430,19 @@ async function getMegaPlayAnimeSources(
     return variants.map((variant) => {
       const directUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(variant.url)}&ref=${encodeURIComponent(MEGAPLAY_RAW_REF)}`;
       return {
-        name: `MegaPlay · ${variant.quality} · صوت خام${kawaiiSubtitle ? " · ترجمة Kawaii" : ""}`,
+        name: isDubMode
+          ? `MegaPlay · EN Dub · ${variant.quality}${arabicSubtitle ? " · ترجمة عربية" : ""}`
+          : `MegaPlay · ${variant.quality} · صوت خام${arabicSubtitle ? " · ترجمة Kawaii" : ""}`,
         url: directUrl,
         quality: variant.quality,
         qualityRank: variant.qualityRank,
-        site: "megaplay",
+        site: targetSite,
         directUrl,
         directType: "hls",
         rawUrl: variant.url,
         hasBuiltinSub: false,
         verified: true,
-        ...(kawaiiSubtitle ? { subtitleUrl: kawaiiSubtitle } : {}),
+        ...(arabicSubtitle ? { subtitleUrl: arabicSubtitle } : {}),
         ...(skipIntro ? { skipIntro } : {}),
         ...(skipOutro ? { skipOutro } : {}),
       } as UnifiedSource;
@@ -14789,6 +14837,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
         : site === "anime4up2" ? "anime4up2-v2"
         : site === "anime4up2_hard" ? "anime4up2_hard-v2"
         : site === "reflix" ? (checkOnly ? "reflix-avail-v3" : "reflix-v2")
+        : site === "megaplay" ? (checkOnly ? "megaplay-avail-v2" : "megaplay")
         : site;
       // AnimeWitcher latest cards carry the provider's own catalog id. Keep
       // their availability/source caches separate from title/AniList lookups;
@@ -15588,6 +15637,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
   const ANIME_SOURCE_ALLOWLIST: Set<string> | null = new Set([
     "kawaii",
     "megaplay",        // ⚡ الأسرع — DB-cached (50ms) ✅
+    "megaplay_dub",    // 🇬🇧 MegaPlay English Dub + ترجمة عربية
     "anineko",       // 🎌 HLS متعدد الجودات — full VPS manifest + segment proxy
     "animewitcher",  // 🗄️ DB-first aw_links (142k) → Algolia fallback ✅
     "anifox",        // 📦 12 مصدر — Archive/MediaFire/MP4Upload/Uqload ✅
@@ -16033,7 +16083,8 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
         `${cKey}:live`,
         () => race(getKawaiiAnimeSources(title, english, ep, anilistId), 15_000, []),
       )).forEach(collectSrc); break;
-      case "megaplay":    (await race(getMegaPlayAnimeSources(title, english, ep, anilistId), 32_000, [])).forEach(collectSrc); break;
+      case "megaplay":    (await race(getMegaPlayAnimeSources(title, english, ep, anilistId, false, undefined, "sub"), 32_000, [])).forEach(collectSrc); break;
+      case "megaplay_dub": (await race(getMegaPlayAnimeSources(title, english, ep, anilistId, false, undefined, "dub"), 32_000, [])).forEach(collectSrc); break;
       case "reflix":
       case "reanime":     (await race(getReanímeSources(title, english, ep, anilistId, false, undefined, "sub"), 20_000, [])).forEach(collectSrc); break;
       case "reflix_dub":  (await race(getReanímeSources(title, english, ep, anilistId, false, undefined, "dub"), 20_000, [])).forEach(collectSrc); break;
