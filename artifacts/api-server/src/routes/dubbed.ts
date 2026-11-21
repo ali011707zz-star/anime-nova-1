@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import { Router } from "express";
 import { load } from "cheerio";
 import { logger } from "../lib/logger";
+import { streamMultiRangeMediaVPS } from "../lib/multiRangeStreamer.js";
 import { mergeAwSourceRows } from "../lib/awSourceRows.mjs";
 import { parseCarateenEpisodeUrl } from "../lib/carateenEpisodeRef.mjs";
 import {
@@ -1297,6 +1298,25 @@ router.get("/dubbed/stream", async (req, res) => {
     };
     // Forward Range header for seeking support
     const rangeHeader = req.headers["range"];
+    const uaHeader = String(req.headers["user-agent"] || "");
+    const isDownloadReq = Boolean(
+      String(req.query.dl || "") === "1" ||
+      String(req.query.download || "") === "1" ||
+      req.headers["x-download-token"] ||
+      req.query.dlToken ||
+      !rangeHeader ||
+      /DownloadManager|NovaAnime/i.test(uaHeader)
+    );
+    if (isDownloadReq) {
+      await streamMultiRangeMediaVPS({
+        url: rawUrl,
+        upstreamHeaders: fetchHeaders,
+        req,
+        res,
+        isDownload: String(req.query.dl || "") === "1",
+      });
+      return;
+    }
     if (rangeHeader) fetchHeaders["Range"] = rangeHeader;
 
     // foupix occasionally returns a transient 403 for the first request

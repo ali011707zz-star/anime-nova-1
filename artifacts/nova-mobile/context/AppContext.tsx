@@ -5,6 +5,7 @@ import { DEFAULT_CONFIG, fetchRemoteConfig, getBaseUrl, RemoteConfig } from "@/u
 import { getAuthToken, secureFetch, setUserAuthToken } from "@/utils/secureApi";
 import { setActiveThemeIsWhite } from "@/utils/tv";
 import { resolveDubbedHistoryParams } from "@/utils/carateenEpisodeRef.mjs";
+import { normalizeWatchlistStatus, resolveWatchlistStatus, WatchlistStatus } from "@/utils/watchlistStatus";
 
 export type Theme = "white" | "black";
 
@@ -55,6 +56,7 @@ export type FavoriteAnime = {
   addedAt: number;
   startYear?: number | null;
   genres?: string[];
+  watchStatus?: WatchlistStatus;
 };
 
 export type MobileUser = {
@@ -78,9 +80,12 @@ type AppContextType = {
   clearHistory: () => Promise<void>;
   favorites: FavoriteAnime[];
   toggleFavorite: (anime: FavoriteAnime) => Promise<void>;
+  setFavoriteStatus: (anime: FavoriteAnime, status: WatchlistStatus) => Promise<void>;
+  removeFavorite: (id: number) => Promise<void>;
   updateFavorite: (anime: FavoriteAnime) => Promise<void>;
   clearFavorites: () => Promise<void>;
   isFavorite: (id: number) => boolean;
+  getFavoriteStatus: (id: number) => WatchlistStatus | undefined;
   currentUser: MobileUser | null;
   authReady: boolean;
   setCurrentUser: (user: MobileUser | null) => void;
@@ -502,6 +507,7 @@ function mapServerFavorite(row: any): FavoriteAnime | null {
     score: row?.score == null ? null : asNumber(row.score),
     startYear: row?.start_year == null && row?.startYear == null ? undefined : asNumber(row?.start_year ?? row?.startYear),
     addedAt: Date.parse(row?.added_at || row?.created_at || "") || Date.now(),
+    watchStatus: normalizeWatchlistStatus(row?.watch_status ?? row?.watchStatus),
   };
 }
 
@@ -639,6 +645,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           ...(item.episodes != null ? { episodes: item.episodes } : {}),
           ...(item.score != null ? { score: item.score } : {}),
           ...(item.startYear != null ? { startYear: item.startYear } : {}),
+          ...(item.watchStatus ? { watchStatus: item.watchStatus } : {}),
         }),
       });
       return response.ok;
@@ -777,10 +784,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
         const localHasRichRouting = Boolean((item.contentKind && item.contentKind !== "anime") || item.mangaId);
         const remoteMissingRichRouting = Boolean(remote && !remote.contentKind && !remote.mangaId);
-        if (!remote || item.addedAt >= remote.addedAt || (localHasRichRouting && remoteMissingRichRouting) || isPendingLocal) {
-          mergedFavorites.set(item.id, item);
-          if (!remote || item.addedAt > remote.addedAt || favoritesClearPending === "1" || (localHasRichRouting && remoteMissingRichRouting) || isPendingLocal) {
-            favoritesToUpload.push(item);
+        const localHasStatus = Boolean(item.watchStatus);
+        const remoteMissingStatus = Boolean(remote && !remote.watchStatus);
+        if (!remote || item.addedAt >= remote.addedAt || (localHasRichRouting && remoteMissingRichRouting) || (localHasStatus && remoteMissingStatus) || isPendingLocal) {
+          const mergedItem: FavoriteAnime = remote && !item.watchStatus && remote.watchStatus
+            ? { ...item, watchStatus: remote.watchStatus }
+            : item;
+          mergedFavorites.set(item.id, mergedItem);
+          if (!remote || item.addedAt > remote.addedAt || favoritesClearPending === "1" || (localHasRichRouting && remoteMissingRichRouting) || (localHasStatus && remoteMissingStatus) || isPendingLocal) {
+            favoritesToUpload.push(mergedItem);
           }
         }
       }
@@ -1172,7 +1184,56 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } catch {}
   }, [accountUrl, currentUser?.id]);
 
+  const setFavoriteStatus = useCallback(async (anime: FavoriteAnime, status: WatchlistStatus) => {
+    const now = Date.now();
+    const existing = favoritesRef.current.find((f) => f.id === anime.id);
+    const merged: FavoriteAnime = {
+      ...(existing || {}),
+      ...anime,
+      watchStatus: status,
+      addedAt: now,
+    };
+    setFavorites((prev) => {
+      const rest = prev.filter((f) => f.id !== anime.id);
+      return [merged, ...rest].slice(0, 500);
+    });
+    const userId = currentUser?.id;
+    if (!userId) return;
+
+    const key = FAVORITES_DELETED_KEY(userId);
+    const deleted = await readDeletedIds(key);
+    if (deleted.includes(anime.id)) {
+      await writeDeletedIds(key, deleted.filter((id) => id !== anime.id));
+    }
+    pendingFavoriteIdsRef.current.add(anime.id);
+    void postFavorite(merged).then((ok) => {
+      if (ok) pendingFavoriteIdsRef.current.delete(anime.id);
+    });
+  }, [currentUser?.id, postFavorite, readDeletedIds, writeDeletedIds]);
+
+  const removeFavorite = useCallback(async (id: number) => {
+    setFavorites((prev) => prev.filter((f) => f.id !== id));
+    const userId = currentUser?.id;
+    if (!userId) return;
+
+    const key = FAVORITES_DELETED_KEY(userId);
+    const deleted = await readDeletedIds(key);
+    await writeDeletedIds(key, [...deleted, id]);
+    try {
+      const response = await secureFetch(accountUrl(`/user/favorites/${id}`), { method: "DELETE" });
+      if (response.ok) {
+        await writeDeletedIds(key, deleted.filter((itemId) => itemId !== id));
+      }
+    } catch {}
+  }, [accountUrl, currentUser?.id, readDeletedIds, writeDeletedIds]);
+
   const isFavorite = useCallback((id: number) => favorites.some((f) => f.id === id), [favorites]);
+
+  const getFavoriteStatus = useCallback((id: number): WatchlistStatus | undefined => {
+    const found = favorites.find((f) => f.id === id);
+    if (!found) return undefined;
+    return resolveWatchlistStatus(found.watchStatus);
+  }, [favorites]);
 
   const contextValue = useMemo<AppContextType>(() => ({
     theme,
@@ -1186,9 +1247,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     clearHistory,
     favorites,
     toggleFavorite,
+    setFavoriteStatus,
+    removeFavorite,
     updateFavorite,
     clearFavorites,
     isFavorite,
+    getFavoriteStatus,
     currentUser,
     authReady,
     setCurrentUser,
@@ -1201,8 +1265,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     clearHistory,
     currentUser,
     favorites,
+    getFavoriteStatus,
     isFavorite,
     refreshConfig,
+    removeFavorite,
+    setFavoriteStatus,
     remoteConfig,
     removeFromHistory,
     restoreAuth,

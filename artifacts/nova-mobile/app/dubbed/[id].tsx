@@ -20,6 +20,8 @@ import {
 import { useColors } from "@/hooks/useColors";
 import { EpisodeDivider } from "@/components/EpisodeDivider";
 import { getWatchContentId, useApp } from "@/context/AppContext";
+import { WatchlistStatusModal } from "@/components/WatchlistStatusModal";
+import { getWatchlistStatusMeta, WatchlistStatus } from "@/utils/watchlistStatus";
 const Pressable = TvPressable;
 
 interface Season { label: string; arabicToonsId: string; episodes?: Episode[]; }
@@ -150,7 +152,7 @@ export default function DubbedDetailScreen() {
       : legacySeasons;
   const imgSrc = img ? (() => { try { return decodeURIComponent(img); } catch { return img; } })() : null;
   const posterSrc = imgSrc?.startsWith("http") ? imgSrc : (imgSrc ? `${apiBase()}${imgSrc}` : null);
-  const { isFavorite, toggleFavorite } = useApp();
+  const { isFavorite, setFavoriteStatus, removeFavorite, getFavoriteStatus } = useApp();
   const favKey = useMemo(() => {
     if (isSd2Entry) return `sd2:${sd2Slug}`;
     if (isCarateenEntry && carateenProvider) return `${carateenProvider}:${showId}`;
@@ -158,6 +160,9 @@ export default function DubbedDetailScreen() {
   }, [isSd2Entry, sd2Slug, isCarateenEntry, carateenProvider, showId, id, title]);
   const numericFavId = useMemo(() => getWatchContentId("dubbed", favKey), [favKey]);
   const isFav = isFavorite(numericFavId);
+  const currentWatchStatus = getFavoriteStatus(numericFavId);
+  const watchStatusMeta = isFav ? getWatchlistStatusMeta(currentWatchStatus) : null;
+  const [showWatchlist, setShowWatchlist] = useState(false);
 
   const [selSeason, setSelSeason] = useState(0);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
@@ -392,7 +397,7 @@ export default function DubbedDetailScreen() {
     );
   };
 
-  const handleFavorite = useCallback(async () => {
+  const handleSelectWatchStatus = useCallback(async (status: WatchlistStatus) => {
     const routeParams: Record<string, string> = {
       id: isSd2Entry
         ? `sd2-${sd2Slug}`
@@ -413,7 +418,7 @@ export default function DubbedDetailScreen() {
     if (langLabelStr) routeParams.languageLabel = langLabelStr;
     if (imgSrc) routeParams.img = imgSrc;
 
-    await toggleFavorite({
+    await setFavoriteStatus({
       id: numericFavId,
       contentKind: "dubbed",
       contentKey: favKey,
@@ -425,7 +430,7 @@ export default function DubbedDetailScreen() {
       episodes: episodes.length || null,
       score: null,
       addedAt: Date.now(),
-    });
+    }, status);
   }, [
     isSd2Entry,
     sd2Slug,
@@ -438,7 +443,7 @@ export default function DubbedDetailScreen() {
     isMovie,
     langLabelStr,
     imgSrc,
-    toggleFavorite,
+    setFavoriteStatus,
     numericFavId,
     favKey,
     posterSrc,
@@ -455,18 +460,18 @@ export default function DubbedDetailScreen() {
         </Pressable>
         <Text numberOfLines={1} style={[styles.headerTitle, { color: colors.textPrimary }]}>{title}</Text>
         <Pressable
-          onPress={() => void handleFavorite()}
+          onPress={() => setShowWatchlist(true)}
           focusable={tvMode}
           accessibilityRole="button"
-          accessibilityLabel={isFav ? "إزالة من المفضلة" : "إضافة للمفضلة"}
+          accessibilityLabel={watchStatusMeta ? watchStatusMeta.label : "إضافة إلى قائمتي"}
           style={({ focused }) => [
             styles.backBtn,
             { backgroundColor: colors.input, borderColor: colors.border },
-            isFav && { backgroundColor: "rgba(239,68,68,0.16)", borderColor: "rgba(239,68,68,0.45)" },
+            watchStatusMeta && { backgroundColor: watchStatusMeta.bg, borderColor: watchStatusMeta.border },
             tvMode && tvFocusStyle(focused),
           ]}
         >
-          <Ionicons name={isFav ? "heart" : "heart-outline"} size={18} color={isFav ? "#EF4444" : colors.textPrimary} />
+          <Ionicons name={(watchStatusMeta ? watchStatusMeta.activeIcon : "bookmark-outline") as any} size={18} color={watchStatusMeta ? watchStatusMeta.color : colors.textPrimary} />
         </Pressable>
       </View>
 
@@ -598,6 +603,17 @@ export default function DubbedDetailScreen() {
           ) : null}
         />
       </TvFocusGuideView>
+
+      <WatchlistStatusModal
+        visible={showWatchlist}
+        title={title}
+        thumbnail={posterSrc || undefined}
+        currentStatus={currentWatchStatus}
+        isSaved={isFav}
+        onSelect={(status) => void handleSelectWatchStatus(status)}
+        onRemove={isFav ? () => void removeFavorite(numericFavId) : undefined}
+        onClose={() => setShowWatchlist(false)}
+      />
     </View>
   );
 }

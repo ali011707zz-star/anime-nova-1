@@ -24,6 +24,8 @@ import {
 import WebView from "react-native-webview";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { getWatchContentId, useApp } from "@/context/AppContext";
+import { WatchlistStatusModal } from "@/components/WatchlistStatusModal";
+import { getWatchlistStatusMeta, WatchlistStatus } from "@/utils/watchlistStatus";
 import { useColors } from "@/hooks/useColors";
 import { getBaseUrl } from "@/utils/api";
 import { translateMangaGenre } from "@/utils/mangaLocalization";
@@ -543,7 +545,7 @@ export default function MangaDetailScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const { isFavorite, toggleFavorite } = useApp();
+  const { isFavorite, setFavoriteStatus, removeFavorite, getFavoriteStatus } = useApp();
 
   const decodedId = useMemo(() => {
     try {
@@ -1001,6 +1003,9 @@ export default function MangaDetailScreen() {
     [targetMangaId]
   );
   const isFav = isFavorite(favNumericId);
+  const currentWatchStatus = getFavoriteStatus(favNumericId);
+  const watchStatusMeta = isFav ? getWatchlistStatusMeta(currentWatchStatus) : null;
+  const [showWatchlist, setShowWatchlist] = useState(false);
 
   const handleChapterDownload = useCallback(
     async (ch: MangaChapter) => {
@@ -1054,9 +1059,9 @@ export default function MangaDetailScreen() {
     ],
   );
 
-  const handleToggleFavorite = useCallback(() => {
+  const handleSelectWatchStatus = useCallback((status: WatchlistStatus) => {
     if (!targetMangaId) return;
-    void toggleFavorite({
+    void setFavoriteStatus({
       id: favNumericId,
       mangaId: targetMangaId,
       source: currentSource,
@@ -1068,7 +1073,7 @@ export default function MangaDetailScreen() {
       addedAt: Date.now(),
       startYear: manga?.year || new Date().getFullYear(),
       genres: manga?.genres || [],
-    });
+    }, status);
   }, [
     targetMangaId,
     favNumericId,
@@ -1081,7 +1086,7 @@ export default function MangaDetailScreen() {
     rawScore,
     manga?.year,
     manga?.genres,
-    toggleFavorite,
+    setFavoriteStatus,
   ]);
 
   // Characters list
@@ -1170,22 +1175,22 @@ export default function MangaDetailScreen() {
             </Pressable>
 
             <Pressable
-              onPress={handleToggleFavorite}
+              onPress={() => setShowWatchlist(true)}
               style={[
                 styles.favTopBtn,
-                isFav && {
-                  backgroundColor: "rgba(239, 68, 68, 0.22)",
-                  borderColor: "rgba(239, 68, 68, 0.55)",
+                watchStatusMeta && {
+                  backgroundColor: watchStatusMeta.bg,
+                  borderColor: watchStatusMeta.border,
                 },
               ]}
             >
               <Ionicons
-                name={isFav ? "heart" : "heart-outline"}
+                name={(watchStatusMeta ? watchStatusMeta.activeIcon : "bookmark-outline") as any}
                 size={18}
-                color={isFav ? "#EF4444" : "#fff"}
+                color={watchStatusMeta ? watchStatusMeta.color : "#fff"}
               />
-              <Text style={[styles.favTopBtnText, isFav && { color: "#FCA5A5" }]}>
-                {isFav ? "في المفضلة" : "أضف للمفضلة"}
+              <Text style={[styles.favTopBtnText, watchStatusMeta && { color: watchStatusMeta.color }]}>
+                {watchStatusMeta ? watchStatusMeta.shortLabel : "قائمتي"}
               </Text>
             </Pressable>
           </View>
@@ -2433,6 +2438,17 @@ export default function MangaDetailScreen() {
           </View>
         </View>
       </Modal>
+
+      <WatchlistStatusModal
+        visible={showWatchlist}
+        title={arabicTitle || primaryTitle}
+        thumbnail={cover || undefined}
+        currentStatus={currentWatchStatus}
+        isSaved={isFav}
+        onSelect={handleSelectWatchStatus}
+        onRemove={isFav ? () => void removeFavorite(favNumericId) : undefined}
+        onClose={() => setShowWatchlist(false)}
+      />
     </View>
   );
 }

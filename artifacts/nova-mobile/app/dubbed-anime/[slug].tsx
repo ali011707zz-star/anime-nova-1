@@ -20,6 +20,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { SafePosterImage } from "@/components/SafePosterImage";
 import { YoutubeTrailerModal } from "@/components/YoutubeTrailerModal";
+import { WatchlistStatusModal } from "@/components/WatchlistStatusModal";
+import { getWatchlistStatusMeta, WatchlistStatus } from "@/utils/watchlistStatus";
 import { getWatchContentId, useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import type { ThemePalette } from "@/constants/colors";
@@ -347,9 +349,12 @@ export default function DubbedAnimeDetailScreen() {
     [rememberFocus, tvMode],
   );
 
-  const { isFavorite, toggleFavorite, watchHistory } = useApp();
+  const { isFavorite, setFavoriteStatus, removeFavorite, getFavoriteStatus, watchHistory } = useApp();
   const numericFavId = useMemo(() => getWatchContentId("dubbed", `az:${slug}`), [slug]);
   const isFav = isFavorite(numericFavId);
+  const currentWatchStatus = getFavoriteStatus(numericFavId);
+  const watchStatusMeta = isFav ? getWatchlistStatusMeta(currentWatchStatus) : null;
+  const [showWatchlist, setShowWatchlist] = useState(false);
 
   const cachedEntry = slug ? _azDetailMemoryCache.get(slug) : undefined;
   const [detail, setDetail] = useState<AzDetail | null>(() => cachedEntry?.detail ?? null);
@@ -541,8 +546,8 @@ export default function DubbedAnimeDetailScreen() {
     return watchHistory.find((h) => h.contentKey === key || h.animeId === numericFavId);
   }, [watchHistory, slug, numericFavId]);
 
-  const handleFavorite = useCallback(async () => {
-    await toggleFavorite({
+  const handleSelectWatchStatus = useCallback(async (status: WatchlistStatus) => {
+    await setFavoriteStatus({
       id: numericFavId,
       contentKind: "dubbed-anime",
       contentKey: slug,
@@ -556,9 +561,9 @@ export default function DubbedAnimeDetailScreen() {
       startYear: Number(releaseYear) || null,
       genres: anilist?.genres,
       addedAt: Date.now(),
-    });
+    }, status);
   }, [
-    toggleFavorite,
+    setFavoriteStatus,
     numericFavId,
     slug,
     displayTitle,
@@ -696,17 +701,17 @@ export default function DubbedAnimeDetailScreen() {
             </View>
           ) : null}
           <Pressable
-            onPress={() => void handleFavorite()}
+            onPress={() => setShowWatchlist(true)}
             focusable={tvMode}
             onFocus={() => rememberDetailFocus("topFav")}
             style={({ focused }) => [
               d.topBarBack,
               tvMode && d.tvTopBarBack,
-              isFav && { backgroundColor: "rgba(239,68,68,0.16)", borderColor: "rgba(239,68,68,0.45)" },
+              watchStatusMeta && { backgroundColor: watchStatusMeta.bg, borderColor: watchStatusMeta.border },
               tvMode && tvFocusStyle(focused),
             ]}
           >
-            <Ionicons name={isFav ? "heart" : "heart-outline"} size={19} color={isFav ? "#EF4444" : colors.textPrimary} />
+            <Ionicons name={(watchStatusMeta ? watchStatusMeta.activeIcon : "bookmark-outline") as any} size={19} color={watchStatusMeta ? watchStatusMeta.color : colors.textPrimary} />
           </Pressable>
         </View>
       </View>
@@ -831,12 +836,12 @@ export default function DubbedAnimeDetailScreen() {
               onPress: openEpisodesScreen,
             },
             {
-              icon: "heart-outline",
-              activeIcon: "heart",
-              label: "المفضلة",
+              icon: watchStatusMeta ? watchStatusMeta.icon : "bookmark-outline",
+              activeIcon: watchStatusMeta ? watchStatusMeta.activeIcon : "bookmark",
+              label: watchStatusMeta ? watchStatusMeta.shortLabel : "قائمتي",
               active: isFav,
-              activeColor: "#EF4444",
-              onPress: () => void handleFavorite(),
+              activeColor: watchStatusMeta ? watchStatusMeta.color : "#8B5CF6",
+              onPress: () => setShowWatchlist(true),
             },
             {
               icon: "star-outline",
@@ -1346,6 +1351,17 @@ export default function DubbedAnimeDetailScreen() {
           </View>
         </Modal>
       )}
+
+      <WatchlistStatusModal
+        visible={showWatchlist}
+        title={displayTitle}
+        thumbnail={posterUri || undefined}
+        currentStatus={currentWatchStatus}
+        isSaved={isFav}
+        onSelect={(status) => void handleSelectWatchStatus(status)}
+        onRemove={isFav ? () => void removeFavorite(numericFavId) : undefined}
+        onClose={() => setShowWatchlist(false)}
+      />
     </View>
   );
 }

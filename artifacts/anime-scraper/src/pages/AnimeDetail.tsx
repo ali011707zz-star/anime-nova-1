@@ -9,7 +9,9 @@ import {
 import { useAuth } from "@/lib/auth-context";
 import { motion, AnimatePresence } from "framer-motion";
 import SEO from "@/components/SEO";
-import { saveAnime, unsaveAnime } from "@/lib/db";
+import { getSavedStatus, saveAnime, unsaveAnime } from "@/lib/db";
+import { WatchlistStatusSheet } from "@/components/WatchlistStatusSheet";
+import { getWatchlistStatusMeta, WatchlistStatus } from "@/lib/watchlistStatus";
 
 const ADULT_WARN = "قد يحتوي هذا الأنمي على مشاهد جنسية أو عنف أو مشاهد للبالغين فقط وغير مناسبة للأطفال أو المشاهدة العائلية.\n\nينصح بمراعاة المشاهدين";
 
@@ -190,6 +192,8 @@ export default function AnimeDetail() {
   const [titleAr, setTitleAr]       = useState<string | null>(null);
   const [showFull, setShowFull]     = useState(false);
   const [saved, setSaved]           = useState(false);
+  const [watchStatus, setWatchStatus] = useState<WatchlistStatus | null>(null);
+  const [showWatchlist, setShowWatchlist] = useState(false);
   const [myRating, setMyRating]     = useState(0);
   const [hoverRating, setHoverRating] = useState(0);
   const [tab, setTab]               = useState<"chars"|"related"|"similar">("chars");
@@ -217,8 +221,11 @@ export default function AnimeDetail() {
     const ctrl = new AbortController();
     setLoading(true); setAnime(null); setDescAr(null); setTitleAr(null); setShowFull(false);
 
+    const numericId = parseInt(params.id);
     const savedList: number[] = JSON.parse(localStorage.getItem("savedAnime") || "[]");
-    setSaved(savedList.includes(parseInt(params.id)));
+    const isNowSaved = savedList.includes(numericId);
+    setSaved(isNowSaved);
+    setWatchStatus(isNowSaved ? getSavedStatus(numericId) : null);
     setMyRating(parseInt(localStorage.getItem(`nova-rating-${params.id}`) || "0"));
     setComments([]);
     fetch(`${API_BASE}/api/comments?animeId=${params.id}`, { credentials: "include" })
@@ -360,19 +367,24 @@ export default function AnimeDetail() {
   }, [params.id]);
 
   // ── Actions ──
-  const toggleSave = () => {
+  const handleSelectWatchStatus = (status: WatchlistStatus) => {
     const id = parseInt(params.id!);
-    if (saved) {
-      unsaveAnime(user?.id ?? null, id);
-    } else {
-      saveAnime(
-        user?.id ?? null,
-        id,
-        anime?.title?.romaji ?? anime?.title?.english ?? undefined,
-        anime?.coverImage?.large ?? undefined,
-      );
-    }
-    setSaved(!saved);
+    saveAnime(
+      user?.id ?? null,
+      id,
+      anime?.title?.romaji ?? anime?.title?.english ?? undefined,
+      anime?.coverImage?.large ?? undefined,
+      status,
+    );
+    setSaved(true);
+    setWatchStatus(status);
+  };
+
+  const handleRemoveWatchlist = () => {
+    const id = parseInt(params.id!);
+    unsaveAnime(user?.id ?? null, id);
+    setSaved(false);
+    setWatchStatus(null);
   };
 
   const submitRating = (r: number) => {
@@ -693,7 +705,7 @@ export default function AnimeDetail() {
         <div className="grid grid-cols-3 gap-2 mb-3">
           {[
             { icon: MessageSquare, label: "التعليقات", active: comments.length > 0, activeColor: "#8B5CF6", action: () => navigate(`/comments?animeId=${params.id}`), sub: comments.length > 0 ? `${comments.length}` : null },
-            { icon: Plus,          label: "قائمتي",    active: saved,        activeColor: "#8B5CF6", action: toggleSave,                         sub: saved ? "مضاف" : null },
+            { icon: Plus,          label: "قائمتي",    active: saved,        activeColor: saved ? getWatchlistStatusMeta(watchStatus).color : "#8B5CF6", action: () => setShowWatchlist(true), sub: saved ? getWatchlistStatusMeta(watchStatus).shortLabel : null },
             { icon: Star,          label: "تقييمي",    active: myRating > 0, activeColor: "#EAB308", action: () => setShowRatingPicker(true),    sub: myRating > 0 ? `${myRating}/10` : null },
           ].map(({ icon: Icon, label, active, activeColor, action, sub }) => (
             <motion.button key={label} whileTap={{ scale: 0.94 }} onClick={action}
@@ -1135,6 +1147,17 @@ export default function AnimeDetail() {
           </div>
         )}
       </AnimatePresence>
+
+      <WatchlistStatusSheet
+        open={showWatchlist}
+        title={titleAr || anime?.title?.english || anime?.title?.romaji || ""}
+        thumbnail={anime?.coverImage?.large}
+        currentStatus={watchStatus}
+        isSaved={saved}
+        onSelect={handleSelectWatchStatus}
+        onRemove={saved ? handleRemoveWatchlist : undefined}
+        onClose={() => setShowWatchlist(false)}
+      />
 
     </main>
   );

@@ -602,7 +602,6 @@ function requestHeaders(params: StartDownloadParams): Record<string, string> {
     "X-Nova-Package": MOBILE_PACKAGE_NAME,
     "X-Nova-Version": MOBILE_VERSION,
     "User-Agent": `NovaAnime/${MOBILE_VERSION} (Expo; Mobile)`,
-    "Connection": "keep-alive",
     /* DownloadResumable may issue Range requests after a background retry.
        Explicitly advertise byte-range support to the VPS conversion route. */
     "Accept": "video/mp4,video/*;q=0.9,*/*;q=0.1",
@@ -1132,12 +1131,28 @@ async function runDownload(entry: RuntimeDownload): Promise<void> {
   }
 }
 
+function withFastDownloadParam(rawUrl: string): string {
+  if (!rawUrl) return rawUrl;
+  try {
+    const parsed = new URL(rawUrl);
+    if (
+      parsed.pathname.includes("/api/anime/video-proxy") ||
+      parsed.pathname.includes("/api/dubbed/stream")
+    ) {
+      parsed.searchParams.set("dl", "1");
+      return parsed.toString();
+    }
+  } catch {}
+  return rawUrl;
+}
+
 function enqueueDownload(
   params: StartDownloadParams,
   resumeState?: ResumeState,
   localPath?: string,
   autoStart = true,
 ): void {
+  params = { ...params, url: withFastDownloadParam(params.url) };
   const id = makeDownloadId(params.animeId, params.ep, params.site, params.quality);
   cancelActiveDownload(id);
 

@@ -116,7 +116,6 @@ const ARABIC_PLAYBACK_SITES = new Set([
 const DOWNLOAD_SOURCE_SITES = new Set([
   "animedar",       // AnimeDar
   "anime4up2_hard", // AD 1 — أنمي فور أب (مدمج)
-  "anime4up2",      // AD 2 — أنمي فور أب (خارجي)
   "animewitcher",   // AW
   "sanime",         // SA
   "animeify",       // AF — direct MediaFire/FileMoon sources
@@ -1053,6 +1052,7 @@ export default function WatchScreen() {
   const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
   /* صفوف يجري جلبها خصيصاً للتنزيل (بدون فتح المشغّل) */
   const [dlFetchingSites,  setDlFetchingSites]  = useState<Set<string>>(new Set());
+  const dlFetchingRef = useRef<Set<string>>(new Set());
   /* نتائج الاستعلام المسبق: نفس صفوف المصادر التي يرسلها الخادم للويب */
   type AvailableSlot = {
     serverCount: number;
@@ -2264,12 +2264,12 @@ export default function WatchScreen() {
   }, [anime, epNum]);
 
   /* ── تنزيل حلقة من موقع معين (Global — يستمر عند التنقل) ── */
-  const handleDownloadSite = useCallback(async (site: string, preferredQuality?: QualityKey) => {
-    if (!isAwDubbed && !DOWNLOAD_SOURCE_SITES.has(site)) return;
+  const handleDownloadSite = useCallback(async (site: string, preferredQuality?: QualityKey): Promise<boolean> => {
+    if (!isAwDubbed && !DOWNLOAD_SOURCE_SITES.has(site)) return false;
     const stateKey = preferredQuality ? `${site}:${preferredQuality}` : site;
     const wantedQuality = preferredQuality ? PICKER_QUALITY[preferredQuality] : undefined;
     const dlState = downloadStates[stateKey] || "idle";
-    if (dlState === "downloading" || dlState === "done") return;
+    if (dlState === "downloading" || dlState === "done") return true;
 
     const siteSrcs = isAwDubbed
       ? sources.filter(s => s.awPickerKey === site || s.site === site)
@@ -2277,51 +2277,63 @@ export default function WatchScreen() {
     const best = (wantedQuality
       ? siteSrcs.find(s => getSrcQuality(s) === wantedQuality && isDirectPlayable(s))
       : undefined) ?? siteSrcs.find(isDirectPlayable) ?? siteSrcs[0];
-    if (!best || !isDirectPlayable(best)) return;
+    if (!best || !isDirectPlayable(best)) return false;
 
-    const rawUrl   = getPlayUrl(best);
-    const headers  = best.headers || extractProxyHeaders(rawUrl);
-    const base     = getBaseUrl();
-    const proxyUrl = isAwDubbed
-      ? resolveUrl(rawUrl, base)
-      : ensureVpsProxy(rawUrl, headers, base, best.directType === "hls");
+    try {
+      const rawUrl   = getPlayUrl(best);
+      const headers  = best.headers || extractProxyHeaders(rawUrl);
+      const base     = getBaseUrl();
+      const proxyUrl = isAwDubbed
+        ? resolveUrl(rawUrl, base)
+        : ensureVpsProxy(rawUrl, headers, base, best.directType === "hls");
 
-    /* الترجمة الجانبية اختيارية: لا نمنع تنزيل الفيديو إذا لم تتوفر. */
-    const subRaw     = (isAwDubbed || subtitlesDisabledForSite(site))
-      ? undefined
-      : (best.subtitleUrl || globalSubUrl);
-    const subtitleCandidate = subRaw;
-    const subtitleUrl = normalizeProviderSubtitleUrl(site, subtitleCandidate, base);
+      /* الترجمة الجانبية اختيارية: لا نمنع تنزيل الفيديو إذا لم تتوفر. */
+      const subRaw     = (isAwDubbed || subtitlesDisabledForSite(site))
+        ? undefined
+        : (best.subtitleUrl || globalSubUrl);
+      const subtitleCandidate = subRaw;
+      const subtitleUrl = normalizeProviderSubtitleUrl(site, subtitleCandidate, base);
 
-    const [token, downloadToken] = await Promise.all([getAuthToken(), getDownloadToken()]);
-    const isHlsDownload = best.directType === "hls" || isHlsMediaUrl(proxyUrl);
-    const downloadUrl = (DOWNLOAD_SUBTITLE_SITES.has(site) || isHlsDownload)
-      ? buildEmbeddedDownloadUrl(site, proxyUrl, subtitleUrl, base)
-      : proxyUrl;
-    const numericId = isAwDubbed
-      ? Math.abs(Array.from(awSeries || titleStr).reduce((acc, ch) => ((acc << 5) - acc) + ch.charCodeAt(0), 0)) || 900001
-      : (parseInt(anime || "0", 10) || 0);
-    void startGlobalDownload({
-      animeId:  numericId,
-      ep:       epNum,
-      title:    displayTitle,
-      cover:    coverUrl,
-      site,
-      quality:  getSrcQuality(best),
-      url:      downloadUrl,
-      authToken: token,
-      downloadToken,
-      headers,
-      subtitleUrl,
-      hlsManifestUrl: isHlsDownload ? proxyUrl : undefined,
-    });
+      const [token, downloadToken] = await Promise.all([getAuthToken(), getDownloadToken()]);
+      const isHlsDownload = best.directType === "hls" || isHlsMediaUrl(proxyUrl);
+      const downloadUrl = (DOWNLOAD_SUBTITLE_SITES.has(site) || isHlsDownload)
+        ? buildEmbeddedDownloadUrl(site, proxyUrl, subtitleUrl, base)
+        : proxyUrl;
+      const numericId = isAwDubbed
+        ? Math.abs(Array.from(awSeries || titleStr).reduce((acc, ch) => ((acc << 5) - acc) + ch.charCodeAt(0), 0)) || 900001
+        : (parseInt(anime || "0", 10) || 0);
+      if (isMountedRef.current) {
+        setDownloadStates(prev => ({ ...prev, [stateKey]: "downloading" }));
+        setDownloadProgress(prev => ({ ...prev, [stateKey]: 0 }));
+      }
+      await startGlobalDownload({
+        animeId:  numericId,
+        ep:       epNum,
+        title:    displayTitle,
+        cover:    coverUrl,
+        site,
+        quality:  getSrcQuality(best),
+        url:      downloadUrl,
+        authToken: token,
+        downloadToken,
+        headers,
+        subtitleUrl,
+        hlsManifestUrl: isHlsDownload ? proxyUrl : undefined,
+      });
+      return true;
+    } catch {
+      if (isMountedRef.current) {
+        setDownloadStates(prev => ({ ...prev, [stateKey]: "error" }));
+      }
+      return false;
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAwDubbed, awSeries, downloadStates, sources, anime, epNum, displayTitle, coverUrl, globalSubUrl, watchUnlocked]);
+  }, [isAwDubbed, awSeries, titleStr, downloadStates, sources, anime, epNum, displayTitle, coverUrl, globalSubUrl, watchUnlocked]);
 
   /**
    * handleFetchAndDownload — يُنزَّل مباشرةً بدون الحاجة لفتح المشغّل أولاً.
-   * - إذا كان المصدر مجلوباً مسبقاً → يُنزَّل من الكاش مباشرةً.
-   * - إذا لم يُجلب بعد → يجلبه أولاً ثم يبدأ التنزيل.
+   * - إذا كان المصدر مجلوباً مسبقاً وفيه رابط مباشر صالح → يُنزَّل فوراً.
+   * - إذا لم يُجلب بعد → يجلبه بالوضع السريع (progressive=1&forDownload=1) ثم يبدأ التنزيل.
    */
   const handleFetchAndDownload = useCallback(async (site: string, preferredQuality: QualityKey) => {
     if (!isAwDubbed && !DOWNLOAD_SOURCE_SITES.has(site)) return;
@@ -2329,66 +2341,151 @@ export default function WatchScreen() {
     const wantedQuality = PICKER_QUALITY[preferredQuality];
     const dlState = downloadStates[stateKey] || "idle";
     if (dlState === "downloading" || dlState === "done") return;
-    if (dlFetchingSites.has(stateKey)) return; // جلب جارٍ بالفعل
-    if (!(await ensureDownloadAllowed())) return;
+    if (dlFetchingRef.current.has(stateKey) || dlFetchingSites.has(stateKey)) return;
 
-    if (isAwDubbed) {
-      await handleDownloadSite(site, preferredQuality);
-      return;
-    }
-
-    // إذا كان المصدر مجلوباً → نزّل مباشرةً من sources الحالية
-    if (fetchedSitesRef.current.has(site) || fetchedSitesRef.current.has(`${site}::${preferredQuality}`)) {
-      await handleDownloadSite(site, preferredQuality);
-      return;
-    }
-
-    // جلب المصدر ثم التنزيل
+    /* أظهر استجابة اللمس/التحميل فوراً قبل فحص الصلاحية أو الشبكة حتى لا يبدو الزر غير مستجيب. */
+    dlFetchingRef.current.add(stateKey);
     setDlFetchingSites(prev => { const s = new Set(prev); s.add(stateKey); return s; });
-
-    const base = getBaseUrl();
-    const qs = new URLSearchParams({
-      anime: sourceAnimeId || "0", ep: String(epNum), title: titleStr,
-      english: englishStr, format: format || "",
-      year: year || "", episodes: episodes || "", native: native || "",
-    });
-    qs.set("anilistId", sourceAnimeId || "0");
-    qs.set("titles", JSON.stringify(titleVariants));
-    if (preferredQuality) qs.set("quality", preferredQuality);
-    if (titleArStr) qs.set("titleAr", titleArStr);
-    if (site === "anslayer" && anslayerId) qs.set("anslayerId", anslayerId);
-    if (site === "animewitcher" && awAnimeId) qs.set("awAnimeId", awAnimeId);
+    if (dlState === "error") {
+      setDownloadStates(prev => ({ ...prev, [stateKey]: "idle" }));
+    }
 
     let tid: ReturnType<typeof setTimeout> | null = null;
     try {
+      const allowed = await ensureDownloadAllowed();
+      if (!allowed || !isMountedRef.current) return;
+
+      if (isAwDubbed) {
+        const ok = await handleDownloadSite(site, preferredQuality);
+        if (!ok && isMountedRef.current) {
+          setDownloadStates(prev => ({ ...prev, [stateKey]: "error" }));
+        }
+        return;
+      }
+
+      /* لا تعتمد على fetchedSitesRef وحده — تحقق فعلياً من وجود مصدر مباشر صالح داخل sources */
+      const cachedSiteSrcs = sources.filter(s => s.site === site);
+      const isDirectMp4Src = (s: Src) =>
+        isDirectPlayable(s) && s.directType !== "hls" && !isHlsMediaUrl(getPlayUrl(s));
+      const cachedBest = (wantedQuality
+        ? cachedSiteSrcs.find(s =>
+            getSrcQuality(s) === wantedQuality &&
+            (site === "anime4up2_hard" ? isDirectMp4Src(s) : isDirectPlayable(s)),
+          )
+        : undefined) ?? (site === "anime4up2_hard"
+        ? cachedSiteSrcs.find(isDirectMp4Src)
+        : cachedSiteSrcs.find(isDirectPlayable));
+      if (cachedBest && isDirectPlayable(cachedBest)) {
+        const ok = await handleDownloadSite(site, preferredQuality);
+        if (ok) return;
+      }
+
+      const base = getBaseUrl();
+      const qs = new URLSearchParams({
+        anime: sourceAnimeId || "0", ep: String(epNum), title: titleStr,
+        english: englishStr, format: format || "",
+        year: year || "", episodes: episodes || "", native: native || "",
+      });
+      qs.set("anilistId", sourceAnimeId || "0");
+      qs.set("titles", JSON.stringify(titleVariants));
+      if (preferredQuality) qs.set("quality", preferredQuality);
+      qs.set("progressive", "1");
+      qs.set("forDownload", "1");
+      if (titleArStr) qs.set("titleAr", titleArStr);
+      if (site === "anslayer" && anslayerId) qs.set("anslayerId", anslayerId);
+      if (site === "animewitcher" && awAnimeId) qs.set("awAnimeId", awAnimeId);
+
       const siteCtrl = new AbortController();
       /* تسجيل الـ controller — يُلغى عند navigation/refresh/goEp تماماً كـ handlePickSite */
       siteCtrls.current.set(site, siteCtrl);
       const timeout = Math.max(SITE_TIMEOUT_MS, SITE_TIMEOUT_MAP[site] ?? 0);
       tid = setTimeout(() => siteCtrl.abort(), timeout);
-      const res = await secureFetch(`${base}/api/anime/fetch-source?site=${site}&${qs}`, { signal: siteCtrl.signal });
+      const res = await secureStreamFetch(`${base}/api/anime/fetch-source?site=${site}&${qs}`, { signal: siteCtrl.signal });
 
       if (!res.ok || !isMountedRef.current) throw new Error("fetch failed");
-      const data = await res.json();
-      const rawSrcs: Src[] = data.sources || [];
-      if (!rawSrcs.length) throw new Error("no sources");
 
-       const newSrcs = rawSrcs
-        .map((s): Src => {
-          const sourceSite = s.site || site;
-           const mapped: Src = {
-            ...s,
-            site: sourceSite,
-            quality: s.quality || preferredQuality || undefined,
-            directUrl: resolveUrl(s.directUrl, base),
-            url: resolveUrl(s.url, base),
-            subtitleUrl: normalizeProviderSubtitleUrl(sourceSite, s.subtitleUrl, base),
-          };
-           return normalizeKawaiiMobileSource(mapped, base);
-        })
-        .filter(s => !isBlockedSource(s))
-        .filter(s => !(s.isEmbed && s.url && (s.url.includes("mega.nz") || s.url.includes("mega.co.nz"))))
-        .filter(s => { const k = getPlayUrl(s); if (!k || seenKeys.current.has(k)) return false; seenKeys.current.add(k); return true; });
+      const mapAndFilterOne = (s: Src): Src | null => {
+        const sourceSite = s.site || site;
+        const mapped = normalizeKawaiiMobileSource({
+          ...s,
+          site: sourceSite,
+          quality: s.quality || preferredQuality || undefined,
+          directUrl: resolveUrl(s.directUrl, base),
+          url: resolveUrl(s.url, base),
+          subtitleUrl: normalizeProviderSubtitleUrl(sourceSite, s.subtitleUrl, base),
+        }, base);
+        if (isBlockedSource(mapped)) return null;
+        if (mapped.isEmbed && mapped.url && (mapped.url.includes("mega.nz") || mapped.url.includes("mega.co.nz"))) return null;
+        return getPlayUrl(mapped) ? mapped : null;
+      };
+
+      const fetchSeen = new Set<string>();
+      const newSrcs: Src[] = [];
+      let chosenExact: Src | null = null;
+      let chosenFallback: Src | null = null;
+      const contentType = (res.headers.get("content-type") || "").toLowerCase();
+
+      if (contentType.includes("text/event-stream") && res.body?.getReader) {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let eventBuffer = "";
+        let finishedEarly = false;
+
+        const handleDlSseBlock = (block: string) => {
+          let eventName = "message";
+          const dataLines: string[] = [];
+          for (const line of block.split(/\r?\n/)) {
+            if (line.startsWith("event:")) eventName = line.slice(6).trim();
+            else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+          }
+          if (!dataLines.length) return;
+          let payload: any;
+          try { payload = JSON.parse(dataLines.join("\n")); } catch { return; }
+          if (eventName !== "source" || !payload?.source) return;
+          const mapped = mapAndFilterOne(payload.source as Src);
+          if (!mapped) return;
+          const key = getPlayUrl(mapped);
+          if (!key || fetchSeen.has(key)) return;
+          fetchSeen.add(key);
+          newSrcs.push(mapped);
+          if (!isDirectPlayable(mapped)) return;
+          if (!wantedQuality || getSrcQuality(mapped) === wantedQuality) {
+            if (!chosenExact) chosenExact = mapped;
+          } else if (!chosenFallback) {
+            chosenFallback = mapped;
+          }
+        };
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          eventBuffer += decoder.decode(value, { stream: true });
+          const blocks = eventBuffer.split(/\r?\n\r?\n/);
+          eventBuffer = blocks.pop() || "";
+          blocks.forEach(handleDlSseBlock);
+          if (chosenExact) {
+            finishedEarly = true;
+            try { await reader.cancel(); } catch {}
+            siteCtrl.abort();
+            break;
+          }
+        }
+        if (!finishedEarly) {
+          eventBuffer += decoder.decode();
+          if (eventBuffer.trim()) handleDlSseBlock(eventBuffer);
+        }
+      } else {
+        const data = await res.json();
+        const rawSrcs: Src[] = data.sources || [];
+        for (const raw of rawSrcs) {
+          const mapped = mapAndFilterOne(raw);
+          if (!mapped) continue;
+          const key = getPlayUrl(mapped);
+          if (!key || fetchSeen.has(key)) continue;
+          fetchSeen.add(key);
+          newSrcs.push(mapped);
+        }
+      }
 
       if (!newSrcs.length) throw new Error("no direct sources");
 
@@ -2396,7 +2493,10 @@ export default function WatchScreen() {
       setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "ready" }));
       setSources(prev => [...prev.filter(s => s.site !== site), ...newSrcs]);
 
-      const best = newSrcs.find(s => getSrcQuality(s) === wantedQuality && isDirectPlayable(s))
+      const best = chosenExact
+        ?? newSrcs.find(s => getSrcQuality(s) === wantedQuality && isDirectMp4Src(s))
+        ?? newSrcs.find(s => getSrcQuality(s) === wantedQuality && isDirectPlayable(s))
+        ?? chosenFallback
         ?? newSrcs.find(isDirectPlayable)
         ?? newSrcs[0];
       if (!best || !isDirectPlayable(best)) throw new Error("no playable source");
@@ -2413,7 +2513,9 @@ export default function WatchScreen() {
         ? buildEmbeddedDownloadUrl(site, proxyUrl, subtitleUrl, base)
         : proxyUrl;
 
-      void startGlobalDownload({
+      setDownloadStates(prev => ({ ...prev, [stateKey]: "downloading" }));
+      setDownloadProgress(prev => ({ ...prev, [stateKey]: 0 }));
+      await startGlobalDownload({
         animeId:    parseInt(anime || "0"),
         ep:         epNum,
         title:      displayTitle,
@@ -2434,11 +2536,12 @@ export default function WatchScreen() {
     } finally {
       if (tid !== null) clearTimeout(tid);
       siteCtrls.current.delete(site); // تنظيف الـ controller بعد انتهاء الطلب
+      dlFetchingRef.current.delete(stateKey);
       if (isMountedRef.current)
         setDlFetchingSites(prev => { const s = new Set(prev); s.delete(stateKey); return s; });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [downloadStates, dlFetchingSites, anime, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, anslayerId, displayTitle, coverUrl, globalSubUrl, handleDownloadSite]);
+  }, [isAwDubbed, sourceAnimeId, awAnimeId, titleVariants, sources, downloadStates, dlFetchingSites, anime, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, anslayerId, displayTitle, coverUrl, globalSubUrl, handleDownloadSite]);
 
   /* ── خروج آمن من شاشة المشاهدة ──
      مسار "أحدث الحلقات" لا يملك صفحة حلقات خلفه دائماً، كما أن router.back()
@@ -3191,10 +3294,16 @@ export default function WatchScreen() {
                 const dlState = downloadStates[stateKey] || "idle";
                 const dlPct = Math.round((downloadProgress[stateKey] || 0) * 100);
                 const qColor = slot.quality === "1080p" ? "#fbbf24" : slot.quality === "720p" ? "#34d399" : "#60a5fa";
+                const canTriggerDl = dlState === "idle" || dlState === "error";
                 return (
-                  <View
+                  <Pressable
                     key={stateKey}
-                    style={[
+                    onPress={() => { if (canTriggerDl) void handleFetchAndDownload(slot.site, slot.quality); }}
+                    disabled={!canTriggerDl}
+                    focusable={tvMode}
+                    accessibilityRole="button"
+                    accessibilityLabel={`تحميل ${slot.quality} من سيرفر ${slot.tag}`}
+                    style={({ pressed, focused }) => [
                       d.downloadRow,
                       {
                         minHeight: 58,
@@ -3205,17 +3314,16 @@ export default function WatchScreen() {
                         justifyContent: "space-between",
                         borderBottomWidth: idx < downloadSlots.length - 1 ? StyleSheet.hairlineWidth : 0,
                         borderBottomColor: "rgba(255,255,255,0.08)",
+                        opacity: pressed && canTriggerDl ? 0.78 : 1,
                       },
+                      tvMode && tvFocusStyle(focused),
                     ]}
                   >
                     {/* Left: Action / Progress */}
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                      {(dlState === "idle" || dlState === "error") && (
-                        <Pressable
-                          onPress={() => void handleFetchAndDownload(slot.site, slot.quality)}
-                          focusable={tvMode}
-                          hitSlop={8}
-                          style={({ pressed, focused }) => [
+                      {canTriggerDl && (
+                        <View
+                          style={[
                             d.downloadAction,
                             {
                               minWidth: 96,
@@ -3224,11 +3332,8 @@ export default function WatchScreen() {
                               borderRadius: 10,
                               backgroundColor: dlState === "error" ? "rgba(239, 68, 68, 0.18)" : "#0284c7",
                               borderColor: dlState === "error" ? "rgba(239, 68, 68, 0.45)" : "#38bdf8",
-                              opacity: pressed ? 0.78 : 1,
                             },
-                            tvMode && tvFocusStyle(focused),
                           ]}
-                          accessibilityLabel={`تحميل ${slot.quality} من سيرفر ${slot.tag}`}
                         >
                           {dlFetchingSites.has(stateKey) ? <SpinRing size={16} /> : (
                             <>
@@ -3242,7 +3347,7 @@ export default function WatchScreen() {
                               </Text>
                             </>
                           )}
-                        </Pressable>
+                        </View>
                       )}
                       {dlState === "downloading" && (
                         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -3277,7 +3382,7 @@ export default function WatchScreen() {
                         <Text style={{ color: "#22d3ee", fontSize: 10, fontFamily: "Cairo_800ExtraBold" }}>{slot.tag}</Text>
                       </View>
                     </View>
-                  </View>
+                  </Pressable>
                 );
               })}
             </View>

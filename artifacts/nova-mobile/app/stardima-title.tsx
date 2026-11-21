@@ -21,6 +21,8 @@ import { RewardedAdPrompt } from "@/components/RewardedAdPrompt";
 import { catalogBadge } from "@/hooks/useDubbedCatalogFeed";
 import { getStardimaProgressKey } from "@/utils/stardimaProgress";
 import { getWatchContentId, useApp } from "@/context/AppContext";
+import { WatchlistStatusModal } from "@/components/WatchlistStatusModal";
+import { getWatchlistStatusMeta, WatchlistStatus } from "@/utils/watchlistStatus";
 
 const Pressable = TvPressable;
 const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
@@ -551,16 +553,19 @@ export default function StardimaTitleScreen() {
     );
   };
 
-  const { isFavorite, toggleFavorite } = useApp();
+  const { isFavorite, setFavoriteStatus, removeFavorite, getFavoriteStatus } = useApp();
   const numericFavId = useMemo(
     () => (providerTitleId ? getWatchContentId("stardima", providerTitleId) : 0),
     [providerTitleId],
   );
   const isFav = numericFavId ? isFavorite(numericFavId) : false;
-  const handleFavorite = useCallback(async () => {
+  const currentWatchStatus = numericFavId ? getFavoriteStatus(numericFavId) : undefined;
+  const watchStatusMeta = isFav ? getWatchlistStatusMeta(currentWatchStatus) : null;
+  const [showWatchlist, setShowWatchlist] = useState(false);
+  const handleSelectWatchStatus = useCallback(async (status: WatchlistStatus) => {
     if (!providerTitleId || !numericFavId) return;
     const display = titleText(title);
-    await toggleFavorite({
+    await setFavoriteStatus({
       id: numericFavId,
       contentKind: "stardima",
       contentKey: providerTitleId,
@@ -574,25 +579,25 @@ export default function StardimaTitleScreen() {
       startYear: title?.release_year || null,
       genres: title?.genres,
       addedAt: Date.now(),
-    });
-  }, [providerTitleId, numericFavId, title, episodes.length, toggleFavorite]);
+    }, status);
+  }, [providerTitleId, numericFavId, title, episodes.length, setFavoriteStatus]);
 
   return (
     <View style={[styles.screen, { paddingTop: topPad }]}>
       <RewardedAdPrompt />
       <View style={[styles.header, { minHeight: tvMode ? 68 : 54 }]}>
         <Pressable
-          onPress={() => void handleFavorite()}
+          onPress={() => setShowWatchlist(true)}
           focusable={tvMode}
           accessibilityRole="button"
-          accessibilityLabel={isFav ? "إزالة من المفضلة" : "إضافة للمفضلة"}
+          accessibilityLabel={watchStatusMeta ? watchStatusMeta.label : "إضافة إلى قائمتي"}
           style={({ focused }) => [
             styles.back,
-            isFav && { backgroundColor: "rgba(239,68,68,0.16)", borderColor: "rgba(239,68,68,0.45)" },
+            watchStatusMeta && { backgroundColor: watchStatusMeta.bg, borderColor: watchStatusMeta.border },
             tvMode && focused && tvFocusStyle(true),
           ]}
         >
-          <Ionicons name={isFav ? "heart" : "heart-outline"} size={18} color={isFav ? "#EF4444" : colors.textPrimary} />
+          <Ionicons name={(watchStatusMeta ? watchStatusMeta.activeIcon : "bookmark-outline") as any} size={18} color={watchStatusMeta ? watchStatusMeta.color : colors.textPrimary} />
         </Pressable>
         <Text numberOfLines={1} style={[styles.heading, tvMode && { fontSize: 22 }]}>
           {titleText(title)}
@@ -712,6 +717,16 @@ export default function StardimaTitleScreen() {
         </TvFocusGuideView>
       )}
 
+      <WatchlistStatusModal
+        visible={showWatchlist}
+        title={titleText(title)}
+        thumbnail={title?.poster_url || undefined}
+        currentStatus={currentWatchStatus}
+        isSaved={isFav}
+        onSelect={(status) => void handleSelectWatchStatus(status)}
+        onRemove={isFav && numericFavId ? () => void removeFavorite(numericFavId) : undefined}
+        onClose={() => setShowWatchlist(false)}
+      />
     </View>
   );
 }

@@ -35,6 +35,7 @@ import {
   streamInspectedBody,
 } from "../lib/mediaStreamTools.mjs";
 import { rewriteHlsManifest } from "../lib/hlsManifestRewrite.mjs";
+import { streamMultiRangeMediaVPS } from "../lib/multiRangeStreamer.js";
 import { getAnimeFillerData } from "../services/fillerService.js";
 import { getPersistentArabicTitles, savePersistentArabicTitles, getSavedTranslation } from "../services/episodeTitlesStore.js";
 import { createHash, createHmac, createDecipheriv, createCipheriv, randomBytes } from "crypto";
@@ -2286,11 +2287,27 @@ async function verifyHlsManifestFast(url: string, referer: string, timeoutMs = 2
   }
 }
 
-/** Multi-quality extractor for MegaMax / Share4Max (returns 1080p / 720p / 480p direct HLS). */
+function parseMixDrop(html: string): string | null {
+  const unpacked = unpackPacked(html);
+  const texts = unpacked ? [unpacked, html] : [html];
+  for (const text of texts) {
+    const wurl = text.match(/MDCore\.wurl\s*=\s*["']([^"']+)["']/i)?.[1]
+      || text.match(/((?:https?:)?\/\/[^"'\s\\]+mxcontent\.net\/[^"'\s\\]+\.(?:mp4|mkv)[^"'\s\\]*)/i)?.[1]
+      || text.match(/((?:https?:)?\/\/[^"'\s\\]+\.(?:mp4|mkv)(?:\?[^"'\s\\]*)?)/i)?.[1];
+    if (wurl) {
+      const normalized = wurl.startsWith("//") ? "https:" + wurl : wurl;
+      if (/^https?:\/\//i.test(normalized)) return normalized;
+    }
+  }
+  return null;
+}
+
+/** Multi-quality extractor for MegaMax / Share4Max (returns 1080p / 720p / 480p direct HLS/MP4). */
 async function parseShareMaxMultiStreams(
   host: string,
   fileId: string,
   referer: string,
+  forDownload = false,
 ): Promise<Array<{ url: string; type: "hls" | "mp4"; quality: string; referer: string }>> {
   const iframeUrl = `https://${host}/iframe/${fileId}`;
   const FALLBACK_VERSION = "d98bcc9c79d1c5ff36a86cc41dfcd275";
@@ -2342,11 +2359,25 @@ async function parseShareMaxMultiStreams(
       const scoreMirror = (m: any): number => {
         const d = String(m?.driver || "").toLowerCase();
         const l = String(m?.link || "").toLowerCase();
+        if (forDownload) {
+          // For offline downloads, direct Range-capable MP4 mirrors start instantly
+          // and accelerate to multi-MB/s instead of stalling 60-180s on HLS remux.
+          if (d === "ok" || l.includes("ok.ru")) return 130;
+          if (d === "mixdrop" || l.includes("mixdrop") || l.includes("mxdrop")) return 120;
+          if (d === "mp4upload" || l.includes("mp4upload")) return 110;
+          if (d === "streamtape") return 105;
+          if (d === "voe" || l.includes("voe.sx")) return 85;
+          if (d === "earnvids" || d === "vidhide" || l.includes("morencius")) return 75;
+          if (d === "streamhg" || l.includes("streamwish")) return 70;
+          if (d === "lulustream" || l.includes("lulustream") || l.includes("lplaygo")) return 40;
+          return 0;
+        }
         if (d === "voe" || l.includes("voe.sx")) return 120;
         if (d === "ok" || l.includes("ok.ru")) return 95;
         if (d === "streamhg" || l.includes("streamwish")) return 85;
         if (d === "earnvids" || d === "vidhide" || l.includes("morencius")) return 70;
         if (d === "streamtape") return 60;
+        if (d === "mixdrop" || l.includes("mixdrop") || l.includes("mxdrop")) return 50;
         if (d === "lulustream" || l.includes("lulustream") || l.includes("lplaygo")) return 40;
         return 0;
       };
@@ -2369,6 +2400,10 @@ async function parseShareMaxMultiStreams(
             const okm = link.match(/\/videoembed\/(\d+)/);
             if (okm) {
               const vids = await extractOkRuVideo(okm[1]);
+              const mp4Src = forDownload ? vids.find((v: any) => v.type === "mp4" && v.url) : null;
+              if (mp4Src) {
+                return { url: mp4Src.url, type: "mp4", quality, referer: "https://ok.ru/" };
+              }
               const hlsSrc = vids.find((v: any) => v.type === "hls" && v.url);
               if (hlsSrc && await verifyHlsManifestFast(hlsSrc.url, "https://ok.ru/", 2800)) {
                 return { url: hlsSrc.url, type: "hls", quality, referer: "https://ok.ru/" };
@@ -2387,6 +2422,13 @@ async function parseShareMaxMultiStreams(
             if (drv === "streamtape") {
               const st = parseStreamtape(html);
               if (st?.url) return { url: st.url, type: st.type, quality, referer: outRef };
+            } else if (drv === "mixdrop" || link.includes("mixdrop") || link.includes("mxdrop")) {
+              const mdUrl = parseMixDrop(html);
+              if (mdUrl) return { url: mdUrl, type: "mp4", quality, referer: outRef };
+            } else if (drv === "mp4upload" || link.includes("mp4upload")) {
+              const unpacked = unpackPacked(html);
+              const mp4Url = parseMp4Upload(unpacked || html) || parseMp4Upload(html);
+              if (mp4Url) return { url: mp4Url, type: "mp4", quality, referer: outRef };
             } else {
               const sw = parseStreamwish(html);
               if (sw?.url) {
@@ -5684,6 +5726,20 @@ async function searchAnime4up2(title: string, english: string | null): Promise<s
   return null;
 }
 
+async function getAnime4up2ArSubUrl(
+  title: string, english: string | null, ep: number, anilistId?: number,
+): Promise<string | undefined> {
+  try {
+    const srcs = await Promise.race([
+      getAnime4up2Sources(title, english, ep, anilistId),
+      new Promise<UnifiedSource[]>(r => setTimeout(() => r([]), 1500)),
+    ]);
+    return srcs.find(s => typeof s.subtitleUrl === "string" && s.subtitleUrl.length > 0)?.subtitleUrl;
+  } catch {
+    return undefined;
+  }
+}
+
 async function getAnime4up2Sources(
   title: string, english: string | null, ep: number, anilistId?: number,
 ): Promise<UnifiedSource[]> {
@@ -5818,8 +5874,9 @@ async function getAnime4up2HardsubSources(
   english: string | null,
   ep: number,
   availabilityOnly = false,
+  forDownload = false,
 ): Promise<UnifiedSource[]> {
-  const ck = `a4up2hard:${(title + "|" + (english ?? "")).toLowerCase()}:${ep}:${availabilityOnly ? "chk" : "play"}`;
+  const ck = `a4up2hard:${(title + "|" + (english ?? "")).toLowerCase()}:${ep}:${availabilityOnly ? "chk" : forDownload ? "dl" : "play"}`;
   const hardTtl = availabilityOnly ? SRC_TTL : 45 * 60 * 1000;
   const hit = a4up2HardSrcCache.get(ck);
   if (hit && Date.now() - hit.ts < hardTtl) return hit.sources;
@@ -5868,7 +5925,7 @@ async function getAnime4up2HardsubSources(
       if (hm) {
         let hn = "megamax.me";
         try { hn = new URL(megaEntry.url).hostname; } catch {}
-        const directStreams = await parseShareMaxMultiStreams(hn, hm[1], epUrl);
+        const directStreams = await parseShareMaxMultiStreams(hn, hm[1], epUrl, forDownload);
         if (directStreams.length > 0) {
           const qRank = (q: string) => q === "1080p" ? 10 : q === "720p" ? 8 : q === "480p" ? 6 : 4;
           return directStreams.map((ds): UnifiedSource => ({
@@ -8040,13 +8097,20 @@ async function getKawaiiAnimeSources(
     const proxiedSubUrl = rawSubUrl
       ? `/api/anime/proxy-text?url=${encodeURIComponent(rawSubUrl)}&ref=${encodeURIComponent(apiBase + "/")}`
       : undefined;
-    const subtitleUrl = proxiedSubUrl
+    const kawaiiSubUrl = proxiedSubUrl
       ? arEntry
         ? proxiedSubUrl
         : `/api/anime/translate-vtt?url=${encodeURIComponent(proxiedSubUrl)}&from=en&to=ar`
       : undefined;
+    const ad2SubUrl = !availabilityOnly
+      ? await Promise.race([
+          getAnime4up2ArSubUrl(_title, _english, ep, anilistId),
+          new Promise<undefined>(r => setTimeout(() => r(undefined), 1200)),
+        ])
+      : undefined;
+    const subtitleUrl = ad2SubUrl || kawaiiSubUrl;
 
-    const subLangLabel = rawSubUrl ? "عربي" : null;
+    const subLangLabel = subtitleUrl ? "عربي" : null;
 
     // بيانات تخطي المقدمة/الخاتمة من API مباشرة
     const skipIntro = normalizeSkipInterval(data.intro) ?? undefined;
@@ -8215,7 +8279,10 @@ async function getMegaPlayAnimeSources(
   if (!anilistId || !Number.isFinite(ep) || ep < 1) return [];
   try {
     const kawaiiSubPromise = (!availabilityOnly && anilistId)
-      ? getKawaiiSubForSource(anilistId, ep).catch(() => undefined)
+      ? Promise.all([
+          getAnime4up2ArSubUrl(_title, _english, ep, anilistId),
+          getKawaiiSubForSource(anilistId, ep).catch(() => undefined),
+        ]).then(([ad2, kw]) => ad2 || kw)
       : Promise.resolve(undefined);
     const embedUrl = `${MEGAPLAY_RAW_BASE}/stream/ani/${anilistId}/${ep}/sub`;
     const page = await fetchSourceWithRetry(embedUrl, {
@@ -9015,7 +9082,21 @@ async function awResolveHlsVariants(
 }
 
 /** بناء UnifiedSources من صفوف aw_links (بدون Algolia/Firestore) */
-async function awBuildSourcesFromDb(rows: AwLinkRow[], parentSignal?: AbortSignal): Promise<UnifiedSource[]> {
+async function isPixeldrainAlive(url: string, parentSignal?: AbortSignal): Promise<boolean> {
+  try {
+    const r = await fetch(url, {
+      headers: { ...BASE_HDRS, Range: "bytes=0-0" },
+      signal: awRequestSignal(parentSignal, 2_500),
+      redirect: "follow",
+    });
+    try { await r.body?.cancel(); } catch {}
+    return r.ok || r.status === 206;
+  } catch {
+    return false;
+  }
+}
+
+async function awBuildSourcesFromDb(rows: AwLinkRow[], parentSignal?: AbortSignal, validatePd = false): Promise<UnifiedSource[]> {
   /*
    * Each AW row is independent. The old loop resolved KF/MediaFire/
    * Streamtape/VT one after another, so one slow host delayed every other
@@ -9038,9 +9119,12 @@ async function awBuildSourcesFromDb(rows: AwLinkRow[], parentSignal?: AbortSigna
     if (srvName === "PD") {
       const direct = awResolvePd(row.link);
       if (!direct) return rowSources;
+      if (validatePd && !(await isPixeldrainAlive(direct, parentSignal))) {
+        return rowSources;
+      }
       add(direct, {
         name: `AnimeWitcher · ${qLabel} · PD`,
-        url: row.link, quality: q, qualityRank: qRank + 2,
+        url: row.link, quality: q, qualityRank: qRank + 1,
         site: "animewitcher",
         directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(direct)}&ref=${encodeURIComponent("https://pixeldrain.com/")}`,
         directType: "mp4",
@@ -9153,8 +9237,8 @@ async function getAnimeWitcherSources(
   try {
     if (signal?.aborted) return [];
     const buildAwSources = async (rows: AwLinkRow[]): Promise<UnifiedSource[]> => {
-      if (availabilityOnly || !requestedQuality) return awBuildSourcesFromDb(rows, signal);
-      const priority: Record<string, number> = { PD: 100, SF: 95, KF: 80, MF2: 60, MF: 50, ST: 30, VT: 20 };
+      if (availabilityOnly || !requestedQuality) return awBuildSourcesFromDb(rows, signal, !availabilityOnly);
+      const priority: Record<string, number> = { MF2: 100, MF: 98, SF: 95, PD: 92, KF: 80, ST: 30, VT: 20 };
       const candidates = rows
         .filter(row => {
           const server = String(row.server || "").toUpperCase();
@@ -9168,7 +9252,7 @@ async function getAnimeWitcherSources(
         );
       for (const row of candidates) {
         if (signal?.aborted) return [];
-        const resolved = await awBuildSourcesFromDb([row], signal);
+        const resolved = await awBuildSourcesFromDb([row], signal, true);
         const exactQuality = resolved.filter(source =>
           normalizeAwQuality(`${source.quality || ""} ${source.name || ""}`) === requestedQuality,
         );
@@ -10383,7 +10467,10 @@ async function getReanímeSources(
     }
 
     // تمرير نفس ترجمة Kawaii التي تُمرَّر لـ KW و MP + تجهيز تخطي البداية/النهاية بالتوازي
-    const kawaiiSubPromise = getKawaiiSubForSource(anilistId, ep).catch(() => undefined);
+    const kawaiiSubPromise = Promise.all([
+      getAnime4up2ArSubUrl(title, english, ep, anilistId),
+      getKawaiiSubForSource(anilistId, ep).catch(() => undefined),
+    ]).then(([ad2, kw]) => ad2 || kw);
     const skipFallbackPromise = (anilistId && anilistId > 0 && ep > 0)
       ? (async () => {
           try {
@@ -15192,6 +15279,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
     return null;
   })();
   const progressive = String(req.query.progressive || "") === "1";
+  const forDownload = String(req.query.forDownload || "") === "1";
   const isMobileClient = (req.headers["x-nova-client"] || "").toString().includes("mobile");
   const excludedCandidateKeys = (() => {
     try {
@@ -15537,8 +15625,9 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
     : anilistId || anslayerId;
   const cacheSite = site === "sanime" ? "sanime-v3"
     : site === "anslayer" ? "anslayer-v2"
+    : site === "animewitcher" ? "animewitcher-v2"
     : site === "anime4up2" ? "anime4up2-v2"
-    : site === "anime4up2_hard" ? "anime4up2_hard-v2"
+    : site === "anime4up2_hard" ? (forDownload ? "anime4up2_hard-dl-v1" : "anime4up2_hard-v2")
     : site;
   const cKey = makeSourceCacheKey(cacheSite, title, ep, cacheAnimeIdentity);
   let cached: Awaited<ReturnType<typeof getFromSourceCache>> = null;
@@ -15831,7 +15920,7 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
         break;
       }
       case "anime4up2_hard": {
-        const a4uHardRaw = await race(getAnime4up2HardsubSources(title, english, ep, false), 14_000, []);
+        const a4uHardRaw = await race(getAnime4up2HardsubSources(title, english, ep, false, forDownload), 14_000, []);
         const a4uHardDirect = a4uHardRaw.filter(s => Boolean(s.directUrl && !s.isEmbed));
         const a4uHardEmbeds = a4uHardRaw.filter(s => !s.directUrl || s.isEmbed);
         a4uHardDirect.forEach(collectSrc);
@@ -18914,6 +19003,7 @@ async function serveMediaVPS(
   url: string, ref: string,
   req: import("express").Request,
   res: import("express").Response,
+  options?: { isDownload?: boolean },
 ): Promise<void> {
   const trace = readPlaybackTrace(req.query.trace);
   const upstreamStartedAt = Date.now();
@@ -18966,10 +19056,71 @@ async function serveMediaVPS(
       await serveKawaiiMediaVPS(url, hdrs, req, res);
       return;
     }
-    const cfStreamResponse = isClientRoutedFlixMedia(url)
-      ? await cfProxyStreamFetch(url, ref, req.headers.range ? String(req.headers.range) : undefined)
-      : null;
-    let r = cfStreamResponse ?? await fetch(url, { headers: hdrs, signal: upstreamAbort.signal });
+    const uaHeader = String(req.headers["user-agent"] || "");
+    const isDownloadReq = Boolean(
+      options?.isDownload ||
+      String(req.query.dl || "") === "1" ||
+      String(req.query.download || "") === "1" ||
+      req.headers["x-download-token"] ||
+      req.query.dlToken ||
+      !req.headers.range ||
+      /DownloadManager|NovaAnime/i.test(uaHeader)
+    );
+    const isM3u8Target = /\.m3u8(?:[?#]|$)/i.test(url);
+    if (isDownloadReq && !isM3u8Target && !isClientRoutedFlixMedia(url)) {
+      clearTimeout(connectTimeout);
+      res.removeListener("close", abortUpstream);
+      await streamMultiRangeMediaVPS({
+        url,
+        upstreamHeaders: hdrs,
+        req,
+        res,
+        isDownload: Boolean(options?.isDownload || String(req.query.dl || "") === "1"),
+        fallbackCfFetch: (rng, sig) => cfProxyStreamFetch(url, ref, rng, sig),
+        onUpstreamCheck: async (r0, currentUrl, currentHdrs, sig) => {
+          if (r0.status !== 404) return null;
+          const saMatch = currentUrl.match(/^https:\/\/server\.sanime\.net\/(Video\d*(?:\/latest)?)\/([^/]+)\/(\d+(?:SD)?\.mp4)$/i);
+          if (!saMatch) return null;
+          const [, currentPrefix, saId, saFile] = saMatch;
+          for (const prefix of ["Video", "Video2", "Video4", "Video2/latest", "Video3"]) {
+            if (prefix.toLowerCase() === currentPrefix.toLowerCase()) continue;
+            const altUrl = `https://server.sanime.net/${prefix}/${saId}/${saFile}`;
+            try {
+              const altResp = await fetch(altUrl, { headers: currentHdrs, signal: sig });
+              if (altResp.ok || altResp.status === 206) {
+                return { url: altUrl, response: altResp };
+              }
+            } catch {}
+          }
+          return null;
+        },
+      });
+      return;
+    }
+    const rangeStr = req.headers.range ? String(req.headers.range) : undefined;
+    const isTransientMediaStatus = (status: number) =>
+      status === 429 || status === 500 || status === 502 || status === 503 || status === 504 || status === 520 || status === 522 || status === 524;
+    const fetchOnceMedia = async (preferCf: boolean): Promise<Response> => {
+      if (preferCf || isClientRoutedFlixMedia(url)) {
+        const cfResp = await cfProxyStreamFetch(url, ref, rangeStr, upstreamAbort.signal);
+        if (cfResp?.ok || cfResp?.status === 206) return cfResp;
+        try { await cfResp?.body?.cancel(); } catch {}
+      }
+      return await fetch(url, { headers: hdrs, signal: upstreamAbort.signal });
+    };
+    let r: Response;
+    try {
+      r = await fetchOnceMedia(false);
+      if ((isTransientMediaStatus(r.status) || r.status === 403) && !upstreamAbort.signal.aborted) {
+        try { await r.body?.cancel(); } catch {}
+        await new Promise(resolve => setTimeout(resolve, 250));
+        r = await fetchOnceMedia(true);
+      }
+    } catch (firstErr) {
+      if (upstreamAbort.signal.aborted) throw firstErr;
+      await new Promise(resolve => setTimeout(resolve, 250));
+      r = await fetchOnceMedia(true);
+    }
     if (r.status === 404) {
       const saMatch = url.match(/^https:\/\/server\.sanime\.net\/(Video\d*(?:\/latest)?)\/([^/]+)\/(\d+(?:SD)?\.mp4)$/i);
       if (saMatch) {
@@ -19228,6 +19379,21 @@ async function streamLocalVideoProxy(
   req: Request,
   res: Response,
 ): Promise<boolean> {
+  try {
+    const parsed = new URL(sourceUrl);
+    if (parsed.pathname === "/api/anime/video-proxy") {
+      let targetUrl = (parsed.searchParams.get("url") || "").trim();
+      let targetRef = (parsed.searchParams.get("ref") || "").trim();
+      if (isEncrypted(targetUrl)) targetUrl = decryptParam(targetUrl);
+      if (targetRef && isEncrypted(targetRef)) targetRef = decryptParam(targetRef);
+      if (isSafeExternalUrl(targetUrl)) {
+        const ua = parsed.searchParams.get("ua");
+        if (ua && !req.query.ua) (req.query as Record<string, string>).ua = ua;
+        await serveMediaVPS(targetUrl, targetRef, req as any, res as any, { isDownload: true });
+        return true;
+      }
+    }
+  } catch {}
   const controller = new AbortController();
   const abort = () => controller.abort();
   res.once("close", abort);
@@ -19574,6 +19740,7 @@ router.get("/anime/download-mp4", async (req, res) => {
      allowlist server-side as the final guard: clients and old cached picker
      rows must not be able to turn a playback-only source into a download. */
   const DOWNLOAD_SOURCE_SITES = new Set([
+    "anime4up2_hard", // AD 1
     "animewitcher", // AW
     "sanime",       // SA
     "anslayer",     // AS
@@ -19636,45 +19803,20 @@ router.get("/anime/download-mp4", async (req, res) => {
     sourceUrl = `http://127.0.0.1:${port}${path}?url=${encodeURIComponent(rawKawaiiUrl)}&ref=${encodeURIComponent(ref)}`;
   }
 
-  const tempRoot = `/tmp/nova-download-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const outputPath = `${tempRoot}/episode.mp4`;
-  mkdirSync(tempRoot, { recursive: true, mode: 0o700 });
-
-  const cleanup = () => {
-    try { rmSync(tempRoot, { recursive: true, force: true }); } catch {}
-  };
-  res.on("close", cleanup);
-
   try {
-    // A local video-proxy URL already represents a signed MP4 stream. Stream
-    // it through the same VPS proxy used by the player instead of invoking
-    // ffmpeg. The old condition handled only Kawaii, so AN/AK/MP MP4 sources
-    // were incorrectly converted as if they were HLS and DownloadResumable
-    // stayed at 0% until the full conversion finished.
-    //
-    // This is also critical for retries: a Range request must not trigger a
-    // second full conversion before the first byte is sent. HLS URLs still
-    // fall through to ffmpeg below.
     if (sourceUrl && !kawaiiMediaIsHls(sourceUrl)) {
       try {
         const sourcePath = new URL(sourceUrl).pathname;
         if (sourcePath === "/api/anime/video-proxy" && await streamLocalVideoProxy(sourceUrl, req, res)) {
           return;
         }
-      } catch {
-        // Fall through to the conversion path when the local URL is invalid.
-      }
+      } catch {}
     }
 
-    // Raw Kawaii MP4 URLs are also signed media files. Keep this direct path
-    // for legacy/cache rows that did not pass through localApiUrl().
-    if (site === "kawaii" && rawKawaiiUrl && !kawaiiMediaIsHls(rawKawaiiUrl)
-        ) {
-        res.setHeader("Content-Disposition", `attachment; filename="nova-episode.mp4"`);
-        // Mewstream rejects the Kawaii page Referer and only accepts
-        // Megaplay. Keep this identical to the playback proxy's routing.
-        await serveMediaVPS(rawKawaiiUrl, kawaiiReferrer(rawKawaiiUrl), req, res);
-        return;
+    if (site === "kawaii" && rawKawaiiUrl && !kawaiiMediaIsHls(rawKawaiiUrl)) {
+      res.setHeader("Content-Disposition", `attachment; filename="nova-episode.mp4"`);
+      await serveMediaVPS(rawKawaiiUrl, kawaiiReferrer(rawKawaiiUrl), req, res, { isDownload: true });
+      return;
     }
 
     if (!sourceUrl) {
@@ -19682,86 +19824,9 @@ router.get("/anime/download-mp4", async (req, res) => {
       return;
     }
 
-    const inputArgs = [
-      "-hide_banner", "-loglevel", "error", "-y",
-      /* HLS manifests coming from the VPS proxy can contain absolute segment
-         URLs and may take a while to answer on a cold CDN connection. These
-         limits apply to the ffmpeg input only; the HTTP response remains
-         resumable through the Range handling below. */
-      "-rw_timeout", "120000000",
-      "-protocol_whitelist", "file,http,https,tcp,tls,crypto",
-      "-allowed_extensions", "ALL",
-      "-i", sourceUrl,
-      "-map", "0:v:0",
-      "-map", "0:a:0?",
-    ];
-    const runFfmpeg = (args: string[]) => new Promise<void>((resolve, reject) => {
-      const child = spawn("/usr/bin/ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"] });
-      let stderr = "";
-      child.stderr.on("data", (chunk: Buffer) => {
-        stderr = (stderr + chunk.toString()).slice(-4000);
-      });
-      const cancelIfClientLeaves = () => {
-        if (!res.writableFinished && !child.killed) child.kill("SIGTERM");
-      };
-      res.once("close", cancelIfClientLeaves);
-      child.once("error", error => {
-        res.removeListener("close", cancelIfClientLeaves);
-        reject(error);
-      });
-      child.once("close", code => {
-        res.removeListener("close", cancelIfClientLeaves);
-        if (code === 0) resolve();
-        else reject(new Error(`ffmpeg exited ${code}: ${stderr}`));
-      });
-    });
-
-    // Most anime HLS streams already contain MP4-compatible H.264/AAC.
-    // Remuxing avoids a full software transcode on every download and keeps
-    // the source quality. Re-encode only when MP4 cannot mux the source codec.
-    try {
-      await runFfmpeg([
-        ...inputArgs,
-        "-c", "copy",
-        "-bsf:a", "aac_adtstoasc",
-        "-movflags", "+faststart",
-        outputPath,
-      ]);
-    } catch (remuxError) {
-      try {
-        rmSync(outputPath, { force: true });
-        await runFfmpeg([
-          ...inputArgs,
-          "-c", "copy",
-          "-movflags", "+faststart",
-          outputPath,
-        ]);
-      } catch (copyErr) {
-        const message = copyErr instanceof Error ? copyErr.message : String(copyErr);
-        if (!/could not write header|could not find tag for codec|codec .* not currently supported in container|unsupported codec|malformed aac|aac_adtstoasc|operation not permitted/i.test(message)) {
-          throw copyErr;
-        }
-        rmSync(outputPath, { force: true });
-        await runFfmpeg([
-          ...inputArgs,
-          "-c:v", "libx264",
-          "-preset", "veryfast",
-          "-crf", "23",
-          "-pix_fmt", "yuv420p",
-          "-c:a", "aac",
-          "-b:a", "128k",
-          "-movflags", "+faststart",
-          outputPath,
-        ]);
-      }
-    }
-
+    const outputPath = await prepareCachedHlsMp4(sourceUrl, site);
     const size = statSync(outputPath).size;
     if (size <= 0) throw new Error("empty converted video");
-    /* DownloadResumable sends a byte Range when it retries an interrupted
-       transfer. The conversion is repeated server-side, then only the
-       requested slice is returned so the native downloader can append it
-       safely instead of starting with a second full MP4. */
     const range = String(req.headers.range || "").trim();
     let streamStart = 0;
     let streamEnd = size - 1;
@@ -19802,6 +19867,467 @@ router.get("/anime/download-mp4", async (req, res) => {
     }
   }
 });
+
+const HLS_DL_CACHE_DIR = "/tmp/nova-hls-dl-cache";
+const HLS_DL_CACHE_TTL_MS = 10 * 60_000;
+const HLS_DL_MAX_CACHE_FILES = 4;
+const MAX_CONCURRENT_HLS_DL = 2;
+const HLS_DL_INFLIGHT = new Map<string, Promise<string>>();
+let activeHlsConversions = 0;
+const hlsConversionWaiters: Array<() => void> = [];
+
+async function withHlsConversionSlot<T>(fn: () => Promise<T>): Promise<T> {
+  if (activeHlsConversions >= MAX_CONCURRENT_HLS_DL) {
+    await new Promise<void>((resolve) => hlsConversionWaiters.push(resolve));
+  }
+  activeHlsConversions += 1;
+  try {
+    return await fn();
+  } finally {
+    activeHlsConversions -= 1;
+    const next = hlsConversionWaiters.shift();
+    if (next) next();
+  }
+}
+
+function pruneHlsDownloadCache(): void {
+  try {
+    if (!existsSync(HLS_DL_CACHE_DIR)) return;
+    const now = Date.now();
+    const entries = readdirSync(HLS_DL_CACHE_DIR)
+      .filter((name) => name.endsWith(".mp4"))
+      .map((name) => {
+        const full = `${HLS_DL_CACHE_DIR}/${name}`;
+        try {
+          const st = statSync(full);
+          return { full, mtimeMs: st.mtimeMs };
+        } catch {
+          return null;
+        }
+      })
+      .filter((x): x is { full: string; mtimeMs: number } => Boolean(x))
+      .sort((a, b) => b.mtimeMs - a.mtimeMs);
+    for (let i = 0; i < entries.length; i++) {
+      if (i >= HLS_DL_MAX_CACHE_FILES || now - entries[i].mtimeMs > HLS_DL_CACHE_TTL_MS) {
+        try { rmSync(entries[i].full, { force: true }); } catch {}
+      }
+    }
+  } catch {}
+}
+
+function rewriteToLocalLoopbackApi(rawUrl: string, port: string): string {
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.pathname.startsWith("/api/anime/") || parsed.pathname.startsWith("/api/animation/")) {
+      return `http://127.0.0.1:${port}${parsed.pathname}${parsed.search}`;
+    }
+  } catch {}
+  return rawUrl;
+}
+
+async function runFfmpegToFile(args: string[]): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn("/usr/bin/ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"] });
+    let stderr = "";
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr = (stderr + chunk.toString()).slice(-4000);
+    });
+    child.once("error", reject);
+    child.once("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`ffmpeg exited ${code}: ${stderr}`));
+    });
+  });
+}
+
+async function remuxInputToFaststartMp4(inputTarget: string, outputPath: string): Promise<void> {
+  const inputArgs = [
+    "-hide_banner", "-loglevel", "error", "-y",
+    "-rw_timeout", "120000000",
+    "-protocol_whitelist", "file,http,https,tcp,tls,crypto",
+    "-allowed_extensions", "ALL",
+    "-i", inputTarget,
+    "-map", "0:v:0",
+    "-map", "0:a:0?",
+  ];
+  try {
+    await runFfmpegToFile([
+      ...inputArgs,
+      "-c", "copy",
+      "-bsf:a", "aac_adtstoasc",
+      "-movflags", "+faststart",
+      outputPath,
+    ]);
+  } catch {
+    try {
+      rmSync(outputPath, { force: true });
+      await runFfmpegToFile([
+        ...inputArgs,
+        "-c", "copy",
+        "-movflags", "+faststart",
+        outputPath,
+      ]);
+    } catch (copyErr) {
+      const message = copyErr instanceof Error ? copyErr.message : String(copyErr);
+      if (!/could not write header|could not find tag for codec|codec .* not currently supported in container|unsupported codec|malformed aac|aac_adtstoasc|operation not permitted/i.test(message)) {
+        throw copyErr;
+      }
+      rmSync(outputPath, { force: true });
+      await runFfmpegToFile([
+        ...inputArgs,
+        "-threads", "1",
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-crf", "23",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-b:a", "128k",
+        "-movflags", "+faststart",
+        outputPath,
+      ]);
+    }
+  }
+}
+
+async function fetchBufferWithRetry(url: string, retries = 2, timeoutMs = 20_000): Promise<Buffer> {
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const r = await fetch(url, {
+        headers: { "x-internal": "1", "User-Agent": "AnimeNova-Downloader/1.0" },
+        signal: controller.signal,
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const ab = await r.arrayBuffer();
+      if (ab.byteLength === 0) throw new Error("empty segment");
+      return Buffer.from(ab);
+    } catch (e) {
+      lastErr = e;
+      if (attempt < retries) await new Promise((res) => setTimeout(res, 250 * (attempt + 1)));
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr || "segment fetch failed"));
+}
+
+function unwrapHlsProxyInput(rawSourceUrl: string): { manifestUrl: string; referer: string; isDirectExternal: boolean } {
+  try {
+    const parsed = new URL(rawSourceUrl);
+    if (parsed.pathname === "/api/anime/hls-proxy" || parsed.pathname === "/api/animation/hls-proxy") {
+      let u = (parsed.searchParams.get("url") || "").trim();
+      let ref = (parsed.searchParams.get("ref") || "").trim();
+      if (isEncrypted(u)) u = decryptParam(u);
+      if (ref && isEncrypted(ref)) ref = decryptParam(ref);
+      if (isSafeExternalUrl(u)) {
+        return { manifestUrl: u, referer: ref, isDirectExternal: true };
+      }
+    }
+  } catch {}
+  return { manifestUrl: rawSourceUrl, referer: "", isDirectExternal: false };
+}
+
+function buildUpstreamHlsHeaders(url: string, referer: string): Record<string, string> {
+  const hdrs: Record<string, string> = { ...BASE_HDRS, Accept: "*/*", "Accept-Encoding": "identity" };
+  if (referer) {
+    hdrs.Referer = referer;
+    if (!isClientRoutedFlixMedia(url, referer)) {
+      try { hdrs.Origin = new URL(referer).origin; } catch {}
+    }
+  }
+  return hdrs;
+}
+
+async function fetchDirectHlsBytes(
+  url: string,
+  referer: string,
+  timeoutMs: number,
+  rangeHeader?: string,
+): Promise<{ status: number; headers: Headers; buf: Buffer }> {
+  const hdrs = buildUpstreamHlsHeaders(url, referer);
+  if (rangeHeader) hdrs.Range = rangeHeader;
+  const ac = new AbortController();
+  const tid = setTimeout(() => ac.abort(new Error("hls_dl_timeout")), timeoutMs);
+  try {
+    const forceCf = isClientRoutedFlixMedia(url, referer);
+    let r = forceCf
+      ? await cfProxyStreamFetch(url, referer, rangeHeader, ac.signal)
+      : await fetch(url, { headers: hdrs, signal: ac.signal, redirect: "follow" });
+    if ((!r || (!r.ok && r.status !== 206)) && !forceCf) {
+      try { await r?.body?.cancel(); } catch {}
+      const cfR = await cfProxyStreamFetch(url, referer, rangeHeader, ac.signal);
+      if (cfR && (cfR.ok || cfR.status === 206)) r = cfR;
+    }
+    if (!r) throw new Error("empty upstream response");
+    if (!r.ok && r.status !== 206) {
+      try { await r.body?.cancel(); } catch {}
+      throw new Error(`HTTP ${r.status}`);
+    }
+    const buf = Buffer.from(await r.arrayBuffer());
+    return { status: r.status, headers: r.headers, buf };
+  } finally {
+    clearTimeout(tid);
+  }
+}
+
+async function unwrapHlsSegmentBuffer(raw: Buffer, referer: string): Promise<Buffer> {
+  const hasPng = raw.length >= 8 && raw.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  const hasWebp = raw.length >= 12 && raw.toString("ascii", 0, 4) === "RIFF" && raw.toString("ascii", 8, 12) === "WEBP";
+  if (!hasPng && !hasWebp) return raw;
+  const isReanime = /reanime|anivexa/i.test(referer) || hasWebp;
+  if (isReanime) {
+    try {
+      const ab = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer;
+      const decoded = await decodeReanimeImageSegment(ab);
+      if (decoded && decoded.length > 0) return decoded;
+    } catch {}
+  }
+  return stripPngWrapper(raw) || stripImageMediaWrapper(raw) || raw;
+}
+
+async function fetchHlsSegmentWithMultiRange(
+  segUrl: string,
+  referer: string,
+  chunkSize = 256 * 1024,
+  chunkWorkers = 4,
+): Promise<{ buf: Buffer; supportsMultiRange: boolean }> {
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 300 * attempt));
+    try {
+      const first = await fetchDirectHlsBytes(segUrl, referer, 30_000, `bytes=0-${chunkSize - 1}`);
+      const cr = first.headers.get("content-range") || "";
+      const crMatch = /^bytes\s+0-(\d+)\/(\d+)$/i.exec(cr.trim());
+      const total = crMatch ? Number(crMatch[2]) : 0;
+      if (first.status !== 206 || !crMatch || total <= chunkSize) {
+        if (first.status === 206 && total > first.buf.length) {
+          const full = await fetchDirectHlsBytes(segUrl, referer, 45_000);
+          return { buf: await unwrapHlsSegmentBuffer(full.buf, referer), supportsMultiRange: false };
+        }
+        return { buf: await unwrapHlsSegmentBuffer(first.buf, referer), supportsMultiRange: false };
+      }
+      const ranges: Array<[number, number]> = [];
+      for (let s = first.buf.length; s < total; s += chunkSize) {
+        ranges.push([s, Math.min(total - 1, s + chunkSize - 1)]);
+      }
+      const parts = new Array<Buffer>(ranges.length);
+      let next = 0;
+      await Promise.all(
+        Array.from({ length: Math.min(chunkWorkers, ranges.length) }, async () => {
+          while (true) {
+            const idx = next++;
+            if (idx >= ranges.length) break;
+            const [s, e] = ranges[idx];
+            let chunkErr: unknown = null;
+            for (let ca = 0; ca < 3; ca++) {
+              try {
+                if (ca > 0) await new Promise((r) => setTimeout(r, 250 * ca));
+                const part = await fetchDirectHlsBytes(segUrl, referer, 30_000, `bytes=${s}-${e}`);
+                parts[idx] = part.buf;
+                chunkErr = null;
+                break;
+              } catch (ce) {
+                chunkErr = ce;
+              }
+            }
+            if (chunkErr) throw chunkErr;
+          }
+        }),
+      );
+      const assembled = Buffer.concat([first.buf, ...parts]);
+      return { buf: await unwrapHlsSegmentBuffer(assembled, referer), supportsMultiRange: total >= 300 * 1024 };
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr || "segment failed"));
+}
+
+async function prepareCachedHlsMp4(sourceUrl: string, site: string): Promise<string> {
+  mkdirSync(HLS_DL_CACHE_DIR, { recursive: true, mode: 0o700 });
+  pruneHlsDownloadCache();
+  const cacheKey = createHash("sha1").update(`${site}|${sourceUrl}`).digest("hex");
+  const cachedPath = `${HLS_DL_CACHE_DIR}/${cacheKey}.mp4`;
+  try {
+    if (existsSync(cachedPath)) {
+      const st = statSync(cachedPath);
+      if (st.size > 0 && Date.now() - st.mtimeMs < HLS_DL_CACHE_TTL_MS) {
+        return cachedPath;
+      }
+    }
+  } catch {}
+  const existing = HLS_DL_INFLIGHT.get(cacheKey);
+  if (existing) return existing;
+
+  const job = withHlsConversionSlot(async () => {
+    try {
+      if (existsSync(cachedPath)) {
+        const st = statSync(cachedPath);
+        if (st.size > 0 && Date.now() - st.mtimeMs < HLS_DL_CACHE_TTL_MS) {
+          return cachedPath;
+        }
+      }
+    } catch {}
+    const port = process.env.PORT || "5000";
+    const tempRoot = `/tmp/nova-download-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const tempMp4 = `${tempRoot}/episode.mp4`;
+    mkdirSync(tempRoot, { recursive: true, mode: 0o700 });
+    try {
+      const localSourceUrl = rewriteToLocalLoopbackApi(sourceUrl, port);
+      const unwrapped = unwrapHlsProxyInput(localSourceUrl);
+      let usedParallel = false;
+      try {
+        let playlistUrl = unwrapped.manifestUrl;
+        const ref = unwrapped.referer;
+        const fetchManifestText = async (u: string): Promise<string> => {
+          if (unwrapped.isDirectExternal) {
+            return (await fetchDirectHlsBytes(u, ref, 15_000)).buf.toString("utf-8");
+          }
+          return (await fetchBufferWithRetry(rewriteToLocalLoopbackApi(u, port), 1, 15_000)).toString("utf-8");
+        };
+
+        let playlistText = await fetchManifestText(playlistUrl);
+        if (playlistText.includes("#EXT-X-STREAM-INF")) {
+          const lines = playlistText.split(/\r?\n/);
+          let bestBw = -1;
+          let bestUri = "";
+          for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (line.startsWith("#EXT-X-STREAM-INF")) {
+              const bwMatch = /BANDWIDTH=(\d+)/i.exec(line);
+              const bw = bwMatch ? parseInt(bwMatch[1], 10) : 0;
+              for (let j = i + 1; j < lines.length; j++) {
+                const next = lines[j].trim();
+                if (!next || next.startsWith("#")) continue;
+                if (bw >= bestBw) {
+                  bestBw = bw;
+                  bestUri = next;
+                }
+                break;
+              }
+            }
+          }
+          if (bestUri) {
+            playlistUrl = new URL(bestUri, playlistUrl).toString();
+            playlistText = await fetchManifestText(playlistUrl);
+          }
+        }
+        const isSupportedVod =
+          playlistText.includes("#EXTINF:") &&
+          !playlistText.includes("#EXT-X-KEY");
+        if (isSupportedVod) {
+          const lines = playlistText.split(/\r?\n/);
+          const segTasks: Array<{ idx: number; url: string; file: string }> = [];
+          const outLines: string[] = [];
+          let segCounter = 0;
+          let mapCounter = 0;
+          for (const rawLine of lines) {
+            const line = rawLine.trim();
+            if (!line) continue;
+            if (line.startsWith("#EXT-X-MAP:")) {
+              const uriM = /URI="([^"]+)"/i.exec(line);
+              if (uriM?.[1]) {
+                const mapUrl = new URL(uriM[1], playlistUrl).toString();
+                const mapFile = `init_${mapCounter++}.mp4`;
+                segTasks.push({ idx: -1, url: mapUrl, file: `${tempRoot}/${mapFile}` });
+                outLines.push(line.replace(uriM[1], mapFile));
+                continue;
+              }
+            }
+            if (line.startsWith("#")) {
+              outLines.push(line);
+              continue;
+            }
+            const resolved = new URL(line, playlistUrl).toString();
+            const fileName = `s_${String(segCounter).padStart(5, "0")}.ts`;
+            segTasks.push({ idx: segCounter, url: resolved, file: `${tempRoot}/${fileName}` });
+            outLines.push(fileName);
+            segCounter += 1;
+          }
+          if (segTasks.length >= 2 && segTasks.length <= 2500) {
+            let useMultiRangePerSeg = false;
+            let startTaskIdx = 0;
+            if (unwrapped.isDirectExternal && !isClientRoutedFlixMedia(segTasks[0].url, ref)) {
+              try {
+                const probe = await fetchHlsSegmentWithMultiRange(segTasks[0].url, ref, 256 * 1024, 4);
+                if (probe.buf.length > 0) {
+                  writeFileSync(segTasks[0].file, probe.buf);
+                  useMultiRangePerSeg = probe.supportsMultiRange;
+                  startTaskIdx = 1;
+                }
+              } catch {}
+            }
+            const CONCURRENCY = useMultiRangePerSeg ? 2 : 16;
+            let cursor = startTaskIdx;
+            let failed = 0;
+            const workers = Array.from({ length: Math.min(CONCURRENCY, Math.max(1, segTasks.length - startTaskIdx)) }, async () => {
+              while (true) {
+                const myIdx = cursor++;
+                if (myIdx >= segTasks.length) break;
+                const t = segTasks[myIdx];
+                try {
+                  if (unwrapped.isDirectExternal) {
+                    if (useMultiRangePerSeg && t.idx >= 0) {
+                      const segRes = await fetchHlsSegmentWithMultiRange(t.url, ref, 256 * 1024, 4);
+                      writeFileSync(t.file, segRes.buf);
+                    } else {
+                      let segErr: unknown = null;
+                      for (let a = 0; a < 3; a++) {
+                        try {
+                          if (a > 0) await new Promise((r) => setTimeout(r, 300 * a));
+                          const raw = (await fetchDirectHlsBytes(t.url, ref, 35_000)).buf;
+                          const clean = t.idx >= 0 ? await unwrapHlsSegmentBuffer(raw, ref) : raw;
+                          writeFileSync(t.file, clean);
+                          segErr = null;
+                          break;
+                        } catch (e) { segErr = e; }
+                      }
+                      if (segErr) throw segErr;
+                    }
+                  } else {
+                    const buf = await fetchBufferWithRetry(rewriteToLocalLoopbackApi(t.url, port), 2, 35_000);
+                    writeFileSync(t.file, buf);
+                  }
+                } catch {
+                  failed += 1;
+                  if (failed > 3) throw new Error("too many failed HLS segments");
+                }
+              }
+            });
+            await Promise.all(workers);
+            if (failed === 0) {
+              const localPlaylistPath = `${tempRoot}/local.m3u8`;
+              writeFileSync(localPlaylistPath, outLines.join("\n") + "\n", "utf-8");
+              await remuxInputToFaststartMp4(localPlaylistPath, tempMp4);
+              usedParallel = true;
+            }
+          }
+        }
+      } catch (parErr) {
+        logger.warn({ site, err: parErr instanceof Error ? parErr.message : String(parErr) }, "[download-mp4] parallel HLS download failed, falling back to ffmpeg");
+      }
+      if (!usedParallel) {
+        rmSync(tempMp4, { force: true });
+        await remuxInputToFaststartMp4(localSourceUrl, tempMp4);
+      }
+      const sz = statSync(tempMp4).size;
+      if (sz <= 0) throw new Error("empty converted video");
+      renameSync(tempMp4, cachedPath);
+      pruneHlsDownloadCache();
+      return cachedPath;
+    } finally {
+      try { rmSync(tempRoot, { recursive: true, force: true }); } catch {}
+    }
+  });
+  HLS_DL_INFLIGHT.set(cacheKey, job);
+  try {
+    return await job;
+  } finally {
+    HLS_DL_INFLIGHT.delete(cacheKey);
+  }
+}
 
 // ── seg-proxy: VPS يجلب الـ segment مع Referer الصحيح ───────────────────────
 // بعض CDNs (anineko, cdn.1shows.app وغيرها) تحزم الـ TS segments داخل PNG

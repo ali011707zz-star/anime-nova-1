@@ -1179,7 +1179,10 @@ export default function DubbedWatchScreen() {
 
       const rawMediaUrl = extracted.rawUrl || extracted.url;
       const isDirectProgressiveProxy =
-        rawMediaUrl.includes("/api/dubbed/stream") || rawMediaUrl.includes("/api/anime/video-proxy");
+        rawMediaUrl.includes("/api/dubbed/stream") ||
+        rawMediaUrl.includes("/api/anime/video-proxy") ||
+        extracted.url.includes("/api/dubbed/stream") ||
+        extracted.url.includes("/api/anime/video-proxy");
       const downloadSite = isSd2Source || isCarateenSource ? (slot.site || "sd2") : "animewitcher";
       const downloadUrl =
         extracted.contentType === "hls" && !rawMediaUrl.includes("/api/anime/download-mp4")

@@ -14,6 +14,16 @@ import { FavoriteAnime, historyRoute, resolveFavoriteRouteTarget, useApp } from 
 import { tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { getGridColumnCount, getRailCardWidth } from "@/components/AnimeCard";
 import { getKnownArabicAnimeTitle } from "@/utils/arabicAnimeTitles";
+import { WatchlistStatusModal } from "@/components/WatchlistStatusModal";
+import {
+  WATCHLIST_STATUSES,
+  WatchlistFilter,
+  WatchlistStatus,
+  countByWatchlistStatus,
+  filterByWatchlistStatus,
+  getWatchlistStatusMeta,
+  resolveWatchlistStatus,
+} from "@/utils/watchlistStatus";
 
 interface FavChar {
   id: number;
@@ -72,7 +82,7 @@ export default function LibraryScreen() {
     ? tvPosterWidth * gridColumns + 8 * (gridColumns - 1) + 32
     : Math.min(Math.max(width - 24, 0), 900);
   const router = useRouter();
-  const { watchHistory, favorites, removeFromHistory, toggleFavorite, updateFavorite, syncAccountNow } = useApp();
+  const { watchHistory, favorites, removeFromHistory, setFavoriteStatus, removeFavorite, updateFavorite, syncAccountNow } = useApp();
   useFocusEffect(useCallback(() => {
     void syncAccountNow(true);
   }, [syncAccountNow]));
@@ -95,6 +105,8 @@ export default function LibraryScreen() {
   const [search, setSearch] = useState("");
   const [year, setYear] = useState("");
   const [genre, setGenre] = useState("");
+  const [statusFilter, setStatusFilter] = useState<WatchlistFilter>("all");
+  const [editingFav, setEditingFav] = useState<FavoriteAnime | null>(null);
   const [favChars, setFavChars] = useState<FavChar[]>([]);
 
   useEffect(() => {
@@ -166,7 +178,7 @@ export default function LibraryScreen() {
   }, [watchHistory, search, router, removeFromHistory]);
 
   /* ── Filtered favorites (المحفوظة — بدون المانجا في وضع التلفاز) ── */
-  const filteredFavs = useMemo(() => {
+  const baseFavs = useMemo(() => {
     const sq = search.toLowerCase();
     return favorites.filter(f => {
       if (tvMode && f.mangaId) return false;
@@ -177,6 +189,12 @@ export default function LibraryScreen() {
       return matchesSearch && matchesYear && matchesGenre;
     });
   }, [favorites, search, year, genre, tvMode]);
+
+  const statusCounts = useMemo(() => countByWatchlistStatus(baseFavs), [baseFavs]);
+  const filteredFavs = useMemo(
+    () => filterByWatchlistStatus(baseFavs, statusFilter),
+    [baseFavs, statusFilter],
+  );
 
   /* ── Filtered characters (الشخصيات) ── */
   const filteredChars = useMemo(() => {
@@ -344,6 +362,53 @@ export default function LibraryScreen() {
       {activeTab === 2 && (
         <View style={s.libraryFilters}>
           <ScrollView horizontal focusable={false} showsHorizontalScrollIndicator={false} contentContainerStyle={s.filterChips}>
+            <Pressable
+              onPress={() => setStatusFilter("all")}
+              focusable={tvMode}
+              style={({ focused }) => [
+                s.filterChip,
+                s.statusChip,
+                tvMode && s.tvFilterChip,
+                statusFilter === "all" && { backgroundColor: colors.primary + "28", borderColor: colors.primary },
+                tvMode && tvFocusStyle(focused),
+              ]}
+            >
+              <Text style={[
+                s.filterChipText,
+                tvMode && s.tvFilterChipText,
+                { color: statusFilter === "all" ? colors.primary : colors.textSecondary },
+              ]}>
+                الكل ({statusCounts.all})
+              </Text>
+            </Pressable>
+            {WATCHLIST_STATUSES.map(st => {
+              const active = statusFilter === st.id;
+              return (
+                <Pressable
+                  key={st.id}
+                  onPress={() => setStatusFilter(st.id)}
+                  focusable={tvMode}
+                  style={({ focused }) => [
+                    s.filterChip,
+                    s.statusChip,
+                    tvMode && s.tvFilterChip,
+                    active && { backgroundColor: st.bg, borderColor: st.border },
+                    tvMode && tvFocusStyle(focused),
+                  ]}
+                >
+                  <Ionicons name={active ? st.activeIcon : st.icon} size={tvMode ? 14 : 12} color={active ? st.color : colors.textSecondary} />
+                  <Text style={[
+                    s.filterChipText,
+                    tvMode && s.tvFilterChipText,
+                    { color: active ? st.color : colors.textSecondary },
+                  ]}>
+                    {st.label} ({statusCounts[st.id]})
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+          <ScrollView horizontal focusable={false} showsHorizontalScrollIndicator={false} contentContainerStyle={s.filterChips}>
             {LIBRARY_YEARS.map(y => (
               <Pressable key={y || "all-years"} onPress={() => setYear(y)} focusable={tvMode}
                 style={({ focused }) => [
@@ -434,13 +499,29 @@ export default function LibraryScreen() {
                   fallbackId={(!item.mangaId && (!item.contentKind || item.contentKind === "anime") && item.id < 100_000_000) ? item.id : undefined}
                   style={[s.favImg, tvMode && s.tvFavImg, { backgroundColor: "#1C1C22" }]}
                 />
-                <Pressable
-                  onPress={() => toggleFavorite(item)}
-                  focusable={tvMode}
-                  style={({ focused }) => [s.favHeart, tvMode && s.tvFavHeart, tvMode && tvFocusStyle(focused)]}
-                >
-                  <Ionicons name="heart" size={tvMode ? 14 : 13} color="#f43f5e" />
-                </Pressable>
+                {(() => {
+                  const stMeta = getWatchlistStatusMeta(item.watchStatus);
+                  return (
+                    <Pressable
+                      onPress={(e: any) => {
+                        e?.stopPropagation?.();
+                        setEditingFav(item);
+                      }}
+                      focusable={tvMode}
+                      style={({ focused }) => [
+                        s.favStatusBadge,
+                        tvMode && s.tvFavStatusBadge,
+                        { backgroundColor: "rgba(9,9,11,0.82)", borderColor: stMeta.border },
+                        tvMode && tvFocusStyle(focused),
+                      ]}
+                    >
+                      <Ionicons name={stMeta.activeIcon} size={tvMode ? 13 : 11} color={stMeta.color} />
+                      <Text style={[s.favStatusText, tvMode && s.tvFavStatusText, { color: stMeta.color }]} numberOfLines={1}>
+                        {stMeta.shortLabel}
+                      </Text>
+                    </Pressable>
+                  );
+                })()}
                 <View style={[s.favInfo, tvMode && s.tvFavInfo]}>
                   {(() => {
                     const favEn = item.english || item.title;
@@ -476,6 +557,19 @@ export default function LibraryScreen() {
           />
         )
       )}
+
+      <WatchlistStatusModal
+        visible={Boolean(editingFav)}
+        title={editingFav ? (editingFav.titleAr || editingFav.english || editingFav.title) : ""}
+        thumbnail={editingFav?.thumbnail}
+        currentStatus={editingFav ? resolveWatchlistStatus(editingFav.watchStatus) : undefined}
+        isSaved={Boolean(editingFav)}
+        onSelect={(status: WatchlistStatus) => {
+          if (editingFav) void setFavoriteStatus(editingFav, status);
+        }}
+        onRemove={editingFav ? () => void removeFavorite(editingFav.id) : undefined}
+        onClose={() => setEditingFav(null)}
+      />
 
       {/* ── Tab 3: الشخصيات ── */}
       {activeTab === 3 && (
@@ -592,6 +686,11 @@ const s = StyleSheet.create({
   tvFavImg: { aspectRatio: 0.69, borderRadius: 12, borderWidth: 1.5, borderColor: "rgba(255,255,255,0.08)" },
   favHeart: { position: "absolute", top: 6, right: 6, backgroundColor: "rgba(0,0,0,0.6)", borderRadius: 10, padding: 4 },
   tvFavHeart: { top: 7, right: 7, borderRadius: 11, padding: 5 },
+  statusChip: { flexDirection: "row", alignItems: "center", gap: 5 },
+  favStatusBadge: { position: "absolute", top: 6, right: 6, flexDirection: "row", alignItems: "center", gap: 3, borderRadius: 9, borderWidth: 1, paddingHorizontal: 6, paddingVertical: 3, maxWidth: "88%" },
+  tvFavStatusBadge: { top: 7, right: 7, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4, gap: 4 },
+  favStatusText: { fontSize: 9, fontFamily: "Cairo_700Bold" },
+  tvFavStatusText: { fontSize: 11 },
   favInfo: { gap: 2 },
   favTitle: { fontSize: 10, fontFamily: "Cairo_600SemiBold", lineHeight: 14 },
   tvFavInfo: { gap: 2 },

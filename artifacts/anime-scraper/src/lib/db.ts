@@ -5,6 +5,7 @@
 ───────────────────────────────────────────────────── */
 
 import { API_BASE } from "./apiBase";
+import { DEFAULT_WATCHLIST_STATUS, normalizeWatchlistStatus, WatchlistStatus } from "./watchlistStatus";
 const API = API_BASE + "/api/user";
 
 async function apiFetch(path: string, init?: RequestInit) {
@@ -103,21 +104,56 @@ export async function clearWatchHistory(userId: string | null) {
    FAVORITES
 ═══════════════════════════════════════ */
 
+const SAVED_STATUSES_KEY = "savedAnimeStatuses";
+
+function readLocalStatuses(): Record<number, WatchlistStatus> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SAVED_STATUSES_KEY) || "{}");
+    const out: Record<number, WatchlistStatus> = {};
+    if (raw && typeof raw === "object") {
+      for (const [k, v] of Object.entries(raw)) {
+        const id = Number(k);
+        const st = normalizeWatchlistStatus(String(v));
+        if (id && st) out[id] = st;
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function writeLocalStatuses(map: Record<number, WatchlistStatus>) {
+  try {
+    localStorage.setItem(SAVED_STATUSES_KEY, JSON.stringify(map));
+  } catch {}
+}
+
+export function getSavedStatus(anilistId: number): WatchlistStatus | null {
+  if (!isSaved(anilistId)) return null;
+  const map = readLocalStatuses();
+  return map[anilistId] ?? DEFAULT_WATCHLIST_STATUS;
+}
+
 export async function saveAnime(
   userId: string | null,
   anilistId: number,
   animeTitle?: string,
   animeCover?: string,
+  watchStatus: WatchlistStatus = DEFAULT_WATCHLIST_STATUS,
 ) {
   try {
     const ids: number[] = JSON.parse(localStorage.getItem("savedAnime") || "[]");
     if (!ids.includes(anilistId)) localStorage.setItem("savedAnime", JSON.stringify([anilistId, ...ids]));
+    const statuses = readLocalStatuses();
+    statuses[anilistId] = watchStatus;
+    writeLocalStatuses(statuses);
   } catch {}
 
   if (userId) {
     apiFetch("/favorites", {
       method: "POST",
-      body: JSON.stringify({ animeId: anilistId, animeTitle, animeCover, animeType: "anime" }),
+      body: JSON.stringify({ animeId: anilistId, animeTitle, animeCover, animeType: "anime", watchStatus }),
     });
   }
 }
@@ -126,6 +162,9 @@ export async function unsaveAnime(userId: string | null, anilistId: number) {
   try {
     const ids: number[] = JSON.parse(localStorage.getItem("savedAnime") || "[]");
     localStorage.setItem("savedAnime", JSON.stringify(ids.filter(i => i !== anilistId)));
+    const statuses = readLocalStatuses();
+    delete statuses[anilistId];
+    writeLocalStatuses(statuses);
   } catch {}
   if (userId) apiFetch(`/favorites/${anilistId}`, { method: "DELETE" });
 }
@@ -134,11 +173,40 @@ export async function loadSavedIds(userId: string | null): Promise<number[]> {
   if (userId) {
     const data = await apiFetch("/favorites/ids");
     if (data?.ids != null) {
-      try { localStorage.setItem("savedAnime", JSON.stringify(data.ids)); } catch {}
+      try {
+        localStorage.setItem("savedAnime", JSON.stringify(data.ids));
+        if (data.statuses && typeof data.statuses === "object") {
+          const merged = readLocalStatuses();
+          for (const [k, v] of Object.entries(data.statuses)) {
+            const id = Number(k);
+            const st = normalizeWatchlistStatus(String(v));
+            if (id && st) merged[id] = st;
+          }
+          writeLocalStatuses(merged);
+        }
+      } catch {}
       return data.ids as number[];
     }
   }
   try { return JSON.parse(localStorage.getItem("savedAnime") || "[]"); } catch { return []; }
+}
+
+export async function loadSavedStatuses(userId: string | null): Promise<Record<number, WatchlistStatus>> {
+  const local = readLocalStatuses();
+  if (userId) {
+    const data = await apiFetch("/favorites/ids");
+    if (data?.statuses && typeof data.statuses === "object") {
+      const merged: Record<number, WatchlistStatus> = { ...local };
+      for (const [k, v] of Object.entries(data.statuses)) {
+        const id = Number(k);
+        const st = normalizeWatchlistStatus(String(v));
+        if (id && st) merged[id] = st;
+      }
+      writeLocalStatuses(merged);
+      return merged;
+    }
+  }
+  return local;
 }
 
 export function isSaved(anilistId: number): boolean {

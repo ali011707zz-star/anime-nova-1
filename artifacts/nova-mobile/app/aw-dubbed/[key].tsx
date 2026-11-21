@@ -21,6 +21,8 @@ import {
   useTvListFocusScroll, useTvMetrics } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
 import { getWatchContentId, useApp } from "@/context/AppContext";
+import { WatchlistStatusModal } from "@/components/WatchlistStatusModal";
+import { getWatchlistStatusMeta, WatchlistStatus } from "@/utils/watchlistStatus";
 const Pressable = TvPressable;
 const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
 const ROW_LTR = I18nManager.isRTL ? "row-reverse" : "row";
@@ -82,12 +84,15 @@ export default function AwDubbedDetailScreen() {
     [episodes, epDescOrder],
   );
   const displayTitle = titleAr || title;
-  const { isFavorite, toggleFavorite } = useApp();
+  const { isFavorite, setFavoriteStatus, removeFavorite, getFavoriteStatus } = useApp();
   const favKey = keyParam || curSeason?.animeId || displayTitle;
   const numericFavId = React.useMemo(() => getWatchContentId("aw-dubbed", favKey), [favKey]);
   const isFav = isFavorite(numericFavId);
-  const handleFavorite = useCallback(async () => {
-    await toggleFavorite({
+  const currentWatchStatus = getFavoriteStatus(numericFavId);
+  const watchStatusMeta = isFav ? getWatchlistStatusMeta(currentWatchStatus) : null;
+  const [showWatchlist, setShowWatchlist] = useState(false);
+  const handleSelectWatchStatus = useCallback(async (status: WatchlistStatus) => {
+    await setFavoriteStatus({
       id: numericFavId,
       contentKind: "aw-dubbed",
       contentKey: favKey,
@@ -102,8 +107,8 @@ export default function AwDubbedDetailScreen() {
       episodes: episodes.length || null,
       score: null,
       addedAt: Date.now(),
-    });
-  }, [toggleFavorite, numericFavId, favKey, seasons, displayTitle, title, titleAr, poster, episodes.length]);
+    }, status);
+  }, [setFavoriteStatus, numericFavId, favKey, seasons, displayTitle, title, titleAr, poster, episodes.length]);
 
   useEffect(() => {
     if (!curSeason?.animeId) return;
@@ -240,18 +245,18 @@ export default function AwDubbedDetailScreen() {
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <Pressable
-          onPress={() => void handleFavorite()}
+          onPress={() => setShowWatchlist(true)}
           focusable={tvMode}
           accessibilityRole="button"
-          accessibilityLabel={isFav ? "إزالة من المفضلة" : "إضافة للمفضلة"}
+          accessibilityLabel={watchStatusMeta ? watchStatusMeta.label : "إضافة إلى قائمتي"}
           style={({ focused }) => [
             styles.backBtn,
             { backgroundColor: colors.input, borderColor: colors.border },
-            isFav && { backgroundColor: "rgba(239,68,68,0.16)", borderColor: "rgba(239,68,68,0.45)" },
+            watchStatusMeta && { backgroundColor: watchStatusMeta.bg, borderColor: watchStatusMeta.border },
             tvMode && tvFocusStyle(focused),
           ]}
         >
-          <Ionicons name={isFav ? "heart" : "heart-outline"} size={18} color={isFav ? "#EF4444" : colors.textPrimary} />
+          <Ionicons name={(watchStatusMeta ? watchStatusMeta.activeIcon : "bookmark-outline") as any} size={18} color={watchStatusMeta ? watchStatusMeta.color : colors.textPrimary} />
         </Pressable>
         <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>{displayTitle}</Text>
         <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} focusable={tvMode}
@@ -384,6 +389,17 @@ export default function AwDubbedDetailScreen() {
           }
         />
       </TvFocusGuideView>
+
+      <WatchlistStatusModal
+        visible={showWatchlist}
+        title={displayTitle}
+        thumbnail={poster || undefined}
+        currentStatus={currentWatchStatus}
+        isSaved={isFav}
+        onSelect={(status) => void handleSelectWatchStatus(status)}
+        onRemove={isFav ? () => void removeFavorite(numericFavId) : undefined}
+        onClose={() => setShowWatchlist(false)}
+      />
     </View>
   );
 }

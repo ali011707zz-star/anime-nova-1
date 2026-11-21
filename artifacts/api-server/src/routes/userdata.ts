@@ -215,6 +215,20 @@ router.delete("/user/history", async (req: Request, res: Response) => {
    FAVORITES
 ═══════════════════════════════════════════ */
 
+const VALID_WATCHLIST_STATUSES = new Set([
+  "watching",
+  "plan_to_watch",
+  "completed",
+  "on_hold",
+  "dropped",
+]);
+
+function normalizeWatchStatus(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const cleaned = raw.trim().toLowerCase();
+  return VALID_WATCHLIST_STATUSES.has(cleaned) ? cleaned : undefined;
+}
+
 interface PackedFavoriteMeta {
   animeType?: string;
   titleAr?: string;
@@ -222,6 +236,18 @@ interface PackedFavoriteMeta {
   episodes?: number | null;
   score?: number | null;
   startYear?: number | null;
+  watchStatus?: string;
+}
+
+function extractPackedFavoriteMeta(rawCover: string | null | undefined): { cleanCover: string; meta: PackedFavoriteMeta } {
+  const raw = typeof rawCover === "string" ? rawCover : "";
+  const idx = raw.indexOf(NOVA_META_DELIMITER);
+  if (idx === -1) return { cleanCover: raw, meta: {} };
+  let meta: PackedFavoriteMeta = {};
+  try {
+    meta = JSON.parse(decodeURIComponent(raw.slice(idx + NOVA_META_DELIMITER.length))) || {};
+  } catch {}
+  return { cleanCover: raw.slice(0, idx), meta };
 }
 
 function packFavoriteCover(
@@ -237,23 +263,17 @@ function packFavoriteCover(
   if (meta.episodes != null && Number.isFinite(Number(meta.episodes))) payload.episodes = Number(meta.episodes);
   if (meta.score != null && Number.isFinite(Number(meta.score))) payload.score = Number(meta.score);
   if (meta.startYear != null && Number.isFinite(Number(meta.startYear))) payload.startYear = Number(meta.startYear);
+  const ws = normalizeWatchStatus(meta.watchStatus);
+  if (ws) payload.watchStatus = ws;
   if (Object.keys(payload).length === 0) return cleanCover || null;
   return `${cleanCover}${NOVA_META_DELIMITER}${encodeURIComponent(JSON.stringify(payload))}`;
 }
 
 function unpackFavoriteRow(row: any): any {
   if (!row || typeof row !== "object") return row;
-  const rawCover = typeof row.anime_cover === "string" ? row.anime_cover : "";
-  let cleanCover = rawCover;
-  let meta: PackedFavoriteMeta = {};
-  const idx = rawCover.indexOf(NOVA_META_DELIMITER);
-  if (idx !== -1) {
-    cleanCover = rawCover.slice(0, idx);
-    try {
-      meta = JSON.parse(decodeURIComponent(rawCover.slice(idx + NOVA_META_DELIMITER.length))) || {};
-    } catch {}
-  }
+  const { cleanCover, meta } = extractPackedFavoriteMeta(row.anime_cover);
   const resolvedType = meta.animeType || row.anime_type || "anime";
+  const resolvedWatchStatus = normalizeWatchStatus(meta.watchStatus ?? row.watch_status ?? row.watchStatus);
   return {
     ...row,
     anime_cover: cleanCover || null,
@@ -263,6 +283,8 @@ function unpackFavoriteRow(row: any): any {
     episodes: meta.episodes !== undefined ? meta.episodes : (row.episodes ?? null),
     score: meta.score !== undefined ? meta.score : (row.score ?? null),
     start_year: meta.startYear !== undefined ? meta.startYear : (row.start_year ?? null),
+    watch_status: resolvedWatchStatus,
+    watchStatus: resolvedWatchStatus,
   };
 }
 
@@ -290,7 +312,14 @@ router.get("/user/favorites/ids", async (req: Request, res: Response) => {
   try {
     const rows = await sbSelect("favorites", { user_id: `eq.${userId}` }, { strict: true });
     res.setHeader("Cache-Control", "no-store");
-    return res.json({ ids: rows.map((r: any) => r.anime_id) });
+    const statuses: Record<number, string> = {};
+    for (const r of rows) {
+      const unpacked = unpackFavoriteRow(r);
+      if (unpacked?.anime_id && unpacked?.watchStatus) {
+        statuses[Number(unpacked.anime_id)] = unpacked.watchStatus;
+      }
+    }
+    return res.json({ ids: rows.map((r: any) => r.anime_id), statuses });
   } catch (err) {
     console.error("[userdata] favorites/ids GET:", err);
     return res.status(500).json({ error: "خطأ في الخادم" });
@@ -304,23 +333,17 @@ router.post("/user/favorites", async (req: Request, res: Response) => {
   try {
     const {
       animeId, animeTitle, animeCover, animeType, tmdbId, mediaType,
-      titleAr, english, episodes, score, startYear,
+      titleAr, english, episodes, score, startYear, watchStatus, watch_status,
     } = req.body;
     if (!animeId) return res.status(400).json({ error: "animeId مطلوب" });
 
+    const incomingWatchStatus = normalizeWatchStatus(watchStatus ?? watch_status);
     const fullType = String(animeType || "anime").trim() || "anime";
     // Keep favorites.anime_type safely <= 16 chars (Postgres VARCHAR(16)) while
     // storing rich routing/display metadata inside anime_cover!
     const shortType = fullType.startsWith("fav:")
       ? (fullType.split(":")[1] || "anime").slice(0, 16)
       : fullType.split(":")[0].slice(0, 16) || "anime";
-    const packedCover = packFavoriteCover(animeCover, fullType, {
-      titleAr: titleAr ? String(titleAr).slice(0, 160) : undefined,
-      english: english ? String(english).slice(0, 160) : undefined,
-      episodes: episodes == null ? undefined : Number(episodes),
-      score: score == null ? undefined : Number(score),
-      startYear: startYear == null ? undefined : Number(startYear),
-    });
 
     const existing = await sbSelect("favorites", {
       user_id:  `eq.${userId}`,
@@ -328,17 +351,39 @@ router.post("/user/favorites", async (req: Request, res: Response) => {
     }, { limit: 1 });
 
     if (existing.length > 0) {
+      const prevUnpacked = extractPackedFavoriteMeta(existing[0].anime_cover);
+      const mergedFullType = animeType ? fullType : (prevUnpacked.meta.animeType || existing[0].anime_type || "anime");
+      const mergedShortType = mergedFullType.startsWith("fav:")
+        ? (mergedFullType.split(":")[1] || "anime").slice(0, 16)
+        : mergedFullType.split(":")[0].slice(0, 16) || "anime";
+      const mergedCover = packFavoriteCover(animeCover || prevUnpacked.cleanCover, mergedFullType, {
+        titleAr: titleAr ? String(titleAr).slice(0, 160) : prevUnpacked.meta.titleAr,
+        english: english ? String(english).slice(0, 160) : prevUnpacked.meta.english,
+        episodes: episodes == null ? prevUnpacked.meta.episodes : Number(episodes),
+        score: score == null ? prevUnpacked.meta.score : Number(score),
+        startYear: startYear == null ? prevUnpacked.meta.startYear : Number(startYear),
+        watchStatus: incomingWatchStatus ?? prevUnpacked.meta.watchStatus,
+      });
       const updated = await sbPatch("favorites", {
         user_id:  `eq.${userId}`,
         anime_id: `eq.${Number(animeId)}`,
       }, {
         anime_title: animeTitle || existing[0].anime_title || null,
-        anime_cover: packedCover ?? existing[0].anime_cover ?? null,
-        anime_type:  shortType,
+        anime_cover: mergedCover ?? existing[0].anime_cover ?? null,
+        anime_type:  mergedShortType,
       }).catch(() => null);
       const rowOut = Array.isArray(updated) ? updated[0] : (updated || existing[0]);
       return res.status(201).json({ entry: unpackFavoriteRow(rowOut), already: true });
     }
+
+    const packedCover = packFavoriteCover(animeCover, fullType, {
+      titleAr: titleAr ? String(titleAr).slice(0, 160) : undefined,
+      english: english ? String(english).slice(0, 160) : undefined,
+      episodes: episodes == null ? undefined : Number(episodes),
+      score: score == null ? undefined : Number(score),
+      startYear: startYear == null ? undefined : Number(startYear),
+      watchStatus: incomingWatchStatus,
+    });
 
     const row = await sbInsert("favorites", {
       user_id:     userId,
@@ -353,6 +398,43 @@ router.post("/user/favorites", async (req: Request, res: Response) => {
     return res.status(201).json({ entry: unpackFavoriteRow(row) || null, already: false });
   } catch (err) {
     console.error("[userdata] favorites POST:", err);
+    return res.status(500).json({ error: "خطأ في الخادم" });
+  }
+});
+
+router.patch("/user/favorites/:animeId", async (req: Request, res: Response) => {
+  const userId = getUserId(req);
+  if (!userId) return res.status(401).json({ error: "غير مصرّح" });
+
+  try {
+    const animeId = Number(req.params.animeId);
+    const incomingWatchStatus = normalizeWatchStatus(req.body?.watchStatus ?? req.body?.watch_status);
+    if (!animeId || !incomingWatchStatus) {
+      return res.status(400).json({ error: "animeId و watchStatus مطلوبان" });
+    }
+    const existing = await sbSelect("favorites", {
+      user_id: `eq.${userId}`,
+      anime_id: `eq.${animeId}`,
+    }, { limit: 1 });
+    if (existing.length === 0) {
+      return res.status(404).json({ error: "غير موجود في قائمتك" });
+    }
+    const prev = extractPackedFavoriteMeta(existing[0].anime_cover);
+    const fullType = prev.meta.animeType || existing[0].anime_type || "anime";
+    const mergedCover = packFavoriteCover(prev.cleanCover, fullType, {
+      ...prev.meta,
+      watchStatus: incomingWatchStatus,
+    });
+    const updated = await sbPatch("favorites", {
+      user_id: `eq.${userId}`,
+      anime_id: `eq.${animeId}`,
+    }, {
+      anime_cover: mergedCover,
+    });
+    const rowOut = Array.isArray(updated) ? updated[0] : (updated || existing[0]);
+    return res.json({ entry: unpackFavoriteRow(rowOut) });
+  } catch (err) {
+    console.error("[userdata] favorites PATCH:", err);
     return res.status(500).json({ error: "خطأ في الخادم" });
   }
 });

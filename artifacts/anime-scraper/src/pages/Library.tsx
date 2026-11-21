@@ -3,7 +3,17 @@ import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { Link } from "wouter";
 import { BookMarked, History, Trash2, Play, Clock, ChevronRight, Home, Star, PlayCircle, Heart, Clapperboard, Search as SearchIcon, X } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
-import { loadWatchHistory, loadSavedIds, unsaveAnime } from "@/lib/db";
+import { loadWatchHistory, loadSavedIds, loadSavedStatuses, saveAnime, unsaveAnime } from "@/lib/db";
+import { WatchlistStatusSheet } from "@/components/WatchlistStatusSheet";
+import {
+  WATCHLIST_STATUSES,
+  WatchlistFilter,
+  WatchlistStatus,
+  countByWatchlistStatus,
+  filterByWatchlistStatus,
+  getWatchlistStatusMeta,
+  resolveWatchlistStatus,
+} from "@/lib/watchlistStatus";
 import { motion, AnimatePresence } from "framer-motion";
 
 const ANIME_QUERY = `
@@ -98,6 +108,9 @@ export default function Library() {
   })();
   const [tab, setTab] = useState<"continue" | "history" | "saved" | "chars">(initialTab);
   const [savedAnime, setSavedAnime] = useState<any[]>([]);
+  const [savedStatuses, setSavedStatuses] = useState<Record<number, WatchlistStatus>>({});
+  const [statusFilter, setStatusFilter] = useState<WatchlistFilter>("all");
+  const [editingAnime, setEditingAnime] = useState<any | null>(null);
   const [history, setHistory] = useState<any[]>([]);
   const [animHistory, setAnimHistory] = useState<AnimHistItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -122,7 +135,7 @@ export default function Library() {
   }, []);
 
   /* ── Reset visible count when filter/search changes ── */
-  useEffect(() => { setSavedVisible(12); }, [sortBy, searchQuery]);
+  useEffect(() => { setSavedVisible(12); }, [sortBy, searchQuery, statusFilter]);
 
 
   const loadData = useCallback(async () => {
@@ -130,7 +143,11 @@ export default function Library() {
     setHistory(hist);
     setAnimHistory(loadAnimHistory());
 
-    const savedIds = await loadSavedIds(user?.id ?? null);
+    const [savedIds, statusesMap] = await Promise.all([
+      loadSavedIds(user?.id ?? null),
+      loadSavedStatuses(user?.id ?? null),
+    ]);
+    setSavedStatuses(statusesMap);
     if (savedIds.length === 0) { setSavedAnime([]); return; }
     setLoading(true);
     try {
@@ -152,7 +169,11 @@ export default function Library() {
       const hist = await loadWatchHistory(user?.id ?? null);
       if (!cancelled) setHistory(hist);
       if (!cancelled) setAnimHistory(loadAnimHistory());
-      const savedIds = await loadSavedIds(user?.id ?? null);
+      const [savedIds, statusesMap] = await Promise.all([
+        loadSavedIds(user?.id ?? null),
+        loadSavedStatuses(user?.id ?? null),
+      ]);
+      if (!cancelled) setSavedStatuses(statusesMap);
       if (savedIds.length === 0) { if (!cancelled) setSavedAnime([]); return; }
       if (!cancelled) setLoading(true);
       try {
@@ -173,6 +194,22 @@ export default function Library() {
   const removeFromSaved = (id: number) => {
     unsaveAnime(user?.id ?? null, id);
     setSavedAnime(prev => prev.filter(a => a.id !== id));
+    setSavedStatuses(prev => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  };
+
+  const updateSavedStatus = (anime: any, status: WatchlistStatus) => {
+    saveAnime(
+      user?.id ?? null,
+      anime.id,
+      anime.title?.romaji ?? anime.title?.english ?? undefined,
+      anime.coverImage?.large ?? undefined,
+      status,
+    );
+    setSavedStatuses(prev => ({ ...prev, [anime.id]: status }));
   };
 
   const removeHistory = (id: number, ep: number) => {
@@ -214,15 +251,25 @@ export default function Library() {
     continueItems.filter((i: any) => !sq || (i.title || "").toLowerCase().includes(sq)),
     [continueItems, sq]);
 
+  const savedWithStatus = useMemo(
+    () => savedAnime.map(a => ({ ...a, watchStatus: resolveWatchlistStatus(savedStatuses[a.id]) })),
+    [savedAnime, savedStatuses],
+  );
+
+  const statusCounts = useMemo(
+    () => countByWatchlistStatus(savedWithStatus),
+    [savedWithStatus],
+  );
+
   const filteredSaved = useMemo(() => {
-    let arr = [...savedAnime];
-    const sorted = arr.sort((a, b) => {
+    let arr = filterByWatchlistStatus(savedWithStatus, statusFilter);
+    const sorted = [...arr].sort((a, b) => {
       if (sortBy === "name") return (a.title?.romaji || "").localeCompare(b.title?.romaji || "");
       if (sortBy === "score") return (b.averageScore || 0) - (a.averageScore || 0);
       return 0;
     });
     return sq ? sorted.filter(a => [a.title?.english, a.title?.romaji, a.title_ar].some(title => typeof title === "string" && title.toLowerCase().includes(sq))) : sorted;
-  }, [savedAnime, sortBy, sq]);
+  }, [savedWithStatus, statusFilter, sortBy, sq]);
 
   const sortedSaved = filteredSaved;
 
@@ -573,6 +620,41 @@ export default function Library() {
         {tab === "saved" && (
           <motion.div key="saved" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             className="px-4 mt-4">
+            {/* Watchlist Status Filter Pills */}
+            {savedAnime.length > 0 && (
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-2 mb-2 no-scrollbar">
+                <button
+                  type="button"
+                  onClick={() => setStatusFilter("all")}
+                  className={`shrink-0 px-3 py-1.5 rounded-xl text-[10px] font-black font-['Cairo'] border transition-all ${
+                    statusFilter === "all"
+                      ? "bg-primary/20 text-primary border-primary/40"
+                      : "bg-white/[0.03] text-white/45 border-white/10"
+                  }`}
+                >
+                  الكل ({statusCounts.all})
+                </button>
+                {WATCHLIST_STATUSES.map(st => {
+                  const active = statusFilter === st.id;
+                  return (
+                    <button
+                      key={st.id}
+                      type="button"
+                      onClick={() => setStatusFilter(st.id)}
+                      className="shrink-0 px-3 py-1.5 rounded-xl text-[10px] font-black font-['Cairo'] border transition-all"
+                      style={
+                        active
+                          ? { background: st.bg, borderColor: st.border, color: st.color }
+                          : { background: "rgba(255,255,255,0.03)", borderColor: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.5)" }
+                      }
+                    >
+                      {st.label} ({statusCounts[st.id]})
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
             {/* Sort bar */}
             {savedAnime.length > 0 && (
               <div className="flex items-center gap-2 mb-4">
@@ -632,10 +714,24 @@ export default function Library() {
                               className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                             />
                             <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent" />
-                            {/* Status badge */}
-                            <div className={`absolute top-2 right-2 text-[8px] font-black px-2 py-0.5 rounded-md ${status.cls}`}>
-                              {status.ar}
-                            </div>
+                            {/* Watchlist Status badge (click to change) */}
+                            {(() => {
+                              const wsMeta = getWatchlistStatusMeta(savedStatuses[anime.id]);
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={e => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setEditingAnime(anime);
+                                  }}
+                                  className="absolute top-2 right-2 text-[8.5px] font-black font-['Cairo'] px-2 py-0.5 rounded-lg border backdrop-blur-sm transition-transform active:scale-95"
+                                  style={{ background: "rgba(9,9,11,0.82)", borderColor: wsMeta.border, color: wsMeta.color }}
+                                >
+                                  {wsMeta.shortLabel}
+                                </button>
+                              );
+                            })()}
                             {/* Score */}
                             {anime.averageScore && (
                               <div className="absolute top-2 left-2 bg-black/70 text-yellow-400 text-[8px] px-1.5 py-0.5 rounded-lg font-black flex items-center gap-0.5">
@@ -759,6 +855,19 @@ export default function Library() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <WatchlistStatusSheet
+        open={Boolean(editingAnime)}
+        title={editingAnime ? (editingAnime.title_ar || editingAnime.title?.english || editingAnime.title?.romaji || "") : ""}
+        thumbnail={editingAnime?.coverImage?.large}
+        currentStatus={editingAnime ? resolveWatchlistStatus(savedStatuses[editingAnime.id]) : null}
+        isSaved={Boolean(editingAnime)}
+        onSelect={st => {
+          if (editingAnime) updateSavedStatus(editingAnime, st);
+        }}
+        onRemove={editingAnime ? () => removeFromSaved(editingAnime.id) : undefined}
+        onClose={() => setEditingAnime(null)}
+      />
     </main>
   );
 }

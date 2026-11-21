@@ -18,6 +18,8 @@ import { getBaseUrl } from "@/utils/api";
 import { secureFetch } from "@/utils/secureApi";
 import { getYoutubeEmbedUrl, getYoutubeReferer } from "@/utils/youtube";
 import { YoutubeTrailerModal } from "@/components/YoutubeTrailerModal";
+import { WatchlistStatusModal } from "@/components/WatchlistStatusModal";
+import { getWatchlistStatusMeta, WatchlistStatus } from "@/utils/watchlistStatus";
 import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { useTvFocusMemory } from "@/utils/tvFocus";
 import { useColors } from "@/hooks/useColors";
@@ -225,7 +227,7 @@ export default function AnimeDetailScreen() {
   const { width, height } = useWindowDimensions();
   const { tv: tvMode } = useTvMetrics();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
-  const { isFavorite, toggleFavorite } = useApp();
+  const { isFavorite, setFavoriteStatus, removeFavorite, getFavoriteStatus } = useApp();
   const { rememberFocus } = useTvFocusMemory(`detail:${id || "unknown"}`);
   const rememberDetailFocus = useCallback((key: string) => {
     if (tvMode) rememberFocus(key);
@@ -251,6 +253,7 @@ export default function AnimeDetailScreen() {
     };
   }, [showTrailer, tvMode]);
   const [showRating, setShowRating] = useState(false);
+  const [showWatchlist, setShowWatchlist] = useState(false);
   const [myRating, setMyRating] = useState(0);
   const [saved, setSaved] = useState(false);
   const [warnDismissed, setWarnDismissed] = useState(false);
@@ -269,6 +272,8 @@ export default function AnimeDetailScreen() {
   }, []);
 
   const isFav = anime ? isFavorite(anime.id) : false;
+  const currentWatchStatus = anime ? getFavoriteStatus(anime.id) : undefined;
+  const watchStatusMeta = isFav ? getWatchlistStatusMeta(currentWatchStatus) : null;
 
   useEffect(() => {
     AsyncStorage.getItem("fav-characters").then(raw => {
@@ -468,11 +473,10 @@ export default function AnimeDetailScreen() {
     };
   }, [showTrailer]);
 
-  const handleFavorite = useCallback(async () => {
+  const handleSelectWatchStatus = useCallback(async (status: WatchlistStatus) => {
     if (!anime) return;
-    
     const favAr = anime.title_ar || anime.synonyms?.find((value: string) => /[\u0600-\u06FF]/.test(value)) || getKnownArabicAnimeTitle(anime.id, anime.title?.english, anime.title?.romaji);
-    await toggleFavorite({
+    await setFavoriteStatus({
       id: anime.id,
       title: anime.title.romaji,
       english: anime.title.english || "",
@@ -483,8 +487,13 @@ export default function AnimeDetailScreen() {
       addedAt: Date.now(),
       startYear: anime.startDate?.year ?? null,
       genres: anime.genres || [],
-    });
-  }, [anime, toggleFavorite]);
+    }, status);
+  }, [anime, setFavoriteStatus]);
+
+  const handleRemoveWatchlist = useCallback(async () => {
+    if (!anime) return;
+    await removeFavorite(anime.id);
+  }, [anime, removeFavorite]);
 
   async function toggleSave() {
     const next = !saved;
@@ -727,7 +736,7 @@ export default function AnimeDetailScreen() {
         <View style={[d.actionGrid, tvMode && d.tvActionGrid]}>
           {[
             { icon: "chatbubble-outline", activeIcon: "chatbubble", label: "التعليقات", active: false,        activeColor: "#38BDF8", onPress: () => router.push(`/comments?animeId=${anime?.id}&title=${encodeURIComponent(anime?.title?.romaji || "")}` as any) },
-            { icon: "heart-outline",      activeIcon: "heart",      label: "المفضلة",   active: isFav,        activeColor: "#EF4444", onPress: handleFavorite },
+            { icon: watchStatusMeta ? watchStatusMeta.icon : "bookmark-outline", activeIcon: watchStatusMeta ? watchStatusMeta.activeIcon : "bookmark", label: watchStatusMeta ? watchStatusMeta.shortLabel : "قائمتي", active: isFav, activeColor: watchStatusMeta ? watchStatusMeta.color : "#8B5CF6", onPress: () => setShowWatchlist(true) },
             { icon: "star-outline",       activeIcon: "star",       label: "تقييمي",    active: myRating > 0, activeColor: "#FBBF24", onPress: () => setShowRating(true) },
           ].map(({ icon, activeIcon, label, active, activeColor, onPress }) => (
              <Pressable key={label} onPress={onPress} focusable={tvMode}
@@ -1088,6 +1097,17 @@ export default function AnimeDetailScreen() {
           </View>
         </Modal>
       )}
+
+      <WatchlistStatusModal
+        visible={showWatchlist}
+        title={arabicTitle || anime?.title?.english || anime?.title?.romaji || ""}
+        thumbnail={anime?.coverImage?.extraLarge || anime?.coverImage?.large}
+        currentStatus={currentWatchStatus}
+        isSaved={isFav}
+        onSelect={(status) => void handleSelectWatchStatus(status)}
+        onRemove={isFav ? () => void handleRemoveWatchlist() : undefined}
+        onClose={() => setShowWatchlist(false)}
+      />
     </View>
   );
 }
