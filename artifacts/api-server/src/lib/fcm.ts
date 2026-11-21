@@ -2,6 +2,8 @@ import { createSign } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
+import { buildFcmAndroidConfig } from "./pushAlertsLogic.mjs";
+
 const FCM_SCOPE = "https://www.googleapis.com/auth/firebase.messaging";
 // Keep the private credential outside the repository and outside Replit.
 const DEFAULT_SERVICE_ACCOUNT_FILE = "/etc/nova/fcm-service-account.json";
@@ -18,6 +20,7 @@ type FcmPayload = {
   body?: unknown;
   channelId?: unknown;
   sound?: unknown;
+  tag?: unknown;
   richContent?: { image?: unknown };
   data?: Record<string, unknown>;
 };
@@ -201,20 +204,7 @@ export async function sendFcmMessage(token: string, payload: FcmPayload): Promis
       token,
       ...(Object.keys(notification).length ? { notification } : {}),
       ...(data ? { data } : {}),
-      android: {
-        priority: "HIGH",
-        ttl: "86400s",
-        direct_boot_ok: true,
-        notification: {
-          channel_id: typeof payload.channelId === "string" ? payload.channelId : "nova-new-episodes",
-          ...(typeof payload.sound === "string" ? { sound: payload.sound } : {}),
-          default_sound: true,
-          default_vibrate_timings: true,
-          notification_priority: "PRIORITY_MAX",
-          visibility: "PUBLIC",
-          ...(image ? { image } : {}),
-        },
-      },
+      android: buildFcmAndroidConfig(payload),
     };
 
     let response: Response;

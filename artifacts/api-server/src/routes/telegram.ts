@@ -10,6 +10,7 @@ import { sbInsert, sbSelect } from "../lib/supabaseClient.js";
 import { getEnvOrDb } from "../lib/dbConfig.js";
 import { saveNotification } from "./notifications.js";
 import { sendNewEpisodePushDetailed, sendSubscribedAlertPush } from "./push.js";
+import { detectNewEpisodesByWatermark, parseCartoonAlertKey } from "../lib/pushAlertsLogic.mjs";
 
 const router = Router();
 
@@ -1137,6 +1138,100 @@ async function pollDubbedLatest(): Promise<void> {
   }
 }
 
+
+async function pollSubscribedCartoonAlerts(): Promise<void> {
+  try {
+    const alertRows = await sbSelect<{
+      content_kind: string;
+      content_key: string;
+      title: string;
+      title_ar?: string | null;
+      poster_url?: string | null;
+    }>("mobile_episode_alerts", { content_kind: "eq.dubbed" }, { limit: 500 });
+    if (!alertRows.length) return;
+
+    const uniqueShows = new Map<string, {
+      provider: "sp" | "carateen";
+      showId: string;
+      contentKey: string;
+      title: string;
+      titleAr: string;
+      posterUrl: string;
+    }>();
+
+    for (const row of alertRows) {
+      const parsed = parseCartoonAlertKey(row.content_key);
+      if (!parsed || (parsed.provider !== "sp" && parsed.provider !== "carateen")) continue;
+      const mapKey = `${parsed.provider}:${parsed.showId}`;
+      if (!uniqueShows.has(mapKey)) {
+        uniqueShows.set(mapKey, {
+          provider: parsed.provider,
+          showId: parsed.showId,
+          contentKey: mapKey,
+          title: String(row.title_ar || row.title || mapKey).trim(),
+          titleAr: String(row.title_ar || row.title || "").trim(),
+          posterUrl: String(row.poster_url || "").trim(),
+        });
+      }
+    }
+
+    if (!uniqueShows.size) return;
+
+    for (const show of uniqueShows.values()) {
+      try {
+        const resp = await fetch(
+          `${internalApiBaseUrl()}/api/dubbed/carateen/episodes?provider=${encodeURIComponent(show.provider)}&showId=${encodeURIComponent(show.showId)}&refresh=1`,
+          { headers: { "User-Agent": "NovaBot/1.0", Accept: "application/json" }, signal: AbortSignal.timeout(15_000) },
+        );
+        if (!resp.ok) continue;
+        const json = await resp.json().catch(() => null) as { episodes?: Array<{ epId?: string; number?: number; title?: string; thumbnail?: string }> } | null;
+        const episodes = Array.isArray(json?.episodes) ? json.episodes : [];
+        if (!episodes.length) continue;
+
+        const wmKey = `bell_wm:dubbed:${show.contentKey}`;
+        const wmRows = await sbSelect<{ value: string }>("app_config", { key: `eq.${wmKey}` }, { limit: 1 });
+        let prevState: { knownIds?: string[]; maxNumber?: number; count?: number } | null = null;
+        if (wmRows[0]?.value) {
+          try { prevState = JSON.parse(wmRows[0].value); } catch { prevState = null; }
+        }
+
+        const diff = detectNewEpisodesByWatermark(prevState, episodes);
+        await sbUpsert("app_config", { key: wmKey, value: JSON.stringify(diff.nextState) }, "key").catch(() => {});
+
+        if (diff.isSeed) {
+          console.log(`[scheduler] 🌱 seeded cartoon bell watermark ${show.contentKey} (${show.title}) episodes=${episodes.length}`);
+          continue;
+        }
+        if (!diff.newEpisodes.length) continue;
+
+        // Send alert for the latest newly added episode (max 2 per show per cycle to avoid spam)
+        for (const ep of diff.newEpisodes.slice(-2)) {
+          const poster = ep.thumbnail || show.posterUrl || undefined;
+          const bellPush = await sendSubscribedAlertPush({
+            contentKind: "dubbed",
+            contentKey: show.contentKey,
+            title: show.title,
+            titleAr: show.titleAr || show.title,
+            episode: ep.number,
+            posterUrl: poster,
+            eventKey: `cartoon:${show.contentKey}:${ep.epId || ep.number}`,
+            sectionLabel: show.provider === "sp" ? "سبيستون / كرتون" : "كرتون",
+            routeData: {
+              provider: show.provider,
+              showId: show.showId,
+            },
+          });
+          console.log(`[scheduler] 🔔 cartoon bell push ${show.contentKey} ep=${ep.number} subscribers=${bellPush.matchedTokens.length} delivered=${bellPush.summary?.delivered ?? 0}`);
+        }
+      } catch (showErr: any) {
+        console.warn(`[scheduler] cartoon bell check failed for ${show.contentKey}:`, showErr?.message || String(showErr));
+      }
+    }
+  } catch (err: any) {
+    console.warn("[scheduler] pollSubscribedCartoonAlerts error:", err?.message || String(err));
+  }
+}
+
 async function resolveMangaStory(item: any): Promise<string> {
   const existing = String(item?.description || "").trim();
   if (existing.length >= 25) return existing;
@@ -1390,6 +1485,7 @@ async function runSchedulerCycleInner(): Promise<void> {
   // مع بذر أول دورة ومنع التكرار نهائياً عبر app_config.
   await pollAnimeSlayerDirect();
   await pollDubbedLatest();
+  await pollSubscribedCartoonAlerts();
   await pollMangaLatest();
   await pollNewsLatest();
 }

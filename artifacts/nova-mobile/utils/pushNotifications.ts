@@ -10,7 +10,8 @@ export const PUSH_REGISTERED_KEY = "nova-push-token-registered-v1";
 export const PUSH_ENABLED_KEY = "nova-push-notifications-enabled-v1";
 const PUSH_TOKEN_KEY = "nova-expo-push-token-v1";
 const FCM_TOKEN_CHECKED_AT_KEY = "nova-fcm-token-checked-at-v1";
-const CHANNEL_ID = "nova-new-episodes";
+export const PUSH_CHANNEL_ID = "nova-alerts-v2";
+const CHANNEL_ID = PUSH_CHANNEL_ID;
 let registrationInFlight: Promise<boolean> | null = null;
 let registrationAgain = false;
 let forceTokenRefreshAgain = false;
@@ -59,10 +60,12 @@ async function registerPushNotificationsOnce(forceTokenRefresh = false): Promise
 
     if (Platform.OS === "android") {
       await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
-        name: "حلقات جديدة",
+        name: "تنبيهات الحلقات الجديدة",
         importance: Notifications.AndroidImportance.MAX,
         lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
         enableVibrate: true,
+        enableLights: true,
+        lightColor: "#8B5CF6",
         sound: "default",
         vibrationPattern: [0, 250, 120, 250],
         showBadge: true,
@@ -161,6 +164,7 @@ async function registerPushNotificationsOnce(forceTokenRefresh = false): Promise
             ...(previousToken && previousToken !== token ? { previousToken } : {}),
             ...(storedUserId ? { userId: storedUserId } : {}),
             platform: Platform.OS,
+            channelId: CHANNEL_ID,
             appVersion: Constants.expoConfig?.version || "1.0.0",
           }),
         });
@@ -325,4 +329,36 @@ export function subscribeToPushTokenChanges(): () => void {
     tokenListener?.remove();
     tokenListener = null;
   };
+}
+export async function sendDelayedTestPush(delaySeconds = 10): Promise<{
+  ok: boolean;
+  scheduledInSeconds?: number;
+  error?: string;
+}> {
+  if (Platform.OS === "web") return { ok: false, error: "غير مدعوم على الويب" };
+  try {
+    const active = await getActivePushToken({ requestPermission: true });
+    if (active.permissionDenied) {
+      return { ok: false, error: "يرجى السماح بإذن الإشعارات للتطبيق من إعدادات الهاتف أولاً" };
+    }
+    if (!active.token) {
+      return { ok: false, error: "تعذر الحصول على رمز الإشعارات من الجهاز — أعد المحاولة" };
+    }
+    const res = await secureFetch(`${getBaseUrl()}/api/push/test-delayed`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        token: active.token,
+        delaySeconds,
+        channelId: CHANNEL_ID,
+      }),
+    });
+    const data = await res.json().catch(() => null) as { ok?: boolean; scheduledInSeconds?: number; error?: string } | null;
+    if (!res.ok || !data?.ok) {
+      return { ok: false, error: data?.error || "تعذر إرسال الإشعار التجريبي الآن" };
+    }
+    return { ok: true, scheduledInSeconds: data.scheduledInSeconds ?? delaySeconds };
+  } catch {
+    return { ok: false, error: "تعذر الاتصال بالخادم — تحقق من الإنترنت" };
+  }
 }

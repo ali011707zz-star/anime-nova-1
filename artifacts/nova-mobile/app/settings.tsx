@@ -27,6 +27,7 @@ import {
   getPushNotificationsStatus,
   setPushNotificationsEnabled,
   registerPushNotifications,
+  sendDelayedTestPush,
 } from "@/utils/pushNotifications";
 
 const THEMES: { label: string; value: string; dot: string; desc: string }[] = [
@@ -1893,6 +1894,8 @@ export default function SettingsScreen() {
   const [pushRegistered, setPushRegistered] = useState(false);
   const [notifsReady, setNotifsReady] = useState(false);
   const [notifsBusy, setNotifsBusy] = useState(false);
+  const [testPushBusy, setTestPushBusy] = useState(false);
+  const [testPushNotice, setTestPushNotice] = useState<{ ok: boolean; text: string } | null>(null);
   const [showReport, setShowReport] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
@@ -2436,6 +2439,69 @@ export default function SettingsScreen() {
                 ios_backgroundColor={colors.border}
               />
             </View>
+            {!tvMode && Platform.OS !== "web" && (
+              <>
+                <NavRow
+                  icon="paper-plane-outline"
+                  iconColor="#10b981"
+                  iconBg="rgba(16,185,129,0.12)"
+                  label={testPushBusy ? "جارٍ جدولة الإشعار التجريبي…" : "اختبار إشعار الخلفية (بعد 10 ثوانٍ)"}
+                  sub="اضغط ثم أغلق التطبيق فوراً للتأكد من وصول الإشعارات في الخلفية"
+                  onPress={() => {
+                    if (testPushBusy) return;
+                    setTestPushBusy(true);
+                    setTestPushNotice(null);
+                    void sendDelayedTestPush(10).then((res) => {
+                      if (res.ok) {
+                        setPushRegistered(true);
+                        setNotifs(true);
+                        setTestPushNotice({
+                          ok: true,
+                          text: "تمت الجدولة! أغلق التطبيق الآن — سيصلك إشعار حقيقي خلال 10 ثوانٍ",
+                        });
+                      } else {
+                        setTestPushNotice({
+                          ok: false,
+                          text: res.error || "تعذر إرسال الإشعار التجريبي",
+                        });
+                      }
+                    }).finally(() => setTestPushBusy(false));
+                  }}
+                />
+                {testPushNotice && (
+                  <View
+                    style={{
+                      paddingHorizontal: 14,
+                      paddingVertical: 9,
+                      borderBottomWidth: StyleSheet.hairlineWidth,
+                      borderBottomColor: colors.border,
+                      backgroundColor: testPushNotice.ok ? "rgba(16,185,129,0.10)" : "rgba(239,68,68,0.10)",
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: testPushNotice.ok ? "#10b981" : "#f87171",
+                        fontSize: 12,
+                        fontFamily: "Cairo_600SemiBold",
+                        textAlign: "right",
+                      }}
+                    >
+                      {testPushNotice.text}
+                    </Text>
+                  </View>
+                )}
+                <NavRow
+                  icon="battery-charging-outline"
+                  iconColor="#f59e0b"
+                  iconBg="rgba(245,158,11,0.12)"
+                  label="إعدادات الإشعارات والبطارية في الهاتف"
+                  sub="اجعل البطارية «بلا قيود» في شاومي/سامسونج لو تأخرت الإشعارات"
+                  onPress={() => {
+                    void Linking.openSettings().catch(() => {});
+                  }}
+                />
+              </>
+            )}
           </Card>
         </View>
 

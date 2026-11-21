@@ -88,6 +88,7 @@ async function ensureDeviceStorageSchema(): Promise<void> {
           disabled_at TIMESTAMPTZ
         );
         ALTER TABLE mobile_push_tokens ADD COLUMN IF NOT EXISTS user_id UUID;
+        ALTER TABLE mobile_push_tokens ADD COLUMN IF NOT EXISTS channel_id TEXT;
         CREATE INDEX IF NOT EXISTS idx_mobile_push_tokens_active
           ON mobile_push_tokens(disabled_at, last_seen_at DESC);
         CREATE INDEX IF NOT EXISTS idx_mobile_push_tokens_user_active

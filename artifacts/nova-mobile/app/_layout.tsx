@@ -441,7 +441,27 @@ function PushRegistrationBridge({ disabled }: { disabled: boolean }) {
       } as any);
       return;
     }
-    if (contentKind === "dubbed" && (rawData.sd2Slug || rawData.contentKey)) {
+    if (contentKind === "dubbed" && (rawData.showId || rawData.sd2Slug || rawData.contentKey)) {
+      const rawKey = String(rawData.contentKey || "").trim();
+      const spOrCrMatch = rawKey.match(/^(sp|carateen):([0-9]+)$/i);
+      const explicitProvider = String(rawData.provider || "").trim().toLowerCase();
+      if (explicitProvider === "sp" || explicitProvider === "carateen" || spOrCrMatch) {
+        const provider = (explicitProvider === "sp" || explicitProvider === "carateen"
+          ? explicitProvider
+          : spOrCrMatch![1].toLowerCase()) as "sp" | "carateen";
+        const showId = String(rawData.showId || spOrCrMatch?.[2] || rawKey).trim();
+        router.push({
+          pathname: "/dubbed/[id]",
+          params: {
+            id: showId,
+            provider,
+            showId,
+            ...(title ? { title } : {}),
+            ...(poster ? { img: poster } : {}),
+          },
+        } as any);
+        return;
+      }
       const sd2Slug = String(rawData.sd2Slug || rawData.contentKey).replace(/^sd2:/i, "");
       router.push({
         pathname: "/dubbed/[id]",

@@ -9,7 +9,7 @@ const KNOWN_EPISODES_KEY = "nova-known-latest-episodes-v2";
 const NOTIFIED_EPISODES_KEY = "nova-notified-latest-episodes-v1";
 const LAST_SYNC_KEY = "nova-latest-episodes-last-sync-v1";
 const SYNC_MIN_INTERVAL_MS = 3 * 60_000;
-const CHANNEL_ID = "nova-new-episodes";
+const CHANNEL_ID = "nova-alerts-v2";
 let ready: Promise<boolean> | null = null;
 let syncInFlight: Promise<void> | null = null;
 
@@ -50,10 +50,12 @@ function configure(): Promise<boolean> {
         }
         if (Platform.OS === "android") {
           await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
-            name: "حلقات جديدة",
+            name: "تنبيهات الحلقات الجديدة",
             importance: Notifications.AndroidImportance.MAX,
             lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
             enableVibrate: true,
+            enableLights: true,
+            lightColor: "#8B5CF6",
             sound: "default",
             vibrationPattern: [0, 250, 120, 250],
             showBadge: true,

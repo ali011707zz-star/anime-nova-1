@@ -2,7 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Platform } from "react-native";
 import { getBaseUrl } from "./baseUrl";
 import { secureFetch } from "./secureApi";
-import { getActivePushToken, getCachedPushToken } from "./pushNotifications";
+import { getActivePushToken, getCachedPushToken, PUSH_CHANNEL_ID } from "./pushNotifications";
 import {
   makeAlertKey,
   normalizeAlertKind,
@@ -142,6 +142,7 @@ export async function toggleEpisodeAlert(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         token: tokenResult.token,
+        channelId: PUSH_CHANNEL_ID,
         contentKind: kind,
         contentKey: String(input.contentKey || "").trim(),
         ...(input.animeId && Number(input.animeId) > 0 ? { animeId: Number(input.animeId) } : {}),

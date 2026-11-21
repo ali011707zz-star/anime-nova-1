@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { sbDelete, sbInsertIgnore, sbPatch, sbSelect, sbUpsert } from "../lib/supabaseClient.js";
 import { getMobileUserId } from "../lib/security.js";
 import { sendFcmMessage } from "../lib/fcm.js";
+import { resolveDeviceChannelId, sanitizeChannelId } from "../lib/pushAlertsLogic.mjs";
 
 const router = Router();
 const EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send";
@@ -102,6 +103,9 @@ type PushTokenRow = {
   user_id?: string;
   platform?: string;
   app_version?: string;
+  channel_id?: string | null;
+  disabled_at?: string | null;
+  last_seen_at?: string | null;
 };
 
 function isExpoToken(value: string): boolean {
@@ -159,6 +163,7 @@ router.post(["/push/register", "/register"], async (req: Request, res: Response)
         ? req.body.userId.trim()
         : undefined);
 
+    const channelId = sanitizeChannelId(req.body?.channelId);
     const saved = await sbUpsert(
       "mobile_push_tokens",
       {
@@ -166,6 +171,7 @@ router.post(["/push/register", "/register"], async (req: Request, res: Response)
         ...(resolvedUserId ? { user_id: resolvedUserId } : {}),
         platform,
         app_version: appVersion,
+        ...(channelId ? { channel_id: channelId } : {}),
         last_seen_at: new Date().toISOString(),
         disabled_at: null,
       },
@@ -307,12 +313,14 @@ router.post(["/push/alerts/toggle", "/alerts/toggle"], async (req: Request, res:
     }
 
     // Ensure token is active in mobile_push_tokens so alerts always deliver
+    const toggleChannelId = sanitizeChannelId(req.body?.channelId);
     await sbUpsert(
       "mobile_push_tokens",
       {
         token,
         ...(resolvedUserId ? { user_id: resolvedUserId } : {}),
         platform: isExpoToken(token) ? "ios" : "android",
+        ...(toggleChannelId ? { channel_id: toggleChannelId } : {}),
         last_seen_at: new Date().toISOString(),
         disabled_at: null,
       },
@@ -342,6 +350,108 @@ router.post(["/push/alerts/toggle", "/alerts/toggle"], async (req: Request, res:
     console.error("[push] POST /push/alerts/toggle failed:", error?.message || String(error));
     return res.status(503).json({ error: "Could not update alert" });
   }
+});
+
+const testPushCooldown = new Map<string, number>();
+
+router.get(["/push/diagnostics", "/diagnostics"], async (req: Request, res: Response) => {
+  const token = typeof req.query.token === "string" ? req.query.token.trim() : "";
+  if (!validToken(token)) {
+    return res.status(400).json({ error: "Invalid push token" });
+  }
+  try {
+    const [tokenRows, alertRows, deliveryRows] = await Promise.all([
+      sbSelect<PushTokenRow>("mobile_push_tokens", { token: `eq.${token}` }, { limit: 1 }),
+      sbSelect<EpisodeAlertRow>(EPISODE_ALERTS_TABLE, { token: `eq.${token}` }, { limit: 500 }),
+      sbSelect<PushDeliveryRow>(PUSH_DELIVERIES_TABLE, { token: `eq.${token}`, order: "id.desc" }, { limit: 1 }),
+    ]);
+    const row = tokenRows[0];
+    const lastDelivery = deliveryRows[0];
+    return res.json({
+      ok: true,
+      registered: Boolean(row),
+      active: Boolean(row && !row.disabled_at),
+      channelId: resolveDeviceChannelId(row?.channel_id),
+      alertsCount: alertRows.length,
+      lastSeenAt: row?.last_seen_at || null,
+      lastDeliveryStatus: lastDelivery?.status || null,
+      lastDeliveryAt: lastDelivery?.created_at || null,
+    });
+  } catch (error: any) {
+    console.error("[push] GET /push/diagnostics failed:", error?.message || String(error));
+    return res.status(503).json({ error: "Diagnostics unavailable" });
+  }
+});
+
+router.post(["/push/test-delayed", "/test-delayed"], async (req: Request, res: Response) => {
+  const token = typeof req.body?.token === "string" ? req.body.token.trim() : "";
+  if (!validToken(token)) {
+    return res.status(400).json({ error: "Invalid push token" });
+  }
+  const now = Date.now();
+  const prevAt = testPushCooldown.get(token) || 0;
+  if (now - prevAt < 12_000) {
+    const waitSec = Math.ceil((12_000 - (now - prevAt)) / 1000);
+    return res.status(429).json({ error: `انتظر ${waitSec} ثوانٍ قبل اختبار جديد` });
+  }
+  testPushCooldown.set(token, now);
+  if (testPushCooldown.size > 2000) {
+    for (const [k, ts] of testPushCooldown.entries()) {
+      if (now - ts > 60_000) testPushCooldown.delete(k);
+    }
+  }
+
+  const rawDelay = Number(req.body?.delaySeconds ?? 10);
+  const delaySeconds = Number.isFinite(rawDelay) ? Math.min(30, Math.max(0, Math.trunc(rawDelay))) : 10;
+  const reqChannel = sanitizeChannelId(req.body?.channelId);
+
+  let storedChannel: string | null = null;
+  try {
+    const rows = await sbSelect<PushTokenRow>("mobile_push_tokens", { token: `eq.${token}` }, { limit: 1 });
+    storedChannel = rows[0]?.channel_id || null;
+    if (reqChannel) {
+      await sbUpsert(
+        "mobile_push_tokens",
+        {
+          token,
+          platform: isExpoToken(token) ? "ios" : "android",
+          channel_id: reqChannel,
+          last_seen_at: new Date().toISOString(),
+          disabled_at: null,
+        },
+        "token",
+      ).catch(() => {});
+    }
+  } catch {}
+
+  const channelId = resolveDeviceChannelId(reqChannel || storedChannel);
+  const sendNow = async () => {
+    const payload = {
+      title: "🔔 اختبار إشعارات الخلفية · Anime NOVA",
+      body: "ممتاز! إشعارات الخلفية تعمل بقوتها الكاملة حتى عند إغلاق التطبيق 🎉",
+      channelId,
+      sound: "default",
+      tag: `nova-test-${Date.now()}`,
+      data: { type: "push-test", channelId },
+    };
+    if (isExpoToken(token)) {
+      await postExpoJson(EXPO_PUSH_URL, [{ ...payload, to: token }], "ticket").catch(() => {});
+    } else {
+      const result = await sendFcmMessage(token, payload);
+      console.info(`[push] delayed test push token_suf=${token.slice(-6)} channel=${channelId} ok=${result.ok}${result.ok ? "" : ` code=${result.code}`}`);
+    }
+  };
+
+  if (delaySeconds === 0) {
+    await sendNow();
+    return res.json({ ok: true, scheduledInSeconds: 0, channelId });
+  }
+  setTimeout(() => {
+    void sendNow().catch((err) => {
+      console.warn("[push] delayed test push failed:", err instanceof Error ? err.message : String(err));
+    });
+  }, delaySeconds * 1000);
+  return res.json({ ok: true, scheduledInSeconds: delaySeconds, channelId });
 });
 
 async function disableToken(token: string): Promise<boolean> {
@@ -720,21 +830,23 @@ export async function sendMobilePushDetailed(input: {
     return { eventKey, targets: 0, delivered: 0, pending: 0, failed: 0, queueReady: true, complete: true };
   }
 
-  const payload = {
+  const basePayload = {
     sound: "default",
     title: input.title,
     body: input.body,
-    channelId: "nova-new-episodes",
+    tag: eventKey.slice(0, 80),
     ...(input.posterUrl ? { richContent: { image: input.posterUrl } } : {}),
     data: input.data || {},
   };
-  const payloadJson = JSON.stringify(payload);
   try {
     for (let offset = 0; offset < validRows.length; offset += 100) {
       const batch = validRows.slice(offset, offset + 100).map((row) => ({
         event_key: eventKey,
         token: row.token,
-        payload_json: payloadJson,
+        payload_json: JSON.stringify({
+          ...basePayload,
+          channelId: resolveDeviceChannelId(row.channel_id),
+        }),
         status: "queued",
         attempts: 0,
         next_attempt_at: new Date().toISOString(),
