@@ -2,7 +2,7 @@ import { SafePosterImage } from "@/components/SafePosterImage";
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   View, Text, Image, ScrollView, ActivityIndicator,
-  StyleSheet, Platform, Animated, Easing, Alert, I18nManager, BackHandler,
+  StyleSheet, Platform, Animated, AppState, Easing, Alert, I18nManager, BackHandler,
 } from "react-native";
 
 const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
@@ -766,16 +766,111 @@ function ServerScanAnimation() {
   );
 }
 
-/* Native MP4 replaces animated GIF/WebP rendering. This keeps the loading
-   animation reliable on Android and avoids a WebView dependency in this
-   critical screen. */
-function ServerScanGif() {
+/* Native MP4 replaces animated GIF/WebP rendering. Split into an inner video
+   player component so that if Android Media3/ExoPlayer stalls or errors, we
+   unmount the native video player immediately (freeing the hardware decoder)
+   and render the lightweight Animated fallback with zero memory leak. */
+function ServerScanVideoPlayer({ onFallback }: { onFallback: () => void }) {
   const { d } = useWatchStyles();
+  const fallbackCalledRef = useRef(false);
+  const triggerFallback = useCallback(() => {
+    if (fallbackCalledRef.current) return;
+    fallbackCalledRef.current = true;
+    onFallback();
+  }, [onFallback]);
+
   const player = useVideoPlayer(require("../assets/nova-loading.mp4"), (instance) => {
     instance.loop = true;
     instance.muted = true;
-    instance.play();
   });
+
+  useEffect(() => {
+    let alive = true;
+    let lastTime = -1;
+    let lastMovedAt = Date.now();
+    let nudged = false;
+
+    const safePlay = () => {
+      if (!alive) return;
+      try { player.play(); } catch {}
+    };
+
+    safePlay();
+
+    const statusSub = player.addListener("statusChange", (event: any) => {
+      if (!alive) return;
+      if (event?.status === "readyToPlay") {
+        safePlay();
+      } else if (event?.status === "error") {
+        triggerFallback();
+      }
+    });
+
+    const endSub = player.addListener("playToEnd", () => {
+      if (!alive) return;
+      try {
+        player.currentTime = 0;
+        player.play();
+      } catch {
+        triggerFallback();
+      }
+    });
+
+    const appSub = AppState.addEventListener("change", (nextState) => {
+      if (!alive) return;
+      if (nextState === "active") {
+        lastMovedAt = Date.now();
+        safePlay();
+      } else {
+        try { player.pause(); } catch {}
+      }
+    });
+
+    /* Watchdog: إذا تجمّد ديكودر الفيديو على أندرويد (إطار ثابت بلا حركة)،
+       نحاول إنعاشه مرة واحدة ثم ننتقل للأنيميشن الخفيف ونفكّك المشغّل فوراً. */
+    const watchdog = setInterval(() => {
+      if (!alive) return;
+      if (AppState.currentState && AppState.currentState !== "active") {
+        lastMovedAt = Date.now();
+        return;
+      }
+      let ct = 0;
+      try {
+        const raw = Number(player.currentTime);
+        ct = Number.isFinite(raw) ? raw : 0;
+      } catch {
+        triggerFallback();
+        return;
+      }
+      if (Math.abs(ct - lastTime) > 0.02) {
+        lastTime = ct;
+        lastMovedAt = Date.now();
+        nudged = false;
+        return;
+      }
+      const stalledMs = Date.now() - lastMovedAt;
+      if (stalledMs >= 2_500 && !nudged) {
+        nudged = true;
+        try {
+          if (ct > 0 && Number.isFinite(player.duration) && player.duration > 0 && ct >= player.duration - 0.2) {
+            player.currentTime = 0;
+          }
+          player.play();
+        } catch {}
+      } else if (stalledMs >= 4_500) {
+        triggerFallback();
+      }
+    }, 1_000);
+
+    return () => {
+      alive = false;
+      clearInterval(watchdog);
+      try { statusSub.remove(); } catch {}
+      try { endSub.remove(); } catch {}
+      try { appSub.remove(); } catch {}
+      try { player.pause(); } catch {}
+    };
+  }, [player, triggerFallback]);
 
   return (
     <VideoView
@@ -790,11 +885,20 @@ function ServerScanGif() {
   );
 }
 
+function ServerScanGif() {
+  const [useFallback, setUseFallback] = useState(false);
+  const handleFallback = useCallback(() => setUseFallback(true), []);
+  if (useFallback) return <ServerScanAnimation />;
+  return <ServerScanVideoPlayer onFallback={handleFallback} />;
+}
+
 /* timeout موحّد افتراضي */
 // Leave room for the API's slowest provider deadline plus scraper-queue wait.
 // Per-provider values below must never force-cancel a request before that.
 const SITE_TIMEOUT_MS = 60_000;
-const AVAILABILITY_TIMEOUT_MS = 90_000;
+const AVAILABILITY_TIMEOUT_MS = 50_000;
+const AVAILABILITY_FIRST_CHUNK_TIMEOUT_MS = 20_000;
+const AVAILABILITY_IDLE_CHUNK_TIMEOUT_MS = 22_000;
 const SITE_TIMEOUT_MAP: Record<string, number> = {
   anifox:       35_000,
   animewitcher: 38_000,
@@ -1120,6 +1224,13 @@ export default function WatchScreen() {
   const seenKeys          = useRef(new Set<string>());
   const lastTimeRef       = useRef(0);
   const lastDurationRef   = useRef(0);
+  const lastLocalSaveAtRef = useRef(0);
+  const lastServerSaveRef = useRef<{ key: string; sec: number; at: number }>({ key: "", sec: -1, at: 0 });
+  const screenRef         = useRef<Screen>(screen);
+  screenRef.current = screen;
+  const saveProgressRef   = useRef<(() => Promise<void>) | null>(null);
+  const autoRetriedAvailabilityRef = useRef(false);
+  const [scanSlow, setScanSlow] = useState(false);
   const isMountedRef      = useRef(true);
   const fetchEpochRef     = useRef(0);
   const inFlightSitesRef  = useRef<Set<string>>(new Set());
@@ -1302,27 +1413,45 @@ export default function WatchScreen() {
   const srcCacheKey    = !isAwDubbed && anime ? `anime-srcs-${anime}-e${epNum}` : null;
   const SRC_CACHE_TTL  = 5 * 60 * 1000; // 5 minutes
 
-  /* ── Load resume time فقط ── */
+  /* ── Load resume time (من التخزين المحلي أولاً + سجل المشاهدة كاحتياط) ── */
   useEffect(() => {
     let active = true;
-    if (isAwDubbed) setResumeTime(0);
+    autoRetriedAvailabilityRef.current = false;
+    lastTimeRef.current = 0;
+    lastDurationRef.current = 0;
+    lastLocalSaveAtRef.current = 0;
+    setResumeTime(0);
+    const numericAnimeId = !isAwDubbed && anime ? parseInt(anime, 10) : 0;
     const historyPosition = isAwDubbed
-      ? watchHistory.find((item) =>
+      ? (watchHistory.find((item) =>
         item.contentKind === "aw-dubbed"
         && item.contentKey === awSeries
         && item.ep === epNum,
-      )?.position || 0
-      : 0;
+      )?.position || 0)
+      : (numericAnimeId > 0
+        ? (watchHistory.find((item) =>
+          (!item.contentKind || item.contentKind === "anime")
+          && item.animeId === numericAnimeId
+          && item.ep === epNum,
+        )?.position || 0)
+        : 0);
     AsyncStorage.getItem(progressKey).then(v => {
       if (!active || !isMountedRef.current) return;
       const storedPosition = Number.parseFloat(v || "") || 0;
-      setResumeTime(storedPosition > 0 ? storedPosition : historyPosition);
+      const bestPos = Math.max(storedPosition, historyPosition);
+      if (bestPos > 0) {
+        if (lastTimeRef.current <= 0) lastTimeRef.current = bestPos;
+        setResumeTime(Math.floor(bestPos));
+      }
     }).catch(() => {
-      if (active && isMountedRef.current) setResumeTime(historyPosition);
+      if (active && isMountedRef.current && historyPosition > 0) {
+        if (lastTimeRef.current <= 0) lastTimeRef.current = historyPosition;
+        setResumeTime(Math.floor(historyPosition));
+      }
     });
     return () => { active = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [progressKey, isAwDubbed, awSeries, epNum]);
+  }, [progressKey, isAwDubbed, awSeries, anime, epNum]);
 
   /* ── Availability SSE: صفوفها تلميحات وليست إثباتاً لقابلية التشغيل ── */
   /* ── Cleanup: إلغاء كل طلبات الجلب الجارية عند تغيير الحلقة أو إلغاء mount ── */
@@ -1421,7 +1550,12 @@ export default function WatchScreen() {
 
   /* ── Availability-only scan: بلا روابط تشغيل؛ الجلب الفعلي يبقى عند الضغط ── */
   useEffect(() => {
-    if (isAwDubbed || !titleStr) return;
+    if (isAwDubbed) return;
+    if (!titleStr) {
+      setAvailabilityDone(true);
+      setAvailabilityError(true);
+      return;
+    }
     availabilityAbortRef.current?.abort();
     availabilityAbortRef.current = null;
     const forceFresh = forceAvailabilityRefreshRef.current;
@@ -1547,6 +1681,48 @@ export default function WatchScreen() {
       storeAvailabilityHintRows(availabilityHintKey, stagedSlots);
     };
 
+    let activeReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+    let readTimer: ReturnType<typeof setTimeout> | null = null;
+    const closeReaderSafely = () => {
+      if (readTimer) {
+        clearTimeout(readTimer);
+        readTimer = null;
+      }
+      const r = activeReader;
+      activeReader = null;
+      if (r) {
+        try { r.cancel().catch(() => {}); } catch {}
+        try { r.releaseLock(); } catch {}
+      }
+    };
+
+    const readChunkWithTimeout = (
+      reader: ReadableStreamDefaultReader<Uint8Array>,
+      timeoutMs: number,
+    ): Promise<ReadableStreamReadResult<Uint8Array>> => {
+      return new Promise((resolve, reject) => {
+        if (readTimer) clearTimeout(readTimer);
+        readTimer = setTimeout(() => {
+          readTimer = null;
+          timedOut = true;
+          try { reader.cancel().catch(() => {}); } catch {}
+          controller.abort();
+          reject(new Error("availability_idle_timeout"));
+        }, timeoutMs);
+        reader.read().then(
+          (res) => {
+            if (readTimer) { clearTimeout(readTimer); readTimer = null; }
+            resolve(res);
+          },
+          (err) => {
+            if (readTimer) { clearTimeout(readTimer); readTimer = null; }
+            reject(err);
+          },
+        );
+      });
+    };
+
+    let requestFailed = false;
     const run = async () => {
       try {
         const response = await secureStreamFetch(
@@ -1555,10 +1731,12 @@ export default function WatchScreen() {
         );
         if (!response.ok || !response.body) throw new Error(`availability_${response.status}`);
         const reader = response.body.getReader();
+        activeReader = reader;
         const decoder = new TextDecoder();
         let buffer = "";
         let sawDone = false;
         let scanIncomplete = false;
+        let receivedAnyData = false;
         const consume = (text: string) => {
           buffer += text;
           const blocks = buffer.split(/\r?\n\r?\n/);
@@ -1595,13 +1773,17 @@ export default function WatchScreen() {
                  Some backend versions use a different SSE event name and
                  still send the same {site, quality} metadata. */
               applyRow(JSON.parse(payload));
+              receivedAnyData = true;
             } catch {
               /* تجاهل حدث SSE غير صالح */
             }
           }
         };
         while (!cancelled) {
-          const { value, done } = await reader.read();
+          const chunkTimeout = receivedAnyData
+            ? AVAILABILITY_IDLE_CHUNK_TIMEOUT_MS
+            : AVAILABILITY_FIRST_CHUNK_TIMEOUT_MS;
+          const { value, done } = await readChunkWithTimeout(reader, chunkTimeout);
           if (done) break;
           if (value) consume(decoder.decode(value, { stream: true }));
         }
@@ -1633,6 +1815,7 @@ export default function WatchScreen() {
           buffer = "";
         }
         if (!cancelled && (!sawDone || scanIncomplete) && isMountedRef.current) {
+          requestFailed = true;
           setAvailabilityError(true);
           console.warn(
             `[playback-trace] id=${playbackTraceId} component=availability stage=incomplete elapsed_ms=${Date.now() - availabilityRequestStartedAt} reason=${scanIncomplete ? "server_incomplete" : "missing_done"}`,
@@ -1640,6 +1823,7 @@ export default function WatchScreen() {
         }
       } catch {
         if ((timedOut || !controller.signal.aborted) && isMountedRef.current) {
+          requestFailed = true;
           setAvailabilityError(true);
           console.warn(
             `[playback-trace] id=${playbackTraceId} component=availability stage=request_error elapsed_ms=${Date.now() - availabilityRequestStartedAt} reason=${timedOut ? "timeout" : "request"}`,
@@ -1647,12 +1831,23 @@ export default function WatchScreen() {
         }
       } finally {
         clearTimeout(timeoutId);
+        closeReaderSafely();
         if (!cancelled && isMountedRef.current) {
+          const rowCount = Object.values(stagedSlots).reduce((sum, tiers) => sum + Object.keys(tiers).length, 0);
+          if (rowCount === 0 && (timedOut || requestFailed) && !autoRetriedAvailabilityRef.current) {
+            autoRetriedAvailabilityRef.current = true;
+            console.info(
+              `[playback-trace] id=${playbackTraceId} component=availability stage=auto_retry elapsed_ms=${Date.now() - availabilityRequestStartedAt}`,
+            );
+            setAvailabilityError(false);
+            setAvailabilityAttempt(v => v + 1);
+            return;
+          }
           commitRows();
           setAvailabilityDone(true);
           setShowingAvailabilityHints(false);
           console.info(
-            `[playback-trace] id=${playbackTraceId} component=availability stage=complete elapsed_ms=${Date.now() - availabilityRequestStartedAt} rows=${Object.values(stagedSlots).reduce((sum, tiers) => sum + Object.keys(tiers).length, 0)}`,
+            `[playback-trace] id=${playbackTraceId} component=availability stage=complete elapsed_ms=${Date.now() - availabilityRequestStartedAt} rows=${rowCount}`,
           );
         }
       }
@@ -1660,22 +1855,32 @@ export default function WatchScreen() {
     const availabilityTimeoutMs = AVAILABILITY_TIMEOUT_MS;
     const timeoutId = setTimeout(() => {
       timedOut = true;
+      closeReaderSafely();
       controller.abort();
     }, availabilityTimeoutMs);
     void run();
     return () => {
       cancelled = true;
       clearTimeout(timeoutId);
+      closeReaderSafely();
       controller.abort();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAwDubbed, anime, anilistId, sourceAnimeId, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, anslayerId, awAnimeId, isFromLatest, latestSource, availabilityAttempt, availabilityHintKey, playbackTraceId]);
 
-  /* ── Progress save ── */
+  /* ── Progress save (الخادم يُحدَّث هنا فقط عند الخروج/التبديل/الخلفية — صفر ضغط إضافي) ── */
   const saveProgress = useCallback(async () => {
     const t = lastTimeRef.current;
-    if (t <= 10) return;
-    await AsyncStorage.setItem(progressKey, String(Math.floor(t)));
+    if (!Number.isFinite(t) || t <= 3) return;
+    const floored = Math.floor(t);
+    if (isMountedRef.current) setResumeTime(floored);
+    await AsyncStorage.setItem(progressKey, String(floored)).catch(() => {});
+    const prevSaved = lastServerSaveRef.current;
+    const now = Date.now();
+    if (prevSaved.key === progressKey && Math.abs(prevSaved.sec - floored) <= 1 && now - prevSaved.at < 3_000) {
+      return;
+    }
+    lastServerSaveRef.current = { key: progressKey, sec: floored, at: now };
     if (isAwDubbed && awSeries) {
       await addToHistory({
         animeId: getWatchContentId("aw-dubbed", awSeries),
@@ -1711,6 +1916,20 @@ export default function WatchScreen() {
     progressKey, isAwDubbed, awSeries, epNum, currentAwEpisodeNumbers, awCurrentSeason,
     titleStr, englishStr, titleArStr, coverUrl, anime, totalEpsCount, addToHistory,
   ]);
+  saveProgressRef.current = saveProgress;
+
+  /* حفظ تلقائي مرة واحدة فقط عند انتقال التطبيق للخلفية أو تفكيك الشاشة */
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (nextState) => {
+      if (nextState !== "active" && (screenRef.current === "native" || screenRef.current === "embed")) {
+        void saveProgressRef.current?.();
+      }
+    });
+    return () => {
+      sub.remove();
+      void saveProgressRef.current?.();
+    };
+  }, []);
 
   /* ── Navigate episode ── */
   const goToAwEpisode = useCallback((seasonIndex: number, episodeNumber: number) => {
@@ -1773,8 +1992,9 @@ export default function WatchScreen() {
        invent a future episode. Previous/explicit episode selection remains
        available when it is inside a known catalog bound. */
     if (n < 1 || (n > epNum && (totalEpsCount === undefined || n > totalEpsCount))) return;
-    saveProgress();
+    void saveProgress();
     abortRef.current?.abort();
+    availabilityAbortRef.current?.abort();
     /* إلغاء جميع طلبات المواقع الجارية قبل الانتقال للحلقة التالية */
     siteCtrls.current.forEach(c => c.abort());
     siteCtrls.current.clear();
@@ -1783,6 +2003,9 @@ export default function WatchScreen() {
     inFlightSitesRef.current.clear();
     fetchedSitesRef.current.clear();
     progressivePlaybackRef.current = null;
+    lastTimeRef.current = 0;
+    lastDurationRef.current = 0;
+    setResumeTime(0);
     setSlotStatus({});
     setScreen("picker");
     const coverParam = coverUrl ? `&cover=${encodeURIComponent(coverUrl)}` : "";
@@ -1815,6 +2038,8 @@ export default function WatchScreen() {
   function refreshAllSources() {
     abortRef.current?.abort();
     availabilityAbortRef.current?.abort();
+    autoRetriedAvailabilityRef.current = false;
+    setScanSlow(false);
     if (!isAwDubbed) forceAvailabilityRefreshRef.current = true;
     /* إلغاء كل طلبات المواقع الجارية — كانت تتراكم بدون إلغاء عند الضغط على تحديث */
     siteCtrls.current.forEach(c => c.abort());
@@ -2692,10 +2917,20 @@ export default function WatchScreen() {
   }, [isAwDubbed, playingSrc, saveProgress, srcCacheKey, playSrc, playbackTraceId]);
 
   const onRiftProgress = useCallback((pos: number, dur: number) => {
-    lastTimeRef.current = pos;
+    if (Number.isFinite(pos) && pos >= 0) {
+      lastTimeRef.current = pos;
+      if (pos > 3) {
+        const now = Date.now();
+        if (now - lastLocalSaveAtRef.current >= 12_000) {
+          lastLocalSaveAtRef.current = now;
+          /* حفظ محلي فقط على الجهاز (AsyncStorage) — لا يرسل أي طلب للخادم */
+          AsyncStorage.setItem(progressKey, String(Math.floor(pos))).catch(() => {});
+        }
+      }
+    }
     if (dur > 0) lastDurationRef.current = dur;
     analyticsRef.current?.markProgress?.(pos);
-  }, []);
+  }, [progressKey]);
 
   const onRiftNextEpisode = useCallback(() => {
     if (isAwDubbed) {
@@ -2766,6 +3001,18 @@ export default function WatchScreen() {
     }];
   }, [screen, playingSrc, globalSubUrl, playbackTraceId, isAwDubbed, episodeSkipTimes]);
 
+
+  const hasAvailableSlot = Object.values(availableSlots).some(slots => Object.keys(slots).length > 0);
+  useEffect(() => {
+    if (availabilityDone || hasAvailableSlot) {
+      setScanSlow(false);
+      return;
+    }
+    const timer = setTimeout(() => {
+      if (isMountedRef.current) setScanSlow(true);
+    }, 12_000);
+    return () => clearTimeout(timer);
+  }, [availabilityDone, hasAvailableSlot, availabilityAttempt]);
 
   /* ── loading: صحيح عندما يكون أي موقع قيد الجلب (مرجع للمستقبل) ── */
   const _loading = Object.values(slotStatus).some(s => s === "fetching"); void _loading;
@@ -2901,7 +3148,7 @@ export default function WatchScreen() {
 
   /* ══════════════ PICKER ══════════════ */
 
-  const hasAvailableSlot = Object.values(availableSlots).some(slots => Object.keys(slots).length > 0);
+
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -3041,6 +3288,18 @@ export default function WatchScreen() {
               <SpinRing size={24} />
               <Text style={[d.availabilityHeadline, tvMode && d.tvAvailabilityHeadline]}>سوكونا يقاتل غوجو بجهد من اجل السيرفرات</Text>
               <Text style={[d.availabilityText, tvMode && d.tvAvailabilityText]}>يتم فحص توفر المصادر… ستظهر النتائج تدريجياً</Text>
+              {scanSlow && (
+                <Pressable
+                  onPress={refreshAllSources}
+                  focusable={tvMode}
+                  accessibilityRole="button"
+                  accessibilityLabel="إعادة فحص السيرفرات"
+                  style={({ focused }) => [d.retryBigBtn, { marginTop: 10 }, tvMode && tvFocusStyle(focused)]}
+                >
+                  <Ionicons name="refresh" size={16} color={colors.accent} />
+                  <Text style={d.retryBigText}>إعادة فحص السيرفرات</Text>
+                </Pressable>
+              )}
             </View>
           )}
 

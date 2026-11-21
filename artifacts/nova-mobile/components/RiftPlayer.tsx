@@ -688,6 +688,9 @@ function ExpoRiftPlayer({
   const [whisperLang,   setWhisperLang]   = useState<string>("");
   /* ─── Position to restore when switching sources (keeps resumedRef approach) ─── */
   const switchPosRef = useRef(0);
+  /* يضمن عدم إرسال onProgress(0) أثناء انتظار استقرار القفزة الأولية أو تبديل السيرفر
+     ويُعيد تطبيق القفزة على بث HLS إذا تجاهل ExoPlayer المحاولة الأولى قبل جاهزية المدة */
+  const pendingRestoreRef = useRef<{ target: number; retries: number; expiresAt: number } | null>(null);
 
   /* ─── Independent source/AniSkip/fallback timings ─── */
   const sourceIntroTiming = validateSkipInterval(skipIntroProp)
@@ -861,11 +864,15 @@ function ExpoRiftPlayer({
   }, [measureSeekBar]);
 
   useEffect(() => {
+    const keepPos = switchPosRef.current > 0.5
+      ? switchPosRef.current
+      : (!resumedRef.current && initialPosition && initialPosition > 3 ? initialPosition : 0);
     durationRef.current = 0;
-    positionRef.current = 0;
+    positionRef.current = keepPos;
     pendingSeekRef.current = null;
+    pendingRestoreRef.current = null;
     isDraggingRef.current = false;
-    setPosition(0);
+    setPosition(keepPos);
     setDuration(0);
     setBufferedPct(0);
     setIsDragging(false);
@@ -963,7 +970,7 @@ function ExpoRiftPlayer({
     /* ⚠️ لا نستدعي p.play() هنا مباشرةً — بعض إصدارات ExoPlayer/AVPlayer تُطلق
        native crash عند استدعاء play() قبل أن يكون المصدر جاهزاً للتشغيل.
        التشغيل الآن يتم فقط عبر حدث statusChange → readyToPlay أدناه. */
-    if (initialPosition && initialPosition > 5) {
+    if (initialPosition && initialPosition > 3) {
       try { p.currentTime = initialPosition; } catch {}
     }
      /* Use expo-video's public buffer contract; do not pass Media3-only millisecond
@@ -1018,7 +1025,10 @@ function ExpoRiftPlayer({
       if (replaceSafetyTimerRef.current) { clearTimeout(replaceSafetyTimerRef.current); replaceSafetyTimerRef.current = null; }
       if (replaceCallTimerRef.current) { clearTimeout(replaceCallTimerRef.current); replaceCallTimerRef.current = null; }
       if (seekRecoveryTimerRef.current) { clearTimeout(seekRecoveryTimerRef.current); seekRecoveryTimerRef.current = null; }
+      if (manualSeekErrorTimeoutRef.current) { clearTimeout(manualSeekErrorTimeoutRef.current); manualSeekErrorTimeoutRef.current = null; }
       seekRecoveryRef.current = null;
+      pendingRestoreRef.current = null;
+      pendingSeekRef.current = null;
       if (subtitleTimeoutRef.current) { clearTimeout(subtitleTimeoutRef.current); subtitleTimeoutRef.current = null; }
       subtitleAbortRef.current?.abort();
       subtitleAbortRef.current = null;
@@ -1313,12 +1323,21 @@ function ExpoRiftPlayer({
              Doing this here (not in the polling timer) ensures we only seek AFTER
              the new stream is actually buffered, preventing conflicts with loading. */
           const swPos = switchPosRef.current;
-          const initPos = initialPosition && initialPosition > 5 ? initialPosition : 0;
+          const initPos = initialPosition && initialPosition > 3 ? initialPosition : 0;
           const restorePos = swPos > 0.5 ? swPos : initPos;
           if (!resumedRef.current && restorePos > 0.5) {
             resumedRef.current = true;
             switchPosRef.current = 0;
-            try { player.currentTime = restorePos; } catch {}
+            const rawDur = Number((player as any).duration);
+            const safeTarget = Number.isFinite(rawDur) && rawDur > 5
+              ? Math.min(restorePos, Math.max(0, rawDur - 2))
+              : restorePos;
+            const expiresAt = Date.now() + 9_000;
+            pendingRestoreRef.current = { target: safeTarget, retries: 0, expiresAt };
+            pendingSeekRef.current = { target: safeTarget, expiresAt };
+            positionRef.current = safeTarget;
+            setPosition(safeTarget);
+            try { player.currentTime = safeTarget; } catch {}
           }
           try {
             if (!animePlayback || animePlaybackIntentRef.current) player.play();
@@ -1553,8 +1572,31 @@ function ExpoRiftPlayer({
           setDuration(reportedDuration);
         }
         const dur = reportedDuration || durationRef.current;
+        const pendingRestore = pendingRestoreRef.current;
+        if (pendingRestore) {
+          const restoreTarget = dur > 5
+            ? Math.min(pendingRestore.target, Math.max(0, dur - 2))
+            : pendingRestore.target;
+          const tolerance = Math.max(2.5, dur * 0.008);
+          const reachedRestore = Math.abs(pos - restoreTarget) <= tolerance ||
+            (pos > restoreTarget && pos - restoreTarget <= Math.max(6, dur * 0.015));
+          if (reachedRestore) {
+            pendingRestoreRef.current = null;
+          } else if (Date.now() < pendingRestore.expiresAt) {
+            if (dur > 0 && pos < Math.max(3, restoreTarget - 4) && pendingRestore.retries < 3) {
+              pendingRestore.retries += 1;
+              pendingRestore.target = restoreTarget;
+              if (pendingSeekRef.current) pendingSeekRef.current.target = restoreTarget;
+              try { player.currentTime = restoreTarget; } catch {}
+            }
+          } else {
+            pendingRestoreRef.current = null;
+          }
+        }
+        const awaitingInitialRestore = !resumedRef.current &&
+          ((initialPosition && initialPosition > 3) || switchPosRef.current > 0.5);
         const pendingSeek = pendingSeekRef.current;
-        let awaitingNativeSeek = false;
+        let awaitingNativeSeek = awaitingInitialRestore || Boolean(pendingRestoreRef.current);
         if (pendingSeek) {
           const tolerance = Math.max(1.5, dur * 0.004);
           const reachedTarget = Math.abs(pos - pendingSeek.target) <= tolerance;
@@ -2598,11 +2640,16 @@ function ExpoRiftPlayer({
     setIsWaitingForSources(false);
     /* ── Save current position before replacing source ── */
     const nativePos = Number(player.currentTime);
-    const savedPos = Number.isFinite(nativePos) && nativePos > 0
-      ? nativePos
-      : positionRef.current;
-    /* لا نهمل المواضع القصيرة، واستخدم polling كاحتياط إذا أعاد native
+    const pendingTarget = pendingRestoreRef.current?.target || 0;
+    const savedPos = pendingTarget > 0.5
+      ? pendingTarget
+      : (Number.isFinite(nativePos) && nativePos > 0.5
+        ? nativePos
+        : (positionRef.current > 0.5 ? positionRef.current : (initialPosition && initialPosition > 3 ? initialPosition : 0)));
+    /* لا نهمل المواضع القصيرة، واستخدم polling أو الموضع المنتظر كاحتياط إذا أعاد native
        صفرًا لحظة ضغط زر تبديل السيرفر. */
+    pendingRestoreRef.current = null;
+    pendingSeekRef.current = null;
     switchPosRef.current = Number.isFinite(savedPos) ? Math.max(0, savedPos) : 0;
     logPlaybackStage(newSrc.url, "source_switch", `index=${safeIdx + 1} total=${playableSources.length}`);
     console.log(`[Nova Mobile] تبديل المصدر → ${newSrc.label || "مجهول"} (${safeIdx + 1}/${playableSources.length})`);

@@ -475,7 +475,7 @@ export default function AnimationWatchScreen() {
     const now = Date.now();
     if (now - lastSaveTs.current < 5000) return;
     lastSaveTs.current = now;
-    if (t > 5) AsyncStorage.setItem(progressKey, String(Math.floor(t))).catch(() => {});
+    if (t > 3) AsyncStorage.setItem(progressKey, String(Math.floor(t))).catch(() => {});
     /* Save to anim-watch-history */
     if (t > 30) {
       AsyncStorage.getItem("anim-watch-history").then(raw => {
@@ -872,12 +872,22 @@ export default function AnimationWatchScreen() {
         episodeTitle={epTitle}
         initialPosition={resumeTime}
         onBack={() => {
-          handleTimeUpdate(lastTimeRef.current);
+          const cur = lastTimeRef.current;
+          if (cur > 3) {
+            setResumeTime(Math.floor(cur));
+            AsyncStorage.setItem(progressKey, String(Math.floor(cur))).catch(() => {});
+          }
+          handleTimeUpdate(cur);
           setScreen("picker");
         }}
         onProgress={handleTimeUpdate}
         onError={() => {
-          handleTimeUpdate(lastTimeRef.current);
+          const cur = lastTimeRef.current;
+          if (cur > 3) {
+            setResumeTime(Math.floor(cur));
+            AsyncStorage.setItem(progressKey, String(Math.floor(cur))).catch(() => {});
+          }
+          handleTimeUpdate(cur);
           if (animSrcCacheKey) AsyncStorage.removeItem(animSrcCacheKey).catch(() => {});
           setSources([]);
           seenKeys.current.clear();
@@ -923,12 +933,22 @@ export default function AnimationWatchScreen() {
         initialPosition={resumeTime}
         onToggleOrientation={onToggleOrientation}
         onBack={() => {
-          handleTimeUpdate(lastTimeRef.current);
+          const cur = lastTimeRef.current;
+          if (cur > 3) {
+            setResumeTime(Math.floor(cur));
+            AsyncStorage.setItem(progressKey, String(Math.floor(cur))).catch(() => {});
+          }
+          handleTimeUpdate(cur);
           setScreen("picker");
         }}
         onProgress={(pos, _dur) => handleTimeUpdate(pos)}
         onError={() => {
-          handleTimeUpdate(lastTimeRef.current);
+          const cur = lastTimeRef.current;
+          if (cur > 3) {
+            setResumeTime(Math.floor(cur));
+            AsyncStorage.setItem(progressKey, String(Math.floor(cur))).catch(() => {});
+          }
+          handleTimeUpdate(cur);
           /* ⚠️ احذف كاش المصادر التالفة — يمنع تكرار الكراش عند فتح نفس المحتوى مجدداً */
           if (animSrcCacheKey) AsyncStorage.removeItem(animSrcCacheKey).catch(() => {});
           setSources([]);

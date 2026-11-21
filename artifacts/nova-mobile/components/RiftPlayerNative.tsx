@@ -919,9 +919,12 @@ export function RiftPlayer({
     const progressSub = player.addListener("progress", (event: any) => {
       const nextPosition = Number(event.currentTime) || 0;
       const nextDuration = Number(event.duration) || 0;
+      if (!restoredInitialPosition.current && initialPosition > 3 && nextPosition < 2) {
+        return;
+      }
       setPosition(nextPosition);
       setDuration(nextDuration);
-      if (nextPosition - lastProgress.current >= 2 || nextPosition === 0) {
+      if (Math.abs(nextPosition - lastProgress.current) >= 2 && nextPosition > 0) {
         lastProgress.current = nextPosition;
         onProgress?.(nextPosition, nextDuration);
       }
@@ -934,9 +937,11 @@ export function RiftPlayer({
       if (event.state === "readyToPlay") {
         setBuffering(false);
         setFailed(false);
-        if (!restoredInitialPosition.current && initialPosition > 5) {
+        if (!restoredInitialPosition.current && initialPosition > 3) {
           restoredInitialPosition.current = true;
           player.currentTime = initialPosition;
+          lastProgress.current = initialPosition;
+          setPosition(initialPosition);
         }
         player.play();
       } else if (event.state === "loading") {
