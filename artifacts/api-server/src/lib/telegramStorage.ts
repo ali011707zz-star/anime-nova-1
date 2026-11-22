@@ -1546,6 +1546,163 @@ async function publishValidatedDraft(
   };
 }
 
+/* ── Batch Mode Hooks & Remote Auto-Uploader Helpers (zero circular deps) ─ */
+export interface BatchHooks {
+  consumeCaption: () => Promise<{ caption: string; episodeNumber: number; session: any } | null>;
+  attachPoster: (photoFileId: string, photoMessageId: number) => Promise<string | null>;
+}
+
+let _batchHooks: BatchHooks | null = null;
+export function registerBatchHooks(hooks: BatchHooks): void {
+  _batchHooks = hooks;
+}
+
+const _selfUploadedMsgIds = new Set<string>();
+const _inFlightRemoteUploads = new Map<string, number>();
+
+export function markRemoteUploadInFlight(channelId: string, caption: string): void {
+  const now = Date.now();
+  for (const [k, exp] of _inFlightRemoteUploads) {
+    if (exp < now) _inFlightRemoteUploads.delete(k);
+  }
+  _inFlightRemoteUploads.set(`${channelId}:${caption.trim()}`, now + 180_000);
+}
+
+export function markSelfUploadedMessage(channelId: string, messageId: number, caption?: string): void {
+  _selfUploadedMsgIds.add(`${channelId}:${messageId}`);
+  if (_selfUploadedMsgIds.size > 500) {
+    const first = _selfUploadedMsgIds.values().next().value;
+    if (first) _selfUploadedMsgIds.delete(first);
+  }
+  if (caption) {
+    _inFlightRemoteUploads.delete(`${channelId}:${caption.trim()}`);
+  }
+}
+
+export async function hasExistingTelegramEpisode(input: {
+  section: TgMediaSection;
+  title: string;
+  season: number;
+  episode: number;
+  audioLang: TgAudioLang;
+  quality?: string;
+}): Promise<boolean> {
+  await ensureTelegramStorageSchema();
+  const norm = normalizeMediaTitle(input.title);
+  if (!norm) return false;
+  const params: any[] = [input.section, norm, input.season, input.episode, input.audioLang];
+  let qSql = "";
+  if (input.quality) {
+    params.push(input.quality);
+    qSql = ` AND e.quality = $${params.length}`;
+  }
+  const r = await pool.query(
+    `SELECT e.id
+       FROM telegram_media_episodes e
+       JOIN telegram_media_series s ON s.id = e.series_id
+      WHERE s.section = $1
+        AND s.normalized_title = $2
+        AND e.season_number = $3
+        AND e.episode_number = $4
+        AND e.audio_lang = $5
+        AND e.is_active = TRUE${qSql}
+      LIMIT 1`,
+    params
+  );
+  return (r.rowCount || 0) > 0;
+}
+
+export async function attachPosterToBatchSeries(
+  section: TgMediaSection,
+  title: string,
+  photoFileId: string,
+  photoMessageId: number
+): Promise<void> {
+  await findOrUpsertSeries({
+    section,
+    title,
+    posterFileId: photoFileId,
+    posterMessageId: photoMessageId,
+  });
+}
+
+export async function indexRemoteUploadedEpisode(input: {
+  channelId: string;
+  messageId: number;
+  fileId: string;
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  duration: number;
+  width: number;
+  height: number;
+  captionRaw: string;
+  section: TgMediaSection;
+  title: string;
+  season: number;
+  episode: number;
+  quality: string;
+  audioLang: TgAudioLang;
+  posterUrl?: string | null;
+}): Promise<{ series: TgSeriesRow; episode: TgEpisodeRow }> {
+  await ensureTelegramStorageSchema();
+  markSelfUploadedMessage(input.channelId, input.messageId, input.captionRaw);
+
+  const series = await findOrUpsertSeries({
+    section: input.section,
+    title: input.title,
+    posterUrl: input.posterUrl || undefined,
+  });
+
+  const epRes = await pool.query<TgEpisodeRow>(
+    `INSERT INTO telegram_media_episodes
+      (series_id, channel_id, message_id, media_group_id, file_id, file_unique_id, file_name, mime_type, file_size, duration, width, height, season_number, episode_number, quality, audio_lang, caption_raw, is_active)
+     VALUES ($1,$2,$3,NULL,$4,NULL,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,TRUE)
+     ON CONFLICT (channel_id, message_id) DO UPDATE SET
+       series_id = EXCLUDED.series_id,
+       file_id = EXCLUDED.file_id,
+       file_name = EXCLUDED.file_name,
+       mime_type = EXCLUDED.mime_type,
+       file_size = EXCLUDED.file_size,
+       duration = EXCLUDED.duration,
+       width = EXCLUDED.width,
+       height = EXCLUDED.height,
+       season_number = EXCLUDED.season_number,
+       episode_number = EXCLUDED.episode_number,
+       quality = EXCLUDED.quality,
+       audio_lang = EXCLUDED.audio_lang,
+       caption_raw = EXCLUDED.caption_raw,
+       is_active = TRUE,
+       updated_at = NOW()
+     RETURNING *`,
+    [
+      series.id,
+      input.channelId,
+      input.messageId,
+      input.fileId,
+      input.fileName || null,
+      input.mimeType || "video/mp4",
+      input.fileSize || 0,
+      input.duration || 0,
+      input.width || 0,
+      input.height || 0,
+      input.season,
+      input.episode,
+      input.quality,
+      input.audioLang,
+      input.captionRaw || null,
+    ]
+  );
+
+  return { series, episode: epRes.rows[0] };
+}
+
+function hasExplicitSectionTag(text: string): boolean {
+  return /#(انمي|أنمي|anime|كرتون2|كرتون_2|كرتون|cartoon2|cartoon|سبيستون|spacetoon|مدبلج|dub|فيلم|فلم|film|movie|انميشن|أنميشن|animation|مانجا|manga|مانهوا|manhwa)/i.test(
+    String(text || "")
+  );
+}
+
 export async function handleStorageChannelPost(post: any, isEdit = false): Promise<ChannelIngestResult> {
   if (!post || !isStorageChannel(post.chat?.id)) {
     return { handled: false, kind: "ignored" };
@@ -1554,6 +1711,18 @@ export async function handleStorageChannelPost(post: any, isEdit = false): Promi
   const channelId = String(post.chat.id);
   const messageId = Number(post.message_id);
   const caption = String(post.caption || post.text || "").trim();
+
+  // Ignore echoes of episodes uploaded directly by our own MTProto remote auto-uploader
+  if (_selfUploadedMsgIds.has(`${channelId}:${messageId}`)) {
+    return { handled: false, kind: "ignored" };
+  }
+  if (caption) {
+    const inFlightExp = _inFlightRemoteUploads.get(`${channelId}:${caption}`);
+    if (inFlightExp && inFlightExp > Date.now()) {
+      _selfUploadedMsgIds.add(`${channelId}:${messageId}`);
+      return { handled: false, kind: "ignored" };
+    }
+  }
 
   // Case 1: Subtitle reply (.srt / .vtt) replied to an existing episode message
   const doc = post.document;
@@ -1717,6 +1886,16 @@ export async function handleStorageChannelPost(post: any, isEdit = false): Promi
       }
       return publishValidatedDraft(media, parsed, check.matchedCandidate, isEdit);
     }
+    if (!caption && !mediaGroupId && _batchHooks) {
+      const attachedTitle = await _batchHooks.attachPoster(String(bestPhoto.file_id), messageId);
+      if (attachedTitle) {
+        return {
+          handled: true,
+          kind: "series_card",
+          summary: `🖼️ تم ربط البوستر تلقائياً بمسلسل الدفعة: <b>${attachedTitle}</b>!`,
+        };
+      }
+    }
     return { handled: false, kind: "ignored" };
   }
 
@@ -1728,7 +1907,12 @@ export async function handleStorageChannelPost(post: any, isEdit = false): Promi
     )
   );
   if (isArchiveDoc && doc) {
-    const parsed = parseChannelCaption(caption, docName);
+    let archiveCaption = caption;
+    if (!isEdit && _batchHooks && !hasExplicitSectionTag(archiveCaption)) {
+      const batchHit = await _batchHooks.consumeCaption();
+      if (batchHit) archiveCaption = batchHit.caption;
+    }
+    const parsed = parseChannelCaption(archiveCaption, docName);
     const media: MediaPayload = {
       channelId,
       messageId,
@@ -1741,7 +1925,7 @@ export async function handleStorageChannelPost(post: any, isEdit = false): Promi
       duration: 0,
       width: 0,
       height: 0,
-      captionRaw: caption,
+      captionRaw: archiveCaption,
     };
     const check = await validateAndEvaluateDraft(parsed, "manga_chapter", { channelId, messageId });
     if (!check.isValid) {
@@ -1824,6 +2008,13 @@ export async function handleStorageChannelPost(post: any, isEdit = false): Promi
 
     if (effectiveCaption) {
       upsertAlbumMediaContext(channelId, mediaGroupId, { caption: effectiveCaption });
+    }
+  }
+
+  if (!isEdit && _batchHooks && !hasExplicitSectionTag(effectiveCaption)) {
+    const batchHit = await _batchHooks.consumeCaption();
+    if (batchHit) {
+      effectiveCaption = batchHit.caption;
     }
   }
 

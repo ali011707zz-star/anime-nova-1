@@ -19,6 +19,7 @@ import {
   formatTemplatesMessage,
   extractAuthorizedAdminIds,
   isPrivateSenderAuthorized,
+  getSectionDisplayInfo,
 } from "../lib/telegramStorageLogic.mjs";
 import {
   handleStorageChannelPost,
@@ -31,8 +32,29 @@ import {
   applyAdminCallbackToPending,
   getLatestPendingSummary,
   cancelLatestPendingUpload,
+  registerBatchHooks,
   type ChannelIngestResult,
 } from "../lib/telegramStorage.js";
+import {
+  parseBatchCommand,
+  parseLeechCommand,
+  parseImportCommand,
+  formatAutomationHelpMessage,
+} from "../lib/telegramAutoUploaderLogic.mjs";
+import {
+  registerAutoUploaderNotifier,
+  startBatchSession,
+  stopBatchSession,
+  consumeActiveBatchCaption,
+  tryAttachBatchPosterPhoto,
+  enqueueLeechJob,
+  resolveAndEnqueueImport,
+  hasAwaitingReplacementItem,
+  applyReplacementLinkToQueue,
+  handleQueueCallback,
+  getQueueStatusSummary,
+  kickQueueWorker,
+} from "../lib/telegramAutoUploader.js";
 
 const router = Router();
 
@@ -159,6 +181,20 @@ async function sendMessage(chatId: number | string, text: string, extra: Record<
   const res = await sendMessageDetailed(chatId, text, extra);
   return res.ok;
 }
+
+// Wire auto-uploader notifier, batch hooks, and resume any queued items on boot
+registerAutoUploaderNotifier(async (chatId, htmlText, replyMarkup) => {
+  await sendMessage(chatId, htmlText, replyMarkup ? { reply_markup: replyMarkup } : {});
+});
+registerBatchHooks({
+  consumeCaption: consumeActiveBatchCaption,
+  attachPoster: tryAttachBatchPosterPhoto,
+});
+setTimeout(() => {
+  void kickQueueWorker().catch((err: any) =>
+    console.warn("[tg-auto] startup queue resume warning:", err?.message || err)
+  );
+}, 5000);
 
 interface TelegramPosterHint {
   anilistId?: number;
@@ -1633,6 +1669,12 @@ export async function registerTelegramWebhook(domain: string) {
   // Register admin-only commands exclusively for authorized admin private chats
   const { ids: adminIds } = await getAuthorizedTelegramAdmins(true);
   const adminCommands = [
+    { command: "auto",      description: "دليل الرفع التلقائي السريع ⚡" },
+    { command: "batch",     description: "بدء وضع الدفعة السريع 📦" },
+    { command: "done",      description: "إنهاء وضع الدفعة ✅" },
+    { command: "leech",     description: "سحب ورفع حلقات من روابط 🚀" },
+    { command: "import",    description: "استيراد مسلسل كامل تلقائياً 📥" },
+    { command: "queue",     description: "حالة طابور السحب والرفع 📊" },
     { command: "templates", description: "صيغ رفع الحلقات 📋" },
     { command: "pending",   description: "الحلقات المعلّقة ⏳" },
     { command: "cancel",    description: "إلغاء آخر حلقة معلّقة ❌" },
@@ -1829,6 +1871,20 @@ async function handleUpdate(update: any) {
         return;
       }
     }
+    if (data.startsWith("tg_q_") || data === "tg_batch_stop") {
+      try {
+        const qRes = await handleQueueCallback(data, cq.message?.chat?.id);
+        await answerCallbackQuery(cq.id, qRes.toast);
+        if (qRes.message && cq.message?.chat?.id) {
+          await sendMessage(cq.message.chat.id, qRes.message);
+        }
+      } catch (err: any) {
+        console.error("[tg-auto] queue callback error:", err?.message || err);
+        await answerCallbackQuery(cq.id, "حدث خطأ أثناء المعالجة");
+      }
+      return;
+    }
+
     if (data.startsWith("tg_pend_")) {
       try {
         const cbRes = await applyAdminCallbackToPending(data);
@@ -1884,11 +1940,18 @@ async function handleUpdate(update: any) {
   if (text === "/start" || text.startsWith("/start ")) {
     await sendMessage(chatId,
       `🛡️ أهلاً <b>${escapeTelegramHtml(userName)}</b> — لوحة إدارة <b>Anime NOVA</b> (خاصة بالأدمن فقط)\n\n` +
-      `📌 الأوامر المتاحة:\n` +
-      `• /صيغ أو /templates — صيغ رفع الحلقات\n` +
+      `⚡ <b>أوامر الرفع السريع والتلقائي:</b>\n` +
+      `• /تلقائي أو /auto — شرح الطرق الثلاث السريعة مع أمثلة جاهزة\n` +
+      `• /دفعة أو /batch — رفع دفعة حلقات بدون تكرار الكتابة\n` +
+      `• /انهاء أو /done — إنهاء وضع الدفعة\n` +
+      `• /سحب أو /leech — سحب حلقات من روابط مباشرة ورفعها تلقائياً\n` +
+      `• /استيراد أو /import — سحب مسلسل كامل من التطبيق أو رابط خارجي\n` +
+      `• /الطابور أو /queue — متابعة حالة الطابور\n\n` +
+      `📌 <b>أوامر عامة:</b>\n` +
+      `• /صيغ أو /templates — صيغ رفع الحلقات اليدوية\n` +
       `• /معلق أو /pending — الحلقات التي تنتظر إكمال بياناتها\n` +
       `• /الغاء أو /cancel — إلغاء آخر حلقة معلّقة\n` +
-      `• /الادمن أو /admins — عرض وتحديث قائمة الأدمن المصرّح لهم\n` +
+      `• /الادمن أو /admins — قائمة الأدمن المصرّح لهم\n` +
       `• /today — حلقات اليوم`
     );
     return;
@@ -1933,6 +1996,139 @@ async function handleUpdate(update: any) {
         ? "❌ تم إلغاء آخر حلقة معلّقة — لن يتم نشرها في التطبيق."
         : "ℹ️ لا توجد أي حلقة معلّقة لإلغائها حالياً."
     );
+    return;
+  }
+
+  /* /تلقائي أو /auto — دليل الرفع السريع */
+  if (text === "/auto" || text === "/تلقائي" || text === "/تلقائى") {
+    await sendMessage(chatId, formatAutomationHelpMessage());
+    return;
+  }
+
+  /* /دفعة أو /batch — تفعيل وضع الدفعة السريع */
+  if (/^\/(batch|دفعة|دفعه)(\s|$)/i.test(text)) {
+    const parsed = parseBatchCommand(text);
+    if (!parsed.ok || !parsed.spec) {
+      await sendMessage(chatId, parsed.errorAr || "❌ صيغة أمر /دفعة غير مكتملة.");
+      return;
+    }
+    const row = await startBatchSession(parsed.spec, String(from?.id || chatId));
+    const secInfo = getSectionDisplayInfo(row.section, row.audio_lang);
+    await sendMessage(
+      chatId,
+      `📦 <b>تم تفعيل وضع الدفعة السريع بنجاح!</b>\n\n` +
+        `🎬 العمل: <b>${escapeTelegramHtml(row.title)}</b>\n` +
+        `📂 القسم: <b>${secInfo.labelAr}</b> · الموسم ${row.season_number}\n` +
+        `🔢 يبدأ الترقيم التلقائي من: <b>الحلقة ${row.next_episode}</b>\n` +
+        `🎞️ الجودة الافتراضية: <b>${row.quality}</b>\n\n` +
+        `🚀 <b>الآن اذهب لقناة التخزين وأرسل أو حوّل الحلقات وراء بعضها بدون كتابة أي وصف</b> (وأرسل صورة البوستر مرة واحدة فقط لو أردت)، وسيرقّمها البوت وينشرها تلقائياً على <b>NOVA VIP</b>.\n` +
+        `عند الانتهاء اضغط الزر بالأسفل أو أرسل /انهاء.`,
+      {
+        reply_markup: {
+          inline_keyboard: [[{ text: "🛑 إنهاء وضع الدفعة", callback_data: "tg_batch_stop" }]],
+        },
+      }
+    );
+    return;
+  }
+
+  /* /انهاء أو /done — إنهاء وضع الدفعة */
+  if (/^\/(done|انهاء|إنهاء)(\s|$)/i.test(text)) {
+    const stopped = await stopBatchSession();
+    if (!stopped) {
+      await sendMessage(chatId, "ℹ️ لا يوجد وضع دفعة نشط حالياً.");
+      return;
+    }
+    await sendMessage(
+      chatId,
+      `✅ <b>تم إنهاء وضع الدفعة</b> لـ <b>${escapeTelegramHtml(stopped.title)}</b>.\n` +
+        `📊 إجمالي ما تم رفعه في هذه الدفعة: <b>${stopped.uploaded_count}</b> حلقة/فصل.`
+    );
+    return;
+  }
+
+  /* /سحب أو /leech — سحب حلقات من روابط مباشرة أو مواقع فيديو ورفعها لتليجرام */
+  if (/^\/(leech|سحب|رفع_رابط|رفع_روابط)(\s|\n|$)/i.test(text)) {
+    const parsed = parseLeechCommand(text);
+    if (!parsed.ok || !parsed.job) {
+      await sendMessage(chatId, parsed.errorAr || "❌ صيغة أمر /سحب غير مكتملة.");
+      return;
+    }
+    const { queuedCount, skippedDupCount } = await enqueueLeechJob(chatId, parsed.job);
+    const secInfo = getSectionDisplayInfo(parsed.job.section, parsed.job.audioLang);
+    if (queuedCount === 0) {
+      await sendMessage(
+        chatId,
+        `ℹ️ لم تتم إضافة حلقات جديدة للطابور — جميع الحلقات (${skippedDupCount}) مرفوعة مسبقاً لـ <b>${escapeTelegramHtml(parsed.job.title)}</b>.`
+      );
+      return;
+    }
+    await sendMessage(
+      chatId,
+      `🚀 <b>تمت إضافة ${queuedCount} حلقة إلى طابور السحب والرفع (NOVA VIP)!</b>\n` +
+        `🎬 <b>${escapeTelegramHtml(parsed.job.title)}</b>\n` +
+        `📂 القسم: <b>${secInfo.labelAr}</b> · الموسم ${parsed.job.season} · الجودة: <b>${parsed.job.quality}</b>\n` +
+        (skippedDupCount > 0 ? `⏭️ تم تخطّي ${skippedDupCount} حلقة مكررة مسبقاً.\n` : "") +
+        `⚙️ السيرفر سيسحبها ويرفعها <b>حلقة تلو الأخرى</b> تلقائياً، وإذا فشل أي رابط سيصلك تنبيه فوري لإرسال رابط بديل.\n` +
+        `📊 لمتابعة التقدم أرسل /الطابور`,
+      {
+        reply_markup: {
+          inline_keyboard: [[{ text: "🛑 إيقاف الطابور بالكامل", callback_data: "tg_q_stop" }]],
+        },
+      }
+    );
+    return;
+  }
+
+  /* /استيراد أو /import — سحب مسلسل كامل تلقائياً (من مصادر التطبيق أو رابط خارجي) */
+  if (/^\/(import|استيراد|سحب_مسلسل)(\s|\n|$)/i.test(text)) {
+    const parsed = parseImportCommand(text);
+    if (!parsed.ok || !parsed.spec) {
+      await sendMessage(chatId, parsed.errorAr || "❌ صيغة أمر /استيراد غير مكتملة.");
+      return;
+    }
+    await sendMessage(
+      chatId,
+      `⏳ <b>جارٍ فحص المصدر واستخراج الحلقات...</b>\nقد يستغرق هذا بضع ثوانٍ حسب سرعة المصدر.`
+    );
+    try {
+      const res = await resolveAndEnqueueImport(chatId, parsed.spec);
+      await sendMessage(
+        chatId,
+        res.summaryHtml,
+        res.ok
+          ? {
+              reply_markup: {
+                inline_keyboard: [[{ text: "🛑 إيقاف الطابور بالكامل", callback_data: "tg_q_stop" }]],
+              },
+            }
+          : {}
+      );
+    } catch (err: any) {
+      console.error("[tg-auto] /import error:", err?.message || err);
+      await sendMessage(
+        chatId,
+        `⚠️ حدث خطأ أثناء فحص المصدر: <code>${escapeTelegramHtml(String(err?.message || err).slice(0, 180))}</code>\n💡 يمكنك استخدام أمر /سحب مع الروابط المباشرة أو إرسال رابط بديل.`
+      );
+    }
+    return;
+  }
+
+  /* /الطابور أو /queue — عرض حالة طابور السحب والرفع */
+  if (/^\/(queue|الطابور|طابور)(\s|$)/i.test(text)) {
+    const summary = await getQueueStatusSummary();
+    await sendMessage(chatId, summary, {
+      reply_markup: {
+        inline_keyboard: [[{ text: "🛑 إيقاف الطابور بالكامل", callback_data: "tg_q_stop" }]],
+      },
+    });
+    return;
+  }
+
+  /* /ايقاف_الطابور أو /stopqueue */
+  if (/^\/(stopqueue|ايقاف_الطابور|إيقاف_الطابور)(\s|$)/i.test(text)) {
+    const qRes = await handleQueueCallback("tg_q_stop", chatId);
+    await sendMessage(chatId, qRes.message || qRes.toast);
     return;
   }
 
@@ -2024,6 +2220,22 @@ async function handleUpdate(update: any) {
     return;
   }
 
+  /* لو هناك حلقة في طابور السحب تنتظر رابطاً بديلاً وأرسل الأدمن رابطاً → أعد السحب فوراً */
+  if (isAdminSender && text && !text.startsWith("/") && /https?:\/\//i.test(text)) {
+    const awaiting = await hasAwaitingReplacementItem();
+    if (awaiting) {
+      try {
+        const rep = await applyReplacementLinkToQueue(chatId, text);
+        if (rep.handled && rep.message) {
+          await sendMessage(chatId, rep.message);
+          return;
+        }
+      } catch (err: any) {
+        console.error("[tg-auto] replacement link error:", err?.message || err);
+      }
+    }
+  }
+
   /* لو المرسل هو الأدمن ولديه حلقة معلّقة تنتظر إكمال الخانات الناقصة → طبّق التصحيح مباشرة */
   if (isAdminSender && text && !text.startsWith("/")) {
     const replyToId = typeof msg.reply_to_message?.message_id === "number" ? msg.reply_to_message.message_id : undefined;
@@ -2043,10 +2255,11 @@ async function handleUpdate(update: any) {
   /* رسالة عادية من أدمن ولا توجد حلقة معلّقة حالياً */
   await sendMessage(
     chatId,
-    `ℹ️ لا توجد حلقة معلّقة حالياً لإكمال بياناتها.\n\n` +
-    `• أرسل /صيغ لعرض صيغ رفع الحلقات\n` +
-    `• أرسل /معلق للتحقق من الحلقات المعلّقة\n` +
-    `• أرسل /الادمن لعرض المصرّح لهم`
+    `ℹ️ لا توجد حلقة معلّقة أو رابط بديل مطلوب حالياً.\n\n` +
+    `• أرسل /تلقائي لشرح الرفع السريع (دفعة + سحب + استيراد)\n` +
+    `• أرسل /الطابور لمتابعة حالة السحب والرفع\n` +
+    `• أرسل /صيغ لعرض صيغ رفع الحلقات اليدوية\n` +
+    `• أرسل /معلق للتحقق من الحلقات المعلّقة`
   );
 }
 
