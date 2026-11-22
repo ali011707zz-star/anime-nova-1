@@ -2,6 +2,7 @@ export type TgMediaSection =
   | "anime"
   | "animation"
   | "aw_animation"
+  | "spacetoon"
   | "cartoon"
   | "cartoon2"
   | "dubbed"

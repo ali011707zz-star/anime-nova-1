@@ -305,6 +305,16 @@ test("animation, aw_animation, manga, and manhwa sections normalize distinctly",
   assert.match(getSectionDisplayInfo("aw_animation").appLocationAr, /أنيميشن مدبلج/);
   assert.match(getSectionDisplayInfo("manga").appLocationAr, /قسم المانجا/);
   assert.match(getSectionDisplayInfo("manhwa").appLocationAr, /قسم المانهوا/);
+
+  assert.equal(normalizeSection("سبيستون"), "spacetoon");
+  assert.equal(normalizeSection("سبيس تون"), "spacetoon");
+  assert.equal(normalizeSection("spacetoon"), "spacetoon");
+  assert.match(getSectionDisplayInfo("spacetoon").appLocationAr, /سبيستون/);
+  const spMovie = parseChannelCaption("#فيلم_سبيستون\nالاسم: فيلم المحقق كونان 28\nالجودة: 1080p");
+  assert.equal(spMovie.section, "spacetoon");
+  assert.equal(spMovie.episode, 1);
+  assert.equal(spMovie.audioLang, "dub_ar");
+  assert.equal(validateParsedCaption(spMovie, "episode").isValid, true);
 });
 
 test("parseChannelCaption supports #فيلم_انميشن and decimal manga/manhwa chapters", () => {

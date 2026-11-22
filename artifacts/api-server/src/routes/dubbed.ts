@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import { Router } from "express";
 import { load } from "cheerio";
 import { logger } from "../lib/logger";
-import { getTelegramDubbedCatalogItems, getTelegramDubbedEpisodes, getTelegramSd2CatalogItems, getTelegramSd2Detail, getTelegramAnimeZidCatalogItems, getTelegramAnimeZidDetail, getTelegramAwDubbedCatalogItems, getTelegramAwDubbedEpisodes, getTelegramAwDubbedWatchSrc, getTelegramEpisodeById, buildSignedStreamPath, buildSignedStreamUrl, buildSubtitleUrl } from "../lib/telegramStorage.js";
+import { getTelegramDubbedCatalogItems, getTelegramDubbedEpisodes, getTelegramSd2CatalogItems, getTelegramSd2Detail, getTelegramAnimeZidCatalogItems, getTelegramAnimeZidDetail, getTelegramAwDubbedCatalogItems, getTelegramAwDubbedEpisodes, getTelegramAwDubbedWatchSrc, TG_SPACETOON_ID_BASE, getTelegramSpacetoonCatalogItems, getTelegramSpacetoonEpisodes, getTelegramSpacetoonWatchSrc, getTelegramEpisodeById, buildSignedStreamPath, buildSignedStreamUrl, buildSubtitleUrl } from "../lib/telegramStorage.js";
 import { streamMultiRangeMediaVPS } from "../lib/multiRangeStreamer.js";
 import { mergeAwSourceRows } from "../lib/awSourceRows.mjs";
 import { parseCarateenEpisodeUrl } from "../lib/carateenEpisodeRef.mjs";
@@ -600,9 +600,13 @@ router.get("/dubbed/carateen/catalog", async (req, res) => {
       969501286: "https://animenovaa.duckdns.org/api/source-catalog/tmdb-poster/w342/3qiBRbIsfpw6O32TfD1FZ81MiKw.jpg",
       186: "https://animenovaa.duckdns.org/api/source-catalog/tmdb-poster/w342/wzUQbSs3X15xs6GRE0fnPeAFWPs.jpg",
     };
-    const totalPages = Math.max(1, Math.ceil(filtered.length / limit));
+    const tgSpItems = (page === 1 && provider !== "carateen")
+      ? await getTelegramSpacetoonCatalogItems(String(req.query.q || ""))
+      : [];
+    const totalResults = filtered.length + (page === 1 ? tgSpItems.length : 0);
+    const totalPages = Math.max(1, Math.ceil(totalResults / limit));
     const start = (page - 1) * limit;
-    const pageSlice = filtered.slice(start, start + limit).map((entry) => {
+    const baseSlice = filtered.slice(start, start + limit).map((entry) => {
       const fixedPoster = SPACETOON_POSTER_FIXES[entry.id];
       if (fixedPoster) return { ...entry, image: fixedPoster };
       const rawImg = String(entry.image || "").trim();
@@ -614,15 +618,16 @@ router.get("/dubbed/carateen/catalog", async (req, res) => {
       }
       return entry;
     });
+    const pageSlice = tgSpItems.length > 0 ? [...tgSpItems, ...baseSlice] : baseSlice;
     res.setHeader("Cache-Control", req.query.refresh === "1" ? "no-store" : "public, max-age=300");
     res.json({
       results: pageSlice,
       page,
       limit,
-      totalResults: filtered.length,
+      totalResults,
       totalPages,
       sourceCounts: {
-        sp: all.filter((entry) => entry.provider === "sp").length,
+        sp: all.filter((entry) => entry.provider === "sp").length + tgSpItems.length,
         carateen: all.filter((entry) => entry.provider === "carateen").length,
       },
     });
@@ -637,6 +642,12 @@ router.get("/dubbed/carateen/episodes", async (req, res) => {
   const showId = parsePositiveId(req.query.showId);
   if (!provider || !showId) {
     res.status(400).json({ error: "provider and showId are required" });
+    return;
+  }
+  if (showId > TG_SPACETOON_ID_BASE) {
+    const episodes = await getTelegramSpacetoonEpisodes(showId);
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ episodes });
     return;
   }
 
@@ -693,6 +704,13 @@ router.get("/dubbed/carateen/stream", async (req, res) => {
     res.status(400).json({ error: "provider, showId and episodeId are required" });
     return;
   }
+  if (episodeId > TG_SPACETOON_ID_BASE) {
+    const tgSrc = await getTelegramSpacetoonWatchSrc(episodeId);
+    if (!tgSrc) { res.status(404).json({ error: "الحلقة غير موجودة" }); return; }
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ streamUrl: tgSrc.streamUrl, success: true });
+    return;
+  }
   try {
     const rawUrl = await getCarateenEpisodeStream(provider, showId, episodeId);
     if (!isAllowedCarateenStreamUrl(rawUrl)) {
@@ -716,6 +734,13 @@ router.get("/dubbed/carateen/watch-src", async (req, res) => {
   const episodeId = parsePositiveId(req.query.episodeId);
   if (!provider || !showId || !episodeId) {
     res.status(400).json({ error: "provider, showId and episodeId are required" });
+    return;
+  }
+  if (episodeId > TG_SPACETOON_ID_BASE) {
+    const tgSrc = await getTelegramSpacetoonWatchSrc(episodeId);
+    if (!tgSrc) { res.status(404).json({ error: "الحلقة غير موجودة" }); return; }
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ hlsUrl: tgSrc.hlsUrl, rawUrl: tgSrc.rawUrl, type: "mp4", ...(tgSrc.subtitleUrl ? { subtitleUrl: tgSrc.subtitleUrl } : {}) });
     return;
   }
 
@@ -1177,6 +1202,13 @@ router.get("/dubbed/watch-src", async (req, res) => {
     const episodeId = parsePositiveId(carateenRef.episodeId);
     if (!showId || !episodeId) {
       res.status(400).json({ error: "invalid Carateen episode reference" });
+      return;
+    }
+    if (episodeId > TG_SPACETOON_ID_BASE) {
+      const tgSrc = await getTelegramSpacetoonWatchSrc(episodeId);
+      if (!tgSrc) { res.status(404).json({ error: "الحلقة غير موجودة" }); return; }
+      res.setHeader("Cache-Control", "no-store");
+      res.json({ hlsUrl: tgSrc.hlsUrl, rawUrl: tgSrc.rawUrl, type: "mp4", ...(tgSrc.subtitleUrl ? { subtitleUrl: tgSrc.subtitleUrl } : {}) });
       return;
     }
 

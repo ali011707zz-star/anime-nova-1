@@ -56,6 +56,9 @@ export function normalizeSection(raw) {
   if (/^(انميشن|انيميشن|فيلم انميشن|فيلم انيميشن|انميشن فيلم|انيميشن فيلم|مسلسل انميشن|مسلسل انيميشن|animation|animated|anim)$/.test(s)) {
     return "animation";
   }
+  if (/^(سبيستون|سبيس تون|فيلم سبيستون|سبيستون فيلم|كراتين|spacetoon|spacetoon go|spacetoongo|carateen|sp)$/.test(s)) {
+    return "spacetoon";
+  }
   if (/^(انمي|انمي مترجم|انمي انجليزي|انمي دبلجه انجليزي|انمي دبلجه انجليزيه|anime|anime sub|anime dub|anime en|sub|مترجم)$/.test(s)) {
     return "anime";
   }
@@ -85,6 +88,12 @@ export function getSectionDisplayInfo(section, audioLang = "sub") {
     return {
       labelAr: "أنيميشن مدبلج 🎙️",
       appLocationAr: "تبويب المدبلج ← أنيميشن مدبلج (في المقدمة)",
+    };
+  }
+  if (section === "spacetoon") {
+    return {
+      labelAr: "سبيستون 🌟",
+      appLocationAr: "قسم سبيستون (تبويب المدبلج ← سبيستون · في المقدمة)",
     };
   }
   if (section === "cartoon") {
@@ -147,7 +156,7 @@ export function parseAudioLangStrict(raw) {
 export function normalizeAudioLang(raw, section = "anime") {
   const parsed = parseAudioLangStrict(raw);
   if (parsed) return parsed;
-  return section === "cartoon" || section === "cartoon2" || section === "dubbed" || section === "aw_animation" ? "dub_ar" : "sub";
+  return section === "cartoon" || section === "cartoon2" || section === "dubbed" || section === "aw_animation" || section === "spacetoon" ? "dub_ar" : "sub";
 }
 
 export function parseQualityStrict(raw) {
@@ -318,6 +327,11 @@ export function parseChannelCaption(caption, _fileName = "", mediaMeta = {}) {
     }
     if (/^(فيلم انميشن|فيلم انيميشن|انميشن فيلم|انيميشن فيلم)$/.test(clean)) {
       if (!section) section = "animation";
+      if (episode == null) episode = 1;
+      matchedTag = true;
+    }
+    if (/^(فيلم سبيستون|سبيستون فيلم)$/.test(clean)) {
+      if (!section) section = "spacetoon";
       if (episode == null) episode = 1;
       matchedTag = true;
     }
@@ -627,7 +641,7 @@ export function validateParsedCaption(parsed, kind = "episode") {
   const isChapter = kind === "manga_chapter" || isMangaSection(parsed.section);
   const sectionHint = kind === "manga_chapter"
     ? "#مانجا أو #مانهوا"
-    : "#انمي / #انميشن / #انميشن_مدبلج / #كرتون / #كرتون2 / #انمي_مدبلج / #فيلم / #مانجا / #مانهوا";
+    : "#انمي / #سبيستون / #انميشن / #انميشن_مدبلج / #كرتون / #كرتون2 / #انمي_مدبلج / #فيلم / #مانجا / #مانهوا";
 
   if (invalidMap.has("section")) {
     issues.push({
@@ -1223,7 +1237,10 @@ export function buildPendingInlineKeyboard(pendingId, issues = [], suggestions =
         { text: "📺 كرتون مدبلج 2", callback_data: `tg_pend_sec:${pendingId}:cartoon2:dub_ar` },
       ]);
       rows.push([
+        { text: "🌟 سبيستون", callback_data: `tg_pend_sec:${pendingId}:spacetoon:dub_ar` },
         { text: "🗣️ أنمي مدبلج", callback_data: `tg_pend_sec:${pendingId}:dubbed:dub_ar` },
+      ]);
+      rows.push([
         { text: "🎬 فيلم", callback_data: `tg_pend_sec:${pendingId}:film:sub` },
       ]);
       if (isCard) {
@@ -1331,6 +1348,10 @@ export function formatTemplatesMessage() {
     "2️⃣ <b>قسم الأنيميشن (مسلسلات أو أفلام):</b>",
     "<pre>#انميشن\nالاسم: Arcane\nالموسم: 1\nالحلقة: 3\nالجودة: 1080p</pre>",
     "<i>ولفيلم أنيميشن بدون حلقات: <code>#فيلم_انميشن</code> + <code>الاسم: Inside Out 2</code></i>",
+    "",
+    "🌟 <b>قسم سبيستون (مسلسلات وأفلام سبيستون):</b>",
+    "<pre>#سبيستون\nالاسم: المحقق كونان\nالموسم: 1\nالحلقة: 5\nالجودة: 1080p</pre>",
+    "<i>ولأفلام سبيستون بدون حلقات: <code>#فيلم_سبيستون</code> + <code>الاسم: فيلم المحقق كونان 28</code></i>",
     "",
     "3️⃣ <b>أنيميشن مدبلج (تبويب المدبلج ← أنيميشن مدبلج):</b>",
     "<pre>#انميشن_مدبلج\nالاسم: غامبول\nالموسم: 1\nالحلقة: 1\nالجودة: 720p</pre>",

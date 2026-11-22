@@ -841,6 +841,35 @@ async function checkExternalCatalogDuplicate(
       }
       return { existsInSource: false, matchedTitle: exact.title, posterUrl };
     }
+    if (draft.section === "spacetoon") {
+      const r = await fetch(
+        `${localBase}/api/dubbed/carateen/catalog?provider=sp&q=${encodeURIComponent(draft.title)}&limit=12`,
+        { headers: { "x-internal": "1" }, signal: AbortSignal.timeout(4500) }
+      );
+      if (!r.ok) return { existsInSource: false };
+      const data = (await r.json()) as any;
+      const items = (Array.isArray(data?.results) ? data.results : []).filter(
+        (it: any) => it && Number(it.id || 0) < TG_SPACETOON_ID_BASE
+      );
+      const exact = items.find((it: any) => normalizeMediaTitle(it.title) === normTarget);
+      if (!exact) return { existsInSource: false };
+      const posterUrl = exact.image || null;
+      if (exact.id) {
+        const epR = await fetch(
+          `${localBase}/api/dubbed/carateen/episodes?provider=sp&showId=${encodeURIComponent(String(exact.id))}`,
+          { headers: { "x-internal": "1" }, signal: AbortSignal.timeout(5000) }
+        );
+        if (epR.ok) {
+          const epD = (await epR.json()) as any;
+          const eps = Array.isArray(epD?.episodes) ? epD.episodes : [];
+          if (eps.some((e: any) => Number(e?.number) === epNum)) {
+            return { existsInSource: true, sourceLabel: "سبيستون", matchedTitle: exact.title, posterUrl };
+          }
+        }
+      }
+      return { existsInSource: false, matchedTitle: exact.title, posterUrl };
+    }
+
     if (draft.section === "aw_animation") {
       const r = await fetch(`${localBase}/api/aw-dubbed/catalog?q=${encodeURIComponent(draft.title)}&page=1`, {
         headers: { "x-internal": "1" }, signal: AbortSignal.timeout(4500),
@@ -1008,7 +1037,7 @@ async function validateAndEvaluateDraft(
     }
   }
 
-  const extCheckSections: TgMediaSection[] = ["cartoon", "cartoon2", "dubbed", "aw_animation", "animation", "manga", "manhwa"];
+  const extCheckSections: TgMediaSection[] = ["cartoon", "cartoon2", "dubbed", "aw_animation", "spacetoon", "animation", "manga", "manhwa"];
   if (issues.length === 0 && kind === "manga_chapter" && !draft.duplicateAction) {
     const tgChDup = await findExistingTelegramChapterDuplicate(draft, matchedCandidate, ctx?.channelId, ctx?.messageId);
     if (tgChDup) {
@@ -1878,7 +1907,7 @@ export async function applyAdminCallbackToPending(
   if (action === "tg_pend_sec") {
     const sec = parts[2] as TgMediaSection;
     const lang = (parts[3] || "") as TgAudioLang;
-    if (!["anime", "animation", "aw_animation", "cartoon", "cartoon2", "dubbed", "film", "manga", "manhwa"].includes(sec)) {
+    if (!["anime", "animation", "aw_animation", "spacetoon", "cartoon", "cartoon2", "dubbed", "film", "manga", "manhwa"].includes(sec)) {
       return { callbackToast: "قسم غير صالح" };
     }
     draft.section = sec;
@@ -2585,6 +2614,115 @@ export async function getTelegramAwDubbedWatchSrc(seriesRef: string, epNum: numb
       rawUrl: buildSignedStreamUrl(row.id),
       hlsUrl: null,
     }));
+}
+
+/* ── Spacetoon Section (/api/dubbed/carateen/* & /dubbed/watch-src) ──── */
+export const TG_SPACETOON_ID_BASE = 9_000_000_000;
+
+export async function getTelegramSpacetoonCatalogItems(searchQuery?: string): Promise<any[]> {
+  try {
+    await ensureTelegramStorageSchema();
+    const normQ = normalizeMediaTitle(searchQuery || "");
+    const r = await pool.query<TgSeriesRow & { ep_count: number }>(
+      `SELECT s.*, COUNT(DISTINCT (e.season_number, e.episode_number))::int AS ep_count
+         FROM telegram_media_series s
+         JOIN telegram_media_episodes e ON e.series_id = s.id AND e.is_active = TRUE
+        WHERE s.section = 'spacetoon'
+        GROUP BY s.id
+        ORDER BY MAX(e.created_at) DESC
+        LIMIT 100`
+    );
+    return r.rows
+      .filter((row) => {
+        if (!normQ) return true;
+        return (
+          row.normalized_title.includes(normQ) ||
+          normalizeMediaTitle(row.title_ar || "").includes(normQ) ||
+          normalizeMediaTitle(row.title_en || "").includes(normQ)
+        );
+      })
+      .map((row) => {
+        let genres: string[] = [];
+        try { genres = JSON.parse(row.genres_json || "[]"); } catch {}
+        const category = genres[0] || "سبيستون";
+        const isMovie = /فيلم|movie/i.test(category) || /فيلم/.test(row.title);
+        return {
+          id: TG_SPACETOON_ID_BASE + row.id,
+          provider: "sp" as const,
+          providerLabel: "سبيستون",
+          title: row.title_ar || row.title,
+          image: buildPosterUrl(row),
+          category,
+          episodeCount: Number(row.ep_count || 1),
+          isMovie,
+          year: row.year ? String(row.year) : "",
+          source: "tg",
+        };
+      });
+  } catch {
+    return [];
+  }
+}
+
+export async function getTelegramSpacetoonEpisodes(showId: number): Promise<any[]> {
+  if (!Number.isSafeInteger(showId) || showId <= TG_SPACETOON_ID_BASE) return [];
+  const seriesId = showId - TG_SPACETOON_ID_BASE;
+  await ensureTelegramStorageSchema();
+  const r = await pool.query<TgEpisodeRow>(
+    `SELECT e.*, s.poster_url AS series_poster_url, s.poster_file_id AS series_poster_file_id
+       FROM telegram_media_episodes e
+       JOIN telegram_media_series s ON s.id = e.series_id
+      WHERE e.series_id = $1 AND s.section = 'spacetoon' AND e.is_active = TRUE
+      ORDER BY e.season_number ASC, e.episode_number ASC, e.updated_at DESC`,
+    [seriesId]
+  );
+  const byKey = new Map<string, TgEpisodeRow>();
+  for (const row of r.rows) {
+    const k = `${row.season_number}:${row.episode_number}`;
+    const cur = byKey.get(k);
+    if (!cur || qualityToRank(row.quality) > qualityToRank(cur.quality)) {
+      byKey.set(k, row);
+    }
+  }
+  return [...byKey.values()]
+    .sort((a, b) => a.season_number - b.season_number || a.episode_number - b.episode_number)
+    .map((ep) => {
+      const spEpId = TG_SPACETOON_ID_BASE + ep.id;
+      const thumb = ep.series_poster_file_id
+        ? `${getPublicApiBase()}/api/tg-media/poster/${ep.series_id}`
+        : (ep.series_poster_url || "");
+      return {
+        number: ep.episode_number,
+        epId: String(spEpId),
+        url: `carateen://sp/${showId}/${spEpId}`,
+        title: `الحلقة ${ep.episode_number} (${ep.quality})`,
+        thumbnail: thumb,
+        season: ep.season_number,
+      };
+    });
+}
+
+export async function getTelegramSpacetoonWatchSrc(spacetoonEpisodeId: number): Promise<{
+  hlsUrl: string;
+  rawUrl: string;
+  streamUrl: string;
+  type: "mp4";
+  subtitleUrl?: string;
+} | null> {
+  if (!Number.isSafeInteger(spacetoonEpisodeId) || spacetoonEpisodeId <= TG_SPACETOON_ID_BASE) return null;
+  const epId = spacetoonEpisodeId - TG_SPACETOON_ID_BASE;
+  const epRow = await getTelegramEpisodeById(epId);
+  if (!epRow) return null;
+  const signedPath = buildSignedStreamPath(epRow.id);
+  const signedUrl = buildSignedStreamUrl(epRow.id);
+  const subtitleUrl = epRow.subtitle_file_id ? buildSubtitleUrl(epRow.id) : undefined;
+  return {
+    hlsUrl: signedPath,
+    rawUrl: signedUrl,
+    streamUrl: signedUrl,
+    type: "mp4",
+    ...(subtitleUrl ? { subtitleUrl } : {}),
+  };
 }
 
 /* ── Manga & Manhwa Tab (/api/manga/*) ───────────────────────────────── */
