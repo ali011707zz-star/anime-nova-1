@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import { Router } from "express";
 import { load } from "cheerio";
 import { logger } from "../lib/logger";
-import { getTelegramDubbedCatalogItems, getTelegramDubbedEpisodes, getTelegramSd2CatalogItems, getTelegramSd2Detail, getTelegramAnimeZidCatalogItems, getTelegramAnimeZidDetail, getTelegramAwDubbedCatalogItems, getTelegramAwDubbedEpisodes, getTelegramAwDubbedWatchSrc, TG_SPACETOON_ID_BASE, getTelegramSpacetoonCatalogItems, getTelegramSpacetoonEpisodes, getTelegramSpacetoonWatchSrc, getTelegramEpisodeById, buildSignedStreamPath, buildSignedStreamUrl, buildSubtitleUrl } from "../lib/telegramStorage.js";
+import { getTelegramDubbedCatalogItems, getTelegramDubbedEpisodes, getTelegramSd2CatalogItems, getTelegramSd2Detail, getTelegramAnimeZidCatalogItems, getTelegramAnimeZidDetail, getTelegramAwDubbedCatalogItems, getTelegramAwDubbedEpisodes, getTelegramAwDubbedWatchSrc, TG_SPACETOON_ID_BASE, getTelegramSpacetoonCatalogItems, getTelegramSpacetoonEpisodes, getTelegramSpacetoonWatchSrc, getTelegramEpisodeQualities, getTelegramEpisodeById, buildSignedStreamPath, buildSignedStreamUrl, buildSubtitleUrl } from "../lib/telegramStorage.js";
 import { streamMultiRangeMediaVPS } from "../lib/multiRangeStreamer.js";
 import { mergeAwSourceRows } from "../lib/awSourceRows.mjs";
 import { parseCarateenEpisodeUrl } from "../lib/carateenEpisodeRef.mjs";
@@ -741,7 +741,15 @@ router.get("/dubbed/carateen/watch-src", async (req, res) => {
     const tgSrc = await getTelegramSpacetoonWatchSrc(episodeId);
     if (!tgSrc) { res.status(404).json({ error: "الحلقة غير موجودة" }); return; }
     res.setHeader("Cache-Control", "no-store");
-    res.json({ hlsUrl: tgSrc.hlsUrl, rawUrl: tgSrc.rawUrl, type: "mp4", ...(tgSrc.subtitleUrl ? { subtitleUrl: tgSrc.subtitleUrl } : {}) });
+    res.json({
+      hlsUrl: tgSrc.hlsUrl,
+      rawUrl: tgSrc.rawUrl,
+      type: "mp4",
+      serverName: tgSrc.serverName,
+      quality: tgSrc.quality,
+      servers: tgSrc.servers,
+      ...(tgSrc.subtitleUrl ? { subtitleUrl: tgSrc.subtitleUrl } : {}),
+    });
     return;
   }
 
@@ -846,7 +854,8 @@ router.get("/dubbed/sd2/servers", async (req, res) => {
     const epRow = await getTelegramEpisodeById(Number.parseInt(tgSrvM[1], 10));
     if (!epRow) { res.status(404).json({ error: "الحلقة غير موجودة" }); return; }
     res.setHeader("Cache-Control", "no-store");
-    res.json({ watchUrl, servers: [{ id: "nova_tg", name: `NOVA TG · ${epRow.quality}`, quality: epRow.quality }] });
+    const qualities = await getTelegramEpisodeQualities(epRow.id);
+    res.json({ watchUrl, servers: qualities.map((q) => ({ id: q.id, name: q.name, quality: q.quality })) });
     return;
   }
   if (!watchUrl || !isAllowedHyperwatchingUrl(watchUrl)) { res.status(400).json({ error: "valid watchUrl is required" }); return; }
@@ -970,7 +979,7 @@ router.get("/dubbed/sd2/watch-src", async (req, res) => {
     const signedUrl = buildSignedStreamUrl(epRow.id);
     const subtitleUrl = epRow.subtitle_file_id ? buildSubtitleUrl(epRow.id) : undefined;
     res.setHeader("Cache-Control", "no-store");
-    res.json({ hlsUrl: signedPath, rawUrl: signedUrl, referer: "", type: "mp4", serverId: "nova_tg", serverName: "NOVA TG", quality: epRow.quality, ...(subtitleUrl ? { subtitleUrl } : {}) });
+    res.json({ hlsUrl: signedPath, rawUrl: signedUrl, referer: "", type: "mp4", serverId: "nova_tg", serverName: "NOVA VIP", quality: epRow.quality, ...(subtitleUrl ? { subtitleUrl } : {}) });
     return;
   }
   if (!watchUrl || !isAllowedHyperwatchingUrl(watchUrl)) { res.status(400).json({ error: "valid watchUrl is required" }); return; }
@@ -1192,8 +1201,17 @@ router.get("/dubbed/watch-src", async (req, res) => {
     const signedPath = buildSignedStreamPath(epRow.id);
     const signedUrl = buildSignedStreamUrl(epRow.id);
     const subtitleUrl = epRow.subtitle_file_id ? buildSubtitleUrl(epRow.id) : undefined;
+    const servers = await getTelegramEpisodeQualities(epRow.id);
     res.setHeader("Cache-Control", "no-store");
-    res.json({ hlsUrl: signedPath, rawUrl: signedUrl, type: "mp4", ...(subtitleUrl ? { subtitleUrl } : {}) });
+    res.json({
+      hlsUrl: signedPath,
+      rawUrl: signedUrl,
+      type: "mp4",
+      serverName: "NOVA VIP",
+      quality: (epRow.quality || "720p").toLowerCase(),
+      servers,
+      ...(subtitleUrl ? { subtitleUrl } : {}),
+    });
     return;
   }
   const carateenRef = parseCarateenEpisodeUrl(epUrl);
@@ -1209,7 +1227,15 @@ router.get("/dubbed/watch-src", async (req, res) => {
       const tgSrc = await getTelegramSpacetoonWatchSrc(episodeId);
       if (!tgSrc) { res.status(404).json({ error: "الحلقة غير موجودة" }); return; }
       res.setHeader("Cache-Control", "no-store");
-      res.json({ hlsUrl: tgSrc.hlsUrl, rawUrl: tgSrc.rawUrl, type: "mp4", ...(tgSrc.subtitleUrl ? { subtitleUrl: tgSrc.subtitleUrl } : {}) });
+      res.json({
+      hlsUrl: tgSrc.hlsUrl,
+      rawUrl: tgSrc.rawUrl,
+      type: "mp4",
+      serverName: tgSrc.serverName,
+      quality: tgSrc.quality,
+      servers: tgSrc.servers,
+      ...(tgSrc.subtitleUrl ? { subtitleUrl: tgSrc.subtitleUrl } : {}),
+    });
       return;
     }
 
@@ -2641,9 +2667,9 @@ router.get("/dubbed/animezid/servers", async (req, res) => {
       vid,
       watchSources: [{
         id: "nova_tg",
-        provider: "NOVA TG",
+        provider: "NOVA VIP",
         type: "direct_mp4",
-        label: `NOVA TG · ${epRow.quality}`,
+        label: `NOVA VIP · ${epRow.quality}`,
         quality: epRow.quality,
         supportsNative: true,
         priority: 120,

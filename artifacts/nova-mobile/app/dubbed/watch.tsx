@@ -45,15 +45,27 @@ interface DubbedEpRef {
 
 type DubbedSlotState = "checking" | "available" | "fetching" | "failed";
 
+type DubbedSlotQuality = "2160p" | "1080p" | "720p" | "480p" | "360p";
+function normalizeSlotQuality(raw?: string): DubbedSlotQuality {
+  const s = String(raw || "").toLowerCase();
+  if (s.includes("2160") || s.includes("4k")) return "2160p";
+  if (s.includes("1080") || s.includes("fhd")) return "1080p";
+  if (s.includes("480")) return "480p";
+  if (s.includes("360")) return "360p";
+  return "720p";
+}
 interface DubbedServerSlot {
   key: string;
   site: string;
   shortName: string;
+  badge?: string;
   label: string;
-  quality: "720p" | "1080p";
+  quality: DubbedSlotQuality;
   mode: "api" | "direct";
   state: DubbedSlotState;
   serverId?: string;
+  directUrl?: string;
+  rawDirectUrl?: string;
 }
 
 export default function DubbedWatchScreen() {
@@ -373,10 +385,11 @@ export default function DubbedWatchScreen() {
   const resolveCarateenMedia = useCallback(async (
     signal: AbortSignal,
     mode: "api" | "direct" = "api",
-  ): Promise<{ url: string; contentType: "hls" | "progressive"; rawUrl: string } | null> => {
+    overrideEpisodeId?: string,
+  ): Promise<{ url: string; contentType: "hls" | "progressive"; rawUrl: string; servers?: any[] } | null> => {
     const BASE = getBaseUrl();
     const prov = provider || "sp";
-    let targetEpId = effectiveEpisodeId;
+    let targetEpId = overrideEpisodeId || effectiveEpisodeId;
     let targetVideoId = effectiveVideoId;
 
     // If episodeId is still empty (e.g. episodes list hasn't finished loading), fetch it on-demand
@@ -447,6 +460,7 @@ export default function DubbedWatchScreen() {
               url: withPlaybackTrace(proxyUrl, playbackTraceId, BASE),
               contentType: d.type === "hls" ? "hls" : "progressive",
               rawUrl: proxyUrl,
+              servers: Array.isArray(d?.servers) ? d.servers : undefined,
             };
           }
         }
@@ -618,12 +632,14 @@ export default function DubbedWatchScreen() {
             if (shown.length > 0) {
               const dynamicSlots: DubbedServerSlot[] = shown.map((srv, idx) => {
                 const numName = String(idx + 1);
+                const isNovaVip = /NOVA/i.test(String(srv.provider || srv.label || ""));
                 return {
                   key: `AZ_${srv.id}_${idx}`,
-                  site: `dubbed_az_${numName}`,
-                  shortName: numName,
-                  label: `السيرفر ${numName} · ${srv.provider || "مباشر"}`,
-                  quality: srv.quality === "1080p" ? "1080p" : "720p",
+                  site: isNovaVip ? "nova_vip" : `dubbed_az_${numName}`,
+                  shortName: isNovaVip ? "NOVA VIP" : numName,
+                  badge: isNovaVip ? "VIP" : numName,
+                  label: isNovaVip ? `سيرفر NOVA VIP · ${normalizeSlotQuality(srv.quality).toUpperCase()}` : `السيرفر ${numName} · ${srv.provider || "مباشر"}`,
+                  quality: isNovaVip ? normalizeSlotQuality(srv.quality) : (srv.quality === "1080p" ? "1080p" : "720p"),
                   mode: "api",
                   state: "available",
                   serverId: String(srv.id),
@@ -682,12 +698,14 @@ export default function DubbedWatchScreen() {
             if (list.length > 0) {
               const dynamicSlots: DubbedServerSlot[] = list.map((srv, idx) => {
                 const numName = String(idx + 1);
+                const isNovaVip = /NOVA/i.test(String(srv.name || ""));
                 return {
-                  key: `SD2_${srv.id}_${idx === 0 ? "1080p" : "720p"}`,
-                  site: `dubbed_sd2_${numName}`,
-                  shortName: numName,
-                  label: `السيرفر ${numName}`,
-                  quality: srv.quality === "1080p" || idx === 0 ? "1080p" : "720p",
+                  key: `SD2_${srv.id}_${idx}`,
+                  site: isNovaVip ? "nova_vip" : `dubbed_sd2_${numName}`,
+                  shortName: isNovaVip ? "NOVA VIP" : numName,
+                  badge: isNovaVip ? "VIP" : numName,
+                  label: isNovaVip ? `سيرفر NOVA VIP · ${normalizeSlotQuality(srv.quality).toUpperCase()}` : `السيرفر ${numName}`,
+                  quality: isNovaVip ? normalizeSlotQuality(srv.quality) : (srv.quality === "1080p" || idx === 0 ? "1080p" : "720p"),
                   mode: "api",
                   state: "available",
                   serverId: String(srv.id),
@@ -716,42 +734,89 @@ export default function DubbedWatchScreen() {
     }
 
     const primaryShort = provider === "sp" ? "SP" : isCarateenSource ? "CT" : "AT";
-    const initialSlots: DubbedServerSlot[] = [
-      {
-        key: `${primaryShort}_1080p`,
-        site: `dubbed_${primaryShort.toLowerCase()}_1080`,
-        shortName: primaryShort,
-        label: provider === "sp" ? "سيرفر سبيستون الرئيسي FHD" : "سيرفر المدبلج الرئيسي FHD",
-        quality: "1080p",
-        mode: "api",
-        state: "checking",
-      },
-      {
-        key: `${primaryShort}_720p`,
-        site: `dubbed_${primaryShort.toLowerCase()}_720`,
-        shortName: primaryShort,
-        label: provider === "sp" ? "سيرفر سبيستون السريع HD" : "سيرفر المدبلج السريع HD",
-        quality: "720p",
-        mode: "api",
-        state: "checking",
-      },
-      {
-        key: "DIRECT_720p",
-        site: "dubbed_direct_720",
-        shortName: "احتياطي",
-        label: "السيرفر الاحتياطي المباشر",
-        quality: "720p",
-        mode: "direct",
-        state: "checking",
-      },
-    ];
+    const isTgHosted =
+      Number(showId) > 9_000_000_000 ||
+      Number(effectiveEpisodeId) > 9_000_000_000 ||
+      String(effectiveEpUrl || "").startsWith("tg://") ||
+      String(series || "").startsWith("tg://");
+    const initialSlots: DubbedServerSlot[] = isTgHosted
+      ? [
+          {
+            key: "NOVA_VIP_CHECKING",
+            site: "nova_vip",
+            shortName: "NOVA VIP",
+            badge: "VIP",
+            label: "سيرفر NOVA VIP",
+            quality: "720p",
+            mode: "api",
+            state: "checking",
+          },
+        ]
+      : [
+          {
+            key: `${primaryShort}_1080p`,
+            site: `dubbed_${primaryShort.toLowerCase()}_1080`,
+            shortName: primaryShort,
+            label: provider === "sp" ? "سيرفر سبيستون الرئيسي FHD" : "سيرفر المدبلج الرئيسي FHD",
+            quality: "1080p",
+            mode: "api",
+            state: "checking",
+          },
+          {
+            key: `${primaryShort}_720p`,
+            site: `dubbed_${primaryShort.toLowerCase()}_720`,
+            shortName: primaryShort,
+            label: provider === "sp" ? "سيرفر سبيستون السريع HD" : "سيرفر المدبلج السريع HD",
+            quality: "720p",
+            mode: "api",
+            state: "checking",
+          },
+          {
+            key: "DIRECT_720p",
+            site: "dubbed_direct_720",
+            shortName: "احتياطي",
+            label: "السيرفر الاحتياطي المباشر",
+            quality: "720p",
+            mode: "direct",
+            state: "checking",
+          },
+        ];
     setSlots(initialSlots);
+
+    const mapBackendServersToSlots = (serverList: any[]): DubbedServerSlot[] =>
+      serverList.map((srv, idx) => {
+        const q = normalizeSlotQuality(srv?.quality);
+        const sName = String(srv?.shortName || srv?.name || "NOVA VIP").trim();
+        const badge = String(srv?.badge || (sName.includes("NOVA") ? "VIP" : sName.slice(0, 3))).trim();
+        const rawPath = typeof srv?.hlsUrl === "string" && srv.hlsUrl
+          ? (srv.hlsUrl.startsWith("/") ? `${BASE}${srv.hlsUrl}` : srv.hlsUrl)
+          : (typeof srv?.rawUrl === "string" ? srv.rawUrl : undefined);
+        const spEpId = srv?.spacetoonEpisodeId ? String(srv.spacetoonEpisodeId) : (srv?.id ? String(srv.id) : undefined);
+        return {
+          key: `NOVA_VIP_${srv?.id || idx}_${q}`,
+          site: "nova_vip",
+          shortName: sName,
+          badge,
+          label: `سيرفر ${sName} · ${q.toUpperCase()}`,
+          quality: q,
+          mode: "api",
+          state: "available",
+          serverId: spEpId,
+          directUrl: rawPath ? withPlaybackTrace(rawPath, playbackTraceId, BASE) : undefined,
+          rawDirectUrl: rawPath,
+        };
+      });
 
     try {
       if (isCarateenSource) {
         const resolved = await resolveCarateenMedia(ctrl.signal, "api");
         if (resolved && !ctrl.signal.aborted && mountedRef.current) {
           preloadedMediaRef.current = resolved;
+          if (Array.isArray(resolved.servers) && resolved.servers.length > 0) {
+            setSlots(mapBackendServersToSlots(resolved.servers));
+            setCheckingAvailability(false);
+            return;
+          }
         }
       } else if (effectiveEpUrl) {
         const sourceUrl = `${BASE}/api/dubbed/watch-src?epUrl=${encodeURIComponent(effectiveEpUrl)}&trace=${encodeURIComponent(playbackTraceId)}`;
@@ -768,6 +833,11 @@ export default function DubbedWatchScreen() {
               contentType: d.type === "hls" ? "hls" : "progressive",
               rawUrl: proxyUrl,
             };
+          }
+          if (Array.isArray(d?.servers) && d.servers.length > 0) {
+            setSlots(mapBackendServersToSlots(d.servers));
+            setCheckingAvailability(false);
+            return;
           }
         }
       }
@@ -880,7 +950,7 @@ export default function DubbedWatchScreen() {
     }
 
     if (isCarateenSource) {
-      const resolved = await resolveCarateenMedia(signal, mode);
+      const resolved = await resolveCarateenMedia(signal, mode, serverId);
       if (resolved) {
         if (mode === "api") preloadedMediaRef.current = resolved;
         return resolved;
@@ -1059,7 +1129,9 @@ export default function DubbedWatchScreen() {
       return;
     }
 
-    const extracted = await extractPlayableSource(slot.mode, ctrl.signal, false, slot.serverId, isSd2Source);
+    const extracted = slot.directUrl
+      ? { url: slot.directUrl, contentType: "progressive" as const, rawUrl: slot.rawDirectUrl || slot.directUrl }
+      : await extractPlayableSource(slot.mode, ctrl.signal, false, slot.serverId, isSd2Source);
     if (ctrl.signal.aborted || !mountedRef.current) return;
 
     if (!extracted) {
@@ -1079,7 +1151,7 @@ export default function DubbedWatchScreen() {
         url: extracted.url,
         contentType: extracted.contentType,
         label: slot.label,
-        quality: slot.quality === "1080p" ? "1080p FHD" : "720p HD",
+        quality: slot.quality === "2160p" ? "4K UHD" : slot.quality === "1080p" ? "1080p FHD" : slot.quality === "720p" ? "720p HD" : slot.quality.toUpperCase(),
       },
     ]);
     setScreen("player");
@@ -1165,7 +1237,9 @@ export default function DubbedWatchScreen() {
     setDlStates((p) => ({ ...p, [slot.key]: "fetching" }));
     try {
       const ctrl = new AbortController();
-      const extracted = await extractPlayableSource(slot.mode, ctrl.signal, false, slot.serverId, true);
+      const extracted = slot.directUrl
+        ? { url: slot.directUrl, contentType: "progressive" as const, rawUrl: slot.rawDirectUrl || slot.directUrl }
+        : await extractPlayableSource(slot.mode, ctrl.signal, false, slot.serverId, true);
       if (!extracted) {
         setDlStates((p) => ({ ...p, [slot.key]: "error" }));
         return;
@@ -1178,7 +1252,11 @@ export default function DubbedWatchScreen() {
       ]);
 
       const rawMediaUrl = extracted.rawUrl || extracted.url;
+      const isTgDirectStream =
+        rawMediaUrl.includes("/api/tg-media/stream/") ||
+        extracted.url.includes("/api/tg-media/stream/");
       const isDirectProgressiveProxy =
+        isTgDirectStream ||
         rawMediaUrl.includes("/api/dubbed/stream") ||
         rawMediaUrl.includes("/api/anime/video-proxy") ||
         extracted.url.includes("/api/dubbed/stream") ||
@@ -1187,8 +1265,10 @@ export default function DubbedWatchScreen() {
       const downloadUrl =
         extracted.contentType === "hls" && !rawMediaUrl.includes("/api/anime/download-mp4")
           ? `${base}/api/anime/download-mp4?site=${encodeURIComponent(downloadSite)}&url=${encodeURIComponent(rawMediaUrl)}${downloadToken ? `&dlToken=${encodeURIComponent(downloadToken)}` : ""}`
-          : isDirectProgressiveProxy
-            ? rawMediaUrl
+          : isTgDirectStream
+            ? `${rawMediaUrl}${rawMediaUrl.includes("?") ? "&" : "?"}dl=1`
+            : isDirectProgressiveProxy
+              ? rawMediaUrl
             : `${base}/api/anime/download-mp4?site=${encodeURIComponent(downloadSite)}&url=${encodeURIComponent(rawMediaUrl)}${downloadToken ? `&dlToken=${encodeURIComponent(downloadToken)}` : ""}`;
 
       setDlStates((p) => ({ ...p, [slot.key]: "downloading" }));
@@ -1361,8 +1441,11 @@ export default function DubbedWatchScreen() {
     );
   }
 
+  const uhdSlots = slots.filter((s) => s.quality === "2160p");
   const fhdSlots = slots.filter((s) => s.quality === "1080p");
   const hdSlots = slots.filter((s) => s.quality === "720p");
+  const sdSlots = slots.filter((s) => s.quality === "480p");
+  const lowSlots = slots.filter((s) => s.quality === "360p");
 
   const isLightTheme = !colors.background.startsWith("#0");
 
@@ -1375,9 +1458,12 @@ export default function DubbedWatchScreen() {
     return raw;
   })();
 
-  const tierGroups: Array<{ quality: "1080p" | "720p"; label: string; dotColor: string; items: DubbedServerSlot[] }> = [
+  const tierGroups: Array<{ quality: DubbedSlotQuality; label: string; dotColor: string; items: DubbedServerSlot[] }> = [
+    { quality: "2160p" as const, label: "4K", dotColor: isLightTheme ? "#7C3AED" : "#a78bfa", items: uhdSlots },
     { quality: "1080p" as const, label: "1080P", dotColor: isLightTheme ? "#D97706" : "#fbbf24", items: fhdSlots },
     { quality: "720p" as const, label: "720P", dotColor: isLightTheme ? "#059669" : "#34d399", items: hdSlots },
+    { quality: "480p" as const, label: "480P", dotColor: isLightTheme ? "#0284C7" : "#38bdf8", items: sdSlots },
+    { quality: "360p" as const, label: "360P", dotColor: isLightTheme ? "#64748B" : "#94a3b8", items: lowSlots },
   ].filter(g => g.items.length > 0);
 
   /* ── Unified Server Picker Screen (Matching app/watch.tsx) ── */
@@ -1768,7 +1854,7 @@ export default function DubbedWatchScreen() {
                         ]}
                       >
                         <Text style={{ color: isLightTheme ? "#0284C7" : "#22d3ee", fontSize: 10, fontFamily: "Cairo_800ExtraBold" }}>
-                          {slot.shortName}
+                          {slot.badge || slot.shortName}
                         </Text>
                       </View>
                     </View>

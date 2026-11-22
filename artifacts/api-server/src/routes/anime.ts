@@ -1,6 +1,8 @@
 import { Router, type Request } from "express";
 import { scraperQueueMiddleware } from "../lib/scraperQueue.js";
 import { getTelegramAnimeSources } from "../lib/telegramStorage.js";
+import { getTelegramEpisodeById, getEpisodeFileSizeFallback, getStreamSigningSecret, streamTelegramEpisodeRange } from "../lib/telegramStorage.js";
+import { parseHttpByteRange, verifyTgStreamToken } from "../lib/telegramStorageLogic.mjs";
 import { logger } from "../lib/logger.js";
 import {
   SOURCE_AVAILABILITY_CONCURRENCY,
@@ -19890,6 +19892,10 @@ router.get("/anime/download-mp4", async (req, res) => {
      allowlist server-side as the final guard: clients and old cached picker
      rows must not be able to turn a playback-only source into a download. */
   const DOWNLOAD_SOURCE_SITES = new Set([
+    "nova_tg",        // NOVA VIP
+    "nova_tg_dub",    // NOVA VIP (EN)
+    "nova_vip",       // NOVA VIP
+    "tg",             // NOVA VIP
     "anime4up2_hard", // AD 1
     "animewitcher", // AW
     "sanime",       // SA
@@ -19918,6 +19924,45 @@ router.get("/anime/download-mp4", async (req, res) => {
   }
 
   const requestedUrl = String(req.query.url || "");
+  // Direct first-party NOVA VIP (Telegram) MP4 download — instant streaming with Range, no ffmpeg conversion
+  try {
+    const parsedTg = requestedUrl.startsWith("/")
+      ? new URL(requestedUrl, "http://127.0.0.1")
+      : new URL(requestedUrl);
+    const mTg = parsedTg.pathname.match(/^\/api\/tg-media\/stream\/(\d+)$/);
+    if (mTg) {
+      const tgEpId = Number.parseInt(mTg[1], 10);
+      const exp = String(parsedTg.searchParams.get("exp") || "");
+      const sig = String(parsedTg.searchParams.get("sig") || "");
+      if (!verifyTgStreamToken(tgEpId, exp, sig, getStreamSigningSecret())) {
+        res.status(401).send("invalid or expired stream signature");
+        return;
+      }
+      const ep = await getTelegramEpisodeById(tgEpId);
+      if (!ep) { res.status(404).send("episode not found"); return; }
+      const totalSize = await getEpisodeFileSizeFallback(ep);
+      if (!totalSize || totalSize <= 0) { res.status(502).send("unable to determine file size"); return; }
+      const rangeHeader = typeof req.headers.range === "string" ? req.headers.range : undefined;
+      const range = parseHttpByteRange(rangeHeader, totalSize);
+      if (!range) { res.setHeader("Content-Range", `bytes */${totalSize}`); res.status(416).end(); return; }
+      const mime = ep.mime_type && ep.mime_type.startsWith("video/") ? ep.mime_type : "video/mp4";
+      res.setHeader("Content-Type", mime);
+      res.setHeader("Accept-Ranges", "bytes");
+      res.setHeader("Content-Length", String(range.chunkLength));
+      res.setHeader("Content-Disposition", `attachment; filename="nova-episode-${tgEpId}.mp4"`);
+      if (range.isPartial) {
+        res.setHeader("Content-Range", `bytes ${range.start}-${range.end}/${totalSize}`);
+        res.status(206);
+      } else {
+        res.status(200);
+      }
+      await streamTelegramEpisodeRange(ep, range, req, res);
+      return;
+    }
+  } catch (tgDlErr: any) {
+    if (!res.headersSent) { res.status(502).send("telegram download failed"); }
+    return;
+  }
   let sourceUrl = localApiUrl(
     requestedUrl,
     ["/api/anime/hls-proxy", "/api/anime/video-proxy"],

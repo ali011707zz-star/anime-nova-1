@@ -76,7 +76,10 @@ async function handleStream(req: Request, res: Response, headOnly: boolean) {
     res.setHeader("Content-Length", String(range.chunkLength));
     res.setHeader("Cache-Control", "private, max-age=3600");
     res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges");
+    res.setHeader("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges, Content-Disposition");
+    if (String(req.query.dl || "") === "1") {
+      res.setHeader("Content-Disposition", `attachment; filename="nova-episode-${epId}.mp4"`);
+    }
 
     if (range.isPartial) {
       res.setHeader("Content-Range", `bytes ${range.start}-${range.end}/${totalSize}`);

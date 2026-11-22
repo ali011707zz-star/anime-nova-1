@@ -107,13 +107,16 @@ const HARDSUB_ARABIC_SITES = new Set([
   "anime4up2_hard",
 ]);
 const ARABIC_PLAYBACK_SITES = new Set([
-  "shahiid", "animelek", "animedar", "okanime", "arabseed", "animeify",
+  "nova_tg", "nova_vip", "shahiid", "animelek", "animedar", "okanime", "arabseed", "animeify",
   "animeday", "mycima", "topcinemaa", "anime4up2_hard", "animewitcher",
   "ristoanime", "faselhd_db", "animetime", "sanime", "anifox",
 ]);
 
 /* Playback and download providers are separate product surfaces. */
 const DOWNLOAD_SOURCE_SITES = new Set([
+  "nova_tg",        // NOVA VIP (Arabic / Sub)
+  "nova_tg_dub",    // NOVA VIP (English Dub)
+  "nova_vip",       // NOVA VIP
   "animedar",       // AnimeDar
   "anime4up2_hard", // AD 1 — أنمي فور أب (مدمج)
   "animewitcher",   // AW
@@ -131,7 +134,7 @@ const SITE_TAG: Record<string, string> = {
   shahiid: "SH", animelek: "EK", animedar: "AD", okanime: "OK",
   ristoanime: "RS", animeify: "AF", animeday: "DY", arabseed: "AR",
   mycima: "MC", topcinemaa: "TC",
-  nova_tg: "TG", nova_tg_dub: "TG DUB", animewitcher: "AW", anime4up2_hard: "AD 1", anime4up2: "AD 2", kawaii: "KW", megaplay: "MP", megaplay_dub: "MP DUB", reflix: "RE", reflix_dub: "RE DUB", reanime: "RE", anineko: "AN",
+  nova_tg: "VIP", nova_tg_dub: "VIP EN", nova_vip: "VIP", animewitcher: "AW", anime4up2_hard: "AD 1", anime4up2: "AD 2", kawaii: "KW", megaplay: "MP", megaplay_dub: "MP DUB", reflix: "RE", reflix_dub: "RE DUB", reanime: "RE", anineko: "AN",
   animekai: "AK",
   vidlink_anim: "VL", vidfast: "VF",
   animetime: "AT", animepahe: "AP", dulo_anim: "DL",
@@ -144,7 +147,7 @@ const SITE_TAG: Record<string, string> = {
 
 /* ── اسم عرض لكل موقع في منتقي المصادر ── */
 const SITE_LABEL: Record<string, string> = {
-  nova_tg: "NOVA TG", nova_tg_dub: "NOVA TG (إنجليزي)", kawaii: "Kawaii", megaplay: "MegaPlay", megaplay_dub: "MegaPlay (إنجليزي)", reflix: "ReAnime", reflix_dub: "ReAnime (إنجليزي)", reanime: "ReAnime", animekai: "AnimeKai",
+  nova_tg: "NOVA VIP", nova_tg_dub: "NOVA VIP (إنجليزي)", nova_vip: "NOVA VIP", kawaii: "Kawaii", megaplay: "MegaPlay", megaplay_dub: "MegaPlay (إنجليزي)", reflix: "ReAnime", reflix_dub: "ReAnime (إنجليزي)", reanime: "ReAnime", animekai: "AnimeKai",
   animewitcher: "AnimeWitcher",
   anineko: "AniNeko",
   dulo_anim: "Dulo",
@@ -167,7 +170,7 @@ function getSiteTag(site: string): string {
 
 /* ── وصف قصير لكل مصدر في شبكة الاختيار (يطابق نظام الويب) ── */
 const SITE_DESC: Record<string, string> = {
-  nova_tg: "بث مباشر سريع · NOVA", nova_tg_dub: "دبلجة إنجليزية · بث مباشر", kawaii: "1080p · مباشر", megaplay: "HLS · صوت خام · ترجمة Kawaii", megaplay_dub: "دبلجة إنجليزية · ترجمة عربية", reflix: "HLS · صوت خام · ترجمة Kawaii", reflix_dub: "دبلجة إنجليزية · ترجمة عربية", reanime: "HLS · صوت خام · ترجمة Kawaii",
+  nova_tg: "سيرفر NOVA الخاص · بث وتحميل مباشر", nova_tg_dub: "دبلجة إنجليزية · سيرفر NOVA الخاص", nova_vip: "سيرفر NOVA الخاص · بث وتحميل مباشر", kawaii: "1080p · مباشر", megaplay: "HLS · صوت خام · ترجمة Kawaii", megaplay_dub: "دبلجة إنجليزية · ترجمة عربية", reflix: "HLS · صوت خام · ترجمة Kawaii", reflix_dub: "دبلجة إنجليزية · ترجمة عربية", reanime: "HLS · صوت خام · ترجمة Kawaii",
   anineko: "HLS · متعدد الجودات", animekai: "HLS · ياباني + ترجمة",
   animewitcher: "PD/ST · مباشر",
   dulo_anim: "ياباني/إنجليزي · HLS مباشر",

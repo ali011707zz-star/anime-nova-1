@@ -2287,7 +2287,7 @@ export async function getTelegramAnimeSources(params: {
         ? [{ label: "العربية (NOVA)", lang: "ar", url: buildSubtitleUrl(row.id) }]
         : undefined;
       return {
-        name: `NOVA TG (${labelSuffix}) · ${row.quality}`,
+        name: `NOVA VIP (${labelSuffix}) · ${row.quality}`,
         url: streamUrl,
         directUrl: streamUrl,
         quality: row.quality,
@@ -2612,7 +2612,7 @@ export async function getTelegramFilmSources(params: {
     return r.rows.map((row) => {
       const streamUrl = buildSignedStreamUrl(row.id);
       return {
-        name: `NOVA TG · ${row.quality}`,
+        name: `NOVA VIP · ${row.quality}`,
         url: streamUrl,
         directUrl: streamUrl,
         quality: row.quality,
@@ -2683,7 +2683,7 @@ export async function getTelegramAnimationSources(params: {
       const langTag = row.audio_lang === "dub_ar" ? "مدبلج" : row.audio_lang === "dub_en" ? "EN" : "مترجم";
       return {
         url: streamUrl,
-        label: `NOVA TG · ${row.quality} (${langTag})`,
+        label: `NOVA VIP · ${row.quality} (${langTag})`,
         directUrl: streamUrl,
         proxyUrl: streamUrl,
         quality: row.quality,
@@ -2773,7 +2773,7 @@ export async function getTelegramAwDubbedWatchSrc(seriesRef: string, epNum: numb
     .sort((a, b) => qualityToRank(b.quality) - qualityToRank(a.quality))
     .map((row) => ({
       quality: row.quality || "720p",
-      name: `NOVA TG · ${row.quality}`,
+      name: `NOVA VIP · ${row.quality}`,
       rawUrl: buildSignedStreamUrl(row.id),
       hlsUrl: null,
     }));
@@ -2865,11 +2865,62 @@ export async function getTelegramSpacetoonEpisodes(showId: number): Promise<any[
     });
 }
 
+export interface TgEpisodeQualityServer {
+  id: string;
+  episodeId: number;
+  spacetoonEpisodeId: number;
+  name: string;
+  shortName: string;
+  badge: string;
+  quality: string;
+  fileSize: number;
+  hlsUrl: string;
+  rawUrl: string;
+  type: "mp4";
+  subtitleUrl?: string;
+}
+
+export async function getTelegramEpisodeQualities(epId: number): Promise<TgEpisodeQualityServer[]> {
+  const anchor = await getTelegramEpisodeById(epId);
+  if (!anchor) return [];
+  const r = await pool.query<TgEpisodeRow>(
+    `SELECT * FROM telegram_media_episodes
+      WHERE series_id = $1 AND season_number = $2 AND episode_number = $3 AND is_active = TRUE
+      ORDER BY updated_at DESC`,
+    [anchor.series_id, anchor.season_number, anchor.episode_number]
+  );
+  const rows = r.rows.length > 0 ? r.rows : [anchor];
+  const byQuality = new Map<string, TgEpisodeRow>();
+  for (const row of rows) {
+    const q = (row.quality || "720p").toLowerCase();
+    if (!byQuality.has(q)) byQuality.set(q, row);
+  }
+  return [...byQuality.values()]
+    .sort((a, b) => qualityToRank(b.quality) - qualityToRank(a.quality))
+    .map((row) => ({
+      id: String(row.id),
+      episodeId: row.id,
+      spacetoonEpisodeId: TG_SPACETOON_ID_BASE + row.id,
+      name: `NOVA VIP · ${row.quality || "720p"}`,
+      shortName: "NOVA VIP",
+      badge: "VIP",
+      quality: (row.quality || "720p").toLowerCase(),
+      fileSize: Number(row.file_size || 0),
+      hlsUrl: buildSignedStreamPath(row.id),
+      rawUrl: buildSignedStreamUrl(row.id),
+      type: "mp4" as const,
+      ...(row.subtitle_file_id ? { subtitleUrl: buildSubtitleUrl(row.id) } : {}),
+    }));
+}
+
 export async function getTelegramSpacetoonWatchSrc(spacetoonEpisodeId: number): Promise<{
   hlsUrl: string;
   rawUrl: string;
   streamUrl: string;
   type: "mp4";
+  serverName: string;
+  quality: string;
+  servers: TgEpisodeQualityServer[];
   subtitleUrl?: string;
 } | null> {
   if (!Number.isSafeInteger(spacetoonEpisodeId) || spacetoonEpisodeId <= TG_SPACETOON_ID_BASE) return null;
@@ -2879,11 +2930,15 @@ export async function getTelegramSpacetoonWatchSrc(spacetoonEpisodeId: number): 
   const signedPath = buildSignedStreamPath(epRow.id);
   const signedUrl = buildSignedStreamUrl(epRow.id);
   const subtitleUrl = epRow.subtitle_file_id ? buildSubtitleUrl(epRow.id) : undefined;
+  const servers = await getTelegramEpisodeQualities(epRow.id);
   return {
     hlsUrl: signedPath,
     rawUrl: signedUrl,
     streamUrl: signedUrl,
     type: "mp4",
+    serverName: "NOVA VIP",
+    quality: (epRow.quality || "720p").toLowerCase(),
+    servers,
     ...(subtitleUrl ? { subtitleUrl } : {}),
   };
 }
@@ -2939,7 +2994,7 @@ function formatTgMangaBaseItem(
     status: "RELEASING",
     statusAr: "مستمر",
     averageScore: null,
-    scoreText: "NOVA TG",
+    scoreText: "NOVA VIP",
     chapters: Number(row.chapters_count || 0),
     latestChapter: latestCh,
     latestChapterSlug: latestSlug,
@@ -3135,7 +3190,7 @@ export async function getTelegramMangaLatestUpdates(): Promise<any[]> {
           latestChapterSlug: row.latest_chapter_label || formatChapterLabel(row.latest_chapter),
           latestChapterLabel: `الفصل ${row.latest_chapter_label || formatChapterLabel(row.latest_chapter)}`,
           updatedAt: row.latest_updated,
-          scoreText: "NOVA TG",
+          scoreText: "NOVA VIP",
           statusAr: "مستمر",
           genres,
         };
