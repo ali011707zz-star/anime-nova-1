@@ -19328,6 +19328,19 @@ router.get("/anime/hls-proxy", async (req, res) => {
   if (ref && isEncrypted(ref)) ref = decryptParam(ref);
   if (manifestKey && isEncrypted(manifestKey)) manifestKey = decryptParam(manifestKey);
   if (!isSafeExternalUrl(url)) { res.status(400).send("invalid external url"); return; }
+  // First-party signed Telegram stream URLs must never self-loop through video-proxy
+  try {
+    const parsedSelf = new URL(url);
+    const appDomain = (process.env.APP_DOMAIN || "animenovaa.duckdns.org").toLowerCase();
+    if (
+      (parsedSelf.hostname.toLowerCase() === appDomain || parsedSelf.hostname === "127.0.0.1" || parsedSelf.hostname === "localhost") &&
+      parsedSelf.pathname.startsWith("/api/tg-media/stream/")
+    ) {
+      res.setHeader("Cache-Control", "no-store");
+      res.status(307).setHeader("Location", parsedSelf.pathname + parsedSelf.search).end();
+      return;
+    }
+  } catch {}
   const trace = readPlaybackTrace(req.query.trace);
   const traceRoute = req.query.child === "1" ? "child-playlist" : "hls-manifest";
   const startedAt = Date.now();

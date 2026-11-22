@@ -4,6 +4,8 @@ import { deflateRawSync } from "node:zlib";
 import {
   parseChannelCaption,
   validateParsedCaption,
+  looksLikeEpisodeAlbumCaption,
+  isSuspiciousTitle,
   evaluateTitleMatch,
   mergeAdminFixIntoDraft,
   formatPendingReminderMessage,
@@ -369,4 +371,24 @@ test("listZipImageEntries & extractZipImageByIndex naturally sort pages, decompr
   const p2 = extractZipImageByIndex(zip, 2);
   assert.deepEqual([...p2.data], [0x89, 0x50, 0x4e, 0x47, 10]);
   assert.equal(extractZipImageByIndex(zip, 99), null);
+});
+
+
+test("rejects conversational confirmation replies like 'تم' as titles & detects photo+video album captions", () => {
+  assert.equal(isSuspiciousTitle("تم").suspicious, true);
+  assert.equal(isSuspiciousTitle("تأكيد").suspicious, true);
+  assert.equal(isSuspiciousTitle("أوكي").suspicious, true);
+  assert.equal(isSuspiciousTitle("نعم").suspicious, true);
+  assert.equal(isSuspiciousTitle("ok").suspicious, true);
+  assert.equal(isSuspiciousTitle("done").suspicious, true);
+  assert.equal(isSuspiciousTitle("دري لاند").suspicious, false);
+
+  const albumEp = parseChannelCaption("الاسم: دري لاند\nالموسم: 1\nرقم الحلقة: 1\nالجودة: 720");
+  assert.equal(looksLikeEpisodeAlbumCaption(albumEp), true);
+
+  const seriesCard = parseChannelCaption("#عمل_جديد\n#سبيستون\nالاسم: دري لاند");
+  assert.equal(looksLikeEpisodeAlbumCaption(seriesCard), false);
+
+  const mangaCh = parseChannelCaption("#مانجا\nالاسم: One Piece\nالفصل: 1");
+  assert.equal(looksLikeEpisodeAlbumCaption(mangaCh), false);
 });

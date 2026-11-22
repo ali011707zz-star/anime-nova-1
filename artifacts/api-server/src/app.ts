@@ -90,7 +90,7 @@ export async function createApp(): Promise<Express> {
   // media proxy (for example megaplay.buzz). Those origins must never be
   // allowed to call the application API, but they also must not be rejected
   // by this global CORS guard before the proxy can handle the request.
-  const MEDIA_PROXY_PATH = /^\/api\/(?:anime|animation|film)\/(?:hls-proxy|video-proxy|seg-proxy|download-mp4)$/;
+  const MEDIA_PROXY_PATH = /^\/api\/(?:(?:anime|animation|film)\/(?:hls-proxy|video-proxy|seg-proxy|download-mp4)|tg-media\/(?:stream|poster|manga-page)\/.+)$/;
   const ALLOWED_ORIGINS = new Set([
     process.env.FRONTEND_ORIGIN || "",
     process.env.APP_DOMAIN ? `https://${process.env.APP_DOMAIN}` : "",

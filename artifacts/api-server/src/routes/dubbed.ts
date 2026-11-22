@@ -619,7 +619,7 @@ router.get("/dubbed/carateen/catalog", async (req, res) => {
       return entry;
     });
     const pageSlice = tgSpItems.length > 0 ? [...tgSpItems, ...baseSlice] : baseSlice;
-    res.setHeader("Cache-Control", req.query.refresh === "1" ? "no-store" : "public, max-age=300");
+    res.setHeader("Cache-Control", (req.query.refresh === "1" || provider === "sp") ? "no-store" : "public, max-age=300");
     res.json({
       results: pageSlice,
       page,
@@ -705,10 +705,11 @@ router.get("/dubbed/carateen/stream", async (req, res) => {
     return;
   }
   if (episodeId > TG_SPACETOON_ID_BASE) {
-    const tgSrc = await getTelegramSpacetoonWatchSrc(episodeId);
-    if (!tgSrc) { res.status(404).json({ error: "الحلقة غير موجودة" }); return; }
+    // First-party Telegram stream: return empty streamUrl so mobile watch.tsx falls through
+    // cleanly to /dubbed/carateen/watch-src and plays /api/tg-media/stream/:id directly without
+    // wrapping it inside /api/anime/video-proxy?ref=https://carateen.tv/.
     res.setHeader("Cache-Control", "no-store");
-    res.json({ streamUrl: tgSrc.streamUrl, success: true });
+    res.json({ streamUrl: "", useWatchSrc: true, success: false });
     return;
   }
   try {

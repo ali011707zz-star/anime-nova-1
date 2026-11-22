@@ -250,7 +250,7 @@ export function isSuspiciousTitle(title) {
   if (/^(vid|img|mov|dsc|pxl|whatsapp|telegram|video|movie|episode|ep|clip|file|untitled|test|document|screen|rec|new)[_\-\s0-9]*$/i.test(raw)) {
     return { suspicious: true, reason: "filename_placeholder" };
   }
-  if (/^(اسم العمل|اسم الانمي|اسم الكرتون|اسم الفيلم|الاسم|العنوان|هنا|اكتب الاسم|بدون اسم|تجربه|تجربة|none|null|n\/a|xxx)$/.test(norm)) {
+  if (/^(اسم العمل|اسم الانمي|اسم الكرتون|اسم الفيلم|الاسم|العنوان|هنا|اكتب الاسم|بدون اسم|تجربه|تجربة|none|null|n\/a|xxx|تم|تاكيد|تأكيد|نعم|ايوه|ايه|اوك|اوكي|حسنا|طيب|ماشي|موافق|تمام|خلاص|انتهي|انتهى|الغاء|إلغاء|معلق|ok|okay|yes|done|confirm|confirmed|cancel|pending|start|help)$/.test(norm)) {
     return { suspicious: true, reason: "template_placeholder" };
   }
   return { suspicious: false };
@@ -633,6 +633,16 @@ const FIELD_LABELS_AR = {
   genres: "التصنيف",
   titleEn: "الاسم الإنجليزي",
 };
+
+export function looksLikeEpisodeAlbumCaption(parsed) {
+  if (!parsed || parsed.isSeriesCard || isMangaSection(parsed.section)) return false;
+  return Boolean(
+    parsed.episode != null ||
+    parsed.explicitQuality ||
+    parsed.explicitSeason ||
+    parsed.explicitAudio
+  );
+}
 
 export function validateParsedCaption(parsed, kind = "episode") {
   const issues = [];
@@ -1372,7 +1382,7 @@ export function formatTemplatesMessage() {
     "• <b>أو ألبوم صور:</b> أرسل صور صفحات الفصل معاً في ألبوم واحد واكتب الوصف نفسه مع <code>#مانجا</code> أو <code>#مانهوا</code>.",
     "<i>سطر واحد: <code>One Piece | ف1125 #مانجا</code> أو <code>Solo Leveling | ف15.5 #مانهوا</code></i>",
     "",
-    "8️⃣ <b>بوستر عمل جديد:</b> أرسل صورة الغلاف مع <code>#عمل_جديد</code> + <code>القسم: ...</code> + <code>الاسم: ...</code>",
+    "8️⃣ <b>بوستر + حلقة معاً:</b> يمكنك إرسال صورة الغلاف + فيديو الحلقة <b>معاً في ألبوم واحد</b> وسيربط البوت البوستر بالحلقة تلقائياً! أو أرسل صورة الغلاف منفردة مع <code>#عمل_جديد</code> + <code>القسم: ...</code> + <code>الاسم: ...</code>",
     "9️⃣ <b>ترجمة خارجية:</b> أرسل ملف <code>.srt</code> أو <code>.vtt</code> كـ <b>رد (Reply)</b> على رسالة الحلقة.",
     "",
     "🛡️ <b>التدقيق ومنع التكرار مفعّلان تلقائياً</b> على جميع الأقسام.",

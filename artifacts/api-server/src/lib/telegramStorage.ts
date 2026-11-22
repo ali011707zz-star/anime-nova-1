@@ -1,8 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
-import fs from "node:fs";
-import path from "node:path";
 import type { Request, Response } from "express";
 import { pool } from "./db.js";
 import { getEnvOrDb } from "./dbConfig.js";
@@ -16,6 +14,7 @@ import {
   signTgStreamToken,
   convertSrtToVtt,
   validateParsedCaption,
+  looksLikeEpisodeAlbumCaption,
   evaluateTitleMatch,
   mergeAdminFixIntoDraft,
   formatPendingReminderMessage,
@@ -209,6 +208,9 @@ export function ensureTelegramStorageSchema(): Promise<void> {
       CREATE INDEX IF NOT EXISTS idx_tg_pending_status_updated
         ON telegram_media_pending (status, updated_at DESC);
       ALTER TABLE telegram_media_pending ADD COLUMN IF NOT EXISTS media_group_id TEXT;
+      ALTER TABLE telegram_media_pending ADD COLUMN IF NOT EXISTS poster_file_id TEXT;
+      ALTER TABLE telegram_media_pending ADD COLUMN IF NOT EXISTS poster_message_id INTEGER;
+      ALTER TABLE telegram_media_episodes ADD COLUMN IF NOT EXISTS media_group_id TEXT;
 
       CREATE TABLE IF NOT EXISTS telegram_media_chapters (
         id SERIAL PRIMARY KEY,
@@ -306,6 +308,8 @@ export interface TgPendingRow {
   message_id: number;
   kind: TgUploadKind;
   media_group_id?: string | null;
+  poster_file_id?: string | null;
+  poster_message_id?: number | null;
   file_id: string;
   file_unique_id: string | null;
   file_name: string | null;
@@ -639,6 +643,8 @@ interface MediaPayload {
   height: number;
   captionRaw: string;
   mediaGroupId?: string | null;
+  posterFileId?: string | null;
+  posterMessageId?: number | null;
 }
 
 async function findExistingTelegramDuplicate(
@@ -1100,8 +1106,8 @@ async function upsertPendingUpload(
   await ensureTelegramStorageSchema();
   const r = await pool.query<TgPendingRow>(
     `INSERT INTO telegram_media_pending
-      (channel_id, message_id, kind, file_id, file_unique_id, file_name, mime_type, file_size, duration, width, height, caption_raw, parsed_json, issues_json, suggestions_json, media_group_id, status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'pending')
+      (channel_id, message_id, kind, file_id, file_unique_id, file_name, mime_type, file_size, duration, width, height, caption_raw, parsed_json, issues_json, suggestions_json, media_group_id, poster_file_id, poster_message_id, status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'pending')
      ON CONFLICT (channel_id, message_id) DO UPDATE SET
        kind = EXCLUDED.kind,
        file_id = EXCLUDED.file_id,
@@ -1117,6 +1123,8 @@ async function upsertPendingUpload(
        issues_json = EXCLUDED.issues_json,
        suggestions_json = EXCLUDED.suggestions_json,
        media_group_id = COALESCE(EXCLUDED.media_group_id, telegram_media_pending.media_group_id),
+       poster_file_id = COALESCE(EXCLUDED.poster_file_id, telegram_media_pending.poster_file_id),
+       poster_message_id = COALESCE(EXCLUDED.poster_message_id, telegram_media_pending.poster_message_id),
        status = 'pending',
        updated_at = NOW()
      RETURNING *`,
@@ -1137,6 +1145,8 @@ async function upsertPendingUpload(
       JSON.stringify(issues),
       JSON.stringify(suggestions),
       media.mediaGroupId || null,
+      media.posterFileId || null,
+      media.posterMessageId || null,
     ]
   );
   return r.rows[0];
@@ -1167,6 +1177,40 @@ function trackAlbumPhoto(channelId: string, mediaGroupId: string, photo: AlbumPh
   }
   _albumPhotoBuffer.set(key, bucket);
   return bucket.photos;
+}
+
+interface AlbumMediaContext {
+  caption?: string;
+  photoFileId?: string;
+  photoMessageId?: number;
+  publishedSeriesId?: number;
+  ts: number;
+}
+const _albumMediaContext = new Map<string, AlbumMediaContext>();
+
+function upsertAlbumMediaContext(
+  channelId: string,
+  mediaGroupId: string,
+  patch: Partial<Omit<AlbumMediaContext, "ts">>
+): AlbumMediaContext {
+  const key = `${channelId}:${mediaGroupId}`;
+  const now = Date.now();
+  if (_albumMediaContext.size > 200) {
+    for (const [k, v] of _albumMediaContext) {
+      if (now - v.ts > 20 * 60 * 1000) _albumMediaContext.delete(k);
+    }
+  }
+  const cur = _albumMediaContext.get(key) || { ts: now };
+  const next: AlbumMediaContext = {
+    ...cur,
+    ...(patch.caption !== undefined ? { caption: patch.caption } : {}),
+    ...(patch.photoFileId !== undefined ? { photoFileId: patch.photoFileId } : {}),
+    ...(patch.photoMessageId !== undefined ? { photoMessageId: patch.photoMessageId } : {}),
+    ...(patch.publishedSeriesId !== undefined ? { publishedSeriesId: patch.publishedSeriesId } : {}),
+    ts: now,
+  };
+  _albumMediaContext.set(key, next);
+  return next;
 }
 
 async function downloadZipChapterBuffer(channelId: string, messageId: number, fileId: string | null, fileSize: number): Promise<Buffer | null> {
@@ -1399,6 +1443,8 @@ async function publishValidatedDraft(
     anilistId: effectiveAnilistId,
     tmdbId: draft.tmdbId,
     posterUrl: effectivePosterUrl,
+    posterFileId: media.posterFileId || undefined,
+    posterMessageId: media.posterMessageId || undefined,
     synopsis: effectiveSynopsis,
     genres: effectiveGenres,
     year: effectiveYear,
@@ -1421,10 +1467,11 @@ async function publishValidatedDraft(
 
   const epRes = await pool.query<TgEpisodeRow>(
     `INSERT INTO telegram_media_episodes
-      (series_id, channel_id, message_id, file_id, file_unique_id, file_name, mime_type, file_size, duration, width, height, season_number, episode_number, quality, audio_lang, caption_raw, is_active)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,TRUE)
+      (series_id, channel_id, message_id, media_group_id, file_id, file_unique_id, file_name, mime_type, file_size, duration, width, height, season_number, episode_number, quality, audio_lang, caption_raw, is_active)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,TRUE)
      ON CONFLICT (channel_id, message_id) DO UPDATE SET
        series_id = EXCLUDED.series_id,
+       media_group_id = COALESCE(EXCLUDED.media_group_id, telegram_media_episodes.media_group_id),
        file_id = EXCLUDED.file_id,
        file_unique_id = EXCLUDED.file_unique_id,
        file_name = EXCLUDED.file_name,
@@ -1445,6 +1492,7 @@ async function publishValidatedDraft(
       series.id,
       media.channelId,
       media.messageId,
+      media.mediaGroupId || null,
       media.fileId,
       media.fileUniqueId,
       media.fileName || null,
@@ -1460,6 +1508,9 @@ async function publishValidatedDraft(
       media.captionRaw || null,
     ]
   );
+  if (media.mediaGroupId) {
+    upsertAlbumMediaContext(media.channelId, media.mediaGroupId, { publishedSeriesId: series.id });
+  }
 
   await pool.query(
     `UPDATE telegram_media_pending SET status = 'published', updated_at = NOW() WHERE channel_id = $1 AND message_id = $2`,
@@ -1488,6 +1539,7 @@ async function publishValidatedDraft(
         `📂 القسم: <b>${secInfo.labelAr}</b> · الموسم ${epRow.season_number} · الحلقة <b>${epRow.episode_number}</b>\n` +
         `🎞️ الجودة: <b>${epRow.quality}</b> · الصوت: <b>${langAr}</b> · الحجم: ${sizeMb}\n` +
         `📍 <b>مكان الظهور في التطبيق:</b> ${secInfo.appLocationAr}` +
+        (media.posterFileId ? `\n🖼️ البوستر: <b>تم ربطه تلقائياً من الألبوم</b>` : "") +
         warning
       );
     })(),
@@ -1548,6 +1600,11 @@ export async function handleStorageChannelPost(post: any, isEdit = false): Promi
 
     if (mediaGroupId) {
       trackAlbumPhoto(channelId, mediaGroupId, photoEntry);
+      upsertAlbumMediaContext(channelId, mediaGroupId, {
+        photoFileId: photoEntry.fileId,
+        photoMessageId: photoEntry.messageId,
+        ...(caption ? { caption } : {}),
+      });
     }
 
     if (!caption && mediaGroupId) {
@@ -1569,12 +1626,63 @@ export async function handleStorageChannelPost(post: any, isEdit = false): Promi
             [JSON.stringify(pages), pages.length, ch.id]
           );
         }
+        return { handled: false, kind: "ignored" };
+      }
+
+      // Auto-attach trailing album photo as poster on a pending episode/chapter in the same album
+      const pendUpd = await pool.query(
+        `UPDATE telegram_media_pending
+            SET poster_file_id = $1, poster_message_id = $2, updated_at = NOW()
+          WHERE channel_id = $3 AND media_group_id = $4 AND status = 'pending' AND kind IN ('episode', 'manga_chapter')`,
+        [photoEntry.fileId, photoEntry.messageId, channelId, mediaGroupId]
+      );
+      if ((pendUpd.rowCount || 0) === 0) {
+        // Or attach directly to the already-published series from this album
+        const ctx = _albumMediaContext.get(`${channelId}:${mediaGroupId}`);
+        let targetSeriesId = ctx?.publishedSeriesId || null;
+        if (!targetSeriesId) {
+          const epRow = await pool.query<{ series_id: number }>(
+            `SELECT series_id FROM telegram_media_episodes
+              WHERE channel_id = $1 AND media_group_id = $2 AND is_active = TRUE
+              ORDER BY id DESC LIMIT 1`,
+            [channelId, mediaGroupId]
+          );
+          targetSeriesId = epRow.rows[0]?.series_id || null;
+        }
+        if (targetSeriesId) {
+          await pool.query(
+            `UPDATE telegram_media_series
+                SET poster_file_id = $1, poster_message_id = $2, updated_at = NOW()
+              WHERE id = $3`,
+            [photoEntry.fileId, photoEntry.messageId, targetSeriesId]
+          ).catch(() => {});
+        }
       }
       return { handled: false, kind: "ignored" };
     }
 
     if (caption) {
       const parsed = parseChannelCaption(caption);
+      // When the admin sends [Photo + Video] together as ONE album, Telegram puts the episode
+      // caption on the first item (the Photo) and sends the Video with an empty caption.
+      // Hold the photo metadata in _albumMediaContext so the paired video inherits both
+      // the caption and poster automatically without creating a duplicate series_card prompt.
+      if (mediaGroupId && looksLikeEpisodeAlbumCaption(parsed)) {
+        if (isEdit) {
+          const pendEp = await pool.query<TgPendingRow>(
+            `SELECT * FROM telegram_media_pending
+              WHERE channel_id = $1 AND media_group_id = $2 AND kind = 'episode' AND status = 'pending'
+              ORDER BY id DESC LIMIT 1`,
+            [channelId, mediaGroupId]
+          );
+          if (pendEp.rows[0]) {
+            const epRow = pendEp.rows[0];
+            const reParsed = parseChannelCaption(caption, epRow.file_name || "", { width: epRow.width, height: epRow.height });
+            return finalizeOrRePromptPending(epRow, reParsed);
+          }
+        }
+        return { handled: false, kind: "ignored" };
+      }
       const isPhotoChapter = Boolean(
         !parsed.isSeriesCard &&
         isMangaSection(parsed.section) &&
@@ -1662,6 +1770,7 @@ export async function handleStorageChannelPost(post: any, isEdit = false): Promi
   }
 
   const rawMedia = video || doc;
+  const mediaGroupId = post.media_group_id ? String(post.media_group_id) : null;
   const fileName = String(rawMedia.file_name || "");
   const mimeType = String(rawMedia.mime_type || "video/mp4");
   const fileSize = Number(rawMedia.file_size || 0);
@@ -1669,7 +1778,56 @@ export async function handleStorageChannelPost(post: any, isEdit = false): Promi
   const width = Number(rawMedia.width || 0);
   const height = Number(rawMedia.height || 0);
 
-  const parsed = parseChannelCaption(caption, fileName, { width, height });
+  let effectiveCaption = caption;
+  let albumPosterFileId: string | null = null;
+  let albumPosterMessageId: number | null = null;
+
+  if (mediaGroupId) {
+    const key = `${channelId}:${mediaGroupId}`;
+    const ctx = _albumMediaContext.get(key);
+    if (!effectiveCaption && ctx?.caption) {
+      effectiveCaption = ctx.caption;
+    }
+    if (ctx?.photoFileId) {
+      albumPosterFileId = ctx.photoFileId;
+      albumPosterMessageId = ctx.photoMessageId ?? null;
+    } else {
+      const bufferedPhotos = _albumPhotoBuffer.get(key)?.photos;
+      if (bufferedPhotos && bufferedPhotos.length > 0) {
+        albumPosterFileId = bufferedPhotos[0].fileId;
+        albumPosterMessageId = bufferedPhotos[0].messageId;
+      }
+    }
+
+    // Fallback: if the paired photo was already stored as a pending series_card in the same album,
+    // inherit its caption & poster and cancel the duplicate pending card so only ONE prompt appears.
+    const pendCard = await pool.query<TgPendingRow>(
+      `SELECT * FROM telegram_media_pending
+        WHERE channel_id = $1 AND media_group_id = $2 AND kind = 'series_card'
+        ORDER BY id DESC LIMIT 1`,
+      [channelId, mediaGroupId]
+    );
+    if (pendCard.rows[0]) {
+      const card = pendCard.rows[0];
+      if (!effectiveCaption && card.caption_raw) effectiveCaption = card.caption_raw;
+      if (!albumPosterFileId && card.file_id) {
+        albumPosterFileId = card.file_id;
+        albumPosterMessageId = card.message_id;
+      }
+      if (card.status === "pending") {
+        await pool.query(
+          `UPDATE telegram_media_pending SET status = 'cancelled', updated_at = NOW() WHERE id = $1`,
+          [card.id]
+        ).catch(() => {});
+      }
+    }
+
+    if (effectiveCaption) {
+      upsertAlbumMediaContext(channelId, mediaGroupId, { caption: effectiveCaption });
+    }
+  }
+
+  const parsed = parseChannelCaption(effectiveCaption, fileName, { width, height });
   const media: MediaPayload = {
     channelId,
     messageId,
@@ -1682,7 +1840,10 @@ export async function handleStorageChannelPost(post: any, isEdit = false): Promi
     duration,
     width,
     height,
-    captionRaw: caption,
+    captionRaw: effectiveCaption,
+    mediaGroupId,
+    posterFileId: albumPosterFileId,
+    posterMessageId: albumPosterMessageId,
   };
 
   const check = await validateAndEvaluateDraft(parsed, "episode", { channelId, messageId });
@@ -1717,6 +1878,8 @@ function pendingRowToMedia(row: TgPendingRow): MediaPayload {
     height: Number(row.height || 0),
     captionRaw: row.caption_raw || "",
     mediaGroupId: row.media_group_id || null,
+    posterFileId: row.poster_file_id || null,
+    posterMessageId: row.poster_message_id ?? null,
   };
 }
 

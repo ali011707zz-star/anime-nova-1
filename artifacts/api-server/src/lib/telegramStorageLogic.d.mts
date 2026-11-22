@@ -97,6 +97,7 @@ export function parseChannelCaption(
   fileName?: string,
   mediaMeta?: { height?: number; width?: number }
 ): ParsedChannelCaption;
+export function looksLikeEpisodeAlbumCaption(parsed: ParsedChannelCaption | null | undefined): boolean;
 export function validateParsedCaption(
   parsed: ParsedChannelCaption,
   kind?: TgUploadKind
