@@ -37,8 +37,13 @@ const SORT_OPTIONS: AnimeFilterOption[] = [
 
 const FORMAT_OPTIONS: AnimeFilterOption[] = [
   { label: "الكل", value: "all" },
-  { label: "أفلام أجنبية", value: "movie" },
+  { label: "أفلام", value: "movie" },
   { label: "مسلسلات", value: "series" },
+  { label: "عربي", value: "arabic" },
+  { label: "تركي", value: "turkish" },
+  { label: "هندي", value: "indian" },
+  { label: "آسيوي", value: "asian" },
+  { label: "مدبلج", value: "dubbed_series" },
   { label: "أنميشن", value: "animation" },
 ];
 

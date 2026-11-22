@@ -6,6 +6,16 @@ import { pipeline } from "node:stream/promises";
 import { Router, type Request, type Response } from "express";
 import { issueAnonToken, validateAnonToken, validateDownloadToken } from "../lib/security.js";
 import { pool } from "../lib/db.js";
+import {
+  deduplicateFilmSummaries,
+  fetchExternalCategory,
+  fetchExternalHomeCatalog,
+  getExternalFilmDetail,
+  getExternalSeasonEpisodes,
+  isExternalFilmId,
+  resolveExternalFilmStreams,
+  searchExternalCatalog,
+} from "../lib/filmExternalSources.js";
 
 const router = Router();
 
@@ -33,6 +43,8 @@ type ResolvedSource = {
   isEmbed: boolean;
   subtitleUrl?: string;
   hardsubbed?: boolean;
+  type?: "hls" | "mp4";
+  headers?: Record<string, string>;
 };
 
 function encodeMediaUrl(raw?: string | null): string | null {
@@ -301,6 +313,244 @@ function extractFirePlayerConfig(html: string): any | null {
   }
 }
 
+
+const MOVIEBOX_DEFAULT_DOMAINS = [
+  "https://fmoviesunblocked.net",
+  "https://h5.aoneroom.com",
+  "https://moviebox.ph",
+];
+
+function getMovieBoxDomains(): string[] {
+  const fromEnv = String(process.env.MOVIEBOX_DOMAINS || process.env.MOVIEBOX_DOMAIN || "")
+    .split(",")
+    .map((s) => s.trim().replace(/\/+$/, ""))
+    .filter((s) => s.startsWith("http"));
+  return fromEnv.length > 0 ? [...new Set([...fromEnv, ...MOVIEBOX_DEFAULT_DOMAINS])] : MOVIEBOX_DEFAULT_DOMAINS;
+}
+
+function stripArabicDiacritics(s: string): string {
+  return String(s || "").replace(/[\u064B-\u065F\u0670\u06D6-\u06ED]/g, "");
+}
+
+function isArabicCaption(lan?: string, lanName?: string): boolean {
+  const l = String(lan || "").trim().toLowerCase();
+  if (l === "ar" || l.startsWith("ar-") || l.startsWith("ar_")) return true;
+  const cleanName = stripArabicDiacritics(String(lanName || "")).toLowerCase();
+  return cleanName.includes("arab") || cleanName.includes("عرب");
+}
+
+function tierFromResolution(resNum: number): string {
+  if (resNum >= 2160) return "4K UHD";
+  if (resNum >= 1080) return "1080p FHD";
+  if (resNum >= 720) return "720p HD";
+  return "480p SD";
+}
+
+async function resolveMovieBoxServer(
+  srv: { name?: string; url: string; host?: string },
+  idx: number,
+): Promise<{ sources: ResolvedSource[]; tracks: SubTrack[] }> {
+  const outSources: ResolvedSource[] = [];
+  const outTracks: SubTrack[] = [];
+  const raw = String(srv.url || "").trim();
+  const match = raw.match(/^moviebox:\/\/([^/?#]+)\/(\d+)\/(\d+)(?:\?(.*))?$/i);
+  if (!match) return { sources: outSources, tracks: outTracks };
+
+  const subjectId = match[1];
+  const se = Number.parseInt(match[2], 10) || 0;
+  const ep = Number.parseInt(match[3], 10) || 0;
+  const qs = new URLSearchParams(match[4] || "");
+  const detailPath = qs.get("path") || subjectId;
+  const domains = getMovieBoxDomains();
+
+  for (const domain of domains) {
+    try {
+      const refPage = `${domain}/spa/videoPlayPage/movies/${encodeURIComponent(detailPath)}?id=${encodeURIComponent(subjectId)}&type=/movie/detail`;
+      const reqHeaders = {
+        "User-Agent": BROWSER_UA,
+        Accept: "application/json, text/plain, */*",
+        Referer: refPage,
+        Origin: domain,
+      };
+
+      let streams: Array<{ id?: string; url: string; resolution: number }> = [];
+      let captions: Array<{ lan?: string; lanName?: string; url?: string }> = [];
+
+      const dlUrl = `${domain}/wefeed-h5-bff/web/subject/download?subjectId=${encodeURIComponent(subjectId)}&se=${se}&ep=${ep}&detail_path=${encodeURIComponent(detailPath)}`;
+      const dlResp = await fetch(dlUrl, { headers: reqHeaders, signal: AbortSignal.timeout(10_000) });
+      if (dlResp.ok) {
+        const dlJson: any = await dlResp.json().catch(() => null);
+        if (Array.isArray(dlJson?.data?.downloads) && dlJson.data.downloads.length > 0) {
+          streams = dlJson.data.downloads
+            .filter((d: any) => typeof d?.url === "string" && d.url.startsWith("http"))
+            .map((d: any) => ({
+              id: String(d.id || ""),
+              url: String(d.url),
+              resolution: Number(d.resolution || 0),
+            }));
+        }
+        if (Array.isArray(dlJson?.data?.captions)) {
+          captions = dlJson.data.captions;
+        }
+      }
+
+      if (streams.length === 0) {
+        const playUrl = `${domain}/wefeed-h5-bff/web/subject/play?subjectId=${encodeURIComponent(subjectId)}&se=${se}&ep=${ep}&detail_path=${encodeURIComponent(detailPath)}`;
+        const pResp = await fetch(playUrl, { headers: reqHeaders, signal: AbortSignal.timeout(10_000) });
+        if (pResp.ok) {
+          const pJson: any = await pResp.json().catch(() => null);
+          if (Array.isArray(pJson?.data?.streams) && pJson.data.streams.length > 0) {
+            streams = pJson.data.streams
+              .filter((s: any) => typeof s?.url === "string" && s.url.startsWith("http"))
+              .map((s: any) => ({
+                id: String(s.id || ""),
+                url: String(s.url),
+                resolution: Number.parseInt(String(s.resolutions || "0"), 10) || 0,
+              }));
+          }
+        }
+        if (streams.length > 0 && captions.length === 0 && streams[0].id) {
+          const capUrl = `${domain}/wefeed-h5-bff/web/subject/caption?format=MP4&id=${encodeURIComponent(streams[0].id)}&subjectId=${encodeURIComponent(subjectId)}`;
+          const cResp = await fetch(capUrl, { headers: reqHeaders, signal: AbortSignal.timeout(8_000) });
+          if (cResp.ok) {
+            const cJson: any = await cResp.json().catch(() => null);
+            if (Array.isArray(cJson?.data?.captions)) captions = cJson.data.captions;
+          }
+        }
+      }
+
+      if (streams.length === 0) continue;
+
+      const sortedCaps = [...captions].filter((c) => typeof c?.url === "string" && c.url.startsWith("http"));
+      sortedCaps.sort((a, b) => Number(isArabicCaption(b.lan, b.lanName)) - Number(isArabicCaption(a.lan, a.lanName)));
+      for (let ci = 0; ci < sortedCaps.length; ci++) {
+        const cap = sortedCaps[ci];
+        const isAr = isArabicCaption(cap.lan, cap.lanName);
+        if (!isAr && String(cap.lan || "").toLowerCase() !== "en") continue;
+        outTracks.push({
+          id: `mb-sub-${idx}-${ci}`,
+          lang: isAr ? "ar" : "en",
+          label: isAr ? "العربية" : "English",
+          url: String(cap.url),
+        });
+      }
+
+      const arSubUrl = outTracks.find((t) => t.lang === "ar")?.url || outTracks[0]?.url;
+      streams.sort((a, b) => b.resolution - a.resolution);
+      const pickedStreams: typeof streams = [];
+      const seenTiers = new Set<string>();
+      for (const st of streams) {
+        const tier = tierFromResolution(st.resolution);
+        if (seenTiers.has(tier)) continue;
+        seenTiers.add(tier);
+        pickedStreams.push(st);
+        if (pickedStreams.length >= 2) break;
+      }
+
+      const cdnHeaders = {
+        Referer: "https://themoviebox.xyz/",
+        "User-Agent": BROWSER_UA,
+      };
+
+      for (let si = 0; si < pickedStreams.length; si++) {
+        const st = pickedStreams[si];
+        const tier = tierFromResolution(st.resolution);
+        outSources.push({
+          site: si === 0 ? "moviebox" : "moviebox-alt",
+          label: `سيرفر ${idx + si + 1} (MovieBox) · ${st.resolution ? st.resolution + "p" : tier} مباشر`,
+          tier,
+          url: st.url,
+          directUrl: st.url,
+          isEmbed: false,
+          type: "mp4",
+          subtitleUrl: arSubUrl,
+          hardsubbed: false,
+          headers: cdnHeaders,
+        });
+      }
+      return { sources: outSources, tracks: outTracks };
+    } catch {
+      // try next domain
+    }
+  }
+  return { sources: outSources, tracks: outTracks };
+}
+
+async function resolveDivHardServer(
+  srv: { name?: string; url: string; host?: string },
+  idx: number,
+  isHardsubbed = true,
+): Promise<{ sources: ResolvedSource[]; tracks: SubTrack[] }> {
+  const outSources: ResolvedSource[] = [];
+  const outTracks: SubTrack[] = [];
+  const embedUrl = String(srv.url || "").trim();
+  const tokMatch = embedUrl.match(/ex\.divhard\.com\/play\/([a-f0-9]+)/i);
+  if (!tokMatch) return { sources: outSources, tracks: outTracks };
+
+  const token = tokMatch[1];
+  const srvLabel = String(srv.name || `السيرفر ${idx + 1}`).trim();
+  try {
+    const apiResp = await fetch(`https://ex.divhard.com/api/source.php?t=${encodeURIComponent(token)}`, {
+      headers: {
+        "User-Agent": BROWSER_UA,
+        Referer: embedUrl,
+        Origin: "https://ex.divhard.com",
+        Accept: "application/json, */*",
+      },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!apiResp.ok) return { sources: outSources, tracks: outTracks };
+    const data: any = await apiResp.json().catch(() => null);
+    if (!data?.ok || !Array.isArray(data.sources) || data.sources.length === 0) {
+      return { sources: outSources, tracks: outTracks };
+    }
+
+    const firstSrc = data.sources.find((s: any) => typeof s?.url === "string" && s.url.trim().length > 0);
+    if (!firstSrc) return { sources: outSources, tracks: outTracks };
+
+    const rawMediaUrl = String(firstSrc.url).trim();
+    const absMediaUrl = rawMediaUrl.startsWith("http")
+      ? rawMediaUrl
+      : `https://ex.divhard.com${rawMediaUrl.startsWith("/") ? "" : "/"}${rawMediaUrl}`;
+    const refForHls = "https://ex.divhard.com/";
+
+    const mResp = await fetch(absMediaUrl, {
+      headers: { "User-Agent": BROWSER_UA, Referer: refForHls, Accept: "*/*" },
+      signal: AbortSignal.timeout(9_000),
+    });
+    if (!mResp.ok) return { sources: outSources, tracks: outTracks };
+    const mText = await mResp.text();
+    if (!mText.includes("#EXTM3U")) return { sources: outSources, tracks: outTracks };
+
+    const streamInf = mText
+      .split(/\r?\n/)
+      .filter((l) => l.startsWith("#EXT-X-STREAM-INF"))
+      .join("\n");
+    const titleHint = String(data.title || "");
+    let tier = "1080p FHD";
+    if (/3840x2160|2160p/i.test(streamInf)) tier = "4K UHD";
+    else if (/1920x1080|1080p/i.test(streamInf) || /1080/.test(titleHint)) tier = "1080p FHD";
+    else if (/1280x720|720p/i.test(streamInf) || /720/.test(titleHint)) tier = "720p HD";
+    else if (/854x480|640x360|480p/i.test(streamInf)) tier = "480p SD";
+
+    const proxyUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(absMediaUrl)}&ref=${encodeURIComponent(refForHls)}`;
+    outSources.push({
+      site: "divhard",
+      label: `${srvLabel} · ${tier} مباشر`,
+      tier,
+      url: absMediaUrl,
+      directUrl: proxyUrl,
+      proxyUrl,
+      isEmbed: false,
+      type: "hls",
+      hardsubbed: isHardsubbed,
+    });
+  } catch {
+    // failed to resolve divhard source
+  }
+  return { sources: outSources, tracks: outTracks };
+}
+
 async function resolveMoviztimeServer(
   srv: { name?: string; url: string; host?: string },
   idx: number,
@@ -309,7 +559,13 @@ async function resolveMoviztimeServer(
   const outSources: ResolvedSource[] = [];
   const outTracks: SubTrack[] = [];
   const embedUrl = String(srv.url || "").trim();
+  if (embedUrl.toLowerCase().startsWith("moviebox://")) {
+    return resolveMovieBoxServer(srv, idx);
+  }
   if (!embedUrl.startsWith("http")) return { sources: outSources, tracks: outTracks };
+  if (embedUrl.toLowerCase().includes("ex.divhard.com/play/")) {
+    return resolveDivHardServer(srv, idx, isHardsubbed);
+  }
 
   const lower = embedUrl.toLowerCase();
   const srvLabel = String(srv.name || `السيرفر ${idx + 1}`).trim();
@@ -523,15 +779,23 @@ router.get("/config", (_req: Request, res: Response) => {
     sources: {
       moviztime: true,
       vidhls: true,
+      divhard: true,
+      moviebox: true,
       hamml: true,
     },
     limits: { downloadLimit: 6, watchAccessMinutes: 120 },
   });
 });
 
-// ── 2. Home batched real vault feeds ─────────────────────────────────────────
+// ── 2. Home batched real vault + live EgyDead & TopCinema feeds (deduped) ──
+let _filmHomeCache: { ts: number; payload: any } | null = null;
 router.get("/home", async (_req: Request, res: Response) => {
   try {
+    if (_filmHomeCache && Date.now() - _filmHomeCache.ts < 5 * 60_000) {
+      res.json(_filmHomeCache.payload);
+      return;
+    }
+
     const [
       heroRes,
       trendingRes,
@@ -540,6 +804,7 @@ router.get("/home", async (_req: Request, res: Response) => {
       seriesRes,
       topRatedRes,
       animRes,
+      extHome,
     ] = await Promise.all([
       pool.query(
         `SELECT * FROM film_vault_titles
@@ -587,88 +852,247 @@ router.get("/home", async (_req: Request, res: Response) => {
          ORDER BY COALESCE(year, 2020) DESC, COALESCE(imdb_rating, 6.8) DESC, id DESC
          LIMIT 16`,
       ),
+      fetchExternalHomeCatalog().catch(() => null),
     ]);
 
-    res.json({
-      hero: heroRes.rows.map(rowToFilmSummary).slice(0, 6),
-      trendingMovies: trendingRes.rows.map(rowToFilmSummary).slice(0, 14),
-      latestMovies: latestRes.rows.map(rowToFilmSummary).slice(0, 14),
-      asianMovies: asianRes.rows.map(rowToFilmSummary).slice(0, 14),
-      popularSeries: seriesRes.rows.map(rowToFilmSummary).slice(0, 14),
-      topRated: topRatedRes.rows.map(rowToFilmSummary).slice(0, 14),
-      animations: animRes.rows.map(rowToFilmSummary).slice(0, 14),
-    });
+    const vHero = heroRes.rows.map(rowToFilmSummary);
+    const vTrending = trendingRes.rows.map(rowToFilmSummary);
+    const vLatest = latestRes.rows.map(rowToFilmSummary);
+    const vAsian = asianRes.rows.map(rowToFilmSummary);
+    const vSeries = seriesRes.rows.map(rowToFilmSummary);
+    const vTopRated = topRatedRes.rows.map(rowToFilmSummary);
+    const vAnim = animRes.rows.map(rowToFilmSummary);
+
+    const ext = extHome || {
+      foreignMovies: [], arabicMovies: [], turkishMovies: [], indianMovies: [],
+      asianMovies: [], animationMovies: [], foreignSeries: [], arabicSeries: [],
+      turkishSeries: [], indianSeries: [], asianSeries: [], dubbedSeries: [], animationSeries: [],
+    };
+
+    const hero = deduplicateFilmSummaries([vHero, ext.foreignMovies.slice(0, 4), ext.foreignSeries.slice(0, 2)], undefined, 6);
+    const trendingMovies = deduplicateFilmSummaries([vTrending, ext.foreignMovies], undefined, 16);
+    const latestMovies = deduplicateFilmSummaries([ext.foreignMovies, vLatest], undefined, 16);
+    const foreignMovies = deduplicateFilmSummaries([ext.foreignMovies, vTrending, vLatest], undefined, 16);
+    const arabicMovies = deduplicateFilmSummaries([ext.arabicMovies], undefined, 16);
+    const turkishMovies = deduplicateFilmSummaries([ext.turkishMovies], undefined, 16);
+    const indianMovies = deduplicateFilmSummaries([ext.indianMovies], undefined, 16);
+    const asianMovies = deduplicateFilmSummaries([ext.asianMovies, vAsian], undefined, 16);
+    const popularSeries = deduplicateFilmSummaries([vSeries, ext.foreignSeries], undefined, 16);
+    const latestSeries = deduplicateFilmSummaries([ext.foreignSeries, vSeries], undefined, 16);
+    const arabicSeries = deduplicateFilmSummaries([ext.arabicSeries], undefined, 16);
+    const turkishSeries = deduplicateFilmSummaries([ext.turkishSeries], undefined, 16);
+    const asianSeries = deduplicateFilmSummaries([ext.asianSeries], undefined, 16);
+    const dubbedSeries = deduplicateFilmSummaries([ext.dubbedSeries], undefined, 16);
+    const indianSeries = deduplicateFilmSummaries([ext.indianSeries], undefined, 16);
+    const topRated = deduplicateFilmSummaries([vTopRated, ext.foreignMovies], undefined, 16);
+    const animationMovies = deduplicateFilmSummaries([ext.animationMovies, vAnim.filter((x) => x.tmdbType === "movie")], undefined, 16);
+    const animationSeries = deduplicateFilmSummaries([ext.animationSeries, vAnim.filter((x) => x.tmdbType === "tv")], undefined, 16);
+    const animations = deduplicateFilmSummaries([vAnim, ext.animationMovies, ext.animationSeries], undefined, 16);
+
+    const payload = {
+      hero,
+      trendingMovies,
+      latestMovies,
+      foreignMovies,
+      arabicMovies,
+      turkishMovies,
+      indianMovies,
+      asianMovies,
+      popularSeries,
+      latestSeries,
+      arabicSeries,
+      turkishSeries,
+      asianSeries,
+      dubbedSeries,
+      indianSeries,
+      topRated,
+      animations,
+      animationMovies,
+      animationSeries,
+    };
+
+    _filmHomeCache = { ts: Date.now(), payload };
+    res.json(payload);
   } catch (err: any) {
     res.status(500).json({ error: String(err?.message || err) });
   }
 });
 
-// ── 3. Browse / Discover with real DB filters ────────────────────────────────
+// ── 3. Browse / Discover (Vault + Live EgyDead & TopCinema, zero dupes) ────
 router.get("/browse", async (req: Request, res: Response) => {
   try {
-    const category = String(req.query.category || "all");
+    const category = String(req.query.category || "all").trim();
     const genre = String(req.query.genre || "الكل").trim();
-    const sortRaw = String(req.query.sort || "popular");
+    const sortRaw = String(req.query.sort || "popular").trim();
+    const yearParam = Number.parseInt(String(req.query.year || ""), 10);
     const q = String(req.query.q || "").trim();
     const page = Math.max(1, Number.parseInt(String(req.query.page || "1"), 10) || 1);
     const limit = 24;
     const offset = (page - 1) * limit;
 
-    const conditions: string[] = ["is_archived = FALSE", "has_live_server = TRUE"];
-    const params: any[] = [];
+    // Map browse category to external catalog key(s)
+    const extCatKeys: Record<string, string[]> = {
+      all: ["foreign_movies", "foreign_series", "arabic_movies", "arabic_series"],
+      movie: ["foreign_movies"],
+      foreign_movies: ["foreign_movies"],
+      series: ["foreign_series"],
+      foreign_series: ["foreign_series"],
+      arabic_movies: ["arabic_movies"],
+      arabic_series: ["arabic_series"],
+      arabic: ["arabic_movies", "arabic_series"],
+      turkish_movies: ["turkish_movies"],
+      turkish_series: ["turkish_series"],
+      turkish: ["turkish_series", "turkish_movies"],
+      indian_movies: ["indian_movies"],
+      indian_series: ["indian_series"],
+      indian: ["indian_movies", "indian_series"],
+      asian_movies: ["asian_movies"],
+      asian_series: ["asian_series"],
+      asian: ["asian_movies", "asian_series"],
+      dubbed: ["dubbed_series"],
+      dubbed_series: ["dubbed_series"],
+      animation: ["animation_movies", "animation_series"],
+      animation_movies: ["animation_movies"],
+      animation_series: ["animation_series"],
+      top_rated: ["foreign_movies"],
+    };
 
-    if (category === "movie" || category === "series" || category === "animation") {
-      params.push(category);
-      conditions.push(`media_type = $${params.length}`);
-    }
+    const isPureExternalCat = [
+      "arabic_movies",
+      "arabic_series",
+      "arabic",
+      "turkish_movies",
+      "turkish_series",
+      "turkish",
+      "indian_movies",
+      "indian_series",
+      "indian",
+      "asian_series",
+      "dubbed",
+      "dubbed_series",
+      "animation_series",
+    ].includes(category);
 
-    if (genre && genre !== "الكل") {
-      if (genre === "أنميشن") {
-        conditions.push(`(media_type = 'animation' OR genres_json ILIKE '%أنميشن%')`);
-      } else {
-        params.push(`%${genre}%`);
-        conditions.push(`genres_json ILIKE $${params.length}`);
+    // 1) Vault query (skip when pure external category and no search query)
+    const vaultPromise = (async () => {
+      if (isPureExternalCat && !q) return { rows: [] as any[], total: 0 };
+      const conditions: string[] = ["is_archived = FALSE", "has_live_server = TRUE"];
+      const params: any[] = [];
+
+      if (category === "asian" || category === "asian_movies") {
+        conditions.push(`media_type = 'movie' AND category_label IN ('أفلام آسيوية', 'أفلام أوروبية')`);
+      } else if (category === "movie" || category === "foreign_movies" || category === "top_rated") {
+        conditions.push(`media_type = 'movie'`);
+      } else if (category === "series" || category === "foreign_series") {
+        conditions.push(`media_type = 'series'`);
+      } else if (category === "animation" || category === "animation_movies") {
+        conditions.push(`media_type = 'animation'`);
       }
-    }
 
-    if (q) {
-      params.push(`%${q}%`);
-      conditions.push(`(title_ar ILIKE $${params.length} OR title_en ILIKE $${params.length} OR synopsis ILIKE $${params.length})`);
-    }
+      if (Number.isFinite(yearParam) && yearParam >= 1950 && yearParam <= 2035) {
+        params.push(yearParam);
+        conditions.push(`year = $${params.length}`);
+      }
 
-    const whereSql = `WHERE ${conditions.join(" AND ")}`;
+      if (genre && genre !== "الكل") {
+        if (genre === "أنميشن") {
+          conditions.push(`(media_type = 'animation' OR genres_json ILIKE '%أنميشن%')`);
+        } else {
+          params.push(`%${genre}%`);
+          conditions.push(`genres_json ILIKE $${params.length}`);
+        }
+      }
 
-    let orderSql =
-      "ORDER BY (COALESCE(year, 2020) * 1.5 + COALESCE(imdb_rating, 6.8) * 10 + LEAST(playable_episode_count, 20) * 0.3) DESC, id DESC";
-    if (sortRaw === "rating") {
-      orderSql = "ORDER BY COALESCE(imdb_rating, 0) DESC, COALESCE(year, 2020) DESC, id DESC";
-    } else if (sortRaw === "year") {
-      orderSql = "ORDER BY COALESCE(year, 2020) DESC, updated_at DESC, id DESC";
-    }
+      if (q) {
+        params.push(`%${q}%`);
+        conditions.push(`(title_ar ILIKE $${params.length} OR title_en ILIKE $${params.length} OR synopsis ILIKE $${params.length})`);
+      }
 
-    const [countRes, rowsRes] = await Promise.all([
-      pool.query(`SELECT COUNT(*)::int AS total FROM film_vault_titles ${whereSql}`, params),
-      pool.query(
-        `SELECT * FROM film_vault_titles ${whereSql} ${orderSql} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
-        [...params, limit, offset],
-      ),
-    ]);
+      const whereSql = `WHERE ${conditions.join(" AND ")}`;
+      let orderSql =
+        "ORDER BY (COALESCE(year, 2020) * 1.5 + COALESCE(imdb_rating, 6.8) * 10 + LEAST(playable_episode_count, 20) * 0.3) DESC, id DESC";
+      if (sortRaw === "rating" || category === "top_rated") {
+        orderSql = "ORDER BY COALESCE(imdb_rating, 0) DESC, COALESCE(year, 2020) DESC, id DESC";
+      } else if (sortRaw === "year") {
+        orderSql = "ORDER BY COALESCE(year, 2020) DESC, updated_at DESC, id DESC";
+      }
 
-    const totalResults = Number(countRes.rows[0]?.total || 0);
-    const totalPages = Math.max(1, Math.ceil(totalResults / limit));
+      const [countRes, rowsRes] = await Promise.all([
+        pool.query(`SELECT COUNT(*)::int AS total FROM film_vault_titles ${whereSql}`, params),
+        pool.query(
+          `SELECT * FROM film_vault_titles ${whereSql} ${orderSql} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+          [...params, limit, offset],
+        ),
+      ]);
+      return {
+        rows: rowsRes.rows.map(rowToFilmSummary),
+        total: Number(countRes.rows[0]?.total || 0),
+      };
+    })();
+
+    // 2) Live External query (EgyDead + TopCinema)
+    const extPromise = (async () => {
+      try {
+        if (q) {
+          if (page > 1) return [];
+          const typeFilter =
+            category === "movie" || category.endsWith("_movies")
+              ? "movie"
+              : category === "series" || category.endsWith("_series") || category === "dubbed"
+                ? "tv"
+                : "multi";
+          return await searchExternalCatalog(q, typeFilter, 32);
+        }
+        const keys = extCatKeys[category] || ["foreign_movies"];
+        const perKey = Math.max(12, Math.ceil(36 / keys.length));
+        const batches = await Promise.all(keys.map((k) => fetchExternalCategory(k, page, perKey)));
+        let list = deduplicateFilmSummaries(batches, undefined, 40);
+        if (Number.isFinite(yearParam) && yearParam >= 1950 && yearParam <= 2035) {
+          list = list.filter((x) => x.year === yearParam);
+        }
+        if (genre && genre !== "الكل") {
+          const gLow = genre.toLowerCase();
+          const filtered = list.filter(
+            (x) =>
+              x.genres.some((g) => g.toLowerCase().includes(gLow)) ||
+              x.categoryLabel.toLowerCase().includes(gLow),
+          );
+          if (filtered.length > 0) list = filtered;
+        }
+        return list;
+      } catch {
+        return [];
+      }
+    })();
+
+    const [vaultData, extItems] = await Promise.all([vaultPromise, extPromise]);
+
+    // Prefer fresh external items first for pure external / latest-year sorts, vault first for top-rated
+    const orderedLists =
+      isPureExternalCat || sortRaw === "year"
+        ? [extItems, vaultData.rows]
+        : [vaultData.rows, extItems];
+    const merged = deduplicateFilmSummaries(orderedLists, undefined, limit);
+
+    const hasExternalPages = !q && extItems.length >= 6;
+    const estTotalPages = Math.max(
+      1,
+      Math.ceil(vaultData.total / limit),
+      hasExternalPages ? Math.max(page + 1, 25) : page,
+    );
 
     res.json({
-      results: rowsRes.rows.map(rowToFilmSummary),
+      results: merged,
       page,
-      totalPages,
-      totalResults,
+      totalPages: estTotalPages,
+      totalResults: Math.max(merged.length, vaultData.total + (hasExternalPages ? 500 : extItems.length)),
     });
   } catch (err: any) {
     res.status(500).json({ error: String(err?.message || err) });
   }
 });
 
-// ── 4. Search ────────────────────────────────────────────────────────────────
+// ── 4. Search (Unified Vault + TopCinema + EgyDead, strictly deduped) ───────
 router.get("/search", async (req: Request, res: Response) => {
   try {
     const q = String(req.query.q || "").trim();
@@ -695,7 +1119,8 @@ router.get("/search", async (req: Request, res: Response) => {
     conditions.push(`(title_ar ILIKE $${params.length} OR title_en ILIKE $${params.length})`);
     const whereSql = `WHERE ${conditions.join(" AND ")}`;
 
-    const [countRes, rowsRes] = await Promise.all([
+    const typeFilter: "multi" | "movie" | "tv" = type === "movie" ? "movie" : type === "tv" ? "tv" : "multi";
+    const [countRes, rowsRes, extResults] = await Promise.all([
       pool.query(`SELECT COUNT(*)::int AS total FROM film_vault_titles ${whereSql}`, params),
       pool.query(
         `SELECT * FROM film_vault_titles ${whereSql}
@@ -703,11 +1128,13 @@ router.get("/search", async (req: Request, res: Response) => {
          LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
         [...params, limit, offset],
       ),
+      page === 1 ? searchExternalCatalog(q, typeFilter, 28).catch(() => []) : Promise.resolve([]),
     ]);
 
-    const total = Number(countRes.rows[0]?.total || 0);
+    const merged = deduplicateFilmSummaries([rowsRes.rows.map(rowToFilmSummary), extResults], undefined, limit);
+    const total = Math.max(merged.length, Number(countRes.rows[0]?.total || 0) + extResults.length);
     res.json({
-      results: rowsRes.rows.map(rowToFilmSummary),
+      results: merged,
       page,
       totalPages: Math.max(1, Math.ceil(total / limit)),
     });
@@ -722,6 +1149,27 @@ router.get("/detail", async (req: Request, res: Response) => {
     const rawId = Number.parseInt(String(req.query.id || "0"), 10);
     if (!rawId) {
       res.status(400).json({ error: "id is required" });
+      return;
+    }
+
+    if (isExternalFilmId(rawId)) {
+      const extDetail = await getExternalFilmDetail(rawId);
+      if (!extDetail) {
+        res.status(404).json({ error: "External title not found" });
+        return;
+      }
+      // Attach real similar recommendations from cached home/category catalog
+      try {
+        const homeCat = await fetchExternalHomeCatalog();
+        const poolList =
+          extDetail.tmdbType === "tv"
+            ? [...homeCat.foreignSeries, ...homeCat.arabicSeries, ...homeCat.turkishSeries]
+            : [...homeCat.foreignMovies, ...homeCat.arabicMovies, ...homeCat.asianMovies];
+        const recs = poolList.filter((x) => x.id !== rawId).slice(0, 10);
+        extDetail.relations = recs.slice(0, 6);
+        extDetail.recommendations = recs;
+      } catch {}
+      res.json(extDetail);
       return;
     }
 
@@ -847,6 +1295,16 @@ router.get("/season", async (req: Request, res: Response) => {
       return;
     }
 
+    if (isExternalFilmId(id)) {
+      const extSeason = await getExternalSeasonEpisodes(id, season);
+      if (!extSeason) {
+        res.status(404).json({ error: "Season not found" });
+        return;
+      }
+      res.json(extSeason);
+      return;
+    }
+
     const [titleRes, epsRes] = await Promise.all([
       pool.query(`SELECT poster_url, backdrop_url, year FROM film_vault_titles WHERE id = $1 LIMIT 1`, [id]),
       pool.query(
@@ -943,6 +1401,27 @@ router.get("/sources-stream", async (req: Request, res: Response) => {
       return;
     }
 
+    const titleParam = String(req.query.title || "").trim();
+
+    if (isExternalFilmId(tmdbId)) {
+      sendEvent("status", { msg: "جاري استخراج السيرفرات المباشرة من توب سينما وإيجي ديد..." });
+      let emittedExt = 0;
+      await resolveExternalFilmStreams({
+        id: tmdbId,
+        type,
+        season,
+        ep,
+        titleHint: titleParam,
+        onSource: (sObj) => {
+          sendEvent("source", sObj);
+          emittedExt++;
+        },
+      });
+      sendEvent("done", { ok: emittedExt > 0, count: emittedExt });
+      res.end();
+      return;
+    }
+
     const resolved = await resolveEpisodeFromVault(tmdbId, type, season, ep);
     let emitted = 0;
     for (const src of resolved.sources) {
@@ -1001,6 +1480,22 @@ router.get("/sources-stream", async (req: Request, res: Response) => {
         }
       } catch {}
     }
+    // Bonus live streams from TopCinema & EgyDead if vault yielded fewer than 2 servers
+    if (emitted < 2 && (resolved.titleEn || titleParam)) {
+      try {
+        await resolveExternalFilmStreams({
+          id: 0,
+          type,
+          season,
+          ep,
+          titleHint: resolved.titleEn || titleParam,
+          onSource: (sObj) => {
+            sendEvent("source", sObj);
+            emitted++;
+          },
+        });
+      } catch {}
+    }
     sendEvent("done", { ok: true, count: emitted });
     res.end();
   } catch (err: any) {
@@ -1019,6 +1514,22 @@ router.post("/source-resolve", async (req: Request, res: Response) => {
 
     if (!tmdbId) {
       res.status(400).json({ error: "tmdbId is required" });
+      return;
+    }
+
+    if (isExternalFilmId(tmdbId)) {
+      const extSources = await resolveExternalFilmStreams({
+        id: tmdbId,
+        type,
+        season,
+        ep,
+        titleHint: String(req.body?.title || "").trim(),
+      });
+      if (!extSources.length) {
+        res.status(404).json({ error: "No playable source found" });
+        return;
+      }
+      res.json(extSources[0]);
       return;
     }
 

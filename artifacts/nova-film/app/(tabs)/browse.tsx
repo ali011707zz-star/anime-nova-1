@@ -35,9 +35,18 @@ const SORT_OPTIONS: AnimeFilterOption[] = [
 const FORMAT_OPTIONS: AnimeFilterOption[] = [
   { label: "الكل", value: "all" },
   { label: "أفلام أجنبية", value: "movie" },
-  { label: "مسلسلات", value: "series" },
-  { label: "سينما آسيوية وعربية", value: "asian" },
-  { label: "أنميشن", value: "animation" },
+  { label: "مسلسلات أجنبية", value: "series" },
+  { label: "أفلام عربية", value: "arabic_movies" },
+  { label: "مسلسلات عربية", value: "arabic_series" },
+  { label: "مسلسلات تركية", value: "turkish_series" },
+  { label: "أفلام تركية", value: "turkish_movies" },
+  { label: "أفلام هندية", value: "indian_movies" },
+  { label: "مسلسلات هندية", value: "indian_series" },
+  { label: "أفلام آسيوية", value: "asian_movies" },
+  { label: "مسلسلات آسيوية", value: "asian_series" },
+  { label: "مسلسلات مدبلجة", value: "dubbed_series" },
+  { label: "أفلام أنميشن", value: "animation_movies" },
+  { label: "مسلسلات أنميشن", value: "animation_series" },
 ];
 
 const STATUS_OPTIONS: AnimeFilterOption[] = [
@@ -84,9 +93,27 @@ const FILTER_GENRES: AnimeFilterOption[] = [
 
 const FORMAT_AR: Record<string, string> = {
   movie: "أفلام أجنبية",
-  series: "مسلسلات",
-  asian: "سينما آسيوية وعربية",
-  animation: "أنميشن",
+  foreign_movies: "أفلام أجنبية",
+  series: "مسلسلات أجنبية",
+  foreign_series: "مسلسلات أجنبية",
+  arabic: "أفلام ومسلسلات عربية",
+  arabic_movies: "أفلام عربية",
+  arabic_series: "مسلسلات عربية",
+  turkish: "دراما وأفلام تركية",
+  turkish_movies: "أفلام تركية",
+  turkish_series: "مسلسلات تركية",
+  indian: "بوليوود وأفلام هندية",
+  indian_movies: "أفلام هندية",
+  indian_series: "مسلسلات هندية",
+  asian: "سينما ودراما آسيوية",
+  asian_movies: "أفلام آسيوية",
+  asian_series: "مسلسلات آسيوية",
+  dubbed: "مسلسلات مدبلجة",
+  dubbed_series: "مسلسلات مدبلجة",
+  animation: "أنميشن وكرتون",
+  animation_movies: "أفلام أنميشن",
+  animation_series: "مسلسلات أنميشن",
+  top_rated: "الأعلى تقييماً",
 };
 
 function useBrowseTheme() {

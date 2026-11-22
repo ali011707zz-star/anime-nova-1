@@ -15,10 +15,22 @@ export type FilmHomeFeed = {
   hero: FilmSummary[];
   trendingMovies: FilmSummary[];
   latestMovies: FilmSummary[];
+  foreignMovies?: FilmSummary[];
+  arabicMovies?: FilmSummary[];
+  turkishMovies?: FilmSummary[];
+  indianMovies?: FilmSummary[];
   asianMovies: FilmSummary[];
   popularSeries: FilmSummary[];
+  latestSeries?: FilmSummary[];
+  arabicSeries?: FilmSummary[];
+  turkishSeries?: FilmSummary[];
+  asianSeries?: FilmSummary[];
+  dubbedSeries?: FilmSummary[];
+  indianSeries?: FilmSummary[];
   topRated: FilmSummary[];
   animations: FilmSummary[];
+  animationMovies?: FilmSummary[];
+  animationSeries?: FilmSummary[];
 };
 
 export type FilmBrowseResponse = {
@@ -36,18 +48,34 @@ function resolveAbsUrl(url: string | undefined, base: string): string {
   return `${base}${url.startsWith("/") ? url : `/${url}`}`;
 }
 
-export const FILM_HOME_CACHE_KEY = "nova_film_home_cache_v1";
+export const FILM_HOME_CACHE_KEY = "nova_film_home_cache_v2";
 let _memHomeFeed: FilmHomeFeed | undefined = undefined;
+
+function normArr(arr: any): FilmSummary[] {
+  return Array.isArray(arr) ? arr.map(normalizeFilmSummary) : [];
+}
 
 function normalizeHomeFeed(raw: any): FilmHomeFeed {
   return {
-    hero: Array.isArray(raw?.hero) ? raw.hero.map(normalizeFilmSummary) : [],
-    trendingMovies: Array.isArray(raw?.trendingMovies) ? raw.trendingMovies.map(normalizeFilmSummary) : [],
-    latestMovies: Array.isArray(raw?.latestMovies) ? raw.latestMovies.map(normalizeFilmSummary) : [],
-    asianMovies: Array.isArray(raw?.asianMovies) ? raw.asianMovies.map(normalizeFilmSummary) : [],
-    popularSeries: Array.isArray(raw?.popularSeries) ? raw.popularSeries.map(normalizeFilmSummary) : [],
-    topRated: Array.isArray(raw?.topRated) ? raw.topRated.map(normalizeFilmSummary) : [],
-    animations: Array.isArray(raw?.animations) ? raw.animations.map(normalizeFilmSummary) : [],
+    hero: normArr(raw?.hero),
+    trendingMovies: normArr(raw?.trendingMovies),
+    latestMovies: normArr(raw?.latestMovies),
+    foreignMovies: normArr(raw?.foreignMovies),
+    arabicMovies: normArr(raw?.arabicMovies),
+    turkishMovies: normArr(raw?.turkishMovies),
+    indianMovies: normArr(raw?.indianMovies),
+    asianMovies: normArr(raw?.asianMovies),
+    popularSeries: normArr(raw?.popularSeries),
+    latestSeries: normArr(raw?.latestSeries),
+    arabicSeries: normArr(raw?.arabicSeries),
+    turkishSeries: normArr(raw?.turkishSeries),
+    asianSeries: normArr(raw?.asianSeries),
+    dubbedSeries: normArr(raw?.dubbedSeries),
+    indianSeries: normArr(raw?.indianSeries),
+    topRated: normArr(raw?.topRated),
+    animations: normArr(raw?.animations),
+    animationMovies: normArr(raw?.animationMovies),
+    animationSeries: normArr(raw?.animationSeries),
   };
 }
 
