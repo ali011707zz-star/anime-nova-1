@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 import { pipeline } from "node:stream/promises";
 import { Router, type Request, type Response } from "express";
 import { issueAnonToken, validateAnonToken, validateDownloadToken } from "../lib/security.js";
+import { getTelegramFilmSources } from "../lib/telegramStorage.js";
 import { pool } from "../lib/db.js";
 import {
   deduplicateFilmSummaries,
@@ -457,7 +458,7 @@ async function resolveMovieBoxServer(
         const tier = tierFromResolution(st.resolution);
         outSources.push({
           site: si === 0 ? "moviebox" : "moviebox-alt",
-          label: `سيرفر ${idx + si + 1} (MovieBox) · ${st.resolution ? st.resolution + "p" : tier} مباشر`,
+          label: `سيرفر ${idx + si + 1}  · ${st.resolution ? st.resolution + "p" : tier} مباشر`,
           tier,
           url: st.url,
           directUrl: st.url,
@@ -655,7 +656,7 @@ async function resolveMoviztimeServer(
                 const altTier = tier === "1080p FHD" ? "720p HD" : "1080p FHD";
                 outSources.push({
                   site: "vidhls-alt",
-                  label: `سيرفر ${idx + 2} (vidhls CDN) · ${altTier}`,
+                  label: `سيرفر ${idx + 2}  · ${altTier}`,
                   tier: altTier,
                   url: childLine,
                   directUrl: childProxyUrl,
@@ -1399,7 +1400,7 @@ router.get("/sources-stream", async (req: Request, res: Response) => {
   };
 
   try {
-    sendEvent("status", { msg: "جاري سحب السيرفرات المباشرة من أرشيف نوفا فيلم..." });
+    sendEvent("status", { msg: "جاري تجهيز سيرفرات المشاهدة المباشرة..." });
     if (!tmdbId) {
       sendEvent("done", { ok: false, count: 0 });
       res.end();
@@ -1409,7 +1410,7 @@ router.get("/sources-stream", async (req: Request, res: Response) => {
     const titleParam = String(req.query.title || "").trim();
 
     if (isExternalFilmId(tmdbId)) {
-      sendEvent("status", { msg: "جاري استخراج السيرفرات المباشرة من توب سينما وإيجي ديد..." });
+      sendEvent("status", { msg: "جاري تجهيز سيرفرات المشاهدة المباشرة..." });
       let emittedExt = 0;
       await resolveExternalFilmStreams({
         id: tmdbId,
@@ -1429,6 +1430,16 @@ router.get("/sources-stream", async (req: Request, res: Response) => {
 
     const resolved = await resolveEpisodeFromVault(tmdbId, type, season, ep);
     let emitted = 0;
+    const tgFilmSources = await getTelegramFilmSources({
+      tmdbId,
+      title: resolved.titleEn || titleParam,
+      season,
+      ep,
+    });
+    for (const src of tgFilmSources) {
+      sendEvent("source", src);
+      emitted++;
+    }
     for (const src of resolved.sources) {
       sendEvent("source", src);
       emitted++;
@@ -1470,7 +1481,7 @@ router.get("/sources-stream", async (req: Request, res: Response) => {
               if (evMatch?.[1] === "source" && dtMatch?.[1]) {
                 try {
                   const sObj = JSON.parse(dtMatch[1]);
-                  if (sObj && (sObj.url || sObj.directUrl || sObj.proxyUrl)) {
+                  if (sObj && (sObj.url || sObj.directUrl || sObj.proxyUrl) && !/dahmer/i.test(String(sObj.label || sObj.site || ""))) {
                     sendEvent("source", {
                       ...sObj,
                       tier: /2160|4k/i.test(sObj.label || "") ? "4K UHD" : /1080/i.test(sObj.label || "") ? "1080p FHD" : "720p HD",

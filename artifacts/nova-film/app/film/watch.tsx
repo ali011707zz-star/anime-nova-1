@@ -90,24 +90,14 @@ function normalizeQualityBucket(src: FilmStreamSource): "1080p" | "720p" | "480p
   return "720p";
 }
 
-function serverShortTag(src: FilmStreamSource, idx: number): string {
-  const s = (src.site || "").toLowerCase();
-  if (s === "vidhls") return "VH";
-  if (s === "vidhls-alt") return "CD";
-  if (s.includes("dahmer")) return "DH";
-  if (s.includes("vidfast")) return "VF";
-  if (s.includes("starcima")) return "SC";
-  if (s.includes("dulo")) return "DL";
-  if (s.includes("nebula")) return "NB";
-  if (s.includes("vidbolt")) return "VB";
-  if (s.includes("moviztime")) return "MT";
-  return s ? s.slice(0, 2).toUpperCase() : `S${idx + 1}`;
+const SERVER_CODE_POOL = ["NV", "VX", "HD", "NX", "PX", "SX", "FX", "LX", "MX", "RX", "DX", "ZX"] as const;
+
+function serverShortTag(_src: FilmStreamSource, idx: number): string {
+  return SERVER_CODE_POOL[idx % SERVER_CODE_POOL.length] || `S${idx + 1}`;
 }
 
 function serverDisplayName(src: FilmStreamSource, idx: number): string {
-  const raw = String(src.label || "").trim();
-  if (raw) return raw;
-  return `السيرفر ${idx + 1}`;
+  return `السيرفر ${serverShortTag(src, idx)}`;
 }
 
 export default function FilmWatchScreen() {
@@ -267,7 +257,12 @@ export default function FilmWatchScreen() {
       year: lookupYear,
       signal: controller.signal,
       onStatus: (msg) => {
-        if (!controller.signal.aborted && msg) setStatusMsg(msg);
+        if (!controller.signal.aborted && msg) {
+          const clean = /أرشيف|توب سينما|إيجي ديد|ايجي ديد|topcinema|egydead|moviz/i.test(msg)
+            ? "جاري تجهيز سيرفرات المشاهدة المباشرة..."
+            : msg;
+          setStatusMsg(clean);
+        }
       },
       onSource: (src) => {
         if (controller.signal.aborted) return;
