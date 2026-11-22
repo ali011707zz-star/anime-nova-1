@@ -5,7 +5,11 @@ import { recordDubbedRecentRelease } from "./dubbed.js";
  * ويرسل تنبيهات الحلقات الجديدة للقناة تلقائياً
  */
 
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { Router, type Request, type Response } from "express";
+import { checkAppSecret } from "../lib/security.js";
+import { getEmailUser } from "../auth/emailAuth.js";
+import { isWebAdmin } from "./webAdmin.js";
 import { sbInsert, sbSelect , sbUpsert } from "../lib/supabaseClient.js";
 import { getEnvOrDb } from "../lib/dbConfig.js";
 import { saveNotification } from "./notifications.js";
@@ -1534,6 +1538,36 @@ export function startEpisodeScheduler(): void {
   }, 15_000);
 }
 
+
+function getTelegramWebhookSecret(): string | null {
+  const explicit = process.env.TELEGRAM_WEBHOOK_SECRET?.trim();
+  if (explicit) return explicit;
+  const appSecret = process.env.APP_SECRET?.trim();
+  if (!appSecret) return null;
+  return createHmac("sha256", appSecret).update("nova-telegram-webhook-v1").digest("hex").slice(0, 48);
+}
+
+function isValidTelegramWebhookRequest(req: Request): boolean {
+  const expected = getTelegramWebhookSecret();
+  if (!expected) return false;
+  const provided = req.headers["x-telegram-bot-api-secret-token"];
+  const token = Array.isArray(provided) ? provided[0] : provided;
+  if (!token || token.length !== expected.length) return false;
+  try {
+    return timingSafeEqual(Buffer.from(token, "utf8"), Buffer.from(expected, "utf8"));
+  } catch {
+    return false;
+  }
+}
+
+async function hasTelegramAdminAccess(req: Request): Promise<boolean> {
+  const provided = (req.headers["x-relay-secret"] as string | undefined) || (req.query.s as string | undefined);
+  if (checkAppSecret(provided)) return true;
+  if (isWebAdmin(req)) return true;
+  const eu = await getEmailUser(req);
+  return eu?.plan === "admin";
+}
+
 /* ── تسجيل الـ webhook ────────────────────────────────────────────────── */
 
 export async function registerTelegramWebhook(domain: string) {
@@ -1547,7 +1581,11 @@ export async function registerTelegramWebhook(domain: string) {
     const res  = await fetch(`https://api.telegram.org/bot${tok}/setWebhook`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url, allowed_updates: ["message", "callback_query"] }),
+      body: JSON.stringify({
+        url,
+        allowed_updates: ["message", "callback_query"],
+        ...(getTelegramWebhookSecret() ? { secret_token: getTelegramWebhookSecret() } : {}),
+      }),
       signal: AbortSignal.timeout(10_000),
     });
     const data = await res.json() as any;
@@ -1721,6 +1759,10 @@ async function handleUpdate(update: any) {
 /* ── Webhook endpoint ─────────────────────────────────────────────────── */
 
 router.post("/api/telegram/webhook", async (req: Request, res: Response) => {
+  if (!isValidTelegramWebhookRequest(req)) {
+    res.sendStatus(401);
+    return;
+  }
   res.sendStatus(200);
   try {
     await handleUpdate(req.body);
@@ -1731,7 +1773,11 @@ router.post("/api/telegram/webhook", async (req: Request, res: Response) => {
 
 /* ── Status endpoint ──────────────────────────────────────────────────── */
 
-router.get("/api/telegram/status", async (_req: Request, res: Response) => {
+router.get("/api/telegram/status", async (req: Request, res: Response) => {
+  if (!(await hasTelegramAdminAccess(req))) {
+    res.status(401).json({ ok: false, error: "unauthorized" });
+    return;
+  }
   const tok = await getToken();
   if (!tok) {
     res.json({ ok: false, error: "TELEGRAM_BOT_TOKEN غير موجود — أضفه عبر /api/admin/setup" });
@@ -1759,7 +1805,11 @@ router.get("/api/telegram/status", async (_req: Request, res: Response) => {
 
 /* ── Test episode notification ────────────────────────────────────────── */
 
-router.post("/api/telegram/notify-test", async (_req: Request, res: Response) => {
+router.post("/api/telegram/notify-test", async (req: Request, res: Response) => {
+  if (!(await hasTelegramAdminAccess(req))) {
+    res.status(401).json({ ok: false, error: "unauthorized" });
+    return;
+  }
   const channelId = process.env.TELEGRAM_CHANNEL_ID;
   if (!channelId) {
     res.status(400).json({
@@ -1800,7 +1850,11 @@ router.post("/api/telegram/notify-test", async (_req: Request, res: Response) =>
 
 /* ── Scheduler status & manual trigger ───────────────────────────────── */
 
-router.get("/api/telegram/scheduler", (_req: Request, res: Response) => {
+router.get("/api/telegram/scheduler", async (req: Request, res: Response) => {
+  if (!(await hasTelegramAdminAccess(req))) {
+    res.status(401).json({ ok: false, error: "unauthorized" });
+    return;
+  }
   res.json({
     running:    schedulerRunning,
     intervalMin: INTERVAL_MS / 60_000,
@@ -1812,7 +1866,11 @@ router.get("/api/telegram/scheduler", (_req: Request, res: Response) => {
   });
 });
 
-router.post("/api/telegram/scheduler/run-now", async (_req: Request, res: Response) => {
+router.post("/api/telegram/scheduler/run-now", async (req: Request, res: Response) => {
+  if (!(await hasTelegramAdminAccess(req))) {
+    res.status(401).json({ ok: false, error: "unauthorized" });
+    return;
+  }
   const runTok = await getToken();
   if (!runTok || !process.env.TELEGRAM_CHANNEL_ID) {
     res.status(400).json({ ok: false, error: "token أو channel غير مضبوط" });

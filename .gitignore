@@ -93,3 +93,10 @@ artifacts/nova-mobile/.env.production
 # Expo OTA build output
 artifacts/nova-mobile/ota-dist/
 artifacts/api-server/data/stardima-v2-catalog.json
+
+# Prevent any env backup files from ever being tracked
+.env.*
+.env.bak*
+!.env.example
+!.env.production.example
+!.env.*.example
