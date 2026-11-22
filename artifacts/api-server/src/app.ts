@@ -12,6 +12,7 @@ import adminRouter from "./routes/admin.js";
 import dbRelayRouter from "./routes/dbRelay.js";
 import reportRouter from "./routes/report.js";
 import telegramRouter, { sendAdminAlert } from "./routes/telegram.js";
+import telegramStorageRouter from "./routes/telegramStorage.js";
 import authTokenRouter from "./routes/authToken.js";
 import pushRouter from "./routes/push.js";
 import newsRouter from "./routes/news.js";
@@ -321,6 +322,7 @@ export async function createApp(): Promise<Express> {
   app.use("/api", dbRelayRouter);
   app.use(reportRouter);
   app.use(telegramRouter);
+  app.use(telegramStorageRouter);
   app.use("/api/crash-report", crashReportRouter);
   // Manifest-only proxy used by the mobile AniNeko player. Segment URLs are
   // rewritten to absolute upstream URLs and are fetched directly by ExoPlayer.

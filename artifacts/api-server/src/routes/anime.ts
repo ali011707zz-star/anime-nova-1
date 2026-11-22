@@ -1,5 +1,6 @@
 import { Router, type Request } from "express";
 import { scraperQueueMiddleware } from "../lib/scraperQueue.js";
+import { getTelegramAnimeSources } from "../lib/telegramStorage.js";
 import { logger } from "../lib/logger.js";
 import {
   SOURCE_AVAILABILITY_CONCURRENCY,
@@ -15056,6 +15057,12 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
     if (checkOnly) {
       const providerJobs = orderAvailabilityJobs([
         {
+          site: "nova_tg",
+          timeoutMs: 2_500,
+          run: () => scrapeCached("nova_tg", async () =>
+            getTelegramAnimeSources({ anilistId: await aniListIdResolution, title, english, titleAr, episode: ep, season: seasonNum, audioMode: "all" }), false, 2500),
+        },
+        {
           site: "kawaii",
           timeoutMs: sourceAvailabilityJobTimeoutMs("kawaii", 10_000),
           run: () => scrapeCached("kawaii", async signal =>
@@ -15224,6 +15231,7 @@ router.get("/anime/sources-stream", scraperQueueMiddleware, async (req, res) => 
 
     // جميع الكاشطات تعمل بالتوازي
     await Promise.allSettled([
+      scrapeCached("nova_tg", () => getTelegramAnimeSources({ anilistId, title, english, titleAr, episode: ep, season: seasonNum, audioMode: "all" }), false, 2500),
       // ── مصادر عربية مدبلجة / مترجمة ──────────────────────────────
       // shahiid/animelek: معطّلة بطلب المستخدم 2026-07-14 (قسم الأنمي فقط)
       // scrapeCached("shahiid",      () => getShahiidSources(title, english, ep, isMovie, matchCtx)),
@@ -15637,6 +15645,8 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
   const ANIME_SOURCE_ALLOWLIST: Set<string> | null = new Set([
     "kawaii",
     "megaplay",        // ⚡ الأسرع — DB-cached (50ms) ✅
+    "nova_tg",         // ⚡ قناة تيليجرام الخاصة (مباشر)
+    "nova_tg_dub",     // 🇬🇧 قناة تيليجرام الخاصة (دبلجة إنجليزية)
     "megaplay_dub",    // 🇬🇧 MegaPlay English Dub + ترجمة عربية
     "anineko",       // 🎌 HLS متعدد الجودات — full VPS manifest + segment proxy
     "animewitcher",  // 🗄️ DB-first aw_links (142k) → Algolia fallback ✅
@@ -16084,6 +16094,8 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
         () => race(getKawaiiAnimeSources(title, english, ep, anilistId), 15_000, []),
       )).forEach(collectSrc); break;
       case "megaplay":    (await race(getMegaPlayAnimeSources(title, english, ep, anilistId, false, undefined, "sub"), 32_000, [])).forEach(collectSrc); break;
+      case "nova_tg":     (await race(getTelegramAnimeSources({ anilistId, title, english, titleAr, episode: ep, audioMode: "sub" }), 4_000, [])).forEach(collectSrc); break;
+      case "nova_tg_dub": (await race(getTelegramAnimeSources({ anilistId, title, english, titleAr, episode: ep, audioMode: "dub" }), 4_000, [])).forEach(collectSrc); break;
       case "megaplay_dub": (await race(getMegaPlayAnimeSources(title, english, ep, anilistId, false, undefined, "dub"), 32_000, [])).forEach(collectSrc); break;
       case "reflix":
       case "reanime":     (await race(getReanímeSources(title, english, ep, anilistId, false, undefined, "sub"), 20_000, [])).forEach(collectSrc); break;

@@ -131,7 +131,7 @@ const SITE_TAG: Record<string, string> = {
   shahiid: "SH", animelek: "EK", animedar: "AD", okanime: "OK",
   ristoanime: "RS", animeify: "AF", animeday: "DY", arabseed: "AR",
   mycima: "MC", topcinemaa: "TC",
-  animewitcher: "AW", anime4up2_hard: "AD 1", anime4up2: "AD 2", kawaii: "KW", megaplay: "MP", megaplay_dub: "MP DUB", reflix: "RE", reflix_dub: "RE DUB", reanime: "RE", anineko: "AN",
+  nova_tg: "TG", nova_tg_dub: "TG DUB", animewitcher: "AW", anime4up2_hard: "AD 1", anime4up2: "AD 2", kawaii: "KW", megaplay: "MP", megaplay_dub: "MP DUB", reflix: "RE", reflix_dub: "RE DUB", reanime: "RE", anineko: "AN",
   animekai: "AK",
   vidlink_anim: "VL", vidfast: "VF",
   animetime: "AT", animepahe: "AP", dulo_anim: "DL",
@@ -144,7 +144,7 @@ const SITE_TAG: Record<string, string> = {
 
 /* ── اسم عرض لكل موقع في منتقي المصادر ── */
 const SITE_LABEL: Record<string, string> = {
-  kawaii: "Kawaii", megaplay: "MegaPlay", megaplay_dub: "MegaPlay (إنجليزي)", reflix: "ReAnime", reflix_dub: "ReAnime (إنجليزي)", reanime: "ReAnime", animekai: "AnimeKai",
+  nova_tg: "NOVA TG", nova_tg_dub: "NOVA TG (إنجليزي)", kawaii: "Kawaii", megaplay: "MegaPlay", megaplay_dub: "MegaPlay (إنجليزي)", reflix: "ReAnime", reflix_dub: "ReAnime (إنجليزي)", reanime: "ReAnime", animekai: "AnimeKai",
   animewitcher: "AnimeWitcher",
   anineko: "AniNeko",
   dulo_anim: "Dulo",
@@ -167,7 +167,7 @@ function getSiteTag(site: string): string {
 
 /* ── وصف قصير لكل مصدر في شبكة الاختيار (يطابق نظام الويب) ── */
 const SITE_DESC: Record<string, string> = {
-  kawaii: "1080p · مباشر", megaplay: "HLS · صوت خام · ترجمة Kawaii", megaplay_dub: "دبلجة إنجليزية · ترجمة عربية", reflix: "HLS · صوت خام · ترجمة Kawaii", reflix_dub: "دبلجة إنجليزية · ترجمة عربية", reanime: "HLS · صوت خام · ترجمة Kawaii",
+  nova_tg: "بث مباشر سريع · NOVA", nova_tg_dub: "دبلجة إنجليزية · بث مباشر", kawaii: "1080p · مباشر", megaplay: "HLS · صوت خام · ترجمة Kawaii", megaplay_dub: "دبلجة إنجليزية · ترجمة عربية", reflix: "HLS · صوت خام · ترجمة Kawaii", reflix_dub: "دبلجة إنجليزية · ترجمة عربية", reanime: "HLS · صوت خام · ترجمة Kawaii",
   anineko: "HLS · متعدد الجودات", animekai: "HLS · ياباني + ترجمة",
   animewitcher: "PD/ST · مباشر",
   dulo_anim: "ياباني/إنجليزي · HLS مباشر",
@@ -483,7 +483,7 @@ function buildEmbeddedDownloadUrl(
 /* Web's canonical Arabic subtitle policy: KW supplies the track for the
    Japanese raw-audio providers AN/AK/MP as well as for KW itself. */
 const KAWAII_SUBTITLE_SITES = new Set(["kawaii", "anineko", "animekai", "megaplay", "megaplay_dub", "reflix", "reflix_dub", "reanime"]);
-const ENGLISH_DUB_SITES = new Set(["reflix_dub", "megaplay_dub"]);
+const ENGLISH_DUB_SITES = new Set(["reflix_dub", "megaplay_dub", "nova_tg_dub"]);
 const DOWNLOAD_SUBTITLE_SITES = KAWAII_SUBTITLE_SITES;
 
 function normalizeProviderSubtitleUrl(

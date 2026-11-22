@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import { Router } from "express";
 import { load } from "cheerio";
 import { logger } from "../lib/logger";
+import { getTelegramDubbedCatalogItems, getTelegramDubbedEpisodes, getTelegramEpisodeById, buildSignedStreamPath, buildSignedStreamUrl, buildSubtitleUrl } from "../lib/telegramStorage.js";
 import { streamMultiRangeMediaVPS } from "../lib/multiRangeStreamer.js";
 import { mergeAwSourceRows } from "../lib/awSourceRows.mjs";
 import { parseCarateenEpisodeUrl } from "../lib/carateenEpisodeRef.mjs";
@@ -946,8 +947,15 @@ router.get("/dubbed/catalog", async (req, res) => {
     image: absoluteImageUrl(item.image),
     poster: absoluteImageUrl(item.poster),
   })) : data.results;
-  const responseData = results ? { ...data, results } : data;
-  res.setHeader("Cache-Control", forceRefresh ? "no-store" : "public, max-age=300");
+  let mergedResults = results;
+  if (page === 1 && Array.isArray(results)) {
+    const tgItems = await getTelegramDubbedCatalogItems();
+    if (tgItems.length > 0) {
+      mergedResults = [...tgItems, ...results];
+    }
+  }
+  const responseData = mergedResults ? { ...data, results: mergedResults } : data;
+  res.setHeader("Cache-Control", forceRefresh ? "no-store" : "public, max-age=180");
   res.json(responseData);
 });
 
@@ -996,6 +1004,10 @@ router.get("/dubbed/search", async (req, res) => {
       });
     };
 
+    // 0. Include matching Telegram private storage cartoon/dubbed series
+    const tgSearchItems = await getTelegramDubbedCatalogItems(q);
+    for (const item of tgSearchItems) addCandidate(item);
+
     // 1. Search all in-memory cached catalog pages
     for (const [, entry] of _catalogCache.entries()) {
       if (Array.isArray(entry?.data?.results)) {
@@ -1028,6 +1040,12 @@ router.get("/dubbed/episodes", async (req, res) => {
     return order === "asc" ? an - bn : bn - an;
   });
   if (!series) { res.json({ episodes: [] }); return; }
+  if (series.startsWith("tg://series/")) {
+    const tgEps = await getTelegramDubbedEpisodes(series);
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ episodes: sortEps(tgEps) });
+    return;
+  }
 
   const cacheKey = `/api/dubbed/episodes?series=${series}`;
   const hit = _catalogCache.get(cacheKey);
@@ -1110,6 +1128,18 @@ const ALLOWED_DUBBED_HOSTNAMES = new Set([
 
 router.get("/dubbed/watch-src", async (req, res) => {
   const epUrl = (req.query.epUrl as string || "").trim();
+  const tgEpMatch = epUrl.match(/^tg:\/\/episode\/(\d+)$/i);
+  if (tgEpMatch) {
+    const epId = Number.parseInt(tgEpMatch[1], 10);
+    const epRow = await getTelegramEpisodeById(epId);
+    if (!epRow) { res.status(404).json({ error: "الحلقة غير موجودة" }); return; }
+    const signedPath = buildSignedStreamPath(epRow.id);
+    const signedUrl = buildSignedStreamUrl(epRow.id);
+    const subtitleUrl = epRow.subtitle_file_id ? buildSubtitleUrl(epRow.id) : undefined;
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ hlsUrl: signedPath, rawUrl: signedUrl, type: "mp4", ...(subtitleUrl ? { subtitleUrl } : {}) });
+    return;
+  }
   const carateenRef = parseCarateenEpisodeUrl(epUrl);
   if (carateenRef) {
     const provider = carateenRef.provider;

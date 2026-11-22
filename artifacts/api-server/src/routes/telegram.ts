@@ -15,6 +15,8 @@ import { getEnvOrDb } from "../lib/dbConfig.js";
 import { saveNotification } from "./notifications.js";
 import { sendNewEpisodePushDetailed, sendSubscribedAlertPush } from "./push.js";
 import { detectNewEpisodesByWatermark, parseCartoonAlertKey } from "../lib/pushAlertsLogic.mjs";
+import { formatTemplatesMessage } from "../lib/telegramStorageLogic.mjs";
+import { handleStorageChannelPost, isStorageChannel, softDeleteTelegramEpisode } from "../lib/telegramStorage.js";
 
 const router = Router();
 
@@ -1583,7 +1585,7 @@ export async function registerTelegramWebhook(domain: string) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         url,
-        allowed_updates: ["message", "callback_query"],
+        allowed_updates: ["message", "callback_query", "channel_post", "edited_channel_post"],
         ...(getTelegramWebhookSecret() ? { secret_token: getTelegramWebhookSecret() } : {}),
       }),
       signal: AbortSignal.timeout(10_000),
@@ -1609,6 +1611,7 @@ export async function registerTelegramWebhook(domain: string) {
         { command: "today",   description: "حلقات اليوم 📅" },
         { command: "report",  description: "إبلاغ عن مشكلة" },
         { command: "chatid",  description: "احصل على Chat ID الخاص بك" },
+        { command: "templates", description: "صيغ رفع الحلقات 📋" },
       ]
     }),
     signal: AbortSignal.timeout(8_000),
@@ -1617,7 +1620,81 @@ export async function registerTelegramWebhook(domain: string) {
 
 /* ── معالج رسائل البوت ────────────────────────────────────────────────── */
 
+async function answerCallbackQuery(callbackQueryId: string, text: string) {
+  const tok = await getToken();
+  if (!tok || !callbackQueryId) return;
+  await fetch(`https://api.telegram.org/bot${tok}/answerCallbackQuery`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ callback_query_id: callbackQueryId, text, show_alert: false }),
+    signal: AbortSignal.timeout(6_000),
+  }).catch(() => {});
+}
+
 async function handleUpdate(update: any) {
+  // ── 1. Handle admin callback buttons (e.g. delete indexed storage episode) ──
+  if (update.callback_query) {
+    const cq = update.callback_query;
+    const data = String(cq.data || "");
+    const fromId = String(cq.from?.id || "");
+    const adminId = String((await getAdminChatId()) || "");
+    const allowedAdmins = new Set([adminId, "5477879129", "7881366553"].filter(Boolean));
+    if (data.startsWith("tg_del_ep:") && allowedAdmins.has(fromId)) {
+      const epId = Number.parseInt(data.slice("tg_del_ep:".length), 10);
+      if (Number.isFinite(epId) && epId > 0) {
+        const ok = await softDeleteTelegramEpisode(epId);
+        await answerCallbackQuery(cq.id, ok ? "🗑️ تم حذف الحلقة من التطبيق بنجاح" : "الحلقة محذوفة مسبقاً");
+        if (ok && cq.message?.chat?.id) {
+          await sendMessage(cq.message.chat.id, `🗑️ تم حذف الحلقة #${epId} من فهرس التطبيق.`);
+        }
+        return;
+      }
+    }
+    await answerCallbackQuery(cq.id, "تم");
+    return;
+  }
+
+  // ── 2. Handle Private Storage Channel posts (new / edited episodes & posters) ──
+  const chPost = update.channel_post || update.edited_channel_post;
+  if (chPost && isStorageChannel(chPost.chat?.id)) {
+    const isEdit = Boolean(update.edited_channel_post);
+    try {
+      const result = await handleStorageChannelPost(chPost, isEdit);
+      if (result.handled && result.summary) {
+        const adminId = await getAdminChatId();
+        if (adminId) {
+          const extra = result.episodeId
+            ? {
+                reply_markup: {
+                  inline_keyboard: [[{ text: "🗑️ حذف الحلقة من التطبيق", callback_data: `tg_del_ep:${result.episodeId}` }]],
+                },
+              }
+            : {};
+          await sendMessage(adminId, result.summary, extra);
+        }
+        // Trigger bell push alert for subscribers when a brand-new episode is uploaded
+        if (!isEdit && result.kind === "episode" && result.series && result.episode) {
+          const s = result.series;
+          const e = result.episode;
+          const isDubbed = s.section === "cartoon" || s.section === "dubbed";
+          if (!isDubbed && s.anilist_id) {
+            void sendSubscribedAlertPush({
+              mediaType: "anime",
+              mediaId: String(s.anilist_id),
+              title: s.title,
+              episode: e.episode_number,
+              poster: s.poster_url || undefined,
+              anilistId: s.anilist_id,
+            }).catch(() => {});
+          }
+        }
+      }
+    } catch (err: any) {
+      console.error("[tg-storage] channel_post ingest error:", err?.message || err);
+    }
+    return;
+  }
+
   const msg  = update.message;
   if (!msg) return;
 
@@ -1638,6 +1715,12 @@ async function handleUpdate(update: any) {
       `• /chatid — Chat ID الخاص بك\n\n` +
       `💬 أو أرسل رسالتك مباشرة وسنردّ عليك!`
     );
+    return;
+  }
+
+  /* /صيغ أو /templates — صيغ رفع الحلقات لقناة التخزين */
+  if (text === "/templates" || text === "/صيغ" || text === "/الصيغ" || text.startsWith("/templates ")) {
+    await sendMessage(chatId, formatTemplatesMessage());
     return;
   }
 

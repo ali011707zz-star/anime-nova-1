@@ -103,3 +103,4 @@ artifacts/api-server/data/stardima-v2-catalog.json
 
 # Prevent backup PM2 configs with secrets from being tracked
 ecosystem.config.cjs.bak*
+.tg-mtproto.session*

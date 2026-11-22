@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 import { pipeline } from "node:stream/promises";
 import { Router, type Request, type Response } from "express";
 import { issueAnonToken, validateAnonToken, validateDownloadToken } from "../lib/security.js";
+import { getTelegramFilmSources } from "../lib/telegramStorage.js";
 import { pool } from "../lib/db.js";
 import {
   deduplicateFilmSummaries,
@@ -1424,6 +1425,16 @@ router.get("/sources-stream", async (req: Request, res: Response) => {
 
     const resolved = await resolveEpisodeFromVault(tmdbId, type, season, ep);
     let emitted = 0;
+    const tgFilmSources = await getTelegramFilmSources({
+      tmdbId,
+      title: resolved.titleEn || titleParam,
+      season,
+      ep,
+    });
+    for (const src of tgFilmSources) {
+      sendEvent("source", src);
+      emitted++;
+    }
     for (const src of resolved.sources) {
       sendEvent("source", src);
       emitted++;
