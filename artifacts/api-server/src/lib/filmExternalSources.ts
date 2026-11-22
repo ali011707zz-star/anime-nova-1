@@ -652,7 +652,12 @@ function parseTopCinemaCards(
       imdbRating,
       qualityBadge,
       audioLabel,
-      categoryLabel: defaults.categoryLabel || (isSeries ? "مسلسلات أجنبية" : "أفلام أجنبية"),
+      categoryLabel:
+        defaults.categoryLabel === "أفلام أنمي" &&
+        !/conan|gintama|mononoke|gundam|naruto|bleach|one piece|kimetsu|jujutsu|isekai|anime|أنمي|انمي|doraemon|digimon|pokemon|dragon ball|evangelion|ghibli|chainsaw|spy x|haikyu|slam dunk|hero academia|demon slayer|attack on titan|hunter|sailor moon/i.test(decodedTitle) &&
+        !/[\u3040-\u30ff\u4e00-\u9faf]/.test(decodedTitle)
+          ? "أفلام أنميشن"
+          : defaults.categoryLabel || (isSeries ? "مسلسلات أجنبية" : "أفلام أجنبية"),
       genres: genres.length ? genres : ["دراما"],
       topcinemaUrl: url,
       updatedAt: Date.now(),

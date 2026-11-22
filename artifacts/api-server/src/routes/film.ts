@@ -1481,7 +1481,7 @@ router.get("/sources-stream", async (req: Request, res: Response) => {
               if (evMatch?.[1] === "source" && dtMatch?.[1]) {
                 try {
                   const sObj = JSON.parse(dtMatch[1]);
-                  if (sObj && (sObj.url || sObj.directUrl || sObj.proxyUrl)) {
+                  if (sObj && (sObj.url || sObj.directUrl || sObj.proxyUrl) && !/dahmer/i.test(String(sObj.label || sObj.site || ""))) {
                     sendEvent("source", {
                       ...sObj,
                       tier: /2160|4k/i.test(sObj.label || "") ? "4K UHD" : /1080/i.test(sObj.label || "") ? "1080p FHD" : "720p HD",
