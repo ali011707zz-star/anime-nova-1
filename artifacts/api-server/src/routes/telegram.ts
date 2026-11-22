@@ -24,6 +24,7 @@ import {
   handleStorageChannelPost,
   isStorageChannel,
   softDeleteTelegramEpisode,
+  softDeleteTelegramChapter,
   setPendingAdminPromptMsgId,
   hasPendingAdminUpload,
   applyAdminReplyToPending,
@@ -1766,7 +1767,13 @@ async function dispatchIngestResultToAdmin(
             inline_keyboard: [[{ text: "🗑️ حذف الحلقة من التطبيق", callback_data: `tg_del_ep:${result.episodeId}` }]],
           },
         }
-      : {};
+      : result.chapterId
+        ? {
+            reply_markup: {
+              inline_keyboard: [[{ text: "🗑️ حذف الفصل من التطبيق", callback_data: `tg_del_ch:${result.chapterId}` }]],
+            },
+          }
+        : {};
 
   const sent = await sendMessageDetailed(targetChatId, text, extra);
   if (result.kind === "needs_fix" && result.pendingId && sent.messageId) {
@@ -1807,6 +1814,17 @@ async function handleUpdate(update: any) {
         await answerCallbackQuery(cq.id, ok ? "🗑️ تم حذف الحلقة من التطبيق بنجاح" : "الحلقة محذوفة مسبقاً");
         if (ok && cq.message?.chat?.id) {
           await sendMessage(cq.message.chat.id, `🗑️ تم حذف الحلقة #${epId} من فهرس التطبيق.`);
+        }
+        return;
+      }
+    }
+    if (data.startsWith("tg_del_ch:")) {
+      const chId = Number.parseInt(data.slice("tg_del_ch:".length), 10);
+      if (Number.isFinite(chId) && chId > 0) {
+        const ok = await softDeleteTelegramChapter(chId);
+        await answerCallbackQuery(cq.id, ok ? "🗑️ تم حذف الفصل من التطبيق بنجاح" : "الفصل محذوف مسبقاً");
+        if (ok && cq.message?.chat?.id) {
+          await sendMessage(cq.message.chat.id, `🗑️ تم حذف الفصل #${chId} من فهرس التطبيق.`);
         }
         return;
       }

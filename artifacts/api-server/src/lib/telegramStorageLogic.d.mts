@@ -1,5 +1,15 @@
-export type TgMediaSection = "anime" | "cartoon" | "cartoon2" | "dubbed" | "film";
+export type TgMediaSection =
+  | "anime"
+  | "animation"
+  | "aw_animation"
+  | "cartoon"
+  | "cartoon2"
+  | "dubbed"
+  | "film"
+  | "manga"
+  | "manhwa";
 export type TgAudioLang = "sub" | "dub_en" | "dub_ar";
+export type TgUploadKind = "episode" | "series_card" | "manga_chapter";
 
 export interface ParsedChannelCaption {
   section: TgMediaSection;
@@ -59,8 +69,18 @@ export interface ParsedByteRange {
   isPartial: boolean;
 }
 
+export interface ZipImageEntry {
+  name: string;
+  mime: string;
+  compressionMethod: number;
+  compressedSize: number;
+  uncompressedSize: number;
+  localHeaderOffset: number;
+}
+
 export function normalizeMediaTitle(value: string): string;
 export function slugifyMediaTitle(value: string): string;
+export function isMangaSection(section: string | null | undefined): boolean;
 export function normalizeSection(raw: string): TgMediaSection | null;
 export function getSectionDisplayInfo(section: TgMediaSection, audioLang?: TgAudioLang): { labelAr: string; appLocationAr: string };
 export function parseAudioLangStrict(raw: string): TgAudioLang | null;
@@ -68,6 +88,8 @@ export function normalizeAudioLang(raw: string, section?: TgMediaSection): TgAud
 export function parseQualityStrict(raw: string): string | null;
 export function normalizeQuality(raw: string, videoHeight?: number): string;
 export function qualityToRank(quality: string): number;
+export function parseStrictChapterNumber(val: string | number, max?: number): number | null;
+export function formatChapterLabel(num: number | string): string;
 export function isSuspiciousTitle(title: string): { suspicious: boolean; reason?: string };
 export function parseChannelCaption(
   caption: string,
@@ -76,7 +98,7 @@ export function parseChannelCaption(
 ): ParsedChannelCaption;
 export function validateParsedCaption(
   parsed: ParsedChannelCaption,
-  kind?: "episode" | "series_card"
+  kind?: TgUploadKind
 ): { isValid: boolean; issues: ValidationIssue[] };
 export function levenshteinDistance(a: string, b: string): number;
 export function computeTitleSimilarity(a: string, b: string): number;
@@ -99,13 +121,14 @@ export function formatPendingReminderMessage(
   draft: ParsedChannelCaption,
   issues: ValidationIssue[],
   suggestions?: TitleSuggestion[],
-  meta?: { kind?: "episode" | "series_card" }
+  meta?: { kind?: TgUploadKind }
 ): string;
 export function buildPendingInlineKeyboard(
   pendingId: number,
   issues: ValidationIssue[],
   suggestions?: TitleSuggestion[],
-  draft?: Partial<ParsedChannelCaption>
+  draft?: Partial<ParsedChannelCaption>,
+  meta?: { kind?: TgUploadKind }
 ): { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> };
 export function parseHttpByteRange(rangeHeader: string | undefined, fileSize: number): ParsedByteRange | null;
 export function signTgStreamToken(episodeId: number | string, secret: string, ttlSec?: number): { exp: number; sig: string };
@@ -118,6 +141,11 @@ export function verifyTgStreamToken(
 ): boolean;
 export function convertSrtToVtt(rawText: string): string;
 export function formatTemplatesMessage(): string;
+export function listZipImageEntries(zipBuffer: Buffer): ZipImageEntry[];
+export function extractZipImageByIndex(
+  zipBuffer: Buffer,
+  pageIndexZeroBased: number
+): { name: string; mime: string; data: Buffer } | null;
 export function extractAuthorizedAdminIds(input?: {
   ownerChatId?: string | number | null;
   extraAdminIds?: string | null;

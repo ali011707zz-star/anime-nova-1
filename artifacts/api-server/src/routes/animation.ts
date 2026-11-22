@@ -9,6 +9,7 @@ import {
   setSourceCache,
   shouldRefreshCache,
 } from "../lib/sourceCache.js";
+import { getTelegramAnimationSources } from "../lib/telegramStorage.js";
 
 const router = Router();
 
@@ -2273,7 +2274,7 @@ router.get("/animation/sources-stream", scraperQueueMiddleware, async (req: Requ
     "vidfast_vc", "nebula",
     "nflixmovies_flux2", "vidbolt_flux3",
     // مضاف 2026-07-20: a.111477.xyz direct MP4/MKV rawUrl (browser follows 307→p.111477.xyz)
-    "dahmermovies",
+    "nova_tg", "dahmermovies",
     // moviebox_anim: disabled 2026-07-30
     // "moviebox_anim",
   ]);
@@ -2429,6 +2430,34 @@ router.get("/animation/sources-stream", scraperQueueMiddleware, async (req: Requ
         send("done", {}); clearInterval(keepAlive); res.end();
       }
     }, 30_000);
+
+    // ── 0. NOVA TG (Private Telegram Storage Channel) — فوري قبل السكرابرز ────
+    if (!siteParam || siteParam === "nova_tg") {
+      try {
+        const tgAnimSources = await getTelegramAnimationSources({
+          tmdbId,
+          title: enTitlePrefetched || title,
+          altTitle: title,
+          season,
+          ep: epNum,
+          type,
+        });
+        for (const s of tgAnimSources) {
+          sendSource(s.url, s.label, s.directUrl, s.proxyUrl, {
+            site: "nova_tg",
+            ...(s.subtitleUrl ? { subtitleUrl: s.subtitleUrl } : {}),
+          });
+        }
+      } catch { /* silent */ }
+      if (siteParam === "nova_tg") {
+        clearTimeout(forceClose);
+        if (!streamDone && !res.writableEnded) {
+          streamDone = true;
+          send("done", {}); clearInterval(keepAlive); res.end();
+        }
+        return;
+      }
+    }
 
     // ── Run all scrapers in parallel ──────────────────────────────────────────
     await Promise.allSettled([

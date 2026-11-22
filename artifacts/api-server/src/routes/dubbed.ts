@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import { Router } from "express";
 import { load } from "cheerio";
 import { logger } from "../lib/logger";
-import { getTelegramDubbedCatalogItems, getTelegramDubbedEpisodes, getTelegramSd2CatalogItems, getTelegramSd2Detail, getTelegramAnimeZidCatalogItems, getTelegramAnimeZidDetail, getTelegramEpisodeById, buildSignedStreamPath, buildSignedStreamUrl, buildSubtitleUrl } from "../lib/telegramStorage.js";
+import { getTelegramDubbedCatalogItems, getTelegramDubbedEpisodes, getTelegramSd2CatalogItems, getTelegramSd2Detail, getTelegramAnimeZidCatalogItems, getTelegramAnimeZidDetail, getTelegramAwDubbedCatalogItems, getTelegramAwDubbedEpisodes, getTelegramAwDubbedWatchSrc, getTelegramEpisodeById, buildSignedStreamPath, buildSignedStreamUrl, buildSubtitleUrl } from "../lib/telegramStorage.js";
 import { streamMultiRangeMediaVPS } from "../lib/multiRangeStreamer.js";
 import { mergeAwSourceRows } from "../lib/awSourceRows.mjs";
 import { parseCarateenEpisodeUrl } from "../lib/carateenEpisodeRef.mjs";
@@ -2184,15 +2184,18 @@ router.get("/aw-dubbed/catalog", async (req, res) => {
         }));
       }
     }
-    const totalPages = Math.max(1, Math.ceil(catalog.length / AW_PAGE_SIZE));
-    const results = catalog
+    const tgAwItems = page === 1 ? await getTelegramAwDubbedCatalogItems(q) : [];
+    const pagedBase = catalog
       .slice((page - 1) * AW_PAGE_SIZE, page * AW_PAGE_SIZE)
       .map(item => ({
         ...item,
         poster: normalizeAwPosterUrl(item.poster),
       }));
+    const results = tgAwItems.length > 0 ? [...tgAwItems, ...pagedBase] : pagedBase;
+    const total = catalog.length + (page === 1 ? tgAwItems.length : 0);
+    const totalPages = Math.max(1, Math.ceil(total / AW_PAGE_SIZE));
     res.setHeader("Cache-Control", "public, max-age=300");
-    res.json({ results, page, totalPages, total: catalog.length });
+    res.json({ results, page, totalPages, total });
   } catch {
     res.status(502).json({ error: "failed to load catalog" });
   }
@@ -2239,6 +2242,13 @@ router.get("/aw-dubbed/episodes", async (req, res) => {
   // end with whitespace, and Supabase stores that value verbatim.
   const series = String(req.query.series || "");
   if (!series.trim()) { res.json({ episodes: [] }); return; }
+  if (series.startsWith("tg://aw/")) {
+    const order = req.query.order === "asc" ? "asc" : "desc";
+    const episodes = await getTelegramAwDubbedEpisodes(series, order);
+    res.setHeader("Cache-Control", "public, max-age=60");
+    res.json({ episodes });
+    return;
+  }
 
   const SB_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
   const SB_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
@@ -2297,6 +2307,16 @@ router.get("/aw-dubbed/watch-src", async (req, res) => {
   const series = String(req.query.series || "");
   const ep     = Math.max(1, parseInt(req.query.ep as string || "1", 10) || 1);
   if (!series.trim()) { res.status(400).json({ error: "missing series" }); return; }
+  if (series.startsWith("tg://aw/")) {
+    const allSources = await getTelegramAwDubbedWatchSrc(series, ep);
+    if (!allSources.length) {
+      res.status(404).json({ error: "لا توجد مصادر متاحة لهذه الحلقة حالياً" });
+      return;
+    }
+    res.setHeader("Cache-Control", "no-cache");
+    res.json({ allSources, rawUrl: allSources[0]?.rawUrl ?? null, hlsUrl: null });
+    return;
+  }
   const trace = readPlaybackTrace(req.query.trace);
   const sourceStartedAt = Date.now();
   if (trace) {

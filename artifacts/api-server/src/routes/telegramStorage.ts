@@ -16,6 +16,8 @@ import {
   downloadTelegramSmallFile,
   listTelegramMediaAdmin,
   softDeleteTelegramEpisode,
+  softDeleteTelegramChapter,
+  getTelegramChapterPageBuffer,
 } from "../lib/telegramStorage.js";
 
 const router = Router();
@@ -171,11 +173,40 @@ router.get("/api/tg-media/admin/list", async (req: Request, res: Response) => {
   }
 });
 
+/* ── GET /api/tg-media/manga-page/:chapterId/:pageIndex ───────────────── */
+router.get("/api/tg-media/manga-page/:chapterId/:pageIndex", async (req: Request, res: Response) => {
+  const chapterId = Number.parseInt(String(req.params.chapterId || "0"), 10);
+  const pageIndex = Number.parseInt(String(req.params.pageIndex || "0"), 10);
+  if (!Number.isFinite(chapterId) || chapterId <= 0 || !Number.isFinite(pageIndex) || pageIndex <= 0) {
+    res.status(400).end();
+    return;
+  }
+  try {
+    const page = await getTelegramChapterPageBuffer(chapterId, pageIndex);
+    if (!page) { res.status(404).end(); return; }
+    res.setHeader("Content-Type", page.mime);
+    res.setHeader("Cache-Control", "public, max-age=86400, immutable");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.send(page.buffer);
+  } catch (err: any) {
+    console.error("[tg-manga-page] error:", err?.message || err);
+    res.status(502).end();
+  }
+});
+
 router.delete("/api/tg-media/admin/episode/:epId", async (req: Request, res: Response) => {
   if (!(await hasAdminAccess(req))) { res.status(401).json({ ok: false, error: "unauthorized" }); return; }
   const epId = Number.parseInt(String(req.params.epId || "0"), 10);
   if (!Number.isFinite(epId) || epId <= 0) { res.status(400).json({ ok: false, error: "invalid id" }); return; }
   const deleted = await softDeleteTelegramEpisode(epId);
+  res.json({ ok: deleted });
+});
+
+router.delete("/api/tg-media/admin/chapter/:chId", async (req: Request, res: Response) => {
+  if (!(await hasAdminAccess(req))) { res.status(401).json({ ok: false, error: "unauthorized" }); return; }
+  const chId = Number.parseInt(String(req.params.chId || "0"), 10);
+  if (!Number.isFinite(chId) || chId <= 0) { res.status(400).json({ ok: false, error: "invalid id" }); return; }
+  const deleted = await softDeleteTelegramChapter(chId);
   res.json({ ok: deleted });
 });
 

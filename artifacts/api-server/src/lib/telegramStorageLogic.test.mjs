@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { deflateRawSync } from "node:zlib";
 import {
   parseChannelCaption,
   validateParsedCaption,
@@ -14,6 +15,10 @@ import {
   extractAuthorizedAdminIds,
   isPrivateSenderAuthorized,
   getSectionDisplayInfo,
+  normalizeSection,
+  listZipImageEntries,
+  extractZipImageByIndex,
+  formatChapterLabel,
 } from "./telegramStorageLogic.mjs";
 
 test("parses structured Arabic anime & cartoon captions cleanly", () => {
@@ -229,4 +234,129 @@ test("supports both cartoon sections (cartoon & cartoon2), dubbed anime, and dup
   assert.ok(secCbs.includes("tg_pend_sec:78:cartoon:dub_ar"));
   assert.ok(secCbs.includes("tg_pend_sec:78:cartoon2:dub_ar"));
   assert.ok(secCbs.includes("tg_pend_sec:78:dubbed:dub_ar"));
+});
+
+
+// Helper to craft a minimal real ZIP archive in memory (supports stored & deflate entries)
+function buildTestZip(files) {
+  const localChunks = [];
+  const centralChunks = [];
+  let offset = 0;
+
+  for (const f of files) {
+    const nameBuf = Buffer.from(f.name, "utf8");
+    const rawData = Buffer.isBuffer(f.data) ? f.data : Buffer.from(f.data, "utf8");
+    const method = f.deflate ? 8 : 0;
+    const compData = method === 8 ? deflateRawSync(rawData) : rawData;
+
+    const lh = Buffer.alloc(30);
+    lh.writeUInt32LE(0x04034b50, 0);
+    lh.writeUInt16LE(20, 4);
+    lh.writeUInt16LE(0, 6);
+    lh.writeUInt16LE(method, 8);
+    lh.writeUInt32LE(0, 14);
+    lh.writeUInt32LE(compData.length, 18);
+    lh.writeUInt32LE(rawData.length, 22);
+    lh.writeUInt16LE(nameBuf.length, 26);
+    lh.writeUInt16LE(0, 28);
+    localChunks.push(lh, nameBuf, compData);
+
+    const ch = Buffer.alloc(46);
+    ch.writeUInt32LE(0x02014b50, 0);
+    ch.writeUInt16LE(20, 4);
+    ch.writeUInt16LE(20, 6);
+    ch.writeUInt16LE(0, 8);
+    ch.writeUInt16LE(method, 10);
+    ch.writeUInt32LE(0, 16);
+    ch.writeUInt32LE(compData.length, 20);
+    ch.writeUInt32LE(rawData.length, 24);
+    ch.writeUInt16LE(nameBuf.length, 28);
+    ch.writeUInt16LE(0, 30);
+    ch.writeUInt16LE(0, 32);
+    ch.writeUInt32LE(offset, 42);
+    centralChunks.push(ch, nameBuf);
+
+    offset += lh.length + nameBuf.length + compData.length;
+  }
+
+  const cdBuf = Buffer.concat(centralChunks);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(files.length, 8);
+  eocd.writeUInt16LE(files.length, 10);
+  eocd.writeUInt32LE(cdBuf.length, 12);
+  eocd.writeUInt32LE(offset, 16);
+  return Buffer.concat([...localChunks, cdBuf, eocd]);
+}
+
+test("animation, aw_animation, manga, and manhwa sections normalize distinctly", () => {
+  assert.equal(normalizeSection("انميشن"), "animation");
+  assert.equal(normalizeSection("أنيميشن"), "animation");
+  assert.equal(normalizeSection("انميشن_مدبلج"), "aw_animation");
+  assert.equal(normalizeSection("أنيميشن مدبلج"), "aw_animation");
+  assert.equal(normalizeSection("كرتون"), "cartoon");
+  assert.equal(normalizeSection("كرتون2"), "cartoon2");
+  assert.equal(normalizeSection("انمي_مدبلج"), "dubbed");
+  assert.equal(normalizeSection("مانجا"), "manga");
+  assert.equal(normalizeSection("مانهوا"), "manhwa");
+  assert.equal(normalizeSection("مانها"), "manhwa");
+
+  assert.match(getSectionDisplayInfo("animation").appLocationAr, /قسم الأنيميشن/);
+  assert.match(getSectionDisplayInfo("aw_animation").appLocationAr, /أنيميشن مدبلج/);
+  assert.match(getSectionDisplayInfo("manga").appLocationAr, /قسم المانجا/);
+  assert.match(getSectionDisplayInfo("manhwa").appLocationAr, /قسم المانهوا/);
+});
+
+test("parseChannelCaption supports #فيلم_انميشن and decimal manga/manhwa chapters", () => {
+  const animMovie = parseChannelCaption("#فيلم_انميشن\nالاسم: Inside Out 2\nالجودة: 1080p");
+  assert.equal(animMovie.section, "animation");
+  assert.equal(animMovie.episode, 1);
+  assert.equal(validateParsedCaption(animMovie, "episode").isValid, true);
+
+  const manhwaPipe = parseChannelCaption("Solo Leveling | ف15.5 #مانهوا");
+  assert.equal(manhwaPipe.section, "manhwa");
+  assert.equal(manhwaPipe.title, "Solo Leveling");
+  assert.equal(manhwaPipe.episode, 15.5);
+  assert.equal(formatChapterLabel(manhwaPipe.episode), "15.5");
+  assert.equal(validateParsedCaption(manhwaPipe, "manga_chapter").isValid, true);
+
+  const mangaKv = parseChannelCaption("#مانجا\nالاسم: One Piece\nالفصل: ١١٢٥");
+  assert.equal(mangaKv.section, "manga");
+  assert.equal(mangaKv.episode, 1125);
+  assert.equal(validateParsedCaption(mangaKv, "manga_chapter").isValid, true);
+
+  // Missing chapter number on manga_chapter yields Arabic chapter prompt
+  const missingCh = parseChannelCaption("#مانهوا\nالاسم: Solo Leveling");
+  const check = validateParsedCaption(missingCh, "manga_chapter");
+  assert.equal(check.isValid, false);
+  assert.match(check.issues[0].message, /رقم الفصل/);
+
+  // Zip chapter missing section offers ONLY manga/manhwa buttons
+  const missingSecZip = parseChannelCaption("الاسم: Solo Leveling\nالفصل: 15");
+  const checkZip = validateParsedCaption(missingSecZip, "manga_chapter");
+  const kb = buildPendingInlineKeyboard(99, checkZip.issues, [], missingSecZip, { kind: "manga_chapter" });
+  const secCallbacks = kb.inline_keyboard.flat().map((b) => b.callback_data).filter((c) => c.startsWith("tg_pend_sec:"));
+  assert.deepEqual(secCallbacks, ["tg_pend_sec:99:manga:sub", "tg_pend_sec:99:manhwa:sub"]);
+});
+
+test("listZipImageEntries & extractZipImageByIndex naturally sort pages, decompress deflate, and block traversal/junk", () => {
+  const zip = buildTestZip([
+    { name: "__MACOSX/._01.jpg", data: "junk" },
+    { name: "../evil.jpg", data: "traversal" },
+    { name: "readme.txt", data: "not an image" },
+    { name: "ch15/10.png", data: Buffer.from([0x89, 0x50, 0x4e, 0x47, 10]), deflate: true },
+    { name: "ch15/2.jpg", data: Buffer.from([0xff, 0xd8, 0xff, 2]), deflate: false },
+    { name: "ch15/1.webp", data: Buffer.from("RIFFpage1"), deflate: true },
+  ]);
+
+  const entries = listZipImageEntries(zip);
+  assert.equal(entries.length, 3);
+  assert.deepEqual(entries.map((e) => e.name), ["ch15/1.webp", "ch15/2.jpg", "ch15/10.png"]);
+  assert.deepEqual(entries.map((e) => e.mime), ["image/webp", "image/jpeg", "image/png"]);
+
+  const p0 = extractZipImageByIndex(zip, 0);
+  assert.equal(p0.data.toString("utf8"), "RIFFpage1");
+  const p2 = extractZipImageByIndex(zip, 2);
+  assert.deepEqual([...p2.data], [0x89, 0x50, 0x4e, 0x47, 10]);
+  assert.equal(extractZipImageByIndex(zip, 99), null);
 });

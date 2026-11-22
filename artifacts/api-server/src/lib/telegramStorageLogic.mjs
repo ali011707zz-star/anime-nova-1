@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { inflateRawSync } from "node:zlib";
 
 const ARABIC_DIACRITICS_RE = /[\u064B-\u065F\u0670\u0640]/g;
 
@@ -36,19 +37,35 @@ export function slugifyMediaTitle(value) {
   return "ar-" + (hash >>> 0).toString(36);
 }
 
+export function isMangaSection(section) {
+  return section === "manga" || section === "manhwa";
+}
+
 export function normalizeSection(raw) {
   const s = normalizeMediaTitle(String(raw || "").replace(/_/g, " ").replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660)));
   if (!s) return null;
+  if (/^(مانهوا|مانها|مانهوا كوري|مانهوا كوريه|ويبتون|manhwa|manhua|webtoon)$/.test(s)) {
+    return "manhwa";
+  }
+  if (/^(مانجا|مانغا|manga)$/.test(s)) {
+    return "manga";
+  }
+  if (/^(انميشن مدبلج|انيميشن مدبلج|انميشن عربي|انيميشن عربي|مدبلج انميشن|مدبلج انيميشن|دبلجه انميشن|aw animation|aw dubbed|dubbed animation|animation dub|animation ar)$/.test(s)) {
+    return "aw_animation";
+  }
+  if (/^(انميشن|انيميشن|فيلم انميشن|فيلم انيميشن|انميشن فيلم|انيميشن فيلم|مسلسل انميشن|مسلسل انيميشن|animation|animated|anim)$/.test(s)) {
+    return "animation";
+  }
   if (/^(انمي|انمي مترجم|انمي انجليزي|انمي دبلجه انجليزي|انمي دبلجه انجليزيه|anime|anime sub|anime dub|anime en|sub|مترجم)$/.test(s)) {
     return "anime";
   }
   if (/^(كرتون\s*2|كرتون مدبلج\s*2|cartoon\s*2|sd2|ستارديما|ستارديما\s*2|stardima)$/.test(s)) {
     return "cartoon2";
   }
-  if (/^(كرتون|كرتون\s*1|كرتون مدبلج|كرتون مدبلج\s*1|cartoon|cartoon\s*1|animation|انيميشن|انميشن)$/.test(s)) {
+  if (/^(كرتون|كرتون\s*1|كرتون مدبلج|كرتون مدبلج\s*1|cartoon|cartoon\s*1)$/.test(s)) {
     return "cartoon";
   }
-  if (/^(مدبلج|dubbed|مدبلج عربي|انمي مدبلج|انمي عربي|دبلجه عربي|دبلجه عربيه)$/.test(s)) {
+  if (/^(مدبلج|dubbed|مدبلج عربي|انمي مدبلج|انمي عربي|دبلجه عربي|دبلجه عربيه|animezid|انمي زيد)$/.test(s)) {
     return "dubbed";
   }
   if (/^(فيلم|فلم|افلام|فيلم انمي|فيلم كرتون|فيلم مدبلج|film|movie|movies)$/.test(s)) {
@@ -58,28 +75,52 @@ export function normalizeSection(raw) {
 }
 
 export function getSectionDisplayInfo(section, audioLang = "sub") {
+  if (section === "animation") {
+    return {
+      labelAr: "أنيميشن ✨",
+      appLocationAr: "قسم الأنيميشن ← صفحة العمل ← سيرفر NOVA TG",
+    };
+  }
+  if (section === "aw_animation") {
+    return {
+      labelAr: "أنيميشن مدبلج 🎙️",
+      appLocationAr: "تبويب المدبلج ← أنيميشن مدبلج (في المقدمة)",
+    };
+  }
   if (section === "cartoon") {
     return {
-      labelAr: "كرتون مدبلج 1",
+      labelAr: "كرتون مدبلج 1 🎨",
       appLocationAr: "تبويب المدبلج ← كرتون مدبلج (في المقدمة)",
     };
   }
   if (section === "cartoon2") {
     return {
-      labelAr: "كرتون مدبلج 2",
+      labelAr: "كرتون مدبلج 2 📺",
       appLocationAr: "تبويب المدبلج ← كرتون مدبلج 2 (في المقدمة)",
     };
   }
   if (section === "dubbed") {
     return {
-      labelAr: "أنمي مدبلج",
+      labelAr: "أنمي مدبلج 🗣️",
       appLocationAr: "تبويب المدبلج ← أنمي مدبلج (في المقدمة)",
     };
   }
   if (section === "film") {
     return {
-      labelAr: "أفلام",
+      labelAr: "أفلام 🎬",
       appLocationAr: "قسم الأفلام (داخل صفحة الفيلم كسيرفر NOVA TG)",
+    };
+  }
+  if (section === "manga") {
+    return {
+      labelAr: "مانجا 📖",
+      appLocationAr: "قسم المانجا (في المقدمة)",
+    };
+  }
+  if (section === "manhwa") {
+    return {
+      labelAr: "مانهوا 📱",
+      appLocationAr: "قسم المانهوا (في المقدمة)",
     };
   }
   if (audioLang === "dub_en") {
@@ -106,7 +147,7 @@ export function parseAudioLangStrict(raw) {
 export function normalizeAudioLang(raw, section = "anime") {
   const parsed = parseAudioLangStrict(raw);
   if (parsed) return parsed;
-  return section === "cartoon" || section === "cartoon2" || section === "dubbed" ? "dub_ar" : "sub";
+  return section === "cartoon" || section === "cartoon2" || section === "dubbed" || section === "aw_animation" ? "dub_ar" : "sub";
 }
 
 export function parseQualityStrict(raw) {
@@ -173,6 +214,24 @@ function parseStrictPositiveInt(val, max = 50000) {
   return n;
 }
 
+export function parseStrictChapterNumber(val, max = 50000) {
+  const western = toWesternDigits(val).trim().replace(/[,،]/g, ".");
+  if (!western) return null;
+  const cleaned = western
+    .replace(/^(?:chapter|chap|ch|c|الفصل|فصل|رقم الفصل|ف|ep|episode|الحلقة|الحلقه|حلقة|حلقه|ح)\s*[:.\-]?\s*/i, "")
+    .trim();
+  if (!/^\d+(?:\.\d{1,2})?$/.test(cleaned)) return null;
+  const n = Number.parseFloat(cleaned);
+  if (!Number.isFinite(n) || n < 0 || n > max) return null;
+  return Number(n.toFixed(2));
+}
+
+export function formatChapterLabel(num) {
+  const n = Number(num);
+  if (!Number.isFinite(n)) return String(num || "");
+  return Number.isInteger(n) ? String(n) : String(Number(n.toFixed(2)));
+}
+
 export function isSuspiciousTitle(title) {
   const raw = String(title || "").trim();
   if (!raw) return { suspicious: true, reason: "empty" };
@@ -191,11 +250,11 @@ export function isSuspiciousTitle(title) {
 function detectFieldKey(rawKey) {
   const key = normalizeMediaTitle(rawKey);
   if (!key) return null;
-  if (/^(الاسم|اسم|العنوان|عنوان|name|title|اسم الانمي|اسم العمل|اسم الكرتون|اسم الفيلم)$/.test(key)) return "title";
+  if (/^(الاسم|اسم|العنوان|عنوان|name|title|اسم الانمي|اسم العمل|اسم الكرتون|اسم الفيلم|اسم المانجا|اسم المانهوا|اسم الانميشن)$/.test(key)) return "title";
   if (/^(الاسم الانجليزي|انجليزي|english|title en|en)$/.test(key)) return "titleEn";
   if (/^(القسم|قسم|النوع|نوع|section|category|type)$/.test(key)) return "section";
   if (/^(الموسم|موسم|season|s)$/.test(key)) return "season";
-  if (/^(الحلقه|حلقه|رقم الحلقه|ep|episode|e)$/.test(key)) return "episode";
+  if (/^(الحلقه|حلقه|رقم الحلقه|الفصل|فصل|رقم الفصل|ep|episode|e|ch|chap|chapter)$/.test(key)) return "episode";
   if (/^(الجوده|جوده|quality|q|res|resolution)$/.test(key)) return "quality";
   if (/^(اللغه|لغه|الصوت|صوت|lang|language|audio|dub)$/.test(key)) return "audioLang";
   if (/^(anilist|اني ليست|انيلست|anilist id|al)$/.test(key)) return "anilistId";
@@ -255,6 +314,11 @@ export function parseChannelCaption(caption, _fileName = "", mediaMeta = {}) {
     const sec = normalizeSection(clean);
     if (sec) {
       if (!section) section = sec;
+      matchedTag = true;
+    }
+    if (/^(فيلم انميشن|فيلم انيميشن|انميشن فيلم|انيميشن فيلم)$/.test(clean)) {
+      if (!section) section = "animation";
+      if (episode == null) episode = 1;
       matchedTag = true;
     }
     if (/(انجليز|دبلجه انجليز|dub en|en dub|anime en|anime dub)/.test(clean)) {
@@ -436,8 +500,18 @@ export function parseChannelCaption(caption, _fileName = "", mediaMeta = {}) {
         episode = parsePositiveInt(epEn[1]);
         matchedSeg = true;
       }
+      const chAr = seg.match(/(?:الفصل|فصل|ف)\s*[:\-]?\s*([\d٠-٩]{1,4}(?:[.,][\d٠-٩]{1,2})?)(?=\s|$)/);
+      if (chAr && episode == null) {
+        episode = parseStrictChapterNumber(chAr[1]);
+        matchedSeg = true;
+      }
+      const chEn = seg.match(/^(?:chapter|chap|ch)\s*[:.\-]?\s*(\d{1,4}(?:\.\d{1,2})?)$/i);
+      if (chEn && episode == null) {
+        episode = parseStrictChapterNumber(chEn[1]);
+        matchedSeg = true;
+      }
       if (matchedSeg) continue;
-      const num = parseStrictPositiveInt(seg, 5000);
+      const num = isMangaSection(section) ? parseStrictChapterNumber(seg, 5000) : parseStrictPositiveInt(seg, 5000);
       if (num != null) {
         if (section === "film" && num >= 1920 && num <= 2100 && year == null) {
           year = num;
@@ -462,9 +536,13 @@ export function parseChannelCaption(caption, _fileName = "", mediaMeta = {}) {
       }
     }
     if (episode == null) {
+      const chAr = fallbackLine.match(/(?:الفصل|فصل|ف)\s*[:\-]?\s*([\d٠-٩]{1,4}(?:[.,][\d٠-٩]{1,2})?)/);
+      const chEn = fallbackLine.match(/\b(?:chapter|chap|ch)\s*[:.\-]?\s*(\d{1,4}(?:\.\d{1,2})?)\b/i);
       const epAr = fallbackLine.match(/(?:الحلقة|الحلقه|حلقة|حلقه|ح)\s*[:\-]?\s*([\d٠-٩]{1,4})/);
       const epEn = fallbackLine.match(/(?:\b(?:ep|episode|e)\s*[:.\-]?\s*(\d{1,4})\b|\s-\s(\d{1,4})(?:\s|$))/i);
-      if (epAr) episode = parsePositiveInt(epAr[1]);
+      if (chAr) episode = parseStrictChapterNumber(chAr[1]);
+      else if (chEn) episode = parseStrictChapterNumber(chEn[1]);
+      else if (epAr) episode = parsePositiveInt(epAr[1]);
       else if (epEn) episode = parsePositiveInt(epEn[1] || epEn[2]);
     }
     if (season == null) {
@@ -478,6 +556,8 @@ export function parseChannelCaption(caption, _fileName = "", mediaMeta = {}) {
         .replace(/https?:\/\/\S+/gi, " ")
         .replace(/\bS\d{1,2}\s*E\d{1,4}\b/gi, " ")
         .replace(/(?:الحلقة|الحلقه|حلقة|حلقه|ح)\s*[:\-]?\s*[\d٠-٩]{1,4}/g, " ")
+        .replace(/(?:الفصل|فصل|ف)\s*[:\-]?\s*[\d٠-٩]{1,4}(?:[.,][\d٠-٩]{1,2})?/g, " ")
+        .replace(/\b(?:chapter|chap|ch)\s*[:.\-]?\s*\d{1,4}(?:\.\d{1,2})?\b/gi, " ")
         .replace(/(?:الموسم|موسم|م)\s*[:\-]?\s*[\d٠-٩]{1,2}(?=\s|$)/g, " ")
         .replace(/\b(?:ep|episode|season|e)\s*[:.\-]?\s*\d{1,4}\b/gi, " ")
         .replace(/\b(?:2160p|4k|1080p|720p|480p|360p|mp4|mkv|h264|x264|x265|hevc|web-?dl|bluray)\b/gi, " ")
@@ -544,19 +624,22 @@ export function validateParsedCaption(parsed, kind = "episode") {
   const issues = [];
   const invalidMap = new Map((parsed.invalidFields || []).map((x) => [x.field, x.raw]));
   const emptySet = new Set(parsed.emptyFields || []);
+  const isChapter = kind === "manga_chapter" || isMangaSection(parsed.section);
+  const sectionHint = kind === "manga_chapter"
+    ? "#مانجا أو #مانهوا"
+    : "#انمي / #انميشن / #انميشن_مدبلج / #كرتون / #كرتون2 / #انمي_مدبلج / #فيلم / #مانجا / #مانهوا";
 
-  // 1. Section
   if (invalidMap.has("section")) {
     issues.push({
       field: "section",
       code: "invalid",
-      message: `القسم غير صحيح ("${invalidMap.get("section")}") — استخدم: انمي أو كرتون أو كرتون2 أو انمي_مدبلج أو فيلم`,
+      message: `القسم غير صحيح ("${invalidMap.get("section")}") — استخدم: ${sectionHint}`,
     });
   } else if (emptySet.has("section")) {
     issues.push({
       field: "section",
       code: "empty",
-      message: "خانة القسم فارغة — اختر القسم من الأزرار أو اكتب #انمي / #كرتون / #كرتون2 / #انمي_مدبلج / #فيلم",
+      message: `خانة القسم فارغة — اختر القسم من الأزرار أو اكتب ${sectionHint}`,
     });
   } else if (!parsed.explicitSection) {
     const tagHint = parsed.unknownTags?.length
@@ -565,11 +648,16 @@ export function validateParsedCaption(parsed, kind = "episode") {
     issues.push({
       field: "section",
       code: "missing",
-      message: `لم تحدد القسم${tagHint} — اختر القسم من الأزرار أو أرسل #انمي / #كرتون / #كرتون2 / #انمي_مدبلج / #فيلم`,
+      message: `لم تحدد القسم${tagHint} — اختر القسم من الأزرار بالأسفل أو أرسل ${sectionHint}`,
+    });
+  } else if (kind === "manga_chapter" && !isMangaSection(parsed.section)) {
+    issues.push({
+      field: "section",
+      code: "invalid",
+      message: "ملفات ZIP/CBZ مخصصة لقسم المانجا أو المانهوا فقط — اختر #مانجا أو #مانهوا من الأزرار",
     });
   }
 
-  // 2. Title
   if (emptySet.has("title")) {
     issues.push({
       field: "title",
@@ -580,7 +668,9 @@ export function validateParsedCaption(parsed, kind = "episode") {
     const check = isSuspiciousTitle(parsed.title);
     if (check.suspicious) {
       const msg = check.reason === "empty"
-        ? "لم تكتب اسم العمل — أرسل الاسم (مثال: Attack on Titan أو بن 10)"
+        ? (isChapter
+            ? "لم تكتب اسم المانجا/المانهوا — أرسل الاسم (مثال: Solo Leveling أو One Piece)"
+            : "لم تكتب اسم العمل — أرسل الاسم (مثال: Attack on Titan أو بن 10)")
         : `اسم العمل يبدو غير صحيح أو ناقص ("${parsed.title}") — أرسل الاسم الصحيح`;
       issues.push({
         field: "title",
@@ -590,30 +680,36 @@ export function validateParsedCaption(parsed, kind = "episode") {
     }
   }
 
-  // 3. Episode number (required for episodes unless section is film)
-  if (kind === "episode" && parsed.section !== "film") {
+  if ((kind === "episode" || kind === "manga_chapter") && parsed.section !== "film") {
+    const numLabel = isChapter ? "رقم الفصل" : "رقم الحلقة";
+    const fieldNameAr = isChapter ? "الفصل" : "الحلقة";
+    const sampleNum = isChapter ? "15" : "5";
+    const isValidNum = isChapter
+      ? (parsed.episode != null && Number.isFinite(parsed.episode) && parsed.episode >= 0)
+      : (parsed.episode != null && parsed.episode > 0);
     if (invalidMap.has("episode")) {
       issues.push({
         field: "episode",
         code: "invalid",
-        message: `رقم الحلقة غير صالح ("${invalidMap.get("episode")}") — يجب أن يكون رقماً موجباً (مثال: 5)`,
+        message: `${numLabel} غير صالح ("${invalidMap.get("episode")}") — يجب أن يكون رقماً (مثال: ${sampleNum})`,
       });
     } else if (emptySet.has("episode")) {
       issues.push({
         field: "episode",
         code: "empty",
-        message: "خانة الحلقة فارغة — أرسل رقم الحلقة (مثال: 5)",
+        message: `خانة ${fieldNameAr} فارغة — أرسل ${numLabel} (مثال: ${sampleNum})`,
       });
-    } else if (parsed.episode == null || parsed.episode <= 0) {
+    } else if (!isValidNum) {
       issues.push({
         field: "episode",
         code: "missing",
-        message: "نسيت كتابة رقم الحلقة — أرسل رقم الحلقة (مثال: 5)",
+        message: parsed.section === "animation"
+          ? "لم تكتب رقم الحلقة — أرسل رقم الحلقة للمسلسل، أو اضغط زر (فيلم أنيميشن) بالأسفل إن كان فيلماً"
+          : `نسيت كتابة ${numLabel} — أرسل ${numLabel} (مثال: ${sampleNum})`,
       });
     }
   }
 
-  // 4. Optional fields explicitly left blank or invalid
   for (const optField of ["season", "quality", "audioLang", "anilistId", "tmdbId", "year", "synopsis", "genres", "titleEn"]) {
     const label = FIELD_LABELS_AR[optField] || optField;
     if (invalidMap.has(optField)) {
@@ -737,7 +833,7 @@ export function evaluateTitleMatch(inputTitle, candidates = [], options = {}) {
     return { status: "confirmed", matched: null, suggestions: [] };
   }
 
-  if (section === "anime") {
+  if (section === "anime" || isMangaSection(section)) {
     const topSuggestions = scored
       .filter((s) => s.score >= 0.42)
       .slice(0, 3)
@@ -747,6 +843,9 @@ export function evaluateTitleMatch(inputTitle, candidates = [], options = {}) {
       }));
     if (topSuggestions.length > 0) {
       return { status: "suggest", matched: null, suggestions: topSuggestions };
+    }
+    if (isMangaSection(section) && /[\u0600-\u06FF]/.test(String(inputTitle || ""))) {
+      return { status: "ok_new", matched: null, suggestions: [] };
     }
     return { status: "not_found", matched: null, suggestions: [] };
   }
@@ -790,7 +889,7 @@ export function mergeAdminFixIntoDraft(draft, replyText, currentIssues = [], med
   });
   const hasTags = /#[\p{L}\p{N}_-]+/u.test(raw);
   const hasPipe = raw.includes("|");
-  const aniUrl = raw.match(/anilist\.co\/anime\/(\d+)/i);
+  const aniUrl = raw.match(/anilist\.co\/(?:anime|manga)\/(\d+)/i);
   const tmdbUrl = raw.match(/themoviedb\.org\/(?:movie|tv)\/(\d+)/i);
 
   if (aniUrl) {
@@ -881,6 +980,13 @@ export function mergeAdminFixIntoDraft(draft, replyText, currentIssues = [], med
   }
 
   if (aniUrl || tmdbUrl) {
+    return next;
+  }
+
+  const strictChapterNum = isMangaSection(next.section) ? parseStrictChapterNumber(raw, 50000) : null;
+  if (strictChapterNum != null && issueFields.has("episode")) {
+    next.episode = strictChapterNum;
+    clearFieldErrors("episode");
     return next;
   }
 
@@ -982,18 +1088,23 @@ function escapeHtml(s) {
 
 export function formatPendingReminderMessage(draft, issues = [], suggestions = [], meta = {}) {
   const isCard = meta.kind === "series_card";
+  const isChapter = meta.kind === "manga_chapter" || isMangaSection(draft.section);
   const header = isCard
     ? "⚠️ <b>تم إيقاف حفظ بوستر العمل مؤقتاً — يوجد نقص أو خطأ</b>"
-    : "⚠️ <b>تم إيقاف نشر الحلقة مؤقتاً — يوجد نقص أو خطأ في البيانات</b>";
+    : isChapter
+      ? "⚠️ <b>تم إيقاف نشر الفصل مؤقتاً — يوجد نقص أو خطأ في البيانات</b>"
+      : "⚠️ <b>تم إيقاف نشر الحلقة مؤقتاً — يوجد نقص أو خطأ في البيانات</b>";
 
   const lines = [header, "<i>لم يتم نشر أي شيء في التطبيق بعد حتى تُكمل البيانات الناقصة.</i>", ""];
 
   const captured = [];
   if (draft.explicitSection) captured.push(`القسم: <b>${escapeHtml(getSectionDisplayInfo(draft.section, draft.audioLang).labelAr)}</b>`);
   if (draft.title) captured.push(`الاسم: <b>${escapeHtml(draft.title)}</b>`);
-  if (!isCard && draft.section !== "film" && draft.episode != null) captured.push(`الحلقة: <b>${draft.episode}</b>`);
-  if (draft.explicitSeason) captured.push(`الموسم: <b>${draft.season}</b>`);
-  if (draft.explicitQuality) captured.push(`الجودة: <b>${escapeHtml(draft.quality)}</b>`);
+  if (!isCard && draft.section !== "film" && draft.episode != null) {
+    captured.push(`${isChapter ? "الفصل" : "الحلقة"}: <b>${escapeHtml(formatChapterLabel(draft.episode))}</b>`);
+  }
+  if (!isChapter && draft.explicitSeason) captured.push(`الموسم: <b>${draft.season}</b>`);
+  if (!isChapter && draft.explicitQuality) captured.push(`الجودة: <b>${escapeHtml(draft.quality)}</b>`);
   if (captured.length > 0) {
     lines.push(`📋 <b>ما تم قراءته:</b> ${captured.join(" · ")}`);
     lines.push("");
@@ -1016,9 +1127,15 @@ export function formatPendingReminderMessage(draft, issues = [], suggestions = [
 
   lines.push("");
   if (issues.length === 1 && issues[0].field === "duplicate") {
-    lines.push("💡 <b>اختر الإجراء من الأزرار بالأسفل:</b> استبدال/إضافة كنسخة إضافية أو إلغاء لمنع التكرار.");
+    lines.push("💡 <b>اختر الإجراء من الأزرار بالأسفل:</b> استبدال/إضافة أو إلغاء لمنع التكرار.");
   } else if (issues.length === 1 && issues[0].field === "episode") {
-    lines.push("💡 <b>للإكمال بسرعة:</b> أرسل <b>رقم الحلقة فقط</b> هنا الآن (مثال: <code>5</code>).");
+    lines.push(
+      isChapter
+        ? "💡 <b>للإكمال بسرعة:</b> أرسل <b>رقم الفصل فقط</b> هنا الآن (مثال: <code>15</code> أو <code>12.5</code>)."
+        : draft.section === "animation"
+          ? "💡 <b>للإكمال بسرعة:</b> أرسل <b>رقم الحلقة</b> هنا، أو اضغط زر <b>فيلم أنيميشن</b> بالأسفل."
+          : "💡 <b>للإكمال بسرعة:</b> أرسل <b>رقم الحلقة فقط</b> هنا الآن (مثال: <code>5</code>)."
+    );
   } else if (issues.length === 1 && issues[0].field === "title") {
     lines.push(
       suggestions.length > 0
@@ -1031,9 +1148,9 @@ export function formatPendingReminderMessage(draft, issues = [], suggestions = [
     lines.push("💡 <b>للإكمال بسرعة:</b> اضغط الأزرار بالأسفل أو أرسل الخانات الناقصة هنا برسالة واحدة (أو عدّل وصف الرسالة في القناة):");
     const sample = [];
     const fields = new Set(issues.map((i) => i.field));
-    if (fields.has("section")) sample.push("#انمي");
-    if (fields.has("title")) sample.push("الاسم: Attack on Titan");
-    if (fields.has("episode")) sample.push("الحلقة: 5");
+    if (fields.has("section")) sample.push(isChapter ? "#مانهوا" : "#انمي");
+    if (fields.has("title")) sample.push(isChapter ? "الاسم: Solo Leveling" : "الاسم: Attack on Titan");
+    if (fields.has("episode")) sample.push(isChapter ? "الفصل: 15" : "الحلقة: 5");
     if (fields.has("season")) sample.push("الموسم: 1");
     if (fields.has("quality")) sample.push("الجودة: 1080p");
     if (fields.has("audioLang")) sample.push("اللغة: مترجم");
@@ -1045,9 +1162,11 @@ export function formatPendingReminderMessage(draft, issues = [], suggestions = [
   return lines.join("\n");
 }
 
-export function buildPendingInlineKeyboard(pendingId, issues = [], suggestions = [], draft = {}) {
+export function buildPendingInlineKeyboard(pendingId, issues = [], suggestions = [], draft = {}, meta = {}) {
   const rows = [];
   const fields = new Set(issues.map((i) => i.field));
+  const isChapter = meta.kind === "manga_chapter" || isMangaSection(draft.section);
+  const isCard = meta.kind === "series_card";
 
   if (suggestions.length > 0) {
     suggestions.slice(0, 3).forEach((s, idx) => {
@@ -1065,26 +1184,55 @@ export function buildPendingInlineKeyboard(pendingId, issues = [], suggestions =
   const dupIssue = issues.find((i) => i.field === "duplicate");
   if (dupIssue) {
     if (dupIssue.code === "duplicate_tg") {
-      rows.push([{ text: "🔄 استبدال الحلقة القديمة بالجديدة", callback_data: `tg_pend_replace:${pendingId}` }]);
-      rows.push([{ text: "➕ إبقاء الاثنتين (نسخة/جودة إضافية)", callback_data: `tg_pend_keep_dup:${pendingId}` }]);
+      rows.push([{
+        text: isChapter ? "🔄 استبدال الفصل القديم بالجديد" : "🔄 استبدال الحلقة القديمة بالجديدة",
+        callback_data: `tg_pend_replace:${pendingId}`,
+      }]);
+      if (!isChapter) {
+        rows.push([{ text: "➕ إبقاء الاثنتين (نسخة/جودة إضافية)", callback_data: `tg_pend_keep_dup:${pendingId}` }]);
+      }
     } else {
-      rows.push([{ text: "➕ نشرها رغم ذلك (سيرفر NOVA TG)", callback_data: `tg_pend_keep_dup:${pendingId}` }]);
+      rows.push([{
+        text: isChapter ? "➕ نشر الفصل رغم ذلك (نسخة NOVA TG)" : "➕ نشرها رغم ذلك (سيرفر NOVA TG)",
+        callback_data: `tg_pend_keep_dup:${pendingId}`,
+      }]);
     }
   }
 
+  if (fields.has("episode") && draft.section === "animation") {
+    rows.push([{ text: "🎬 هذا فيلم أنيميشن (بدون رقم حلقة)", callback_data: `tg_pend_ep_movie:${pendingId}` }]);
+  }
+
   if (fields.has("section")) {
-    rows.push([
-      { text: "🎌 أنمي مترجم", callback_data: `tg_pend_sec:${pendingId}:anime:sub` },
-      { text: "🇬🇧 أنمي إنجليزي", callback_data: `tg_pend_sec:${pendingId}:anime:dub_en` },
-    ]);
-    rows.push([
-      { text: "🎨 كرتون مدبلج 1", callback_data: `tg_pend_sec:${pendingId}:cartoon:dub_ar` },
-      { text: "📺 كرتون مدبلج 2", callback_data: `tg_pend_sec:${pendingId}:cartoon2:dub_ar` },
-    ]);
-    rows.push([
-      { text: "🎙️ أنمي مدبلج", callback_data: `tg_pend_sec:${pendingId}:dubbed:dub_ar` },
-      { text: "🎬 فيلم", callback_data: `tg_pend_sec:${pendingId}:film:sub` },
-    ]);
+    if (meta.kind === "manga_chapter") {
+      rows.push([
+        { text: "📖 مانجا", callback_data: `tg_pend_sec:${pendingId}:manga:sub` },
+        { text: "📱 مانهوا", callback_data: `tg_pend_sec:${pendingId}:manhwa:sub` },
+      ]);
+    } else {
+      rows.push([
+        { text: "🎌 أنمي مترجم", callback_data: `tg_pend_sec:${pendingId}:anime:sub` },
+        { text: "🇬🇧 أنمي إنجليزي", callback_data: `tg_pend_sec:${pendingId}:anime:dub_en` },
+      ]);
+      rows.push([
+        { text: "✨ أنيميشن", callback_data: `tg_pend_sec:${pendingId}:animation:sub` },
+        { text: "🎙️ أنيميشن مدبلج", callback_data: `tg_pend_sec:${pendingId}:aw_animation:dub_ar` },
+      ]);
+      rows.push([
+        { text: "🎨 كرتون مدبلج 1", callback_data: `tg_pend_sec:${pendingId}:cartoon:dub_ar` },
+        { text: "📺 كرتون مدبلج 2", callback_data: `tg_pend_sec:${pendingId}:cartoon2:dub_ar` },
+      ]);
+      rows.push([
+        { text: "🗣️ أنمي مدبلج", callback_data: `tg_pend_sec:${pendingId}:dubbed:dub_ar` },
+        { text: "🎬 فيلم", callback_data: `tg_pend_sec:${pendingId}:film:sub` },
+      ]);
+      if (isCard) {
+        rows.push([
+          { text: "📖 مانجا", callback_data: `tg_pend_sec:${pendingId}:manga:sub` },
+          { text: "📱 مانهوا", callback_data: `tg_pend_sec:${pendingId}:manhwa:sub` },
+        ]);
+      }
+    }
   }
 
   if (fields.has("quality")) {
@@ -1103,7 +1251,7 @@ export function buildPendingInlineKeyboard(pendingId, issues = [], suggestions =
     ]);
   }
 
-  rows.push([{ text: "❌ إلغاء هذه الحلقة", callback_data: `tg_pend_cancel:${pendingId}` }]);
+  rows.push([{ text: isChapter ? "❌ إلغاء هذا الفصل" : "❌ إلغاء هذه الحلقة", callback_data: `tg_pend_cancel:${pendingId}` }]);
 
   return { inline_keyboard: rows };
 }
@@ -1174,35 +1322,180 @@ export function convertSrtToVtt(rawText) {
 
 export function formatTemplatesMessage() {
   return [
-    "📋 <b>صيغ رفع الحلقات والأعمال في قناة التخزين الخاصة:</b>",
+    "📋 <b>صيغ رفع الحلقات والفصول في قناة التخزين الخاصة:</b>",
     "",
-    "1️⃣ <b>حلقة أنمي (مترجم أو دبلجة إنجليزية):</b>",
-    "<pre>#انمي\nالاسم: Attack on Titan\nالحلقة: 5\nالجودة: 1080p\nاللغة: مترجم</pre>",
-    "<i>أو سطر واحد: <code>One Piece | 1120 | 1080p #انمي</code></i>",
-    "<i>وللدبلجة الإنجليزية: <code>Solo Leveling | S02E05 | 1080p #انمي_انجليزي</code></i>",
+    "1️⃣ <b>أنمي (مترجم أو دبلجة إنجليزية):</b>",
+    "<pre>#انمي\nالاسم: Attack on Titan\nالحلقة: 5\nالجودة: 1080p</pre>",
+    "<i>سطر واحد: <code>One Piece | 1120 | 1080p #انمي</code> · إنجليزي: <code>#انمي_انجليزي</code></i>",
     "",
-    "2️⃣ <b>حلقة كرتون مدبلج 1 (تبويب كرتون مدبلج):</b>",
-    "<pre>#كرتون\nالاسم: بن 10\nالموسم: 1\nالحلقة: 3\nالجودة: 720p</pre>",
-    "<i>أو سطر واحد: <code>بن 10 | م1 ح1 | 720p #كرتون</code></i>",
+    "2️⃣ <b>قسم الأنيميشن (مسلسلات أو أفلام):</b>",
+    "<pre>#انميشن\nالاسم: Arcane\nالموسم: 1\nالحلقة: 3\nالجودة: 1080p</pre>",
+    "<i>ولفيلم أنيميشن بدون حلقات: <code>#فيلم_انميشن</code> + <code>الاسم: Inside Out 2</code></i>",
     "",
-    "3️⃣ <b>حلقة كرتون مدبلج 2 (تبويب كرتون مدبلج 2):</b>",
-    "<pre>#كرتون2\nالاسم: سبونج بوب\nالموسم: 1\nالحلقة: 1\nالجودة: 1080p</pre>",
+    "3️⃣ <b>أنيميشن مدبلج (تبويب المدبلج ← أنيميشن مدبلج):</b>",
+    "<pre>#انميشن_مدبلج\nالاسم: غامبول\nالموسم: 1\nالحلقة: 1\nالجودة: 720p</pre>",
     "",
-    "4️⃣ <b>حلقة أنمي مدبلج عربي (تبويب أنمي مدبلج):</b>",
-    "<pre>#انمي_مدبلج\nالاسم: دراغون بول سوبر\nالموسم: 1\nالحلقة: 1\nالجودة: 1080p</pre>",
+    "4️⃣ <b>كرتون مدبلج 1 و 2:</b>",
+    "• كرتون 1: <code>#كرتون</code> (مثال: <code>بن 10 | م1 ح1 | 720p #كرتون</code>)",
+    "• كرتون 2: <code>#كرتون2</code> (مثال: <code>سبونج بوب | م1 ح1 | 1080p #كرتون2</code>)",
     "",
-    "3️⃣ <b>فيلم (أنمي أو كرتون):</b>",
-    "<pre>#فيلم\nالاسم: Spirited Away\nالجودة: 1080p\nاللغة: مترجم</pre>",
-    "<i>أو سطر واحد: <code>Spirited Away | 2001 | 1080p #فيلم</code></i>",
+    "5️⃣ <b>أنمي مدبلج عربي (تبويب أنمي مدبلج):</b>",
+    "<pre>#انمي_مدبلج\nالاسم: دراغون بول سوبر\nالموسم: 1\nالحلقة: 1</pre>",
     "",
-    "4️⃣ <b>عمل جديد غير موجود في المصادر (أرسل صورة البوستر أولاً):</b>",
-    "<pre>#عمل_جديد\nالقسم: كرتون\nالاسم: بن 10\nالقصة: نبذة مختصرة...\nالتصنيف: أكشن، مغامرة</pre>",
+    "6️⃣ <b>أفلام:</b>",
+    "<pre>#فيلم\nالاسم: Spirited Away\nالجودة: 1080p</pre>",
     "",
-    "5️⃣ <b>ترجمة خارجية (اختياري):</b>",
-    "أرسل ملف <code>.srt</code> أو <code>.vtt</code> كـ <b>رد (Reply)</b> على رسالة الحلقة في القناة.",
+    "7️⃣ <b>مانجا 📖 و مانهوا 📱 (طريقتان للرفع):</b>",
+    "• <b>الطريقة الأفضل:</b> ارفع ملف <code>.zip</code> أو <code>.cbz</code> يحتوي صفحات الفصل مع الوصف:",
+    "<pre>#مانهوا\nالاسم: Solo Leveling\nالفصل: 15</pre>",
+    "• <b>أو ألبوم صور:</b> أرسل صور صفحات الفصل معاً في ألبوم واحد واكتب الوصف نفسه مع <code>#مانجا</code> أو <code>#مانهوا</code>.",
+    "<i>سطر واحد: <code>One Piece | ف1125 #مانجا</code> أو <code>Solo Leveling | ف15.5 #مانهوا</code></i>",
     "",
-    "🛡️ <b>التدقيق التلقائي مفعّل:</b> لو نسيت أي خانة أو كتبت اسماً خاطئاً، سيوقف البوت النشر ويرسل لك تنبيهاً فورياً لتصحيحها قبل الظهور في التطبيق.",
+    "8️⃣ <b>بوستر عمل جديد:</b> أرسل صورة الغلاف مع <code>#عمل_جديد</code> + <code>القسم: ...</code> + <code>الاسم: ...</code>",
+    "9️⃣ <b>ترجمة خارجية:</b> أرسل ملف <code>.srt</code> أو <code>.vtt</code> كـ <b>رد (Reply)</b> على رسالة الحلقة.",
+    "",
+    "🛡️ <b>التدقيق ومنع التكرار مفعّلان تلقائياً</b> على جميع الأقسام.",
   ].join("\n");
+}
+
+/* ── Safe Pure-JS ZIP / CBZ Image Extractor (No Shell / Zip-Bomb Safe) ── */
+
+const ZIP_IMG_MIME = {
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+  ".avif": "image/avif",
+};
+
+const ZIP_MAX_IMAGES = 250;
+const ZIP_MAX_SINGLE_UNCOMPRESSED = 20 * 1024 * 1024;
+const ZIP_MAX_TOTAL_UNCOMPRESSED = 200 * 1024 * 1024;
+
+function naturalPageSort(a, b) {
+  return String(a.name || "").localeCompare(String(b.name || ""), "en", {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
+function getZipImageMime(name) {
+  const lower = String(name || "").toLowerCase();
+  const dot = lower.lastIndexOf(".");
+  if (dot < 0) return null;
+  return ZIP_IMG_MIME[lower.slice(dot)] || null;
+}
+
+export function listZipImageEntries(zipBuffer) {
+  if (!Buffer.isBuffer(zipBuffer) || zipBuffer.length < 22) {
+    throw new Error("invalid_zip_buffer");
+  }
+  const minOffset = Math.max(0, zipBuffer.length - 65557);
+  let eocdOffset = -1;
+  for (let pos = zipBuffer.length - 22; pos >= minOffset; pos--) {
+    if (zipBuffer.readUInt32LE(pos) === 0x06054b50) {
+      eocdOffset = pos;
+      break;
+    }
+  }
+  if (eocdOffset < 0) {
+    throw new Error("zip_eocd_not_found");
+  }
+
+  const totalEntries = zipBuffer.readUInt16LE(eocdOffset + 10);
+  const cdSize = zipBuffer.readUInt32LE(eocdOffset + 12);
+  const cdOffset = zipBuffer.readUInt32LE(eocdOffset + 16);
+  if (cdOffset + cdSize > zipBuffer.length) {
+    throw new Error("zip_corrupt_central_directory");
+  }
+
+  const entries = [];
+  let cursor = cdOffset;
+  let totalUncompressed = 0;
+
+  for (let i = 0; i < totalEntries && cursor + 46 <= cdOffset + cdSize; i++) {
+    if (zipBuffer.readUInt32LE(cursor) !== 0x02014b50) break;
+    const compressionMethod = zipBuffer.readUInt16LE(cursor + 10);
+    const compressedSize = zipBuffer.readUInt32LE(cursor + 20);
+    const uncompressedSize = zipBuffer.readUInt32LE(cursor + 24);
+    const nameLen = zipBuffer.readUInt16LE(cursor + 28);
+    const extraLen = zipBuffer.readUInt16LE(cursor + 30);
+    const commentLen = zipBuffer.readUInt16LE(cursor + 32);
+    const localHeaderOffset = zipBuffer.readUInt32LE(cursor + 42);
+    const nameStart = cursor + 46;
+    const rawName = zipBuffer.toString("utf8", nameStart, nameStart + nameLen);
+    cursor = nameStart + nameLen + extraLen + commentLen;
+
+    const normalizedPath = rawName.replace(/\\/g, "/");
+    if (
+      !normalizedPath ||
+      normalizedPath.endsWith("/") ||
+      normalizedPath.includes("..") ||
+      normalizedPath.startsWith("/") ||
+      normalizedPath.startsWith("__MACOSX/") ||
+      normalizedPath.split("/").some((seg) => seg.startsWith("."))
+    ) {
+      continue;
+    }
+
+    const mime = getZipImageMime(normalizedPath);
+    if (!mime) continue;
+    if (compressionMethod !== 0 && compressionMethod !== 8) continue;
+    if (uncompressedSize <= 0 || uncompressedSize > ZIP_MAX_SINGLE_UNCOMPRESSED) continue;
+    if (compressedSize <= 0 || compressedSize > ZIP_MAX_SINGLE_UNCOMPRESSED) continue;
+    totalUncompressed += uncompressedSize;
+    if (totalUncompressed > ZIP_MAX_TOTAL_UNCOMPRESSED) {
+      throw new Error("zip_uncompressed_limit_exceeded");
+    }
+
+    entries.push({
+      name: normalizedPath,
+      mime,
+      compressionMethod,
+      compressedSize,
+      uncompressedSize,
+      localHeaderOffset,
+    });
+    if (entries.length >= ZIP_MAX_IMAGES) break;
+  }
+
+  entries.sort(naturalPageSort);
+  return entries;
+}
+
+export function extractZipImageByIndex(zipBuffer, pageIndexZeroBased) {
+  const entries = listZipImageEntries(zipBuffer);
+  const entry = entries[pageIndexZeroBased];
+  if (!entry) return null;
+
+  const lh = entry.localHeaderOffset;
+  if (lh + 30 > zipBuffer.length || zipBuffer.readUInt32LE(lh) !== 0x04034b50) {
+    throw new Error("zip_invalid_local_header");
+  }
+  const nameLen = zipBuffer.readUInt16LE(lh + 26);
+  const extraLen = zipBuffer.readUInt16LE(lh + 28);
+  const dataStart = lh + 30 + nameLen + extraLen;
+  const dataEnd = dataStart + entry.compressedSize;
+  if (dataEnd > zipBuffer.length) {
+    throw new Error("zip_truncated_entry");
+  }
+
+  const rawSlice = zipBuffer.subarray(dataStart, dataEnd);
+  let data;
+  if (entry.compressionMethod === 0) {
+    data = Buffer.from(rawSlice);
+  } else if (entry.compressionMethod === 8) {
+    data = inflateRawSync(rawSlice, { maxOutputLength: ZIP_MAX_SINGLE_UNCOMPRESSED });
+  } else {
+    throw new Error("zip_unsupported_compression");
+  }
+
+  return {
+    name: entry.name,
+    mime: entry.mime,
+    data,
+  };
 }
 
 /* ── Private Bot Access Control (Owner + Channel Human Admins Only) ───── */

@@ -5,6 +5,12 @@ import crypto from "crypto";
 import vm from "node:vm";
 import { exec } from "node:child_process";
 import { logger } from "../lib/logger.js";
+import {
+  getTelegramMangaCatalogItems,
+  getTelegramMangaDetail,
+  getTelegramMangaChapterPages,
+  getTelegramMangaLatestUpdates,
+} from "../lib/telegramStorage.js";
 
 const router = Router();
 
@@ -1775,12 +1781,15 @@ router.get("/manga/catalog", async (req, res) => {
     const sort = req.query.sort ? String(req.query.sort).trim() : undefined;
     const genre = req.query.genre ? String(req.query.genre).trim() : undefined;
 
+    const tgItems = page === 1 ? await getTelegramMangaCatalogItems(source, search) : [];
     if (source === "manhwa") {
       const data = await fetchAzoraflyCatalog({ page, status, search });
-      return res.json({ ...data, media: data.items, results: data.items });
+      const merged = tgItems.length > 0 ? [...tgItems, ...(data.items || [])] : (data.items || []);
+      return res.json({ ...data, items: merged, media: merged, results: merged });
     }
     const data = await fetchMangaDarCatalog({ page, status, search, sort, genre });
-    return res.json(data);
+    const merged = tgItems.length > 0 ? [...tgItems, ...(data.items || [])] : (data.items || []);
+    return res.json({ ...data, items: merged, media: merged, results: merged });
   } catch (error: any) {
     logger.error({ err: error.message }, "[manga] Failed to fetch catalog");
     return res.status(500).json({ error: "Failed to fetch manga/manhwa catalog", detail: error.message });
@@ -1797,6 +1806,11 @@ async function handleMangaDetail(req: any, res: any) {
     const rawSource = String(req.query.source || "").toLowerCase();
     if (!rawId) {
       return res.status(400).json({ error: "Missing id query parameter" });
+    }
+    if (rawId.startsWith("tg-mg-") || rawId.startsWith("tg-mw-")) {
+      const tgDetail = await getTelegramMangaDetail(rawId);
+      if (!tgDetail) return res.status(404).json({ error: "Manga/Manhwa not found" });
+      return res.json(tgDetail);
     }
     if (rawId.startsWith("az--") || rawSource === "manhwa" || rawSource === "azorafly") {
       const detail = await fetchAzoraflyDetail(rawId);
@@ -1824,9 +1838,12 @@ router.get("/manga/chapters", async (req, res) => {
       return res.status(400).json({ error: "Missing id query parameter" });
     }
     const detail =
-      rawId.startsWith("az--") || rawSource === "manhwa"
-        ? await fetchAzoraflyDetail(rawId)
-        : await fetchMangaDarDetail(rawId);
+      rawId.startsWith("tg-mg-") || rawId.startsWith("tg-mw-")
+        ? await getTelegramMangaDetail(rawId)
+        : rawId.startsWith("az--") || rawSource === "manhwa"
+          ? await fetchAzoraflyDetail(rawId)
+          : await fetchMangaDarDetail(rawId);
+    if (!detail) return res.status(404).json({ error: "Not found", chapters: [] });
     return res.json({
       id: detail.id,
       slug: detail.slug,
@@ -1852,6 +1869,11 @@ async function handleMangaChapterPages(req: any, res: any) {
     const rawSource = String(req.query.source || "").toLowerCase();
     if (!rawId || !chapter) {
       return res.status(400).json({ error: "Missing id or chapter query parameter" });
+    }
+    if (rawId.startsWith("tg-mg-") || rawId.startsWith("tg-mw-")) {
+      const tgPages = await getTelegramMangaChapterPages(rawId, chapter);
+      if (!tgPages) return res.status(404).json({ error: "Chapter not found" });
+      return res.json(tgPages);
     }
     if (rawId.startsWith("az--") || rawSource === "manhwa" || rawSource === "azorafly") {
       const data = await fetchAzoraflyChapterPages(rawId, chapter);
@@ -2077,9 +2099,10 @@ async function buildMangaLatestFeed(): Promise<MangaLatestUpdateItem[]> {
 router.get("/manga/latest-updates", async (req, res) => {
   const force = req.query.refresh === "1";
   try {
+    const tgLatest = await getTelegramMangaLatestUpdates();
     if (!force && _mangaLatestCache && Date.now() < _mangaLatestCache.expiresAt) {
       res.setHeader("Cache-Control", "no-store");
-      res.json({ items: _mangaLatestCache.items });
+      res.json({ items: [...tgLatest, ..._mangaLatestCache.items] });
       return;
     }
     if (!_mangaLatestInFlight) {
@@ -2092,7 +2115,7 @@ router.get("/manga/latest-updates", async (req, res) => {
       _mangaLatestCache = { expiresAt: Date.now() + 5 * 60 * 1000, items };
     }
     res.setHeader("Cache-Control", "no-store");
-    res.json({ items });
+    res.json({ items: [...tgLatest, ...items] });
   } catch (err: any) {
     logger.warn({ err: err?.message || String(err) }, "[manga] latest-updates route failed");
     res.setHeader("Cache-Control", "no-store");
