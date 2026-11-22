@@ -16,7 +16,18 @@ import { saveNotification } from "./notifications.js";
 import { sendNewEpisodePushDetailed, sendSubscribedAlertPush } from "./push.js";
 import { detectNewEpisodesByWatermark, parseCartoonAlertKey } from "../lib/pushAlertsLogic.mjs";
 import { formatTemplatesMessage } from "../lib/telegramStorageLogic.mjs";
-import { handleStorageChannelPost, isStorageChannel, softDeleteTelegramEpisode } from "../lib/telegramStorage.js";
+import {
+  handleStorageChannelPost,
+  isStorageChannel,
+  softDeleteTelegramEpisode,
+  setPendingAdminPromptMsgId,
+  hasPendingAdminUpload,
+  applyAdminReplyToPending,
+  applyAdminCallbackToPending,
+  getLatestPendingSummary,
+  cancelLatestPendingUpload,
+  type ChannelIngestResult,
+} from "../lib/telegramStorage.js";
 
 const router = Router();
 
@@ -120,9 +131,9 @@ function buildEpisodeCaption(title: string, ep: number, anilistId = 0, meta?: Ep
   ].join("\n");
 }
 
-async function sendMessage(chatId: number | string, text: string, extra: Record<string, any> = {}) {
+async function sendMessageDetailed(chatId: number | string, text: string, extra: Record<string, any> = {}): Promise<{ ok: boolean; messageId?: number }> {
   const tok = await getToken();
-  if (!tok) return false;
+  if (!tok) return { ok: false };
   const payload = { chat_id: chatId, text, parse_mode: "HTML", ...extra };
   const response = await fetch(`https://api.telegram.org/bot${tok}/sendMessage`, {
     method: "POST",
@@ -130,13 +141,18 @@ async function sendMessage(chatId: number | string, text: string, extra: Record<
     body: JSON.stringify(payload),
     signal: AbortSignal.timeout(8_000),
   }).catch(() => { console.warn("[telegram] sendMessage request failed"); return null; });
-  if (!response) return false;
+  if (!response) return { ok: false };
   const body = await response.json().catch(() => ({})) as any;
   if (!response.ok || body?.ok !== true) {
     console.warn("[telegram] sendMessage API error:", body?.description || response.status);
-    return false;
+    return { ok: false };
   }
-  return true;
+  return { ok: true, messageId: typeof body?.result?.message_id === "number" ? body.result.message_id : undefined };
+}
+
+async function sendMessage(chatId: number | string, text: string, extra: Record<string, any> = {}) {
+  const res = await sendMessageDetailed(chatId, text, extra);
+  return res.ok;
 }
 
 interface TelegramPosterHint {
@@ -1631,8 +1647,51 @@ async function answerCallbackQuery(callbackQueryId: string, text: string) {
   }).catch(() => {});
 }
 
+async function dispatchIngestResultToAdmin(
+  targetChatId: number | string,
+  result: ChannelIngestResult,
+  isEdit = false
+) {
+  if (!result.handled || !result.summary) return;
+  let text = result.summary;
+  if (result.kind !== "needs_fix" && (result.remainingPendingCount || 0) > 0) {
+    text += `\n\n📌 لديك ${result.remainingPendingCount} حلقة أخرى بانتظار الإكمال — أرسل /معلق لعرضها.`;
+  }
+  const extra: Record<string, any> = result.replyMarkup
+    ? { reply_markup: result.replyMarkup }
+    : result.episodeId
+      ? {
+          reply_markup: {
+            inline_keyboard: [[{ text: "🗑️ حذف الحلقة من التطبيق", callback_data: `tg_del_ep:${result.episodeId}` }]],
+          },
+        }
+      : {};
+
+  const sent = await sendMessageDetailed(targetChatId, text, extra);
+  if (result.kind === "needs_fix" && result.pendingId && sent.messageId) {
+    await setPendingAdminPromptMsgId(result.pendingId, sent.messageId);
+  }
+
+  // Only trigger subscriber bell push once episode is COMPLETE and published
+  if (!isEdit && result.kind === "episode" && result.series && result.episode) {
+    const s = result.series;
+    const e = result.episode;
+    const isDubbed = s.section === "cartoon" || s.section === "dubbed";
+    if (!isDubbed && s.anilist_id) {
+      void sendSubscribedAlertPush({
+        mediaType: "anime",
+        mediaId: String(s.anilist_id),
+        title: s.title,
+        episode: e.episode_number,
+        poster: s.poster_url || undefined,
+        anilistId: s.anilist_id,
+      }).catch(() => {});
+    }
+  }
+}
+
 async function handleUpdate(update: any) {
-  // ── 1. Handle admin callback buttons (e.g. delete indexed storage episode) ──
+  // ── 1. Handle admin callback buttons (delete episode OR fix pending upload) ──
   if (update.callback_query) {
     const cq = update.callback_query;
     const data = String(cq.data || "");
@@ -1650,6 +1709,19 @@ async function handleUpdate(update: any) {
         return;
       }
     }
+    if (data.startsWith("tg_pend_") && allowedAdmins.has(fromId)) {
+      try {
+        const cbRes = await applyAdminCallbackToPending(data);
+        await answerCallbackQuery(cq.id, cbRes.callbackToast);
+        if (cbRes.result && cq.message?.chat?.id) {
+          await dispatchIngestResultToAdmin(cq.message.chat.id, cbRes.result, false);
+        }
+      } catch (err: any) {
+        console.error("[tg-storage] pending callback error:", err?.message || err);
+        await answerCallbackQuery(cq.id, "حدث خطأ أثناء المعالجة");
+      }
+      return;
+    }
     await answerCallbackQuery(cq.id, "تم");
     return;
   }
@@ -1663,30 +1735,7 @@ async function handleUpdate(update: any) {
       if (result.handled && result.summary) {
         const adminId = await getAdminChatId();
         if (adminId) {
-          const extra = result.episodeId
-            ? {
-                reply_markup: {
-                  inline_keyboard: [[{ text: "🗑️ حذف الحلقة من التطبيق", callback_data: `tg_del_ep:${result.episodeId}` }]],
-                },
-              }
-            : {};
-          await sendMessage(adminId, result.summary, extra);
-        }
-        // Trigger bell push alert for subscribers when a brand-new episode is uploaded
-        if (!isEdit && result.kind === "episode" && result.series && result.episode) {
-          const s = result.series;
-          const e = result.episode;
-          const isDubbed = s.section === "cartoon" || s.section === "dubbed";
-          if (!isDubbed && s.anilist_id) {
-            void sendSubscribedAlertPush({
-              mediaType: "anime",
-              mediaId: String(s.anilist_id),
-              title: s.title,
-              episode: e.episode_number,
-              poster: s.poster_url || undefined,
-              anilistId: s.anilist_id,
-            }).catch(() => {});
-          }
+          await dispatchIngestResultToAdmin(adminId, result, isEdit);
         }
       }
     } catch (err: any) {
@@ -1718,9 +1767,31 @@ async function handleUpdate(update: any) {
     return;
   }
 
+  const allowedAdminIds = new Set([String(adminId || ""), "5477879129", "7881366553"].filter(Boolean));
+  const isAdminSender = allowedAdminIds.has(String(chatId));
+
   /* /صيغ أو /templates — صيغ رفع الحلقات لقناة التخزين */
   if (text === "/templates" || text === "/صيغ" || text === "/الصيغ" || text.startsWith("/templates ")) {
     await sendMessage(chatId, formatTemplatesMessage());
+    return;
+  }
+
+  /* /معلق أو /pending — عرض الحلقات التي تنتظر إكمال البيانات */
+  if (isAdminSender && (text === "/pending" || text === "/معلق" || text === "/المعلق")) {
+    const res = await getLatestPendingSummary();
+    await dispatchIngestResultToAdmin(chatId, res, false);
+    return;
+  }
+
+  /* /الغاء أو /cancel — إلغاء آخر حلقة معلّقة */
+  if (isAdminSender && (text === "/cancel" || text === "/الغاء" || text === "/إلغاء")) {
+    const cancelled = await cancelLatestPendingUpload();
+    await sendMessage(
+      chatId,
+      cancelled.ok
+        ? "❌ تم إلغاء آخر حلقة معلّقة — لن يتم نشرها في التطبيق."
+        : "ℹ️ لا توجد أي حلقة معلّقة لإلغائها حالياً."
+    );
     return;
   }
 
@@ -1810,6 +1881,22 @@ async function handleUpdate(update: any) {
       );
     }
     return;
+  }
+
+  /* لو المرسل هو الأدمن ولديه حلقة معلّقة تنتظر إكمال الخانات الناقصة → طبّق التصحيح مباشرة */
+  if (isAdminSender && text && !text.startsWith("/")) {
+    const replyToId = typeof msg.reply_to_message?.message_id === "number" ? msg.reply_to_message.message_id : undefined;
+    if (await hasPendingAdminUpload(replyToId)) {
+      try {
+        const res = await applyAdminReplyToPending(text, replyToId);
+        if (res.handled) {
+          await dispatchIngestResultToAdmin(chatId, res, false);
+          return;
+        }
+      } catch (err: any) {
+        console.error("[tg-storage] admin pending reply error:", err?.message || err);
+      }
+    }
   }
 
   /* رسالة عادية → أرسلها للأدمن وردّ على المستخدم */
