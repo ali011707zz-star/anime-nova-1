@@ -758,7 +758,7 @@ export default function NovaFilmHomeScreen() {
                   })}
                   contentContainerStyle={{ paddingHorizontal: 14, gap: 11 }}
                   renderItem={({ item: { rec, title } }) => {
-                    const pct = Math.min(99, Math.max(4, Math.round(rec.progressRatio * 100)));
+                    const pct = Math.min(99, Math.max(4, Math.round(rec.progressPercent || (rec.durationSec > 0 ? (rec.positionSec / rec.durationSec) * 100 : 0))));
                     const imgSrc = getImageSource(title.backdropUrl || title.posterUrl);
                     return (
                       <Pressable
