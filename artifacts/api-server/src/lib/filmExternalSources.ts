@@ -1438,8 +1438,8 @@ async function extractDirectFromEmbedUrl(
           const m3u8 = cleanExtractedUrl(hlsMatch[1]);
           const proxyUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8)}&ref=${encodeURIComponent("https://ok.ru/")}`;
           return {
-            site: `${providerTag}-okru`,
-            label: `${hostLabel} · 1080p FHD مباشر`,
+            site: "nv-ok",
+            label: "1080p FHD",
             tier: "1080p FHD",
             url: m3u8,
             directUrl: proxyUrl,
@@ -1488,8 +1488,8 @@ async function extractDirectFromEmbedUrl(
                 : "720p HD";
             const proxyUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8)}&ref=${encodeURIComponent(hostOrigin)}`;
             return {
-              site: `${providerTag}-${hostLabel.toLowerCase().replace(/[^a-z0-9]/g, "")}`,
-              label: `${hostLabel} · ${tier} مباشر`,
+              site: "nv-direct",
+              label: tier,
               tier,
               url: m3u8,
               directUrl: proxyUrl,
@@ -1513,8 +1513,8 @@ async function extractDirectFromEmbedUrl(
       const verified = await verifyPlayableMp4(mp4);
       if (verified) {
         return {
-          site: `${providerTag}-${hostLabel.toLowerCase().replace(/[^a-z0-9]/g, "")}`,
-          label: `${hostLabel} · 1080p MP4 مباشر`,
+          site: "nv-direct",
+          label: "1080p FHD",
           tier: "1080p FHD",
           url: verified,
           directUrl: verified,
@@ -1587,7 +1587,7 @@ async function extractTopCinemaStreams(
         const iframeUrl = aHtml.match(/src=["']([^"']+)["']/i)?.[1]?.trim();
         if (!iframeUrl || !iframeUrl.startsWith("http")) return;
 
-        const direct = await extractDirectFromEmbedUrl(iframeUrl, `توب سينما (${s.name})`, `${origin}/`, "tc");
+        const direct = await extractDirectFromEmbedUrl(iframeUrl, "سيرفر مباشر", `${origin}/`, "tc");
         if (direct && !seenUrls.has(direct.url)) {
           seenUrls.add(direct.url);
           out.push(direct);
@@ -1698,7 +1698,7 @@ async function extractEgyDeadStreams(
 
       const direct = await extractDirectFromEmbedUrl(
         iframeUrl,
-        `إيجي ديد (${srv.name})`,
+        "سيرفر مباشر",
         `${EGYDEAD_BASE}/`,
         "ed",
       );

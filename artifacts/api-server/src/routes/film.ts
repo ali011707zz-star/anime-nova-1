@@ -458,7 +458,7 @@ async function resolveMovieBoxServer(
         const tier = tierFromResolution(st.resolution);
         outSources.push({
           site: si === 0 ? "moviebox" : "moviebox-alt",
-          label: `سيرفر ${idx + si + 1} (MovieBox) · ${st.resolution ? st.resolution + "p" : tier} مباشر`,
+          label: `سيرفر ${idx + si + 1}  · ${st.resolution ? st.resolution + "p" : tier} مباشر`,
           tier,
           url: st.url,
           directUrl: st.url,
@@ -656,7 +656,7 @@ async function resolveMoviztimeServer(
                 const altTier = tier === "1080p FHD" ? "720p HD" : "1080p FHD";
                 outSources.push({
                   site: "vidhls-alt",
-                  label: `سيرفر ${idx + 2} (vidhls CDN) · ${altTier}`,
+                  label: `سيرفر ${idx + 2}  · ${altTier}`,
                   tier: altTier,
                   url: childLine,
                   directUrl: childProxyUrl,
@@ -1400,7 +1400,7 @@ router.get("/sources-stream", async (req: Request, res: Response) => {
   };
 
   try {
-    sendEvent("status", { msg: "جاري سحب السيرفرات المباشرة من أرشيف نوفا فيلم..." });
+    sendEvent("status", { msg: "جاري تجهيز سيرفرات المشاهدة المباشرة..." });
     if (!tmdbId) {
       sendEvent("done", { ok: false, count: 0 });
       res.end();
@@ -1410,7 +1410,7 @@ router.get("/sources-stream", async (req: Request, res: Response) => {
     const titleParam = String(req.query.title || "").trim();
 
     if (isExternalFilmId(tmdbId)) {
-      sendEvent("status", { msg: "جاري استخراج السيرفرات المباشرة من توب سينما وإيجي ديد..." });
+      sendEvent("status", { msg: "جاري تجهيز سيرفرات المشاهدة المباشرة..." });
       let emittedExt = 0;
       await resolveExternalFilmStreams({
         id: tmdbId,
