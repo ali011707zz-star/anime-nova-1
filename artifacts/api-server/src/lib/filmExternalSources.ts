@@ -320,7 +320,7 @@ export function deduplicateFilmSummaries<T extends ExternalFilmSummary>(
   const out: T[] = [];
   for (const list of lists) {
     for (const item of list) {
-      if (!item || !item.titleAr) continue;
+      if (!item || !item.titleAr || !item.posterUrl || item.posterUrl.includes("images.jpg")) continue;
       const keyWithYear = canonicalTitleKey(item.titleEn || item.titleAr, item.tmdbType, item.year);
       const keyNoYear = canonicalTitleKey(item.titleEn || item.titleAr, item.tmdbType);
       const idKey = `id:${item.tmdbType}:${item.id}`;
@@ -481,7 +481,7 @@ const CATEGORY_MAP: Record<string, CategorySpec> = {
   animation_movies: {
     tmdbType: "movie",
     mediaType: "animation",
-    categoryLabel: "أفلام أنميشن",
+    categoryLabel: "أفلام أنمي",
     audioLabel: "مترجم",
     topcinemaPath: "/category/افلام-انمي-2/",
     egydeadPath: "/category/افلام-انمي/",
@@ -541,7 +541,7 @@ const CATEGORY_MAP: Record<string, CategorySpec> = {
   animation_series: {
     tmdbType: "tv",
     mediaType: "animation",
-    categoryLabel: "مسلسلات أنميشن",
+    categoryLabel: "مسلسلات أنمي",
     audioLabel: "مترجم",
     topcinemaPath: "/category/anime-series/",
     egydeadPath: "/category/مسلسلات-انمي/",
@@ -1446,32 +1446,28 @@ async function extractDirectFromEmbedUrl(
       }
     }
 
-    // 2. StreamTape norobotlink extraction
-    if (u.hostname.includes("streamtape")) {
-      const idMatch = combined.match(/getElementById\(['"](?:norobotlink|robotlink)['"]\)\.innerHTML\s*=\s*['"]([^'"]+)['"]\s*\+\s*\(['"]([^'"]+)['"]\)\.substring\((\d+)\)/);
-      if (idMatch) {
-        const part1 = idMatch[1];
-        const part2 = idMatch[2].slice(Number.parseInt(idMatch[3], 10));
-        const directMp4 = `https:${part1}${part2}&stream=1`;
-        return {
-          site: `${providerTag}-streamtape`,
-          label: `${hostLabel} · 720p HD مباشر`,
-          tier: "720p HD",
-          url: directMp4,
-          directUrl: directMp4,
-          isEmbed: false,
-          hardsubbed: true,
-        };
-      }
-    }
+    // Helper: strictly verify a direct MP4 URL is actually playable (200/206) without Referer
+    const verifyPlayableMp4 = async (candidateUrl: string): Promise<string | null> => {
+      try {
+        const probe = await fetch(candidateUrl, {
+          headers: { "User-Agent": "ExoPlayerLib/2.19.1", Range: "bytes=0-1" },
+          redirect: "follow",
+          signal: AbortSignal.timeout(4_500),
+        });
+        const ct = (probe.headers.get("content-type") || "").toLowerCase();
+        if ((probe.status === 200 || probe.status === 206) && !ct.includes("text/html")) {
+          return probe.url || candidateUrl;
+        }
+      } catch {}
+      return null;
+    };
 
-    // 3. HLS .m3u8 extraction (OkStream, FastVid/EarnVids, StreamWish, Filelions, VOE, Byse, LuluStream, etc.)
+    // 2. HLS .m3u8 extraction (OkStream, FastVid/EarnVids, StreamWish, Filelions, VOE, Byse, LuluStream, etc.)
     const m3u8Matches = combined.match(/https?:\/\/[^"'\s\\<>]+\.m3u8[^"'\s\\<>]*/gi) || [];
     const m3u8 = m3u8Matches
       .map(cleanExtractedUrl)
       .find((link) => !/\.png|\.jpg|logo|thumb|preview/i.test(link));
     if (m3u8) {
-      // Quick verify manifest is reachable (timeout 4s)
       try {
         const probe = await fetch(m3u8, {
           headers: { "User-Agent": BROWSER_UA, Referer: hostOrigin, Accept: "*/*" },
@@ -1503,21 +1499,24 @@ async function extractDirectFromEmbedUrl(
       }
     }
 
-    // 4. Direct MP4 extraction (UpDown, Uqload, SaveFiles, etc.)
+    // 3. Direct MP4 extraction (Uqload, SaveFiles, UpDown etc.) — ONLY emit if verified 200/206!
     const mp4Matches = combined.match(/https?:\/\/[^"'\s\\<>]+\.mp4[^"'\s\\<>]*/gi) || [];
     const mp4 = mp4Matches
       .map(cleanExtractedUrl)
       .find((link) => !/thumb|sample|intro|logo|ads\./i.test(link));
     if (mp4) {
-      return {
-        site: `${providerTag}-${hostLabel.toLowerCase().replace(/[^a-z0-9]/g, "")}`,
-        label: `${hostLabel} · 1080p MP4 مباشر`,
-        tier: "1080p FHD",
-        url: mp4,
-        directUrl: mp4,
-        isEmbed: false,
-        hardsubbed: true,
-      };
+      const verified = await verifyPlayableMp4(mp4);
+      if (verified) {
+        return {
+          site: `${providerTag}-${hostLabel.toLowerCase().replace(/[^a-z0-9]/g, "")}`,
+          label: `${hostLabel} · 1080p MP4 مباشر`,
+          tier: "1080p FHD",
+          url: verified,
+          directUrl: verified,
+          isEmbed: false,
+          hardsubbed: true,
+        };
+      }
     }
 
     return null;
@@ -1552,11 +1551,11 @@ async function extractTopCinemaStreams(
   const priorityScore = (name: string): number => {
     const l = name.toLowerCase();
     if (l.includes("okstream")) return 1;
-    if (l.includes("updown")) return 2;
-    if (l.includes("streamwish") || l.includes("filelions") || l.includes("earnvids")) return 3;
-    if (l.includes("streamtape")) return 4;
-    if (l.includes("byse") || l.includes("lulu") || l.includes("firestream")) return 5;
-    if (l.includes("vidtube") || l.includes("videotube")) return 6;
+    if (l.includes("streamwish") || l.includes("filelions") || l.includes("earnvids")) return 2;
+    if (l.includes("byse") || l.includes("lulu") || l.includes("firestream")) return 3;
+    if (l.includes("uqload") || l.includes("ok")) return 4;
+    if (l.includes("vidtube") || l.includes("videotube")) return 5;
+    if (l.includes("updown")) return 6;
     return 9;
   };
   const ordered = [...srvBtns].sort((a, b) => priorityScore(a.name) - priorityScore(b.name)).slice(0, 6);
