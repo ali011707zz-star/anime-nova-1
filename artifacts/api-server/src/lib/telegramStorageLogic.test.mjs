@@ -11,6 +11,8 @@ import {
   signTgStreamToken,
   verifyTgStreamToken,
   convertSrtToVtt,
+  extractAuthorizedAdminIds,
+  isPrivateSenderAuthorized,
 } from "./telegramStorageLogic.mjs";
 
 test("parses structured Arabic anime & cartoon captions cleanly", () => {
@@ -175,4 +177,32 @@ test("HTTP byte ranges, stream signing, and SRT->VTT stay rock-solid", () => {
   assert.equal(verifyTgStreamToken(99, exp, sig, "super-secret"), true);
   assert.equal(verifyTgStreamToken(100, exp, sig, "super-secret"), false);
   assert.ok(convertSrtToVtt("1\n00:00:01,500 --> 00:00:03,000\nمرحباً").startsWith("WEBVTT"));
+});
+
+test("strict bot access control allows only owner and non-bot channel admins in private chats", () => {
+  const allowed = extractAuthorizedAdminIds({
+    ownerChatId: "5477879129",
+    channelMemberLists: [
+      [
+        { status: "creator", user: { id: 5477879129, is_bot: false } },
+        { status: "administrator", user: { id: 7881366553, is_bot: false } },
+        { status: "administrator", user: { id: 7564669894, is_bot: false } },
+        { status: "administrator", user: { id: 9052295740, is_bot: true } },
+        { status: "member", user: { id: 111111111, is_bot: false } },
+      ],
+    ],
+  });
+  assert.deepEqual([...allowed].sort(), ["5477879129", "7564669894", "7881366553"]);
+  // Authorized private DM passes
+  assert.equal(isPrivateSenderAuthorized({ from: { id: 5477879129, is_bot: false }, chat: { id: 5477879129, type: "private" } }, allowed), true);
+  assert.equal(isPrivateSenderAuthorized({ from: { id: 7564669894, is_bot: false }, chat: { id: 7564669894, type: "private" } }, allowed), true);
+  // Stranger private DM blocked
+  assert.equal(isPrivateSenderAuthorized({ from: { id: 999888777, is_bot: false }, chat: { id: 999888777, type: "private" } }, allowed), false);
+  // Bot sender blocked
+  assert.equal(isPrivateSenderAuthorized({ from: { id: 9052295740, is_bot: true }, chat: { id: 9052295740, type: "private" } }, allowed), false);
+  // Group chat blocked even if admin sends it
+  assert.equal(isPrivateSenderAuthorized({ from: { id: 5477879129, is_bot: false }, chat: { id: -100123456, type: "supergroup" } }, allowed), false);
+  // Authorized callback_query (no top-level chat) passes, stranger blocked
+  assert.equal(isPrivateSenderAuthorized({ from: { id: 7881366553, is_bot: false } }, allowed), true);
+  assert.equal(isPrivateSenderAuthorized({ from: { id: 123456789, is_bot: false } }, allowed), false);
 });

@@ -15,7 +15,11 @@ import { getEnvOrDb } from "../lib/dbConfig.js";
 import { saveNotification } from "./notifications.js";
 import { sendNewEpisodePushDetailed, sendSubscribedAlertPush } from "./push.js";
 import { detectNewEpisodesByWatermark, parseCartoonAlertKey } from "../lib/pushAlertsLogic.mjs";
-import { formatTemplatesMessage } from "../lib/telegramStorageLogic.mjs";
+import {
+  formatTemplatesMessage,
+  extractAuthorizedAdminIds,
+  isPrivateSenderAuthorized,
+} from "../lib/telegramStorageLogic.mjs";
 import {
   handleStorageChannelPost,
   isStorageChannel,
@@ -1617,21 +1621,118 @@ export async function registerTelegramWebhook(domain: string) {
   }
 
   // تفعيل أوامر البوت
-  await fetch(`${API()}/setMyCommands`, {
+  // Clear default public commands so non-admins see an empty private bot menu
+  await fetch(`${API()}/deleteMyCommands`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      commands: [
-        { command: "start",   description: "ابدأ هنا" },
-        { command: "help",    description: "المساعدة" },
-        { command: "today",   description: "حلقات اليوم 📅" },
-        { command: "report",  description: "إبلاغ عن مشكلة" },
-        { command: "chatid",  description: "احصل على Chat ID الخاص بك" },
-        { command: "templates", description: "صيغ رفع الحلقات 📋" },
-      ]
-    }),
+    body: JSON.stringify({ scope: { type: "default" } }),
     signal: AbortSignal.timeout(8_000),
   }).catch(() => {});
+
+  // Register admin-only commands exclusively for authorized admin private chats
+  const { ids: adminIds } = await getAuthorizedTelegramAdmins(true);
+  const adminCommands = [
+    { command: "templates", description: "صيغ رفع الحلقات 📋" },
+    { command: "pending",   description: "الحلقات المعلّقة ⏳" },
+    { command: "cancel",    description: "إلغاء آخر حلقة معلّقة ❌" },
+    { command: "admins",    description: "قائمة الأدمن المصرّح لهم 🛡️" },
+    { command: "today",     description: "حلقات اليوم 📅" },
+  ];
+  for (const uid of adminIds) {
+    await fetch(`${API()}/setMyCommands`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        scope: { type: "chat", chat_id: Number(uid) },
+        commands: adminCommands,
+      }),
+      signal: AbortSignal.timeout(8_000),
+    }).catch(() => {});
+  }
+}
+
+/* ── Dynamic Channel Admin Allowlist (Owner + Human Channel Admins Only) ── */
+interface AuthorizedAdminMeta {
+  id: string;
+  username: string | null;
+  name: string;
+  role: string;
+}
+
+let _cachedAdmins: { ids: Set<string>; details: AuthorizedAdminMeta[]; ts: number } | null = null;
+const ADMIN_CACHE_TTL_MS = 5 * 60 * 1000;
+
+async function getAuthorizedTelegramAdmins(forceRefresh = false): Promise<{ ids: Set<string>; details: AuthorizedAdminMeta[] }> {
+  const now = Date.now();
+  if (!forceRefresh && _cachedAdmins && now - _cachedAdmins.ts < ADMIN_CACHE_TTL_MS) {
+    return { ids: _cachedAdmins.ids, details: _cachedAdmins.details };
+  }
+  const ownerChatId = String((await getAdminChatId()) || "").trim();
+  const tok = await getToken();
+  const channelIds = [
+    process.env.TELEGRAM_CHANNEL_ID,
+    process.env.TELEGRAM_STORAGE_CHANNEL_ID,
+    ...String(process.env.TELEGRAM_ADMIN_CHANNEL_IDS || "").split(/[\s,;]+/),
+  ]
+    .map((s) => String(s || "").trim())
+    .filter(Boolean);
+  const uniqueChannels = [...new Set(channelIds)];
+
+  const memberLists: any[][] = [];
+  const detailsMap = new Map<string, AuthorizedAdminMeta>();
+  let anyChannelFetchSucceeded = false;
+
+  if (tok && uniqueChannels.length > 0) {
+    await Promise.all(
+      uniqueChannels.map(async (cid) => {
+        try {
+          const r = await fetch(
+            `https://api.telegram.org/bot${tok}/getChatAdministrators?chat_id=${encodeURIComponent(cid)}`,
+            { signal: AbortSignal.timeout(6_000) }
+          );
+          const data = (await r.json()) as any;
+          if (data?.ok && Array.isArray(data.result)) {
+            anyChannelFetchSucceeded = true;
+            memberLists.push(data.result);
+            for (const m of data.result) {
+              if (!m?.user || m.user.is_bot === true) continue;
+              if (m.status !== "creator" && m.status !== "administrator") continue;
+              const id = String(m.user.id);
+              const fullName = [m.user.first_name, m.user.last_name].filter(Boolean).join(" ").trim() || "Admin";
+              const prev = detailsMap.get(id);
+              detailsMap.set(id, {
+                id,
+                username: m.user.username ? `@${m.user.username}` : (prev?.username || null),
+                name: fullName,
+                role: m.status === "creator" || prev?.role === "creator" ? "creator" : "administrator",
+              });
+            }
+          }
+        } catch {
+          /* ignore transient channel fetch error */
+        }
+      })
+    );
+  }
+
+  // If Telegram API failed transiently and we have a previous valid cache, keep it (never widen access)
+  if (!anyChannelFetchSucceeded && _cachedAdmins && _cachedAdmins.ids.size > 0) {
+    return { ids: _cachedAdmins.ids, details: _cachedAdmins.details };
+  }
+
+  const ids = extractAuthorizedAdminIds({
+    ownerChatId,
+    extraAdminIds: process.env.TELEGRAM_ADMIN_IDS || "",
+    channelMemberLists: memberLists,
+  });
+
+  if (ownerChatId && ids.has(ownerChatId) && !detailsMap.has(ownerChatId)) {
+    detailsMap.set(ownerChatId, { id: ownerChatId, username: null, name: "Owner", role: "creator" });
+  }
+
+  const details = [...detailsMap.values()];
+  _cachedAdmins = { ids, details, ts: now };
+  return { ids, details };
 }
 
 /* ── معالج رسائل البوت ────────────────────────────────────────────────── */
@@ -1691,14 +1792,15 @@ async function dispatchIngestResultToAdmin(
 }
 
 async function handleUpdate(update: any) {
-  // ── 1. Handle admin callback buttons (delete episode OR fix pending upload) ──
+  // ── 1. Handle admin callback buttons (strictly owner + channel human admins only) ──
   if (update.callback_query) {
     const cq = update.callback_query;
+    const { ids: allowedAdmins } = await getAuthorizedTelegramAdmins();
+    if (!isPrivateSenderAuthorized(cq, allowedAdmins)) {
+      return; // Silently ignore unauthorized users
+    }
     const data = String(cq.data || "");
-    const fromId = String(cq.from?.id || "");
-    const adminId = String((await getAdminChatId()) || "");
-    const allowedAdmins = new Set([adminId, "5477879129", "7881366553"].filter(Boolean));
-    if (data.startsWith("tg_del_ep:") && allowedAdmins.has(fromId)) {
+    if (data.startsWith("tg_del_ep:")) {
       const epId = Number.parseInt(data.slice("tg_del_ep:".length), 10);
       if (Number.isFinite(epId) && epId > 0) {
         const ok = await softDeleteTelegramEpisode(epId);
@@ -1709,7 +1811,7 @@ async function handleUpdate(update: any) {
         return;
       }
     }
-    if (data.startsWith("tg_pend_") && allowedAdmins.has(fromId)) {
+    if (data.startsWith("tg_pend_")) {
       try {
         const cbRes = await applyAdminCallbackToPending(data);
         await answerCallbackQuery(cq.id, cbRes.callbackToast);
@@ -1747,28 +1849,49 @@ async function handleUpdate(update: any) {
   const msg  = update.message;
   if (!msg) return;
 
+  // Strict security gate: bot ONLY responds to private messages from owner + channel human admins
+  const { ids: allowedAdminIds } = await getAuthorizedTelegramAdmins();
+  if (!isPrivateSenderAuthorized(msg, allowedAdminIds)) {
+    return; // Silently drop all non-admin DMs and all group/supergroup messages
+  }
+
   const chatId   = msg.chat.id;
   const text     = (msg.text || "").trim();
   const from     = msg.from;
-  const userName = from?.first_name || from?.username || "مستخدم";
+  const userName = from?.first_name || from?.username || "أدمن";
   const adminId  = await getAdminChatId();
+  const isAdminSender = true;
 
   /* /start */
   if (text === "/start" || text.startsWith("/start ")) {
     await sendMessage(chatId,
-      `👋 أهلاً <b>${userName}</b> في بوت <b>Anime NOVA</b>!\n\n` +
-      `🎌 منصة بث أنمي عربي تجمع أفضل المصادر\n\n` +
+      `🛡️ أهلاً <b>${escapeTelegramHtml(userName)}</b> — لوحة إدارة <b>Anime NOVA</b> (خاصة بالأدمن فقط)\n\n` +
       `📌 الأوامر المتاحة:\n` +
-      `• /report — أرسل لنا بلاغاً أو اقتراحاً\n` +
-      `• /help — المساعدة\n` +
-      `• /chatid — Chat ID الخاص بك\n\n` +
-      `💬 أو أرسل رسالتك مباشرة وسنردّ عليك!`
+      `• /صيغ أو /templates — صيغ رفع الحلقات\n` +
+      `• /معلق أو /pending — الحلقات التي تنتظر إكمال بياناتها\n` +
+      `• /الغاء أو /cancel — إلغاء آخر حلقة معلّقة\n` +
+      `• /الادمن أو /admins — عرض وتحديث قائمة الأدمن المصرّح لهم\n` +
+      `• /today — حلقات اليوم`
     );
     return;
   }
 
-  const allowedAdminIds = new Set([String(adminId || ""), "5477879129", "7881366553"].filter(Boolean));
-  const isAdminSender = allowedAdminIds.has(String(chatId));
+  /* /الادمن أو /admins — عرض وتحديث قائمة الأدمن المصرّح لهم */
+  if (text === "/admins" || text === "/الادمن" || text === "/الأدمن") {
+    const { details } = await getAuthorizedTelegramAdmins(true);
+    const listLines = details.map((a, idx) => {
+      const roleAr = a.role === "creator" ? "المالك" : "أدمن";
+      const handle = a.username ? ` (${escapeTelegramHtml(a.username)})` : "";
+      return `${idx + 1}. <b>${escapeTelegramHtml(a.name)}</b>${handle} · <code>${a.id}</code> — ${roleAr}`;
+    });
+    await sendMessage(
+      chatId,
+      `🛡️ <b>الأدمن المصرّح لهم باستخدام البوت (${details.length}):</b>\n\n` +
+      (listLines.length ? listLines.join("\n") : "—") +
+      `\n\n<i>يتم التحديث تلقائياً من قائمة أدمن قنواتك — أي شخص خارج هذه القائمة يتم تجاهله تماماً.</i>`
+    );
+    return;
+  }
 
   /* /صيغ أو /templates — صيغ رفع الحلقات لقناة التخزين */
   if (text === "/templates" || text === "/صيغ" || text === "/الصيغ" || text.startsWith("/templates ")) {
@@ -1899,31 +2022,14 @@ async function handleUpdate(update: any) {
     }
   }
 
-  /* رسالة عادية → أرسلها للأدمن وردّ على المستخدم */
-  try {
-    await sbInsert("reports", {
-      type:              "other",
-      message:           text || "[رسالة بدون نص]",
-      page:              "telegram",
-      user_display_name: `${userName} (TG:${chatId})`,
-    });
-  } catch { /* silent */ }
-
-  await sendMessage(chatId,
-    `💬 شكراً <b>${userName}</b>، وصلتنا رسالتك!\n\n` +
-    `سنردّ عليك قريباً. يمكنك أيضاً:\n` +
-    `• /report — للإبلاغ عن مشكلة تقنية\n` +
-    `• /help — للمساعدة`
+  /* رسالة عادية من أدمن ولا توجد حلقة معلّقة حالياً */
+  await sendMessage(
+    chatId,
+    `ℹ️ لا توجد حلقة معلّقة حالياً لإكمال بياناتها.\n\n` +
+    `• أرسل /صيغ لعرض صيغ رفع الحلقات\n` +
+    `• أرسل /معلق للتحقق من الحلقات المعلّقة\n` +
+    `• أرسل /الادمن لعرض المصرّح لهم`
   );
-
-  if (adminId && String(adminId) !== String(chatId)) {
-    await sendMessage(adminId,
-      `💬 <b>رسالة جديدة من تيليجرام</b>\n\n` +
-      `👤 <b>المرسل:</b> ${userName} (<code>${chatId}</code>)\n` +
-      `📝 <b>الرسالة:</b>\n${text}\n\n` +
-      `🕐 ${new Date().toLocaleString("ar-SA", { timeZone: "Asia/Riyadh" })}`
-    );
-  }
 }
 
 /* ── Webhook endpoint ─────────────────────────────────────────────────── */

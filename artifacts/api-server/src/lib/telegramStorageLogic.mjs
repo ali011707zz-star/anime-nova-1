@@ -1143,3 +1143,51 @@ export function formatTemplatesMessage() {
     "🛡️ <b>التدقيق التلقائي مفعّل:</b> لو نسيت أي خانة أو كتبت اسماً خاطئاً، سيوقف البوت النشر ويرسل لك تنبيهاً فورياً لتصحيحها قبل الظهور في التطبيق.",
   ].join("\n");
 }
+
+/* ── Private Bot Access Control (Owner + Channel Human Admins Only) ───── */
+
+export function extractAuthorizedAdminIds({
+  ownerChatId = "",
+  extraAdminIds = "",
+  channelMemberLists = [],
+} = {}) {
+  const allowed = new Set();
+  const addId = (raw) => {
+    const s = String(raw ?? "").trim();
+    if (/^\d{4,20}$/.test(s)) allowed.add(s);
+  };
+  addId(ownerChatId);
+  for (const part of String(extraAdminIds || "").split(/[\s,;]+/)) {
+    addId(part);
+  }
+  for (const members of channelMemberLists || []) {
+    if (!Array.isArray(members)) continue;
+    for (const m of members) {
+      const status = String(m?.status || "");
+      const user = m?.user;
+      if (!user || user.is_bot === true) continue;
+      if (status === "creator" || status === "administrator") {
+        addId(user.id);
+      }
+    }
+  }
+  return allowed;
+}
+
+export function isPrivateSenderAuthorized(msgOrCallback, allowedAdminIds) {
+  if (!msgOrCallback || !(allowedAdminIds instanceof Set) || allowedAdminIds.size === 0) {
+    return false;
+  }
+  const from = msgOrCallback.from;
+  if (!from || from.is_bot === true) return false;
+  const fromId = String(from.id ?? "").trim();
+  if (!fromId || !allowedAdminIds.has(fromId)) return false;
+
+  // For regular messages, require private chat matching the authorized user ID (blocks groups/channels)
+  if (msgOrCallback.chat) {
+    if (msgOrCallback.chat.type !== "private") return false;
+    const chatId = String(msgOrCallback.chat.id ?? "").trim();
+    if (chatId !== fromId || !allowedAdminIds.has(chatId)) return false;
+  }
+  return true;
+}

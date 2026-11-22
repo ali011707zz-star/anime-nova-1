@@ -115,3 +115,9 @@ export function verifyTgStreamToken(
 ): boolean;
 export function convertSrtToVtt(rawText: string): string;
 export function formatTemplatesMessage(): string;
+export function extractAuthorizedAdminIds(input?: {
+  ownerChatId?: string | number | null;
+  extraAdminIds?: string | null;
+  channelMemberLists?: Array<Array<{ status?: string; user?: { id?: number | string; is_bot?: boolean } }>>;
+}): Set<string>;
+export function isPrivateSenderAuthorized(msgOrCallback: any, allowedAdminIds: Set<string>): boolean;
