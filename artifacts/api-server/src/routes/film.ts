@@ -6,6 +6,16 @@ import { pipeline } from "node:stream/promises";
 import { Router, type Request, type Response } from "express";
 import { issueAnonToken, validateAnonToken, validateDownloadToken } from "../lib/security.js";
 import { pool } from "../lib/db.js";
+import {
+  deduplicateFilmSummaries,
+  fetchExternalCategory,
+  fetchExternalHomeCatalog,
+  getExternalFilmDetail,
+  getExternalSeasonEpisodes,
+  isExternalFilmId,
+  resolveExternalFilmStreams,
+  searchExternalCatalog,
+} from "../lib/filmExternalSources.js";
 
 const router = Router();
 
@@ -777,9 +787,15 @@ router.get("/config", (_req: Request, res: Response) => {
   });
 });
 
-// ── 2. Home batched real vault feeds ─────────────────────────────────────────
+// ── 2. Home batched real vault + live EgyDead & TopCinema feeds (deduped) ──
+let _filmHomeCache: { ts: number; payload: any } | null = null;
 router.get("/home", async (_req: Request, res: Response) => {
   try {
+    if (_filmHomeCache && Date.now() - _filmHomeCache.ts < 5 * 60_000) {
+      res.json(_filmHomeCache.payload);
+      return;
+    }
+
     const [
       heroRes,
       trendingRes,
@@ -788,6 +804,7 @@ router.get("/home", async (_req: Request, res: Response) => {
       seriesRes,
       topRatedRes,
       animRes,
+      extHome,
     ] = await Promise.all([
       pool.query(
         `SELECT * FROM film_vault_titles
@@ -835,96 +852,247 @@ router.get("/home", async (_req: Request, res: Response) => {
          ORDER BY COALESCE(year, 2020) DESC, COALESCE(imdb_rating, 6.8) DESC, id DESC
          LIMIT 16`,
       ),
+      fetchExternalHomeCatalog().catch(() => null),
     ]);
 
-    res.json({
-      hero: heroRes.rows.map(rowToFilmSummary).slice(0, 6),
-      trendingMovies: trendingRes.rows.map(rowToFilmSummary).slice(0, 14),
-      latestMovies: latestRes.rows.map(rowToFilmSummary).slice(0, 14),
-      asianMovies: asianRes.rows.map(rowToFilmSummary).slice(0, 14),
-      popularSeries: seriesRes.rows.map(rowToFilmSummary).slice(0, 14),
-      topRated: topRatedRes.rows.map(rowToFilmSummary).slice(0, 14),
-      animations: animRes.rows.map(rowToFilmSummary).slice(0, 14),
-    });
+    const vHero = heroRes.rows.map(rowToFilmSummary);
+    const vTrending = trendingRes.rows.map(rowToFilmSummary);
+    const vLatest = latestRes.rows.map(rowToFilmSummary);
+    const vAsian = asianRes.rows.map(rowToFilmSummary);
+    const vSeries = seriesRes.rows.map(rowToFilmSummary);
+    const vTopRated = topRatedRes.rows.map(rowToFilmSummary);
+    const vAnim = animRes.rows.map(rowToFilmSummary);
+
+    const ext = extHome || {
+      foreignMovies: [], arabicMovies: [], turkishMovies: [], indianMovies: [],
+      asianMovies: [], animationMovies: [], foreignSeries: [], arabicSeries: [],
+      turkishSeries: [], indianSeries: [], asianSeries: [], dubbedSeries: [], animationSeries: [],
+    };
+
+    const hero = deduplicateFilmSummaries([vHero, ext.foreignMovies.slice(0, 4), ext.foreignSeries.slice(0, 2)], undefined, 6);
+    const trendingMovies = deduplicateFilmSummaries([vTrending, ext.foreignMovies], undefined, 16);
+    const latestMovies = deduplicateFilmSummaries([ext.foreignMovies, vLatest], undefined, 16);
+    const foreignMovies = deduplicateFilmSummaries([ext.foreignMovies, vTrending, vLatest], undefined, 16);
+    const arabicMovies = deduplicateFilmSummaries([ext.arabicMovies], undefined, 16);
+    const turkishMovies = deduplicateFilmSummaries([ext.turkishMovies], undefined, 16);
+    const indianMovies = deduplicateFilmSummaries([ext.indianMovies], undefined, 16);
+    const asianMovies = deduplicateFilmSummaries([ext.asianMovies, vAsian], undefined, 16);
+    const popularSeries = deduplicateFilmSummaries([vSeries, ext.foreignSeries], undefined, 16);
+    const latestSeries = deduplicateFilmSummaries([ext.foreignSeries, vSeries], undefined, 16);
+    const arabicSeries = deduplicateFilmSummaries([ext.arabicSeries], undefined, 16);
+    const turkishSeries = deduplicateFilmSummaries([ext.turkishSeries], undefined, 16);
+    const asianSeries = deduplicateFilmSummaries([ext.asianSeries], undefined, 16);
+    const dubbedSeries = deduplicateFilmSummaries([ext.dubbedSeries], undefined, 16);
+    const indianSeries = deduplicateFilmSummaries([ext.indianSeries], undefined, 16);
+    const topRated = deduplicateFilmSummaries([vTopRated, ext.foreignMovies], undefined, 16);
+    const animationMovies = deduplicateFilmSummaries([ext.animationMovies, vAnim.filter((x) => x.tmdbType === "movie")], undefined, 16);
+    const animationSeries = deduplicateFilmSummaries([ext.animationSeries, vAnim.filter((x) => x.tmdbType === "tv")], undefined, 16);
+    const animations = deduplicateFilmSummaries([vAnim, ext.animationMovies, ext.animationSeries], undefined, 16);
+
+    const payload = {
+      hero,
+      trendingMovies,
+      latestMovies,
+      foreignMovies,
+      arabicMovies,
+      turkishMovies,
+      indianMovies,
+      asianMovies,
+      popularSeries,
+      latestSeries,
+      arabicSeries,
+      turkishSeries,
+      asianSeries,
+      dubbedSeries,
+      indianSeries,
+      topRated,
+      animations,
+      animationMovies,
+      animationSeries,
+    };
+
+    _filmHomeCache = { ts: Date.now(), payload };
+    res.json(payload);
   } catch (err: any) {
     res.status(500).json({ error: String(err?.message || err) });
   }
 });
 
-// ── 3. Browse / Discover with real DB filters ────────────────────────────────
+// ── 3. Browse / Discover (Vault + Live EgyDead & TopCinema, zero dupes) ────
 router.get("/browse", async (req: Request, res: Response) => {
   try {
-    const category = String(req.query.category || "all");
+    const category = String(req.query.category || "all").trim();
     const genre = String(req.query.genre || "الكل").trim();
-    const sortRaw = String(req.query.sort || "popular");
+    const sortRaw = String(req.query.sort || "popular").trim();
     const yearParam = Number.parseInt(String(req.query.year || ""), 10);
     const q = String(req.query.q || "").trim();
     const page = Math.max(1, Number.parseInt(String(req.query.page || "1"), 10) || 1);
     const limit = 24;
     const offset = (page - 1) * limit;
 
-    const conditions: string[] = ["is_archived = FALSE", "has_live_server = TRUE"];
-    const params: any[] = [];
+    // Map browse category to external catalog key(s)
+    const extCatKeys: Record<string, string[]> = {
+      all: ["foreign_movies", "foreign_series", "arabic_movies", "arabic_series"],
+      movie: ["foreign_movies"],
+      foreign_movies: ["foreign_movies"],
+      series: ["foreign_series"],
+      foreign_series: ["foreign_series"],
+      arabic_movies: ["arabic_movies"],
+      arabic_series: ["arabic_series"],
+      arabic: ["arabic_movies", "arabic_series"],
+      turkish_movies: ["turkish_movies"],
+      turkish_series: ["turkish_series"],
+      turkish: ["turkish_series", "turkish_movies"],
+      indian_movies: ["indian_movies"],
+      indian_series: ["indian_series"],
+      indian: ["indian_movies", "indian_series"],
+      asian_movies: ["asian_movies"],
+      asian_series: ["asian_series"],
+      asian: ["asian_movies", "asian_series"],
+      dubbed: ["dubbed_series"],
+      dubbed_series: ["dubbed_series"],
+      animation: ["animation_movies", "animation_series"],
+      animation_movies: ["animation_movies"],
+      animation_series: ["animation_series"],
+      top_rated: ["foreign_movies"],
+    };
 
-    if (category === "asian") {
-      conditions.push(`media_type = 'movie' AND category_label IN ('أفلام آسيوية', 'أفلام أوروبية')`);
-    } else if (category === "movie" || category === "series" || category === "animation") {
-      params.push(category);
-      conditions.push(`media_type = $${params.length}`);
-    }
+    const isPureExternalCat = [
+      "arabic_movies",
+      "arabic_series",
+      "arabic",
+      "turkish_movies",
+      "turkish_series",
+      "turkish",
+      "indian_movies",
+      "indian_series",
+      "indian",
+      "asian_series",
+      "dubbed",
+      "dubbed_series",
+      "animation_series",
+    ].includes(category);
 
-    if (Number.isFinite(yearParam) && yearParam >= 1950 && yearParam <= 2035) {
-      params.push(yearParam);
-      conditions.push(`year = $${params.length}`);
-    }
+    // 1) Vault query (skip when pure external category and no search query)
+    const vaultPromise = (async () => {
+      if (isPureExternalCat && !q) return { rows: [] as any[], total: 0 };
+      const conditions: string[] = ["is_archived = FALSE", "has_live_server = TRUE"];
+      const params: any[] = [];
 
-    if (genre && genre !== "الكل") {
-      if (genre === "أنميشن") {
-        conditions.push(`(media_type = 'animation' OR genres_json ILIKE '%أنميشن%')`);
-      } else {
-        params.push(`%${genre}%`);
-        conditions.push(`genres_json ILIKE $${params.length}`);
+      if (category === "asian" || category === "asian_movies") {
+        conditions.push(`media_type = 'movie' AND category_label IN ('أفلام آسيوية', 'أفلام أوروبية')`);
+      } else if (category === "movie" || category === "foreign_movies" || category === "top_rated") {
+        conditions.push(`media_type = 'movie'`);
+      } else if (category === "series" || category === "foreign_series") {
+        conditions.push(`media_type = 'series'`);
+      } else if (category === "animation" || category === "animation_movies") {
+        conditions.push(`media_type = 'animation'`);
       }
-    }
 
-    if (q) {
-      params.push(`%${q}%`);
-      conditions.push(`(title_ar ILIKE $${params.length} OR title_en ILIKE $${params.length} OR synopsis ILIKE $${params.length})`);
-    }
+      if (Number.isFinite(yearParam) && yearParam >= 1950 && yearParam <= 2035) {
+        params.push(yearParam);
+        conditions.push(`year = $${params.length}`);
+      }
 
-    const whereSql = `WHERE ${conditions.join(" AND ")}`;
+      if (genre && genre !== "الكل") {
+        if (genre === "أنميشن") {
+          conditions.push(`(media_type = 'animation' OR genres_json ILIKE '%أنميشن%')`);
+        } else {
+          params.push(`%${genre}%`);
+          conditions.push(`genres_json ILIKE $${params.length}`);
+        }
+      }
 
-    let orderSql =
-      "ORDER BY (COALESCE(year, 2020) * 1.5 + COALESCE(imdb_rating, 6.8) * 10 + LEAST(playable_episode_count, 20) * 0.3) DESC, id DESC";
-    if (sortRaw === "rating") {
-      orderSql = "ORDER BY COALESCE(imdb_rating, 0) DESC, COALESCE(year, 2020) DESC, id DESC";
-    } else if (sortRaw === "year") {
-      orderSql = "ORDER BY COALESCE(year, 2020) DESC, updated_at DESC, id DESC";
-    }
+      if (q) {
+        params.push(`%${q}%`);
+        conditions.push(`(title_ar ILIKE $${params.length} OR title_en ILIKE $${params.length} OR synopsis ILIKE $${params.length})`);
+      }
 
-    const [countRes, rowsRes] = await Promise.all([
-      pool.query(`SELECT COUNT(*)::int AS total FROM film_vault_titles ${whereSql}`, params),
-      pool.query(
-        `SELECT * FROM film_vault_titles ${whereSql} ${orderSql} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
-        [...params, limit, offset],
-      ),
-    ]);
+      const whereSql = `WHERE ${conditions.join(" AND ")}`;
+      let orderSql =
+        "ORDER BY (COALESCE(year, 2020) * 1.5 + COALESCE(imdb_rating, 6.8) * 10 + LEAST(playable_episode_count, 20) * 0.3) DESC, id DESC";
+      if (sortRaw === "rating" || category === "top_rated") {
+        orderSql = "ORDER BY COALESCE(imdb_rating, 0) DESC, COALESCE(year, 2020) DESC, id DESC";
+      } else if (sortRaw === "year") {
+        orderSql = "ORDER BY COALESCE(year, 2020) DESC, updated_at DESC, id DESC";
+      }
 
-    const totalResults = Number(countRes.rows[0]?.total || 0);
-    const totalPages = Math.max(1, Math.ceil(totalResults / limit));
+      const [countRes, rowsRes] = await Promise.all([
+        pool.query(`SELECT COUNT(*)::int AS total FROM film_vault_titles ${whereSql}`, params),
+        pool.query(
+          `SELECT * FROM film_vault_titles ${whereSql} ${orderSql} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+          [...params, limit, offset],
+        ),
+      ]);
+      return {
+        rows: rowsRes.rows.map(rowToFilmSummary),
+        total: Number(countRes.rows[0]?.total || 0),
+      };
+    })();
+
+    // 2) Live External query (EgyDead + TopCinema)
+    const extPromise = (async () => {
+      try {
+        if (q) {
+          if (page > 1) return [];
+          const typeFilter =
+            category === "movie" || category.endsWith("_movies")
+              ? "movie"
+              : category === "series" || category.endsWith("_series") || category === "dubbed"
+                ? "tv"
+                : "multi";
+          return await searchExternalCatalog(q, typeFilter, 32);
+        }
+        const keys = extCatKeys[category] || ["foreign_movies"];
+        const perKey = Math.max(12, Math.ceil(36 / keys.length));
+        const batches = await Promise.all(keys.map((k) => fetchExternalCategory(k, page, perKey)));
+        let list = deduplicateFilmSummaries(batches, undefined, 40);
+        if (Number.isFinite(yearParam) && yearParam >= 1950 && yearParam <= 2035) {
+          list = list.filter((x) => x.year === yearParam);
+        }
+        if (genre && genre !== "الكل") {
+          const gLow = genre.toLowerCase();
+          const filtered = list.filter(
+            (x) =>
+              x.genres.some((g) => g.toLowerCase().includes(gLow)) ||
+              x.categoryLabel.toLowerCase().includes(gLow),
+          );
+          if (filtered.length > 0) list = filtered;
+        }
+        return list;
+      } catch {
+        return [];
+      }
+    })();
+
+    const [vaultData, extItems] = await Promise.all([vaultPromise, extPromise]);
+
+    // Prefer fresh external items first for pure external / latest-year sorts, vault first for top-rated
+    const orderedLists =
+      isPureExternalCat || sortRaw === "year"
+        ? [extItems, vaultData.rows]
+        : [vaultData.rows, extItems];
+    const merged = deduplicateFilmSummaries(orderedLists, undefined, limit);
+
+    const hasExternalPages = !q && extItems.length >= 6;
+    const estTotalPages = Math.max(
+      1,
+      Math.ceil(vaultData.total / limit),
+      hasExternalPages ? Math.max(page + 1, 25) : page,
+    );
 
     res.json({
-      results: rowsRes.rows.map(rowToFilmSummary),
+      results: merged,
       page,
-      totalPages,
-      totalResults,
+      totalPages: estTotalPages,
+      totalResults: Math.max(merged.length, vaultData.total + (hasExternalPages ? 500 : extItems.length)),
     });
   } catch (err: any) {
     res.status(500).json({ error: String(err?.message || err) });
   }
 });
 
-// ── 4. Search ────────────────────────────────────────────────────────────────
+// ── 4. Search (Unified Vault + TopCinema + EgyDead, strictly deduped) ───────
 router.get("/search", async (req: Request, res: Response) => {
   try {
     const q = String(req.query.q || "").trim();
@@ -951,7 +1119,8 @@ router.get("/search", async (req: Request, res: Response) => {
     conditions.push(`(title_ar ILIKE $${params.length} OR title_en ILIKE $${params.length})`);
     const whereSql = `WHERE ${conditions.join(" AND ")}`;
 
-    const [countRes, rowsRes] = await Promise.all([
+    const typeFilter: "multi" | "movie" | "tv" = type === "movie" ? "movie" : type === "tv" ? "tv" : "multi";
+    const [countRes, rowsRes, extResults] = await Promise.all([
       pool.query(`SELECT COUNT(*)::int AS total FROM film_vault_titles ${whereSql}`, params),
       pool.query(
         `SELECT * FROM film_vault_titles ${whereSql}
@@ -959,11 +1128,13 @@ router.get("/search", async (req: Request, res: Response) => {
          LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
         [...params, limit, offset],
       ),
+      page === 1 ? searchExternalCatalog(q, typeFilter, 28).catch(() => []) : Promise.resolve([]),
     ]);
 
-    const total = Number(countRes.rows[0]?.total || 0);
+    const merged = deduplicateFilmSummaries([rowsRes.rows.map(rowToFilmSummary), extResults], undefined, limit);
+    const total = Math.max(merged.length, Number(countRes.rows[0]?.total || 0) + extResults.length);
     res.json({
-      results: rowsRes.rows.map(rowToFilmSummary),
+      results: merged,
       page,
       totalPages: Math.max(1, Math.ceil(total / limit)),
     });
@@ -978,6 +1149,27 @@ router.get("/detail", async (req: Request, res: Response) => {
     const rawId = Number.parseInt(String(req.query.id || "0"), 10);
     if (!rawId) {
       res.status(400).json({ error: "id is required" });
+      return;
+    }
+
+    if (isExternalFilmId(rawId)) {
+      const extDetail = await getExternalFilmDetail(rawId);
+      if (!extDetail) {
+        res.status(404).json({ error: "External title not found" });
+        return;
+      }
+      // Attach real similar recommendations from cached home/category catalog
+      try {
+        const homeCat = await fetchExternalHomeCatalog();
+        const poolList =
+          extDetail.tmdbType === "tv"
+            ? [...homeCat.foreignSeries, ...homeCat.arabicSeries, ...homeCat.turkishSeries]
+            : [...homeCat.foreignMovies, ...homeCat.arabicMovies, ...homeCat.asianMovies];
+        const recs = poolList.filter((x) => x.id !== rawId).slice(0, 10);
+        extDetail.relations = recs.slice(0, 6);
+        extDetail.recommendations = recs;
+      } catch {}
+      res.json(extDetail);
       return;
     }
 
@@ -1103,6 +1295,16 @@ router.get("/season", async (req: Request, res: Response) => {
       return;
     }
 
+    if (isExternalFilmId(id)) {
+      const extSeason = await getExternalSeasonEpisodes(id, season);
+      if (!extSeason) {
+        res.status(404).json({ error: "Season not found" });
+        return;
+      }
+      res.json(extSeason);
+      return;
+    }
+
     const [titleRes, epsRes] = await Promise.all([
       pool.query(`SELECT poster_url, backdrop_url, year FROM film_vault_titles WHERE id = $1 LIMIT 1`, [id]),
       pool.query(
@@ -1199,6 +1401,27 @@ router.get("/sources-stream", async (req: Request, res: Response) => {
       return;
     }
 
+    const titleParam = String(req.query.title || "").trim();
+
+    if (isExternalFilmId(tmdbId)) {
+      sendEvent("status", { msg: "جاري استخراج السيرفرات المباشرة من توب سينما وإيجي ديد..." });
+      let emittedExt = 0;
+      await resolveExternalFilmStreams({
+        id: tmdbId,
+        type,
+        season,
+        ep,
+        titleHint: titleParam,
+        onSource: (sObj) => {
+          sendEvent("source", sObj);
+          emittedExt++;
+        },
+      });
+      sendEvent("done", { ok: emittedExt > 0, count: emittedExt });
+      res.end();
+      return;
+    }
+
     const resolved = await resolveEpisodeFromVault(tmdbId, type, season, ep);
     let emitted = 0;
     for (const src of resolved.sources) {
@@ -1257,6 +1480,22 @@ router.get("/sources-stream", async (req: Request, res: Response) => {
         }
       } catch {}
     }
+    // Bonus live streams from TopCinema & EgyDead if vault yielded fewer than 2 servers
+    if (emitted < 2 && (resolved.titleEn || titleParam)) {
+      try {
+        await resolveExternalFilmStreams({
+          id: 0,
+          type,
+          season,
+          ep,
+          titleHint: resolved.titleEn || titleParam,
+          onSource: (sObj) => {
+            sendEvent("source", sObj);
+            emitted++;
+          },
+        });
+      } catch {}
+    }
     sendEvent("done", { ok: true, count: emitted });
     res.end();
   } catch (err: any) {
@@ -1275,6 +1514,22 @@ router.post("/source-resolve", async (req: Request, res: Response) => {
 
     if (!tmdbId) {
       res.status(400).json({ error: "tmdbId is required" });
+      return;
+    }
+
+    if (isExternalFilmId(tmdbId)) {
+      const extSources = await resolveExternalFilmStreams({
+        id: tmdbId,
+        type,
+        season,
+        ep,
+        titleHint: String(req.body?.title || "").trim(),
+      });
+      if (!extSources.length) {
+        res.status(404).json({ error: "No playable source found" });
+        return;
+      }
+      res.json(extSources[0]);
       return;
     }
 
