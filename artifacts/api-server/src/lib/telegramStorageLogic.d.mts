@@ -1,4 +1,4 @@
-export type TgMediaSection = "anime" | "cartoon" | "dubbed" | "film";
+export type TgMediaSection = "anime" | "cartoon" | "cartoon2" | "dubbed" | "film";
 export type TgAudioLang = "sub" | "dub_en" | "dub_ar";
 
 export interface ParsedChannelCaption {
@@ -26,6 +26,8 @@ export interface ParsedChannelCaption {
   invalidFields: Array<{ field: string; raw: string }>;
   unknownTags: string[];
   titleConfirmed?: boolean;
+  duplicateAction?: "replace" | "keep_both" | null;
+  externalPosterUrl?: string | null;
 }
 
 export interface ValidationIssue {
@@ -60,6 +62,7 @@ export interface ParsedByteRange {
 export function normalizeMediaTitle(value: string): string;
 export function slugifyMediaTitle(value: string): string;
 export function normalizeSection(raw: string): TgMediaSection | null;
+export function getSectionDisplayInfo(section: TgMediaSection, audioLang?: TgAudioLang): { labelAr: string; appLocationAr: string };
 export function parseAudioLangStrict(raw: string): TgAudioLang | null;
 export function normalizeAudioLang(raw: string, section?: TgMediaSection): TgAudioLang;
 export function parseQualityStrict(raw: string): string | null;

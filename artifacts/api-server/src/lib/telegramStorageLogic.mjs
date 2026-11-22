@@ -37,12 +37,15 @@ export function slugifyMediaTitle(value) {
 }
 
 export function normalizeSection(raw) {
-  const s = normalizeMediaTitle(String(raw || "").replace(/_/g, " "));
+  const s = normalizeMediaTitle(String(raw || "").replace(/_/g, " ").replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660)));
   if (!s) return null;
   if (/^(انمي|انمي مترجم|انمي انجليزي|انمي دبلجه انجليزي|انمي دبلجه انجليزيه|anime|anime sub|anime dub|anime en|sub|مترجم)$/.test(s)) {
     return "anime";
   }
-  if (/^(كرتون|كرتون مدبلج|cartoon|animation|انيميشن|انميشن)$/.test(s)) {
+  if (/^(كرتون\s*2|كرتون مدبلج\s*2|cartoon\s*2|sd2|ستارديما|ستارديما\s*2|stardima)$/.test(s)) {
+    return "cartoon2";
+  }
+  if (/^(كرتون|كرتون\s*1|كرتون مدبلج|كرتون مدبلج\s*1|cartoon|cartoon\s*1|animation|انيميشن|انميشن)$/.test(s)) {
     return "cartoon";
   }
   if (/^(مدبلج|dubbed|مدبلج عربي|انمي مدبلج|انمي عربي|دبلجه عربي|دبلجه عربيه)$/.test(s)) {
@@ -52,6 +55,43 @@ export function normalizeSection(raw) {
     return "film";
   }
   return null;
+}
+
+export function getSectionDisplayInfo(section, audioLang = "sub") {
+  if (section === "cartoon") {
+    return {
+      labelAr: "كرتون مدبلج 1",
+      appLocationAr: "تبويب المدبلج ← كرتون مدبلج (في المقدمة)",
+    };
+  }
+  if (section === "cartoon2") {
+    return {
+      labelAr: "كرتون مدبلج 2",
+      appLocationAr: "تبويب المدبلج ← كرتون مدبلج 2 (في المقدمة)",
+    };
+  }
+  if (section === "dubbed") {
+    return {
+      labelAr: "أنمي مدبلج",
+      appLocationAr: "تبويب المدبلج ← أنمي مدبلج (في المقدمة)",
+    };
+  }
+  if (section === "film") {
+    return {
+      labelAr: "أفلام",
+      appLocationAr: "قسم الأفلام (داخل صفحة الفيلم كسيرفر NOVA TG)",
+    };
+  }
+  if (audioLang === "dub_en") {
+    return {
+      labelAr: "أنمي دبلجة إنجليزية 🇬🇧",
+      appLocationAr: "قسم الأنمي ← صفحة الأنمي ← سيرفر NOVA TG (دبلجة إنجليزية)",
+    };
+  }
+  return {
+    labelAr: "أنمي مترجم 🇯🇵",
+    appLocationAr: "قسم الأنمي ← صفحة الأنمي ← سيرفر NOVA TG",
+  };
 }
 
 export function parseAudioLangStrict(raw) {
@@ -66,7 +106,7 @@ export function parseAudioLangStrict(raw) {
 export function normalizeAudioLang(raw, section = "anime") {
   const parsed = parseAudioLangStrict(raw);
   if (parsed) return parsed;
-  return section === "cartoon" || section === "dubbed" ? "dub_ar" : "sub";
+  return section === "cartoon" || section === "cartoon2" || section === "dubbed" ? "dub_ar" : "sub";
 }
 
 export function parseQualityStrict(raw) {
@@ -510,13 +550,13 @@ export function validateParsedCaption(parsed, kind = "episode") {
     issues.push({
       field: "section",
       code: "invalid",
-      message: `القسم غير صحيح ("${invalidMap.get("section")}") — استخدم: انمي أو كرتون أو مدبلج أو فيلم`,
+      message: `القسم غير صحيح ("${invalidMap.get("section")}") — استخدم: انمي أو كرتون أو كرتون2 أو انمي_مدبلج أو فيلم`,
     });
   } else if (emptySet.has("section")) {
     issues.push({
       field: "section",
       code: "empty",
-      message: "خانة القسم فارغة — اختر القسم من الأزرار أو اكتب #انمي / #كرتون / #مدبلج / #فيلم",
+      message: "خانة القسم فارغة — اختر القسم من الأزرار أو اكتب #انمي / #كرتون / #كرتون2 / #انمي_مدبلج / #فيلم",
     });
   } else if (!parsed.explicitSection) {
     const tagHint = parsed.unknownTags?.length
@@ -525,7 +565,7 @@ export function validateParsedCaption(parsed, kind = "episode") {
     issues.push({
       field: "section",
       code: "missing",
-      message: `لم تحدد القسم${tagHint} — اختر القسم من الأزرار أو أرسل #انمي / #كرتون / #مدبلج / #فيلم`,
+      message: `لم تحدد القسم${tagHint} — اختر القسم من الأزرار أو أرسل #انمي / #كرتون / #كرتون2 / #انمي_مدبلج / #فيلم`,
     });
   }
 
@@ -949,7 +989,7 @@ export function formatPendingReminderMessage(draft, issues = [], suggestions = [
   const lines = [header, "<i>لم يتم نشر أي شيء في التطبيق بعد حتى تُكمل البيانات الناقصة.</i>", ""];
 
   const captured = [];
-  if (draft.explicitSection) captured.push(`القسم: <b>${escapeHtml(draft.section)}</b>`);
+  if (draft.explicitSection) captured.push(`القسم: <b>${escapeHtml(getSectionDisplayInfo(draft.section, draft.audioLang).labelAr)}</b>`);
   if (draft.title) captured.push(`الاسم: <b>${escapeHtml(draft.title)}</b>`);
   if (!isCard && draft.section !== "film" && draft.episode != null) captured.push(`الحلقة: <b>${draft.episode}</b>`);
   if (draft.explicitSeason) captured.push(`الموسم: <b>${draft.season}</b>`);
@@ -975,7 +1015,9 @@ export function formatPendingReminderMessage(draft, issues = [], suggestions = [
   }
 
   lines.push("");
-  if (issues.length === 1 && issues[0].field === "episode") {
+  if (issues.length === 1 && issues[0].field === "duplicate") {
+    lines.push("💡 <b>اختر الإجراء من الأزرار بالأسفل:</b> استبدال/إضافة كنسخة إضافية أو إلغاء لمنع التكرار.");
+  } else if (issues.length === 1 && issues[0].field === "episode") {
     lines.push("💡 <b>للإكمال بسرعة:</b> أرسل <b>رقم الحلقة فقط</b> هنا الآن (مثال: <code>5</code>).");
   } else if (issues.length === 1 && issues[0].field === "title") {
     lines.push(
@@ -1020,14 +1062,27 @@ export function buildPendingInlineKeyboard(pendingId, issues = [], suggestions =
     rows.push([{ text: `✔️ اعتماد الاسم كما كتبته (${String(draft.title).slice(0, 22)})`, callback_data: `tg_pend_keep_title:${pendingId}` }]);
   }
 
+  const dupIssue = issues.find((i) => i.field === "duplicate");
+  if (dupIssue) {
+    if (dupIssue.code === "duplicate_tg") {
+      rows.push([{ text: "🔄 استبدال الحلقة القديمة بالجديدة", callback_data: `tg_pend_replace:${pendingId}` }]);
+      rows.push([{ text: "➕ إبقاء الاثنتين (نسخة/جودة إضافية)", callback_data: `tg_pend_keep_dup:${pendingId}` }]);
+    } else {
+      rows.push([{ text: "➕ نشرها رغم ذلك (سيرفر NOVA TG)", callback_data: `tg_pend_keep_dup:${pendingId}` }]);
+    }
+  }
+
   if (fields.has("section")) {
     rows.push([
       { text: "🎌 أنمي مترجم", callback_data: `tg_pend_sec:${pendingId}:anime:sub` },
       { text: "🇬🇧 أنمي إنجليزي", callback_data: `tg_pend_sec:${pendingId}:anime:dub_en` },
     ]);
     rows.push([
-      { text: "🎨 كرتون", callback_data: `tg_pend_sec:${pendingId}:cartoon:dub_ar` },
-      { text: "🎙️ مدبلج", callback_data: `tg_pend_sec:${pendingId}:dubbed:dub_ar` },
+      { text: "🎨 كرتون مدبلج 1", callback_data: `tg_pend_sec:${pendingId}:cartoon:dub_ar` },
+      { text: "📺 كرتون مدبلج 2", callback_data: `tg_pend_sec:${pendingId}:cartoon2:dub_ar` },
+    ]);
+    rows.push([
+      { text: "🎙️ أنمي مدبلج", callback_data: `tg_pend_sec:${pendingId}:dubbed:dub_ar` },
       { text: "🎬 فيلم", callback_data: `tg_pend_sec:${pendingId}:film:sub` },
     ]);
   }
@@ -1126,9 +1181,15 @@ export function formatTemplatesMessage() {
     "<i>أو سطر واحد: <code>One Piece | 1120 | 1080p #انمي</code></i>",
     "<i>وللدبلجة الإنجليزية: <code>Solo Leveling | S02E05 | 1080p #انمي_انجليزي</code></i>",
     "",
-    "2️⃣ <b>حلقة كرتون أو مدبلج عربي:</b>",
+    "2️⃣ <b>حلقة كرتون مدبلج 1 (تبويب كرتون مدبلج):</b>",
     "<pre>#كرتون\nالاسم: بن 10\nالموسم: 1\nالحلقة: 3\nالجودة: 720p</pre>",
-    "<i>أو سطر واحد: <code>بن 10 | م1 ح1 | 720p #كرتون</code> (أو #مدبلج).</i>",
+    "<i>أو سطر واحد: <code>بن 10 | م1 ح1 | 720p #كرتون</code></i>",
+    "",
+    "3️⃣ <b>حلقة كرتون مدبلج 2 (تبويب كرتون مدبلج 2):</b>",
+    "<pre>#كرتون2\nالاسم: سبونج بوب\nالموسم: 1\nالحلقة: 1\nالجودة: 1080p</pre>",
+    "",
+    "4️⃣ <b>حلقة أنمي مدبلج عربي (تبويب أنمي مدبلج):</b>",
+    "<pre>#انمي_مدبلج\nالاسم: دراغون بول سوبر\nالموسم: 1\nالحلقة: 1\nالجودة: 1080p</pre>",
     "",
     "3️⃣ <b>فيلم (أنمي أو كرتون):</b>",
     "<pre>#فيلم\nالاسم: Spirited Away\nالجودة: 1080p\nاللغة: مترجم</pre>",

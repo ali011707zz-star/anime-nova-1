@@ -13,6 +13,7 @@ import {
   convertSrtToVtt,
   extractAuthorizedAdminIds,
   isPrivateSenderAuthorized,
+  getSectionDisplayInfo,
 } from "./telegramStorageLogic.mjs";
 
 test("parses structured Arabic anime & cartoon captions cleanly", () => {
@@ -205,4 +206,27 @@ test("strict bot access control allows only owner and non-bot channel admins in 
   // Authorized callback_query (no top-level chat) passes, stranger blocked
   assert.equal(isPrivateSenderAuthorized({ from: { id: 7881366553, is_bot: false } }, allowed), true);
   assert.equal(isPrivateSenderAuthorized({ from: { id: 123456789, is_bot: false } }, allowed), false);
+});
+
+test("supports both cartoon sections (cartoon & cartoon2), dubbed anime, and duplicate action buttons", () => {
+  const c2 = parseChannelCaption("#كرتون2\nالاسم: النمر الوردي\nالموسم: 1\nالحلقة: 2\nالجودة: 1080p");
+  assert.equal(c2.section, "cartoon2");
+  assert.equal(c2.explicitSection, true);
+  assert.equal(c2.audioLang, "dub_ar");
+  assert.equal(validateParsedCaption(c2, "episode").isValid, true);
+  assert.ok(getSectionDisplayInfo("cartoon2", "dub_ar").appLocationAr.includes("كرتون مدبلج 2"));
+  assert.ok(getSectionDisplayInfo("cartoon", "dub_ar").appLocationAr.includes("كرتون مدبلج"));
+  assert.ok(getSectionDisplayInfo("dubbed", "dub_ar").appLocationAr.includes("أنمي مدبلج"));
+
+  const dupKb = buildPendingInlineKeyboard(77, [{ field: "duplicate", code: "duplicate_tg", message: "مكرر" }], [], c2);
+  const cbs = dupKb.inline_keyboard.flat().map((b) => b.callback_data);
+  assert.ok(cbs.includes("tg_pend_replace:77"));
+  assert.ok(cbs.includes("tg_pend_keep_dup:77"));
+  assert.ok(cbs.includes("tg_pend_cancel:77"));
+
+  const secKb = buildPendingInlineKeyboard(78, [{ field: "section", code: "missing", message: "missing" }], [], c2);
+  const secCbs = secKb.inline_keyboard.flat().map((b) => b.callback_data);
+  assert.ok(secCbs.includes("tg_pend_sec:78:cartoon:dub_ar"));
+  assert.ok(secCbs.includes("tg_pend_sec:78:cartoon2:dub_ar"));
+  assert.ok(secCbs.includes("tg_pend_sec:78:dubbed:dub_ar"));
 });

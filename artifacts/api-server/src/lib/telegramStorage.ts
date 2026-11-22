@@ -10,6 +10,7 @@ import {
   slugifyMediaTitle,
   qualityToRank,
   normalizeAudioLang,
+  getSectionDisplayInfo,
   signTgStreamToken,
   convertSrtToVtt,
   validateParsedCaption,
@@ -563,9 +564,165 @@ interface MediaPayload {
   captionRaw: string;
 }
 
+async function findExistingTelegramDuplicate(
+  draft: ParsedChannelCaption,
+  matchedCandidate: TitleSuggestion | null,
+  excludeChannelId?: string,
+  excludeMessageId?: number
+): Promise<{ id: number; quality: string; title: string; season: number; episode: number } | null> {
+  try {
+    const norm = normalizeMediaTitle(draft.title || draft.titleEn || "");
+    const anilistId = draft.anilistId || matchedCandidate?.anilistId || null;
+    const epNum = draft.section === "film" ? (draft.episode || 1) : Number(draft.episode || 0);
+    if (!epNum || (!norm && !anilistId)) return null;
+
+    const params: any[] = [draft.section, draft.season || 1, epNum, draft.audioLang];
+    const seriesMatchConds: string[] = [];
+    if (anilistId) {
+      params.push(anilistId);
+      seriesMatchConds.push(`s.anilist_id = ${params.length}`);
+    }
+    if (norm) {
+      params.push(norm);
+      seriesMatchConds.push(`s.normalized_title = ${params.length}`);
+    }
+    let excludeSql = "";
+    if (excludeChannelId && excludeMessageId) {
+      params.push(excludeChannelId, excludeMessageId);
+      excludeSql = `AND NOT (e.channel_id = ${params.length - 1} AND e.message_id = ${params.length})`;
+    }
+    const r = await pool.query<any>(
+      `SELECT e.id, e.quality, e.season_number, e.episode_number, s.title
+         FROM telegram_media_episodes e
+         JOIN telegram_media_series s ON s.id = e.series_id
+        WHERE s.section = $1
+          AND e.season_number = $2
+          AND e.episode_number = $3
+          AND e.audio_lang = $4
+          AND e.is_active = TRUE
+          AND (${seriesMatchConds.join(" OR ")})
+          ${excludeSql}
+        ORDER BY e.updated_at DESC
+        LIMIT 1`,
+      params
+    );
+    if (!r.rows[0]) return null;
+    return {
+      id: r.rows[0].id,
+      quality: r.rows[0].quality,
+      title: r.rows[0].title,
+      season: r.rows[0].season_number,
+      episode: r.rows[0].episode_number,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function checkExternalCatalogDuplicate(
+  draft: ParsedChannelCaption
+): Promise<{ existsInSource: boolean; sourceLabel?: string; matchedTitle?: string; posterUrl?: string | null }> {
+  const normTarget = normalizeMediaTitle(draft.title || "");
+  const epNum = Number(draft.episode || 0);
+  if (!normTarget || !epNum) return { existsInSource: false };
+  const localBase = `http://127.0.0.1:${process.env.PORT || 5000}`;
+
+  try {
+    if (draft.section === "cartoon") {
+      const r = await fetch(`${localBase}/api/dubbed/search?q=${encodeURIComponent(draft.title)}`, {
+        signal: AbortSignal.timeout(4500),
+      });
+      if (!r.ok) return { existsInSource: false };
+      const data = (await r.json()) as any;
+      const items = (Array.isArray(data?.results) ? data.results : []).filter(
+        (it: any) => it && it.source !== "tg" && !String(it.key || "").startsWith("tg-")
+      );
+      const exact = items.find((it: any) => normalizeMediaTitle(it.title) === normTarget);
+      if (!exact) return { existsInSource: false };
+      const posterUrl = exact.poster || exact.image || null;
+      const seasons = Array.isArray(exact.seasons) ? exact.seasons : [];
+      const targetSeason = seasons[Math.max(0, (draft.season || 1) - 1)] || seasons[0];
+      if (targetSeason?.arabicToonsId) {
+        const epR = await fetch(
+          `${localBase}/api/dubbed/episodes?series=${encodeURIComponent(targetSeason.arabicToonsId)}&order=asc`,
+          { signal: AbortSignal.timeout(5000) }
+        );
+        if (epR.ok) {
+          const epD = (await epR.json()) as any;
+          const eps = Array.isArray(epD?.episodes) ? epD.episodes : [];
+          if (eps.some((e: any) => Number(e?.number) === epNum)) {
+            return { existsInSource: true, sourceLabel: "كرتون مدبلج 1", matchedTitle: exact.title, posterUrl };
+          }
+        }
+      }
+      return { existsInSource: false, matchedTitle: exact.title, posterUrl };
+    }
+
+    if (draft.section === "cartoon2") {
+      const r = await fetch(`${localBase}/api/dubbed/sd2/catalog?q=${encodeURIComponent(draft.title)}&limit=12`, {
+        signal: AbortSignal.timeout(4500),
+      });
+      if (!r.ok) return { existsInSource: false };
+      const data = (await r.json()) as any;
+      const items = (Array.isArray(data?.results) ? data.results : []).filter(
+        (it: any) => it && !String(it.slug || "").startsWith("tg-sd2-")
+      );
+      const exact = items.find((it: any) => normalizeMediaTitle(it.title) === normTarget);
+      if (!exact) return { existsInSource: false };
+      const posterUrl = exact.image || null;
+      if (exact.slug) {
+        const epR = await fetch(
+          `${localBase}/api/dubbed/sd2/episodes?slug=${encodeURIComponent(exact.slug)}&mediaType=${encodeURIComponent(exact.mediaType || "series")}`,
+          { signal: AbortSignal.timeout(5000) }
+        );
+        if (epR.ok) {
+          const epD = (await epR.json()) as any;
+          const eps = Array.isArray(epD?.episodes) ? epD.episodes : [];
+          if (eps.some((e: any) => Number(e?.number) === epNum && (Number(e?.season || 1) === (draft.season || 1)))) {
+            return { existsInSource: true, sourceLabel: "كرتون مدبلج 2", matchedTitle: exact.title, posterUrl };
+          }
+        }
+      }
+      return { existsInSource: false, matchedTitle: exact.title, posterUrl };
+    }
+
+    if (draft.section === "dubbed") {
+      const r = await fetch(`${localBase}/api/dubbed/animezid/catalog?q=${encodeURIComponent(draft.title)}&page=1`, {
+        signal: AbortSignal.timeout(4500),
+      });
+      if (!r.ok) return { existsInSource: false };
+      const data = (await r.json()) as any;
+      const items = (Array.isArray(data?.results) ? data.results : []).filter(
+        (it: any) => it && !String(it.slug || "").startsWith("tg-az-")
+      );
+      const exact = items.find((it: any) => normalizeMediaTitle(it.title) === normTarget);
+      if (!exact) return { existsInSource: false };
+      const posterUrl = exact.poster || null;
+      if (exact.slug) {
+        const epR = await fetch(
+          `${localBase}/api/dubbed/animezid/detail?slug=${encodeURIComponent(exact.slug)}&season=${draft.season || 1}`,
+          { signal: AbortSignal.timeout(5000) }
+        );
+        if (epR.ok) {
+          const epD = (await epR.json()) as any;
+          const eps = Array.isArray(epD?.episodes) ? epD.episodes : [];
+          if (eps.some((e: any) => Number(e?.number) === epNum)) {
+            return { existsInSource: true, sourceLabel: "أنمي مدبلج", matchedTitle: exact.title, posterUrl };
+          }
+        }
+      }
+      return { existsInSource: false, matchedTitle: exact.title, posterUrl };
+    }
+  } catch {
+    /* fail-open on external check timeout */
+  }
+  return { existsInSource: false };
+}
+
 async function validateAndEvaluateDraft(
   draft: ParsedChannelCaption,
-  kind: "episode" | "series_card"
+  kind: "episode" | "series_card",
+  ctx?: { channelId?: string; messageId?: number }
 ): Promise<{
   isValid: boolean;
   issues: ValidationIssue[];
@@ -635,6 +792,33 @@ async function validateAndEvaluateDraft(
     }
   }
 
+  // Duplicate episode check (only once all required fields & title are valid, unless admin already chose replace/keep_both)
+  if (issues.length === 0 && kind === "episode" && !draft.duplicateAction) {
+    const tgDup = await findExistingTelegramDuplicate(draft, matchedCandidate, ctx?.channelId, ctx?.messageId);
+    if (tgDup) {
+      issues.push({
+        field: "duplicate",
+        code: "duplicate_tg",
+        message: `هذه الحلقة مرفوعة مسبقاً في قناتك! (${tgDup.title} · الموسم ${tgDup.season} · الحلقة ${tgDup.episode} · ${tgDup.quality})`,
+      });
+    } else if (draft.section === "cartoon" || draft.section === "cartoon2" || draft.section === "dubbed") {
+      const ext = await checkExternalCatalogDuplicate(draft);
+      if (ext.posterUrl && !draft.externalPosterUrl) {
+        draft.externalPosterUrl = ext.posterUrl;
+      }
+      if (ext.existsInSource) {
+        issues.push({
+          field: "duplicate",
+          code: "duplicate_source",
+          message: `العمل "${ext.matchedTitle || draft.title}" موجود مسبقاً في قسم «${ext.sourceLabel}»، والحلقة رقم ${draft.episode} موجودة بالفعل هناك!`,
+        });
+      }
+    }
+  } else if (issues.length === 0 && kind === "episode" && !draft.externalPosterUrl && (draft.section === "cartoon" || draft.section === "cartoon2" || draft.section === "dubbed")) {
+    const ext = await checkExternalCatalogDuplicate(draft);
+    if (ext.posterUrl) draft.externalPosterUrl = ext.posterUrl;
+  }
+
   return {
     isValid: issues.length === 0,
     issues,
@@ -700,7 +884,7 @@ async function publishValidatedDraft(
 ): Promise<ChannelIngestResult> {
   const effectiveAnilistId = draft.anilistId || matchedCandidate?.anilistId || null;
   const effectiveTitleEn = draft.titleEn || matchedCandidate?.titleEn || matchedCandidate?.titleRomaji || null;
-  const effectivePosterUrl = matchedCandidate?.posterUrl || null;
+  const effectivePosterUrl = matchedCandidate?.posterUrl || draft.externalPosterUrl || null;
   const effectiveSynopsis = draft.synopsis || matchedCandidate?.synopsis || null;
   const effectiveGenres = (draft.genres && draft.genres.length > 0) ? draft.genres : (matchedCandidate?.genres || []);
   const effectiveYear = draft.year || matchedCandidate?.year || null;
@@ -745,6 +929,20 @@ async function publishValidatedDraft(
     year: effectiveYear,
     skipAniListLookup: Boolean(draft.titleConfirmed && !effectiveAnilistId),
   });
+
+  if (draft.duplicateAction === "replace") {
+    await pool.query(
+      `UPDATE telegram_media_episodes
+          SET is_active = FALSE, updated_at = NOW()
+        WHERE series_id = $1
+          AND season_number = $2
+          AND episode_number = $3
+          AND audio_lang = $4
+          AND is_active = TRUE
+          AND NOT (channel_id = $5 AND message_id = $6)`,
+      [series.id, draft.season, epNum, draft.audioLang, media.channelId, media.messageId]
+    ).catch(() => {});
+  }
 
   const epRes = await pool.query<TgEpisodeRow>(
     `INSERT INTO telegram_media_episodes
@@ -807,12 +1005,17 @@ async function publishValidatedDraft(
     series,
     episode: epRow,
     warning: warning || undefined,
-    summary:
-      `✅ تم ${isEdit ? "تحديث" : "نشر"} الحلقة بنجاح!\n` +
-      `🎬 <b>${series.title}</b>${series.anilist_id ? ` (AniList #${series.anilist_id})` : ""}\n` +
-      `📂 القسم: <b>${series.section}</b> · الموسم ${epRow.season_number} · الحلقة <b>${epRow.episode_number}</b>\n` +
-      `🎞️ الجودة: <b>${epRow.quality}</b> · الصوت: <b>${langAr}</b> · الحجم: ${sizeMb}` +
-      warning,
+    summary: (() => {
+      const secInfo = getSectionDisplayInfo(series.section, draft.audioLang);
+      return (
+        `✅ تم ${isEdit ? "تحديث" : "نشر"} الحلقة بنجاح!\n` +
+        `🎬 <b>${series.title}</b>${series.anilist_id ? ` (AniList #${series.anilist_id})` : ""}\n` +
+        `📂 القسم: <b>${secInfo.labelAr}</b> · الموسم ${epRow.season_number} · الحلقة <b>${epRow.episode_number}</b>\n` +
+        `🎞️ الجودة: <b>${epRow.quality}</b> · الصوت: <b>${langAr}</b> · الحجم: ${sizeMb}\n` +
+        `📍 <b>مكان الظهور في التطبيق:</b> ${secInfo.appLocationAr}` +
+        warning
+      );
+    })(),
   };
 }
 
@@ -925,7 +1128,7 @@ export async function handleStorageChannelPost(post: any, isEdit = false): Promi
     captionRaw: caption,
   };
 
-  const check = await validateAndEvaluateDraft(parsed, "episode");
+  const check = await validateAndEvaluateDraft(parsed, "episode", { channelId, messageId });
   if (!check.isValid) {
     const pend = await upsertPendingUpload(media, parsed, check.issues, check.suggestions);
     return {
@@ -996,7 +1199,7 @@ export async function hasPendingAdminUpload(replyToMsgId?: number): Promise<bool
 
 async function finalizeOrRePromptPending(row: TgPendingRow, nextDraft: ParsedChannelCaption): Promise<ChannelIngestResult> {
   const media = pendingRowToMedia(row);
-  const check = await validateAndEvaluateDraft(nextDraft, row.kind);
+  const check = await validateAndEvaluateDraft(nextDraft, row.kind, { channelId: row.channel_id, messageId: row.message_id });
   if (!check.isValid) {
     const updated = await pool.query<TgPendingRow>(
       `UPDATE telegram_media_pending
@@ -1124,10 +1327,22 @@ export async function applyAdminCallbackToPending(
     return { callbackToast: "✔️ تم اعتماد الاسم كما كتبته", result: res };
   }
 
+  if (action === "tg_pend_replace") {
+    draft.duplicateAction = "replace";
+    const res = await finalizeOrRePromptPending(row, draft);
+    return { callbackToast: "🔄 جاري استبدال الحلقة القديمة...", result: res };
+  }
+
+  if (action === "tg_pend_keep_dup") {
+    draft.duplicateAction = "keep_both";
+    const res = await finalizeOrRePromptPending(row, draft);
+    return { callbackToast: "➕ جاري نشرها كنسخة إضافية...", result: res };
+  }
+
   if (action === "tg_pend_sec") {
     const sec = parts[2] as TgMediaSection;
     const lang = (parts[3] || "") as TgAudioLang;
-    if (!["anime", "cartoon", "dubbed", "film"].includes(sec)) return { callbackToast: "قسم غير صالح" };
+    if (!["anime", "cartoon", "cartoon2", "dubbed", "film"].includes(sec)) return { callbackToast: "قسم غير صالح" };
     draft.section = sec;
     draft.explicitSection = true;
     draft.unknownTags = [];
@@ -1296,7 +1511,7 @@ export async function getTelegramDubbedCatalogItems(searchQuery?: string): Promi
               COALESCE(MAX(e.season_number), 1)::text AS max_season
          FROM telegram_media_series s
          LEFT JOIN telegram_media_episodes e ON e.series_id = s.id AND e.is_active = TRUE
-        WHERE s.section IN ('cartoon', 'dubbed')
+        WHERE s.section = 'cartoon'
         GROUP BY s.id
        HAVING COUNT(e.id) > 0
         ORDER BY MAX(e.updated_at) DESC NULLS LAST, s.updated_at DESC
@@ -1369,6 +1584,194 @@ export async function getTelegramDubbedEpisodes(seriesRef: string): Promise<any[
     thumbnail: ep.series_poster_file_id ? `${getPublicApiBase()}/api/tg-media/poster/${ep.series_id}` : (ep.series_poster_url || ""),
     season: ep.season_number,
   }));
+}
+
+
+/* ── Cartoon 2 (SD2) & Dubbed Anime (AnimeZid) Seamless Integration ───── */
+
+export async function getTelegramSd2CatalogItems(searchQuery?: string): Promise<any[]> {
+  try {
+    await ensureTelegramStorageSchema();
+    const r = await pool.query<TgSeriesRow & { ep_count: string }>(
+      `SELECT s.*, COUNT(e.id)::text AS ep_count
+         FROM telegram_media_series s
+         LEFT JOIN telegram_media_episodes e ON e.series_id = s.id AND e.is_active = TRUE
+        WHERE s.section = 'cartoon2'
+        GROUP BY s.id
+       HAVING COUNT(e.id) > 0
+        ORDER BY MAX(e.updated_at) DESC NULLS LAST, s.updated_at DESC
+        LIMIT 100`
+    );
+    const needle = searchQuery ? normalizeMediaTitle(searchQuery) : "";
+    const tokens = needle ? needle.split(" ").filter(Boolean) : [];
+    return r.rows
+      .filter((s) => {
+        if (tokens.length === 0) return true;
+        const hay = normalizeMediaTitle([s.title, s.title_ar, s.title_en, s.slug].filter(Boolean).join(" "));
+        return tokens.every((t) => hay.includes(t));
+      })
+      .map((s) => ({
+        id: 900000 + s.id,
+        slug: `tg-sd2-${s.id}`,
+        provider: "sd2",
+        providerLabel: "مدبلج عربي",
+        title: s.title,
+        image: buildPosterUrl(s) || `${getPublicApiBase()}/favicon.ico`,
+        mediaType: "series",
+        isMovie: false,
+        year: s.year ? String(s.year) : "",
+        languageLabel: "مدبلج عربي",
+        isDubbed: true,
+        isSubbed: false,
+        category: "مسلسلات",
+        source: "tg",
+      }));
+  } catch {
+    return [];
+  }
+}
+
+export async function getTelegramSd2Detail(slugParam: string): Promise<any | null> {
+  const m = String(slugParam || "").match(/^tg-sd2-(d+)$/i);
+  if (!m) return null;
+  await ensureTelegramStorageSchema();
+  const seriesId = Number.parseInt(m[1], 10);
+  const sRes = await pool.query<TgSeriesRow>(`SELECT * FROM telegram_media_series WHERE id = $1 LIMIT 1`, [seriesId]);
+  const s = sRes.rows[0];
+  if (!s) return null;
+  const eRes = await pool.query<TgEpisodeRow>(
+    `SELECT * FROM telegram_media_episodes WHERE series_id = $1 AND is_active = TRUE ORDER BY season_number ASC, episode_number ASC, updated_at DESC`,
+    [seriesId]
+  );
+  const poster = buildPosterUrl(s) || `${getPublicApiBase()}/favicon.ico`;
+  const bySeason = new Map<number, any[]>();
+  for (const ep of eRes.rows) {
+    const sn = ep.season_number || 1;
+    if (!bySeason.has(sn)) bySeason.set(sn, []);
+    bySeason.get(sn)!.push({
+      number: ep.episode_number,
+      epId: `tg-${ep.id}`,
+      url: `tg://episode/${ep.id}`,
+      watchUrl: `tg://episode/${ep.id}`,
+      title: `الحلقة ${ep.episode_number}`,
+      thumbnail: poster,
+      season: sn,
+      seasonLabel: `الموسم ${sn}`,
+    });
+  }
+  const seasons = [...bySeason.entries()].map(([sn, episodes]) => ({
+    label: `الموسم ${sn}`,
+    seasonNumber: sn,
+    episodes,
+  }));
+  const flatEpisodes = seasons.flatMap((x) => x.episodes);
+  return {
+    slug: `tg-sd2-${s.id}`,
+    title: s.title,
+    mediaType: "series",
+    image: poster,
+    year: s.year ? String(s.year) : "",
+    languageLabel: "مدبلج عربي",
+    seasons,
+    episodes: flatEpisodes,
+  };
+}
+
+export async function getTelegramAnimeZidCatalogItems(searchQuery?: string): Promise<any[]> {
+  try {
+    await ensureTelegramStorageSchema();
+    const r = await pool.query<TgSeriesRow & { ep_count: string; max_season: string }>(
+      `SELECT s.*,
+              COUNT(e.id)::text AS ep_count,
+              COALESCE(MAX(e.season_number), 1)::text AS max_season
+         FROM telegram_media_series s
+         LEFT JOIN telegram_media_episodes e ON e.series_id = s.id AND e.is_active = TRUE
+        WHERE s.section = 'dubbed'
+        GROUP BY s.id
+       HAVING COUNT(e.id) > 0
+        ORDER BY MAX(e.updated_at) DESC NULLS LAST, s.updated_at DESC
+        LIMIT 100`
+    );
+    const needle = searchQuery ? normalizeMediaTitle(searchQuery) : "";
+    const tokens = needle ? needle.split(" ").filter(Boolean) : [];
+    return r.rows
+      .filter((s) => {
+        if (tokens.length === 0) return true;
+        const hay = normalizeMediaTitle([s.title, s.title_ar, s.title_en, s.slug].filter(Boolean).join(" "));
+        return tokens.every((t) => hay.includes(t));
+      })
+      .map((s) => ({
+        id: `tg-az-${s.id}`,
+        slug: `tg-az-${s.id}`,
+        url: `tg://animezid/${s.id}`,
+        title: s.title,
+        poster: buildPosterUrl(s) || `${getPublicApiBase()}/favicon.ico`,
+        badge: "مدبلج",
+        year: s.year ? String(s.year) : "",
+        seasonsCount: Math.max(1, Number.parseInt(s.max_season || "1", 10) || 1),
+        episodesCount: Number.parseInt(s.ep_count || "0", 10) || 0,
+        mediaType: "series",
+        source: "tg",
+      }));
+  } catch {
+    return [];
+  }
+}
+
+export async function getTelegramAnimeZidDetail(slugParam: string, requestedSeason?: number): Promise<any | null> {
+  const m = String(slugParam || "").match(/^tg-az-(d+)$/i);
+  if (!m) return null;
+  await ensureTelegramStorageSchema();
+  const seriesId = Number.parseInt(m[1], 10);
+  const sRes = await pool.query<TgSeriesRow>(`SELECT * FROM telegram_media_series WHERE id = $1 LIMIT 1`, [seriesId]);
+  const s = sRes.rows[0];
+  if (!s) return null;
+  const eRes = await pool.query<TgEpisodeRow>(
+    `SELECT * FROM telegram_media_episodes WHERE series_id = $1 AND is_active = TRUE ORDER BY season_number ASC, episode_number ASC, updated_at DESC`,
+    [seriesId]
+  );
+  const poster = buildPosterUrl(s) || `${getPublicApiBase()}/favicon.ico`;
+  const seasonCounts = new Map<number, number>();
+  for (const ep of eRes.rows) {
+    const sn = ep.season_number || 1;
+    seasonCounts.set(sn, (seasonCounts.get(sn) || 0) + 1);
+  }
+  const seasonNums = [...seasonCounts.keys()].sort((a, b) => a - b);
+  const activeSeason = requestedSeason && seasonCounts.has(requestedSeason) ? requestedSeason : (seasonNums[0] || 1);
+  const seasons = seasonNums.map((sn) => ({
+    seasonNumber: sn,
+    label: `الموسم ${sn}`,
+    url: `tg://animezid/${s.id}/season/${sn}`,
+    episodeCount: seasonCounts.get(sn) || 0,
+  }));
+  const episodes = eRes.rows
+    .filter((ep) => (ep.season_number || 1) === activeSeason)
+    .map((ep) => ({
+      number: ep.episode_number,
+      numberLabel: String(ep.episode_number),
+      vid: `tg-ep-${ep.id}`,
+      watchUrl: `tg://episode/${ep.id}`,
+      title: `الحلقة ${ep.episode_number}`,
+      duration: ep.duration > 0 ? `${Math.floor(ep.duration / 60)}:${String(ep.duration % 60).padStart(2, "0")}` : "",
+    }));
+  return {
+    slug: `tg-az-${s.id}`,
+    url: `tg://animezid/${s.id}`,
+    rawTitle: s.title,
+    titleAr: s.title,
+    englishTitle: s.title_en || s.title,
+    poster,
+    badge: "مدبلج",
+    year: s.year ? String(s.year) : "",
+    views: "",
+    seasonsCount: Math.max(1, seasons.length),
+    episodesCount: eRes.rows.length,
+    rawDescription: s.synopsis || "",
+    seasons,
+    activeSeason,
+    episodes,
+    anilist: null,
+  };
 }
 
 export async function getTelegramFilmSources(params: {
@@ -1528,7 +1931,8 @@ export async function streamTelegramEpisodeRange(
 ): Promise<void> {
   const client = await getMtprotoClient();
   const msg = await getChannelMessageMedia(ep.channel_id, ep.message_id);
-  const bigInt = _req("big-integer");
+  const _tgReq = createRequire(_req.resolve("telegram"));
+  const bigInt = _tgReq("big-integer");
 
   // MTProto upload.getFile requires 4096-byte aligned offsets and power-of-2 chunk sizes <= 512 KB
   const MIN_ALIGN = 4096;

@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import { Router } from "express";
 import { load } from "cheerio";
 import { logger } from "../lib/logger";
-import { getTelegramDubbedCatalogItems, getTelegramDubbedEpisodes, getTelegramEpisodeById, buildSignedStreamPath, buildSignedStreamUrl, buildSubtitleUrl } from "../lib/telegramStorage.js";
+import { getTelegramDubbedCatalogItems, getTelegramDubbedEpisodes, getTelegramSd2CatalogItems, getTelegramSd2Detail, getTelegramAnimeZidCatalogItems, getTelegramAnimeZidDetail, getTelegramEpisodeById, buildSignedStreamPath, buildSignedStreamUrl, buildSubtitleUrl } from "../lib/telegramStorage.js";
 import { streamMultiRangeMediaVPS } from "../lib/multiRangeStreamer.js";
 import { mergeAwSourceRows } from "../lib/awSourceRows.mjs";
 import { parseCarateenEpisodeUrl } from "../lib/carateenEpisodeRef.mjs";
@@ -763,8 +763,12 @@ router.get("/dubbed/sd2/catalog", async (req, res) => {
     });
     const totalPages = Math.max(1, Math.ceil(sorted.length / limit));
     const start = (page - 1) * limit;
-    const pageSlice = sorted.slice(start, start + limit);
+    let pageSlice: any[] = sorted.slice(start, start + limit);
     warmStardimaV2CatalogSlice(pageSlice.map((it) => ({ slug: it.slug, mediaType: it.mediaType })));
+    if (page === 1 && typeFilter !== "movie") {
+      const tgSd2 = await getTelegramSd2CatalogItems(String(req.query.q || ""));
+      if (tgSd2.length > 0) pageSlice = [...tgSd2, ...pageSlice];
+    }
     res.setHeader("Cache-Control", req.query.refresh === "1" ? "no-store" : "public, max-age=300");
     res.json({ results: pageSlice, page, limit, totalResults: sorted.length, totalPages, counts: { all: all.length, series: all.filter((e) => e.mediaType === "series").length, movies: all.filter((e) => e.mediaType === "movie").length } });
   } catch (error) {
@@ -777,6 +781,13 @@ router.get("/dubbed/sd2/episodes", async (req, res) => {
   const mediaTypeParam = String(req.query.mediaType || "").trim();
   const mediaTypeHint = mediaTypeParam === "movie" ? "movie" : mediaTypeParam === "series" ? "series" : undefined;
   if (!slugParam) { res.status(400).json({ error: "slug or showId is required" }); return; }
+  if (/^tg-sd2-\d+$/i.test(slugParam)) {
+    const tgDetail = await getTelegramSd2Detail(slugParam);
+    if (!tgDetail) { res.status(404).json({ error: "العمل غير موجود" }); return; }
+    res.setHeader("Cache-Control", "no-store");
+    res.json(tgDetail);
+    return;
+  }
   try {
     const detail = await getStardimaV2Episodes(slugParam, mediaTypeHint, req.query.refresh === "1");
     const known = findStardimaV2ByIdOrSlug(slugParam);
@@ -804,6 +815,14 @@ router.get("/dubbed/sd2/episodes", async (req, res) => {
 });
 router.get("/dubbed/sd2/servers", async (req, res) => {
   const watchUrl = String(req.query.watchUrl || "").trim();
+  const tgSrvM = watchUrl.match(/^tg:\/\/episode\/(\d+)$/i);
+  if (tgSrvM) {
+    const epRow = await getTelegramEpisodeById(Number.parseInt(tgSrvM[1], 10));
+    if (!epRow) { res.status(404).json({ error: "الحلقة غير موجودة" }); return; }
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ watchUrl, servers: [{ id: "nova_tg", name: `NOVA TG · ${epRow.quality}`, quality: epRow.quality }] });
+    return;
+  }
   if (!watchUrl || !isAllowedHyperwatchingUrl(watchUrl)) { res.status(400).json({ error: "valid watchUrl is required" }); return; }
   try {
     const servers = await getStardimaV2Servers(watchUrl);
@@ -917,6 +936,17 @@ router.get("/dubbed/sd2/watch-src", async (req, res) => {
   const watchUrl = String(req.query.watchUrl || "").trim();
   const serverId = String(req.query.serverId || "").trim() || undefined;
   const preferMp4 = req.query.preferMp4 === "1" || req.query.forDownload === "1";
+  const tgWatchM = watchUrl.match(/^tg:\/\/episode\/(\d+)$/i);
+  if (tgWatchM) {
+    const epRow = await getTelegramEpisodeById(Number.parseInt(tgWatchM[1], 10));
+    if (!epRow) { res.status(404).json({ error: "الحلقة غير موجودة" }); return; }
+    const signedPath = buildSignedStreamPath(epRow.id);
+    const signedUrl = buildSignedStreamUrl(epRow.id);
+    const subtitleUrl = epRow.subtitle_file_id ? buildSubtitleUrl(epRow.id) : undefined;
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ hlsUrl: signedPath, rawUrl: signedUrl, referer: "", type: "mp4", serverId: "nova_tg", serverName: "NOVA TG", quality: epRow.quality, ...(subtitleUrl ? { subtitleUrl } : {}) });
+    return;
+  }
   if (!watchUrl || !isAllowedHyperwatchingUrl(watchUrl)) { res.status(400).json({ error: "valid watchUrl is required" }); return; }
   try {
     const resolved = await resolveStardimaV2Stream(watchUrl, serverId, preferMp4);
@@ -2493,15 +2523,18 @@ router.get("/dubbed/animezid/catalog", async (req, res) => {
   const q = String(req.query.q || "").trim();
   try {
     const data: any = await getAnimeZidCatalog({ page, sort, q });
-    const proxied = data && Array.isArray(data.results)
-      ? {
-          ...data,
-          results: data.results.map((item: any) => ({
-            ...item,
-            poster: proxyAnimeZidPosterUrl(item?.poster),
-          })),
-        }
-      : data;
+    const baseResults = data && Array.isArray(data.results)
+      ? data.results.map((item: any) => ({
+          ...item,
+          poster: proxyAnimeZidPosterUrl(item?.poster),
+        }))
+      : null;
+    let mergedAz = baseResults;
+    if (page === 1 && Array.isArray(baseResults)) {
+      const tgAz = await getTelegramAnimeZidCatalogItems(q);
+      if (tgAz.length > 0) mergedAz = [...tgAz, ...baseResults];
+    }
+    const proxied = mergedAz ? { ...data, results: mergedAz } : data;
     res.setHeader("Cache-Control", "public, max-age=300");
     res.json(proxied);
   } catch (error) {
@@ -2515,6 +2548,13 @@ router.get("/dubbed/animezid/detail", async (req, res) => {
   const season = Number.parseInt(String(req.query.season || "0"), 10) || undefined;
   if (!slug) {
     res.status(400).json({ error: "slug is required" });
+    return;
+  }
+  if (/^tg-az-\d+$/i.test(slug)) {
+    const tgDetail = await getTelegramAnimeZidDetail(slug, season);
+    if (!tgDetail) { res.status(404).json({ error: "العمل غير موجود" }); return; }
+    res.setHeader("Cache-Control", "no-store");
+    res.json(tgDetail);
     return;
   }
   try {
@@ -2539,6 +2579,25 @@ router.get("/dubbed/animezid/servers", async (req, res) => {
     res.status(400).json({ error: "vid is required" });
     return;
   }
+  const tgAzSrvM = vid.match(/^tg-ep-(\d+)$/i);
+  if (tgAzSrvM) {
+    const epRow = await getTelegramEpisodeById(Number.parseInt(tgAzSrvM[1], 10));
+    if (!epRow) { res.status(404).json({ error: "الحلقة غير موجودة" }); return; }
+    res.setHeader("Cache-Control", "no-store");
+    res.json({
+      vid,
+      watchSources: [{
+        id: "nova_tg",
+        provider: "NOVA TG",
+        type: "direct_mp4",
+        label: `NOVA TG · ${epRow.quality}`,
+        quality: epRow.quality,
+        supportsNative: true,
+        priority: 120,
+      }],
+    });
+    return;
+  }
   try {
     const data = await getAnimeZidServers(vid);
     res.setHeader("Cache-Control", "private, max-age=180");
@@ -2556,6 +2615,17 @@ router.get("/dubbed/animezid/watch-src", async (req, res) => {
   const startedAt = Date.now();
   if (!vid) {
     res.status(400).json({ error: "vid is required" });
+    return;
+  }
+  const tgAzWatchM = vid.match(/^tg-ep-(\d+)$/i);
+  if (tgAzWatchM) {
+    const epRow = await getTelegramEpisodeById(Number.parseInt(tgAzWatchM[1], 10));
+    if (!epRow) { res.status(404).json({ error: "الحلقة غير موجودة" }); return; }
+    const signedPath = buildSignedStreamPath(epRow.id);
+    const signedUrl = buildSignedStreamUrl(epRow.id);
+    const subtitleUrl = epRow.subtitle_file_id ? buildSubtitleUrl(epRow.id) : undefined;
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ hlsUrl: signedPath, rawUrl: signedUrl, type: "mp4", quality: epRow.quality, ...(subtitleUrl ? { subtitleUrl } : {}) });
     return;
   }
   traceDubbedResponse(res, trace, "animezid-watch-src", "animezid.org", startedAt);
