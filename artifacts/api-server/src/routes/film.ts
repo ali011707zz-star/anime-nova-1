@@ -1394,9 +1394,23 @@ router.get("/sources-stream", async (req: Request, res: Response) => {
   res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders();
 
+  const SERVER_CODES = ["NV", "VX", "HD", "NX", "PX", "SX", "FX", "LX", "MX", "RX", "DX", "ZX"];
+  let _srvCodeSeq = 0;
   const sendEvent = (event: string, data: any) => {
     if (res.writableEnded) return;
-    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    let payload = data;
+    if (event === "source" && data && typeof data === "object") {
+      const code = SERVER_CODES[_srvCodeSeq % SERVER_CODES.length] || `S${_srvCodeSeq + 1}`;
+      _srvCodeSeq++;
+      const tier = String(data.tier || (/1080|fhd|4k|2160/i.test(String(data.label || "")) ? "1080p FHD" : "720p HD"));
+      payload = {
+        ...data,
+        site: code.toLowerCase(),
+        label: `السيرفر ${code}`,
+        tier,
+      };
+    }
+    res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
   };
 
   try {
