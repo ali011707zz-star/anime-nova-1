@@ -10,14 +10,12 @@ import { focusManager, QueryClient, QueryClientProvider } from "@tanstack/react-
 import { Stack, usePathname, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import * as SplashScreen from "expo-splash-screen";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { Animated, AppState, BackHandler, Dimensions, I18nManager, Image, Platform, StatusBar, StyleSheet, Text, TextInput, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import * as ScreenOrientation from "expo-screen-orientation";
 import * as Sentry from "@sentry/react-native";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { TelegramAnnouncementModal } from "@/components/TelegramAnnouncementModal";
 import { AppUpdateModal } from "@/components/AppUpdateModal";
 import { AppProvider, useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
@@ -26,7 +24,14 @@ import { installGlobalCrashHandlers } from "@/utils/crashLogger";
 import { getRuntimeIntegrity, runtimeIntegrityMessage } from "@/utils/runtimeIntegrity";
 import { isTvDevice, useTvMetrics } from "@/utils/tv";
 import { pingMobileAppPresence } from "@/utils/analytics";
-import { registerPushNotifications, subscribeToPushTokenChanges } from "@/utils/pushNotifications";
+
+// Lazy-load TelegramAnnouncementModal so expo-video is NEVER parsed/initialized
+// via Kotlin Reflection on cold start (especially on low-end 32-bit Android TVs).
+const LazyTelegramAnnouncementModal = lazy(() =>
+  import("@/components/TelegramAnnouncementModal").then((m) => ({
+    default: m.TelegramAnnouncementModal,
+  })),
+);
 
 if (Platform.OS !== "web") {
   AppState.addEventListener("change", (status) => {
@@ -58,7 +63,7 @@ if (SENTRY_DSN && RUNTIME_INTEGRITY.trusted) {
     enableNative: true,
     enableNativeCrashHandling: true,
     attachStacktrace: true,
-    tracesSampleRate: 0.1,
+    tracesSampleRate: isTvDevice() ? 0 : 0.1,
     debug: false,
     beforeSend(event) {
       const firstEx = event?.exception?.values?.[0];
@@ -249,7 +254,21 @@ function RootLayout() {
   useEffect(() => {
     if (!tvMode) return;
     setTelegramAnnouncementVisible(false);
-    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
+    let cancelled = false;
+    const t = setTimeout(() => {
+      if (cancelled) return;
+      import("expo-screen-orientation")
+        .then((ScreenOrientation) => {
+          if (!cancelled) {
+            return ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+          }
+        })
+        .catch(() => {});
+    }, 600);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
   }, [tvMode]);
 
   // أظهر شاشة Anime NOVA المخصصة فوراً بدلاً من إبقاء native splash (الأيقونة فقط)
@@ -296,7 +315,7 @@ function RootLayout() {
           .then((m) => m.restoreInterruptedDownloads())
           .catch(() => {});
       }
-    }, 1000);
+    }, isTvDevice() ? 2500 : 1200);
     const interval = setInterval(() => {
       if (AppState.currentState === "active") {
         pingMobileAppPresence();
@@ -401,11 +420,13 @@ function RootContent({
           <BrandSplash />
         </View>
       )}
-      {!tvMode && (
-        <TelegramAnnouncementModal
-          visible={telegramAnnouncementVisible}
-          onClose={onCloseAnnouncement}
-        />
+      {!tvMode && telegramAnnouncementVisible && (
+        <Suspense fallback={null}>
+          <LazyTelegramAnnouncementModal
+            visible={telegramAnnouncementVisible}
+            onClose={onCloseAnnouncement}
+          />
+        </Suspense>
       )}
       {!brandSplashVisible && <AppUpdateModal />}
     </GestureHandlerRootView>
@@ -504,14 +525,22 @@ function PushRegistrationBridge({ disabled }: { disabled: boolean }) {
     let disposed = false;
     let stopEpisodeSync: (() => void) | undefined;
     let removeNotifSub: (() => void) | undefined;
+    let stopTokenListener: (() => void) | undefined;
     let lastRegisterAt = 0;
-    const stopTokenListener = subscribeToPushTokenChanges();
+
+    void import("@/utils/pushNotifications")
+      .then((mod) => {
+        if (!disposed) stopTokenListener = mod.subscribeToPushTokenChanges();
+      })
+      .catch(() => {});
 
     const runRegistration = async () => {
       if (disposed || AppState.currentState === "background") return;
       const now = Date.now();
       if (now - lastRegisterAt < 60_000) return;
       lastRegisterAt = now;
+      const { registerPushNotifications } = await import("@/utils/pushNotifications");
+      if (disposed) return;
       await registerPushNotifications()
         .catch((error) => {
           console.warn("[push] startup registration failed:", error instanceof Error ? error.message : String(error));
@@ -565,7 +594,7 @@ function PushRegistrationBridge({ disabled }: { disabled: boolean }) {
       disposed = true;
       clearTimeout(timer);
       appStateSub.remove();
-      stopTokenListener();
+      stopTokenListener?.();
       stopEpisodeSync?.();
       removeNotifSub?.();
     };

@@ -973,8 +973,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   const loadAll = async () => {
-    // نظّف الكاش القديم أولاً في الخلفية
-    cleanOldCacheKeys().catch(() => {});
+    // أجّل تنظيف الكاش القديم (AsyncStorage.getAllKeys) 8 ثوانٍ حتى لا ينافس
+    // الإقلاع البارد على قفل SQLite ويساعد في منع ANR على أجهزة Android TV الضعيفة
+    setTimeout(() => {
+      cleanOldCacheKeys().catch(() => {});
+    }, 8_000);
 
     const [themeVal, historyVal, favVal] = await Promise.all([
       AsyncStorage.getItem("nova-theme").catch(() => null),
