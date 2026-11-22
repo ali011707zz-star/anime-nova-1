@@ -45,8 +45,8 @@ const FORMAT_OPTIONS: AnimeFilterOption[] = [
   { label: "أفلام آسيوية", value: "asian_movies" },
   { label: "مسلسلات آسيوية", value: "asian_series" },
   { label: "مسلسلات مدبلجة", value: "dubbed_series" },
-  { label: "أفلام أنميشن", value: "animation_movies" },
-  { label: "مسلسلات أنميشن", value: "animation_series" },
+  { label: "أفلام أنمي", value: "animation_movies" },
+  { label: "مسلسلات أنمي", value: "animation_series" },
 ];
 
 const STATUS_OPTIONS: AnimeFilterOption[] = [
@@ -111,8 +111,8 @@ const FORMAT_AR: Record<string, string> = {
   dubbed: "مسلسلات مدبلجة",
   dubbed_series: "مسلسلات مدبلجة",
   animation: "أنميشن وكرتون",
-  animation_movies: "أفلام أنميشن",
-  animation_series: "مسلسلات أنميشن",
+  animation_movies: "أفلام أنمي",
+  animation_series: "مسلسلات أنمي",
   top_rated: "الأعلى تقييماً",
 };
 

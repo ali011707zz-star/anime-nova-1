@@ -144,6 +144,9 @@ export default function FilmWatchScreen() {
   const [screen, setScreen] = useState<"picker" | "player">("picker");
   const [failedUrls, setFailedUrls] = useState<Record<string, boolean>>({});
   const [pickerFocusKey, setPickerFocusKey] = useState<string>("");
+  const [playbackError, setPlaybackError] = useState<string>("");
+  const detailRef = useRef<FilmDetail | null>(null);
+  const startingRef = useRef<boolean>(false);
 
   const [watchedMap, setWatchedMap] = useState<Record<string, boolean>>({});
   const [savedResumeSec, setSavedResumeSec] = useState<number>(0);
@@ -195,6 +198,7 @@ export default function FilmWatchScreen() {
           loadWatchedMap(),
         ]);
         if (!active) return;
+        detailRef.current = dRes;
         setDetail(dRes);
         setWatchedMap(wMap);
 
@@ -237,8 +241,11 @@ export default function FilmWatchScreen() {
     setSelectedIndex(0);
     setStatusMsg("جاري فحص السيرفرات المتاحة...");
 
-    const lookupTitle = detail?.titleEn || params.english || detail?.titleAr || params.title || "";
-    const lookupYear = detail?.year;
+    setPlaybackError("");
+    startingRef.current = false;
+    const dSnap = detailRef.current;
+    const lookupTitle = params.english || params.title || dSnap?.titleEn || dSnap?.titleAr || "";
+    const lookupYear = dSnap?.year;
 
     void fetchFilmSubtitleTracks({
       tmdbId: filmId,
@@ -283,9 +290,6 @@ export default function FilmWatchScreen() {
     tmdbType,
     currentSeason,
     currentEpNum,
-    detail?.titleEn,
-    detail?.titleAr,
-    detail?.year,
     params.english,
     params.title,
     refreshNonce,
@@ -395,7 +399,7 @@ export default function FilmWatchScreen() {
       const tag = serverShortTag(src, idx);
       return {
         url: playUrl,
-        label: `السيرفر ${tag}`,
+        label: serverDisplayName(src, idx),
         quality: normalizeQualityBucket(src),
         contentType: isHls ? "hls" : "progressive",
         site: src.site || `film-${idx + 1}`,
@@ -422,15 +426,18 @@ export default function FilmWatchScreen() {
 
   const [sessionPlaySources, setSessionPlaySources] = useState<PlayerSource[]>([]);
   const handleRiftBack = useCallback(() => {
+    startingRef.current = false;
     setScreen("picker");
   }, []);
   const startPlaybackAt = useCallback(
     (index: number) => {
+      if (startingRef.current) return;
       const list = playerSources;
       const picked = list[index];
-      const ordered = picked
-        ? [picked, ...list.filter((_, i) => i !== index)]
-        : list;
+      if (!picked || !picked.url) return;
+      startingRef.current = true;
+      setPlaybackError("");
+      const ordered = [picked, ...list.filter((_, i) => i !== index)];
       setSelectedIndex(index);
       setSessionPlaySources(ordered);
       setScreen("player");
@@ -466,12 +473,14 @@ export default function FilmWatchScreen() {
   );
 
   const handleRiftError = useCallback(() => {
-    const failedSrc = orderedPlaySources[0];
+    startingRef.current = false;
+    const failedSrc = sessionPlaySources[0] || orderedPlaySources[0];
     if (failedSrc?.url) {
       setFailedUrls((prev) => ({ ...prev, [failedSrc.url]: true }));
     }
+    setPlaybackError("تعذّر تشغيل هذا السيرفر، اختر سيرفراً آخر أو اضغط إعادة فحص السيرفرات.");
     setScreen("picker");
-  }, [orderedPlaySources]);
+  }, [sessionPlaySources, orderedPlaySources]);
 
   const handleDownloadSource = useCallback(
     async (src: FilmStreamSource, idx: number) => {
@@ -752,6 +761,36 @@ export default function FilmWatchScreen() {
             </View>
           ) : null}
 
+          {playbackError ? (
+            <View
+              style={{
+                marginTop: 10,
+                paddingHorizontal: 12,
+                paddingVertical: 10,
+                borderRadius: 12,
+                backgroundColor: "rgba(239,68,68,0.14)",
+                borderWidth: 1,
+                borderColor: "rgba(239,68,68,0.38)",
+                flexDirection: ROW_RTL,
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              <Ionicons name="warning-outline" size={18} color="#F87171" />
+              <Text
+                style={{
+                  flex: 1,
+                  color: "#FCA5A5",
+                  fontSize: 12,
+                  fontFamily: "Cairo_700Bold",
+                  textAlign: "right",
+                }}
+              >
+                {playbackError}
+              </Text>
+            </View>
+          ) : null}
+
           {/* ── Quality Groups (1080P / 720P / 480P matching Anime NOVA) ── */}
           {(["1080p", "720p", "480p"] as const).map((qk) => {
             const slots = qualityGroups[qk];
@@ -804,7 +843,7 @@ export default function FilmWatchScreen() {
                   {slots.map(({ src, index, tag }, idx) => {
                     const playUrl = resolveFilmPlayableUrl(src);
                     const isFailed = Boolean(playUrl && failedUrls[playUrl]);
-                    const slotKey = `${tag}:${qk}:${index}`;
+                    const slotKey = `${src.id || tag}:${qk}:${index}`;
                     const isFirstSlot = index === 0;
                     const shouldPreferTvFocus = Boolean(
                       tvMode && (pickerFocusKey ? pickerFocusKey === slotKey : isFirstSlot),
@@ -900,7 +939,7 @@ export default function FilmWatchScreen() {
                             ]}
                             numberOfLines={1}
                           >
-                            السيرفر {tag}
+                            {serverDisplayName(src, index)}
                           </Text>
                           <View
                             style={[

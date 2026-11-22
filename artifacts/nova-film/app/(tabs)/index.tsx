@@ -224,7 +224,7 @@ export default function NovaFilmHomeScreen() {
     error,
     refetch,
   } = useQuery({
-    queryKey: ["nova-film-home-v2"],
+    queryKey: ["nova-film-home-v3"],
     queryFn: fetchFilmHome,
     initialData: () => getMemoryFilmHome(),
     staleTime: 5 * 60_000,
@@ -520,8 +520,8 @@ export default function NovaFilmHomeScreen() {
           },
           {
             key: "movies",
-            label: "أفلام أنميشن",
-            subtitle: "أحدث أفلام الأنميشن والأنمي السينمائية",
+            label: "أفلام أنمي",
+            subtitle: "أحدث أفلام الأنمي المترجمة",
             icon: "🎬",
             color: "#06B6D4",
             items: animationMovies,
@@ -530,8 +530,8 @@ export default function NovaFilmHomeScreen() {
           },
           {
             key: "series",
-            label: "مسلسلات أنميشن",
-            subtitle: "مسلسلات الأنميشن والأنمي المتنوعة",
+            label: "مسلسلات أنمي",
+            subtitle: "أشهر مسلسلات الأنمي المترجمة",
             icon: "✨",
             color: "#6366F1",
             items: animationSeries,

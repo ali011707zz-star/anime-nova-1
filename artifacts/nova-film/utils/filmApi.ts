@@ -48,7 +48,7 @@ function resolveAbsUrl(url: string | undefined, base: string): string {
   return `${base}${url.startsWith("/") ? url : `/${url}`}`;
 }
 
-export const FILM_HOME_CACHE_KEY = "nova_film_home_cache_v2";
+export const FILM_HOME_CACHE_KEY = "nova_film_home_cache_v3";
 let _memHomeFeed: FilmHomeFeed | undefined = undefined;
 
 function normArr(arr: any): FilmSummary[] {
@@ -335,7 +335,7 @@ function normalizeServerFromSSE(raw: any, index: number, base: string): FilmServ
   };
 }
 
-const SOURCES_CACHE_TTL = 40 * 60_000;
+const SOURCES_CACHE_TTL = 10 * 60_000;
 
 export async function streamFilmSources(params: {
   tmdbId: number | string;
@@ -353,7 +353,7 @@ export async function streamFilmSources(params: {
 }): Promise<FilmServerLink[]> {
   const base = getBaseUrl();
   const mediaType: TmdbMediaType = params.tmdbType || params.type || "movie";
-  const cacheKey = `film-srcs-v3-${mediaType}-${params.tmdbId}-s${params.season}-e${params.episode}`;
+  const cacheKey = `film-srcs-v4-${mediaType}-${params.tmdbId}-s${params.season}-e${params.episode}`;
 
   if (!params.forceRefresh) {
     try {

@@ -3,6 +3,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import React, { useCallback, useMemo } from "react";
 import { Image, Platform, StyleSheet, Text, View } from "react-native";
+import { SafePosterImage } from "@/components/SafePosterImage";
 import { useColors } from "@/hooks/useColors";
 import { getImageSource, type FilmSummary } from "@/utils/filmCatalog";
 import { tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
@@ -46,8 +47,10 @@ export const FilmPosterCard = React.memo(function FilmPosterCard({
 
   const cardHeight = Math.round(cardWidth * 1.48);
   const posterSrc = useMemo(() => getImageSource(item.posterUrl || item.backdropUrl), [item.posterUrl, item.backdropUrl]);
-  const typeTag =
-    item.mediaType === "animation"
+  const isAnimeCat = /أنمي|انمي|anime/i.test(String(item.categoryLabel || ""));
+  const typeTag = isAnimeCat
+    ? "أنمي"
+    : item.mediaType === "animation"
       ? "أنميشن"
       : item.mediaType === "series"
         ? "مسلسل"
@@ -94,13 +97,13 @@ export const FilmPosterCard = React.memo(function FilmPosterCard({
           },
         ]}
       >
-        {posterSrc ? (
-          <Image source={posterSrc} style={styles.image} resizeMode="cover" fadeDuration={0} resizeMethod={Platform.OS === "android" ? "resize" : undefined} />
-        ) : (
-          <View style={styles.fallbackImg}>
-            <Ionicons name="film-outline" size={28} color="#475569" />
-          </View>
-        )}
+        <SafePosterImage
+          uri={item.posterUrl}
+          fallbackUris={[item.backdropUrl]}
+          style={styles.image}
+          containerStyle={styles.fallbackImg}
+          iconSize={28}
+        />
         <LinearGradient
           colors={["transparent", "rgba(9,10,12,0.72)"]}
           locations={[0.55, 1]}
@@ -115,10 +118,12 @@ export const FilmPosterCard = React.memo(function FilmPosterCard({
           <Text style={styles.qualityText}>{item.qualityBadge}</Text>
         </View>
 
-        <View style={styles.scoreBadge}>
-          <Ionicons name="star" size={9} color="#FFD700" />
-          <Text style={styles.scoreText}>{item.imdbRating.toFixed(1)}</Text>
-        </View>
+        {item.imdbRating > 0 ? (
+          <View style={styles.scoreBadge}>
+            <Ionicons name="star" size={9} color="#FFD700" />
+            <Text style={styles.scoreText}>{item.imdbRating.toFixed(1)}</Text>
+          </View>
+        ) : null}
 
         {progress > 0 ? (
           <View style={styles.progressBar}>

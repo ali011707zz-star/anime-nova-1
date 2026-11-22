@@ -823,6 +823,7 @@ router.get("/home", async (_req: Request, res: Response) => {
       pool.query(
         `SELECT * FROM film_vault_titles
          WHERE is_archived = FALSE AND has_live_server = TRUE AND media_type = 'movie'
+           AND poster_url IS NOT NULL AND poster_url != '' AND poster_url NOT LIKE '%images.jpg%'
          ORDER BY COALESCE(year, 2020) DESC, updated_at DESC, id DESC
          LIMIT 16`,
       ),
@@ -836,6 +837,7 @@ router.get("/home", async (_req: Request, res: Response) => {
       pool.query(
         `SELECT * FROM film_vault_titles
          WHERE is_archived = FALSE AND has_live_server = TRUE AND media_type = 'series'
+           AND poster_url IS NOT NULL AND poster_url != '' AND poster_url NOT LIKE '%images.jpg%'
          ORDER BY COALESCE(year, 2020) DESC, playable_episode_count DESC, updated_at DESC
          LIMIT 16`,
       ),
@@ -849,6 +851,9 @@ router.get("/home", async (_req: Request, res: Response) => {
       pool.query(
         `SELECT * FROM film_vault_titles
          WHERE is_archived = FALSE AND has_live_server = TRUE AND media_type = 'animation'
+           AND poster_url IS NOT NULL AND poster_url != '' AND poster_url NOT LIKE '%images.jpg%'
+           AND title_en !~* '(detective conan|gintama|mononoke|isekai|gundam|one piece|naruto|bleach|kimetsu|jujutsu|doraemon|crayon shin|precure|anpanman)'
+           AND title_ar !~ '[\u3040-\u30ff\u4e00-\u9faf]'
          ORDER BY COALESCE(year, 2020) DESC, COALESCE(imdb_rating, 6.8) DESC, id DESC
          LIMIT 16`,
       ),
@@ -887,7 +892,7 @@ router.get("/home", async (_req: Request, res: Response) => {
     const topRated = deduplicateFilmSummaries([vTopRated, ext.foreignMovies], undefined, 16);
     const animationMovies = deduplicateFilmSummaries([ext.animationMovies, vAnim.filter((x) => x.tmdbType === "movie")], undefined, 16);
     const animationSeries = deduplicateFilmSummaries([ext.animationSeries, vAnim.filter((x) => x.tmdbType === "tv")], undefined, 16);
-    const animations = deduplicateFilmSummaries([vAnim, ext.animationMovies, ext.animationSeries], undefined, 16);
+    const animations = deduplicateFilmSummaries([vAnim], undefined, 16);
 
     const payload = {
       hero,
@@ -951,7 +956,7 @@ router.get("/browse", async (req: Request, res: Response) => {
       asian: ["asian_movies", "asian_series"],
       dubbed: ["dubbed_series"],
       dubbed_series: ["dubbed_series"],
-      animation: ["animation_movies", "animation_series"],
+      animation: [],
       animation_movies: ["animation_movies"],
       animation_series: ["animation_series"],
       top_rated: ["foreign_movies"],
@@ -976,7 +981,7 @@ router.get("/browse", async (req: Request, res: Response) => {
     // 1) Vault query (skip when pure external category and no search query)
     const vaultPromise = (async () => {
       if (isPureExternalCat && !q) return { rows: [] as any[], total: 0 };
-      const conditions: string[] = ["is_archived = FALSE", "has_live_server = TRUE"];
+      const conditions: string[] = ["is_archived = FALSE", "has_live_server = TRUE", "poster_url IS NOT NULL", "poster_url != ''", "poster_url NOT LIKE '%images.jpg%'"];
       const params: any[] = [];
 
       if (category === "asian" || category === "asian_movies") {
@@ -1106,7 +1111,7 @@ router.get("/search", async (req: Request, res: Response) => {
       return;
     }
 
-    const conditions: string[] = ["is_archived = FALSE", "has_live_server = TRUE"];
+    const conditions: string[] = ["is_archived = FALSE", "has_live_server = TRUE", "poster_url IS NOT NULL", "poster_url != ''", "poster_url NOT LIKE '%images.jpg%'"];
     const params: any[] = [];
 
     if (type === "movie") {
