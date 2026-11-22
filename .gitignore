@@ -100,3 +100,6 @@ artifacts/api-server/data/stardima-v2-catalog.json
 !.env.example
 !.env.production.example
 !.env.*.example
+
+# Prevent backup PM2 configs with secrets from being tracked
+ecosystem.config.cjs.bak*
