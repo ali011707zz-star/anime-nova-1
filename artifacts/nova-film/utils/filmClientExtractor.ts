@@ -3,26 +3,26 @@ import type { FilmClientExtractDescriptor, FilmServerLink } from "./filmCatalog"
 const PHONE_BROWSER_UA =
   "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36";
 
-const EXTRACT_TIMEOUT_MS = 6_500;
-const PROBE_TIMEOUT_MS = 5_000;
+const EXTRACT_TIMEOUT_MS = 8_500;
+const PROBE_TIMEOUT_MS = 6_500;
 const CACHE_TTL_MS = 10 * 60_000;
-const MAX_CACHE_ENTRIES = 40;
+const MAX_CACHE_ENTRIES = 50;
 
-const _extractCache = new Map<string, { ts: number; link: FilmServerLink }>();
+const _extractCache = new Map<string, { ts: number; links: FilmServerLink[] }>();
 
-function getCachedExtract(embedUrl: string): FilmServerLink | null {
+function getCachedExtract(embedUrl: string): FilmServerLink[] | null {
   const hit = _extractCache.get(embedUrl);
   if (!hit) return null;
   if (Date.now() - hit.ts > CACHE_TTL_MS) {
     _extractCache.delete(embedUrl);
     return null;
   }
-  return hit.link;
+  return hit.links;
 }
 
-function setCachedExtract(embedUrl: string, link: FilmServerLink): void {
+function setCachedExtract(embedUrl: string, links: FilmServerLink[]): void {
   if (_extractCache.has(embedUrl)) _extractCache.delete(embedUrl);
-  _extractCache.set(embedUrl, { ts: Date.now(), link });
+  _extractCache.set(embedUrl, { ts: Date.now(), links });
   while (_extractCache.size > MAX_CACHE_ENTRIES) {
     const oldest = _extractCache.keys().next().value;
     if (oldest !== undefined) _extractCache.delete(oldest);
@@ -59,10 +59,6 @@ function toBase(n: number, radix: number): string {
   return out;
 }
 
-/**
- * Pure, safe Dean Edwards eval(p,a,c,k,e,d) unpacker (no eval() used!).
- * Handles multiple packed script blocks in embed HTML directly on the phone.
- */
 export function unpackDeanEdwardsBlocks(html: string): string {
   const outputs: string[] = [];
   const regex =
@@ -132,44 +128,84 @@ function buildQualityMeta(tierHint: string): {
   return { tier: "1080p FHD", quality: "1080p FHD", qualityTier: "FHD" };
 }
 
+function extractSecondaryFastVariant(
+  manifest: string,
+  masterUrl: string,
+  primaryTier: string,
+): { url: string; tier: string } | null {
+  const lines = manifest.split(/\r?\n/).map((l) => l.trim());
+  let fallback480 = "";
+  for (let i = 0; i < lines.length - 1; i++) {
+    const inf = lines[i];
+    if (!inf.startsWith("#EXT-X-STREAM-INF")) continue;
+    const next = lines[i + 1];
+    if (!next || next.startsWith("#")) continue;
+    const resM = inf.match(/RESOLUTION=(\d+)x(\d+)/i);
+    const height = resM ? Number.parseInt(resM[2], 10) : 0;
+    let absUrl = next;
+    try {
+      absUrl = next.startsWith("http") ? next : new URL(next, masterUrl).toString();
+    } catch {
+      continue;
+    }
+    if (absUrl === masterUrl) continue;
+    if (height >= 540 && height <= 800 && primaryTier !== "720p HD") {
+      return { url: absUrl, tier: "720p HD" };
+    }
+    if (!fallback480 && height >= 360 && height < 540 && primaryTier !== "480p SD") {
+      fallback480 = absUrl;
+    }
+  }
+  return fallback480 ? { url: fallback480, tier: "480p SD" } : null;
+}
+
 /**
- * Extracts a direct CDN stream URL (HLS .m3u8 or progressive .mp4) DIRECTLY on the user phone.
- * Because the fetch originates from the user own IP, IP-bound CDN tokens are signed for the user phone,
- * enabling 100% direct phone-to-CDN streaming with 0 bytes of video bandwidth on the VPS!
+ * Extracts verified direct CDN stream(s) (HLS .m3u8 or progressive .mp4) directly on the user phone.
+ * Runs from the user own residential IP with 0% VPS video bandwidth, measures CDN latency for
+ * fastest-first ordering, and splits lighter 720p/480p variants when present for instant start & seek.
  */
-export async function extractFilmSourceOnPhone(
+export async function extractFilmSourcesOnPhone(
   desc: FilmClientExtractDescriptor,
   index: number,
   parentSignal?: AbortSignal,
-): Promise<FilmServerLink | null> {
+): Promise<FilmServerLink[]> {
   const embedUrl = String(desc?.embedUrl || "").trim();
-  if (!embedUrl.startsWith("http")) return null;
-  if (parentSignal?.aborted) return null;
+  if (!embedUrl.startsWith("http")) return [];
+  if (parentSignal?.aborted) return [];
 
   const cached = getCachedExtract(embedUrl);
   if (cached) {
-    return { ...cached, id: `ce-${index}-${cached.url.slice(-16)}` };
+    return cached.map((item, j) => ({
+      ...item,
+      id: `ce-${index}-${j}-${item.url.slice(-14)}`,
+    }));
   }
 
   try {
-    const parsedEmbed = new URL(embedUrl);
-    const embedOrigin = parsedEmbed.origin;
-    const hostOrigin = `${embedOrigin}/`;
+    const parsedInitial = new URL(embedUrl);
+    const initialOrigin = parsedInitial.origin;
 
     const res = await fetchWithTimeout(
       embedUrl,
       {
         "User-Agent": PHONE_BROWSER_UA,
-        Referer: desc.referer || hostOrigin,
+        Referer: desc.referer || `${initialOrigin}/`,
         Accept: "text/html,application/xhtml+xml,*/*;q=0.8",
       },
       EXTRACT_TIMEOUT_MS,
       parentSignal,
     );
-    if (!res.ok) return null;
+    if (!res.ok) return [];
+
+    // Use the FINAL redirected origin so redirecting embeds (e.g. mirror domains) pass Referer checks!
+    let embedOrigin = initialOrigin;
+    try {
+      if (res.url) embedOrigin = new URL(res.url).origin;
+    } catch {}
+    const hostOrigin = `${embedOrigin}/`;
 
     const html = await res.text();
-    if (!html || html.length < 120) return null;
+    if (!html || html.length < 100) return [];
     const unpacked = unpackDeanEdwardsBlocks(html);
     const combined = `${html}\n${unpacked}`;
 
@@ -180,7 +216,7 @@ export async function extractFilmSourceOnPhone(
     };
 
     // 1. OK.ru JSON manifest extraction
-    if (desc.hostKind === "okru" || parsedEmbed.hostname.includes("ok.ru")) {
+    if (desc.hostKind === "okru" || parsedInitial.hostname.includes("ok.ru")) {
       const optMatch = html.match(/data-options="([^"]+)"/i);
       if (optMatch) {
         const decoded = decodeHtmlEntities(optMatch[1]);
@@ -206,14 +242,15 @@ export async function extractFilmSourceOnPhone(
             site: "nv-ce",
             headers: okHeaders,
             clientExtracted: true,
+            latencyMs: 350,
           };
-          setCachedExtract(embedUrl, link);
-          return link;
+          setCachedExtract(embedUrl, [link]);
+          return [link];
         }
       }
     }
 
-    // 2. Direct HLS (.m3u8) extraction + phone-IP verification
+    // 2. Direct HLS (.m3u8) extraction + phone-IP verification & speed measurement
     const m3u8Matches = combined.match(/https?:\/\/[^"'\s\\<>]+\.m3u8[^"'\s\\<>]*/gi) || [];
     const m3u8Candidates = Array.from(
       new Set(
@@ -224,8 +261,9 @@ export async function extractFilmSourceOnPhone(
     ).slice(0, 3);
 
     for (const m3u8 of m3u8Candidates) {
-      if (parentSignal?.aborted) return null;
+      if (parentSignal?.aborted) return [];
       try {
+        const t0 = Date.now();
         const probe = await fetchWithTimeout(
           m3u8,
           { ...cdnHeaders, Accept: "*/*" },
@@ -234,6 +272,7 @@ export async function extractFilmSourceOnPhone(
         );
         if (!probe.ok) continue;
         const manifest = await probe.text();
+        const latencyMs = Math.max(1, Date.now() - t0);
         if (!manifest.includes("#EXTM3U")) continue;
 
         const detectedTier = /2160|3840x/i.test(manifest)
@@ -244,7 +283,7 @@ export async function extractFilmSourceOnPhone(
               ? "720p HD"
               : desc.tier || "1080p FHD";
         const qm = buildQualityMeta(detectedTier);
-        const link: FilmServerLink = {
+        const primaryLink: FilmServerLink = {
           id: `ce-hls-${index}-${m3u8.slice(-16)}`,
           name: qm.tier,
           label: qm.tier,
@@ -261,15 +300,35 @@ export async function extractFilmSourceOnPhone(
           site: "nv-ce",
           headers: cdnHeaders,
           clientExtracted: true,
+          latencyMs,
         };
-        setCachedExtract(embedUrl, link);
-        return link;
+        const outLinks: FilmServerLink[] = [primaryLink];
+
+        // Also expose fast-start 720p/480p variant if present in multi-bitrate master playlist
+        const secondary = extractSecondaryFastVariant(manifest, m3u8, detectedTier);
+        if (secondary) {
+          const sqm = buildQualityMeta(secondary.tier);
+          outLinks.push({
+            ...primaryLink,
+            id: `ce-hls-${index}-alt-${secondary.url.slice(-14)}`,
+            name: sqm.tier,
+            label: sqm.tier,
+            tier: sqm.tier,
+            quality: sqm.quality,
+            qualityTier: sqm.qualityTier,
+            url: secondary.url,
+            directUrl: secondary.url,
+          });
+        }
+
+        setCachedExtract(embedUrl, outLinks);
+        return outLinks;
       } catch {
         // Try next candidate
       }
     }
 
-    // 3. Direct MP4 extraction + phone-IP 200/206 verification
+    // 3. Direct progressive MP4 extraction (e.g. UpDown, Uqload, SaveFiles — supports instant byte-range seeking!)
     const mp4Matches = combined.match(/https?:\/\/[^"'\s\\<>]+\.mp4[^"'\s\\<>]*/gi) || [];
     const mp4Candidates = Array.from(
       new Set(
@@ -280,15 +339,17 @@ export async function extractFilmSourceOnPhone(
     ).slice(0, 2);
 
     for (const mp4 of mp4Candidates) {
-      if (parentSignal?.aborted) return null;
+      if (parentSignal?.aborted) return [];
       try {
+        const t0 = Date.now();
         const probe = await fetchWithTimeout(
           mp4,
-          { "User-Agent": PHONE_BROWSER_UA, Referer: hostOrigin, Range: "bytes=0-1" },
+          { "User-Agent": PHONE_BROWSER_UA, Referer: hostOrigin, Range: "bytes=0-1023" },
           PROBE_TIMEOUT_MS,
           parentSignal,
         );
         const ct = (probe.headers.get("content-type") || "").toLowerCase();
+        const latencyMs = Math.max(1, Date.now() - t0);
         if ((probe.status === 200 || probe.status === 206) && !ct.includes("text/html")) {
           const finalUrl = probe.url || mp4;
           const qm = buildQualityMeta(desc.tier || "1080p FHD");
@@ -309,17 +370,27 @@ export async function extractFilmSourceOnPhone(
             site: "nv-ce",
             headers: { "User-Agent": PHONE_BROWSER_UA, Referer: hostOrigin },
             clientExtracted: true,
+            latencyMs,
           };
-          setCachedExtract(embedUrl, link);
-          return link;
+          setCachedExtract(embedUrl, [link]);
+          return [link];
         }
       } catch {
         // Skip unplayable mp4
       }
     }
 
-    return null;
+    return [];
   } catch {
-    return null;
+    return [];
   }
+}
+
+export async function extractFilmSourceOnPhone(
+  desc: FilmClientExtractDescriptor,
+  index: number,
+  parentSignal?: AbortSignal,
+): Promise<FilmServerLink | null> {
+  const list = await extractFilmSourcesOnPhone(desc, index, parentSignal);
+  return list[0] || null;
 }

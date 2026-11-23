@@ -133,13 +133,14 @@ function logPlaybackStage(url: string | undefined, stage: string, detail = ""): 
   console.info(`[playback-trace] id=${trace} component=player stage=${stage}${safeDetail}`);
 }
 
-function getPlaybackBufferOptions(animePlayback: boolean): BufferOptions {
-  /* Generous 40s forward buffer and waitsToMinimizeStalling: true prevents stream drops
-     and micro-stuttering across all catalogs (Anime, Spacetoon, Cartoon/Carateen). */
+function getPlaybackBufferOptions(_animePlayback: boolean): BufferOptions {
+  /* Fast-start & snappy-seek buffer profile for direct-CDN movie/series streams:
+     1.0s minBuffer starts playback on the first decoded keyframe; 14s forward buffer
+     avoids saturating mobile bandwidth on heavy 1080p chunks while seeking. */
   return {
-    preferredForwardBufferDuration: 40,
-    waitsToMinimizeStalling: true,
-    minBufferForPlayback: 2.5,
+    preferredForwardBufferDuration: 14,
+    waitsToMinimizeStalling: false,
+    minBufferForPlayback: 1.0,
   };
 }
 

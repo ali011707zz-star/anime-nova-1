@@ -525,17 +525,30 @@ export default function FilmWatchScreen() {
     [downloadStates, filmId, currentEpNum, displayTitle, coverUrl, arSubTrackUrl],
   );
 
-  // Group sources by quality bucket matching Anime NOVA watch.tsx
+  // Group sources by quality bucket and rank fastest-starting CDNs first
   const qualityGroups = useMemo(() => {
     const map: Record<"1080p" | "720p" | "480p", Array<{ src: FilmStreamSource; index: number; tag: string }>> = {
       "1080p": [],
       "720p": [],
       "480p": [],
     };
+    const speedRank = (s: FilmStreamSource): number => {
+      const u = String(s.directUrl || s.url || "").toLowerCase();
+      // Progressive MP4 (instant byte-range seek) and low-latency open CDNs first
+      let base = s.kind === "direct" ? 100 : 200;
+      if (u.includes("cloudcdn.casa") || u.includes("workers.dev") || u.includes("uqload.")) base -= 60;
+      else if (u.includes("tnmr.org")) base -= 30;
+      else if (u.includes("acek-cdn.com")) base += 180;
+      const lat = typeof s.latencyMs === "number" ? Math.min(s.latencyMs, 5000) / 20 : 40;
+      return base + lat;
+    };
     sources.forEach((src, index) => {
       const q = normalizeQualityBucket(src);
       map[q].push({ src, index, tag: serverShortTag(src, index) });
     });
+    for (const q of ["1080p", "720p", "480p"] as const) {
+      map[q].sort((a, b) => speedRank(a.src) - speedRank(b.src));
+    }
     return map;
   }, [sources]);
 

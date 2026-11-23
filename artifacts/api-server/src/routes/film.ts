@@ -534,6 +534,7 @@ async function resolveDivHardServer(
     else if (/1280x720|720p/i.test(streamInf) || /720/.test(titleHint)) tier = "720p HD";
     else if (/854x480|640x360|480p/i.test(streamInf)) tier = "480p SD";
 
+    const divHeaders = { "User-Agent": BROWSER_UA, Referer: refForHls };
     outSources.push({
       site: "nv",
       label: tier,
@@ -542,9 +543,45 @@ async function resolveDivHardServer(
       directUrl: absMediaUrl,
       isEmbed: false,
       type: "hls",
-      headers: { "User-Agent": BROWSER_UA, Referer: refForHls },
+      headers: divHeaders,
       hardsubbed: isHardsubbed,
     });
+
+    // If master playlist contains a lighter 720p/480p variant, emit it as a fast-start HD option too!
+    const mLines = mText.split(/\r?\n/).map((l) => l.trim());
+    let pickedFastUrl = "";
+    let pickedFastTier = "";
+    for (let li = 0; li < mLines.length - 1; li++) {
+      const infLine = mLines[li];
+      if (!infLine.startsWith("#EXT-X-STREAM-INF")) continue;
+      const nextUrl = mLines[li + 1];
+      if (!nextUrl || nextUrl.startsWith("#")) continue;
+      const resM = infLine.match(/RESOLUTION=(\d+)x(\d+)/i);
+      const height = resM ? Number.parseInt(resM[2], 10) : 0;
+      const absVar = nextUrl.startsWith("http") ? nextUrl : new URL(nextUrl, absMediaUrl).toString();
+      if (height >= 540 && height <= 800 && tier !== "720p HD") {
+        pickedFastUrl = absVar;
+        pickedFastTier = "720p HD";
+        break;
+      }
+      if (!pickedFastUrl && height >= 360 && height < 540 && tier !== "480p SD") {
+        pickedFastUrl = absVar;
+        pickedFastTier = "480p SD";
+      }
+    }
+    if (pickedFastUrl && pickedFastUrl !== absMediaUrl) {
+      outSources.push({
+        site: "vx",
+        label: pickedFastTier,
+        tier: pickedFastTier,
+        url: pickedFastUrl,
+        directUrl: pickedFastUrl,
+        isEmbed: false,
+        type: "hls",
+        headers: divHeaders,
+        hardsubbed: isHardsubbed,
+      });
+    }
   } catch {
     // failed to resolve divhard source
   }
@@ -1558,8 +1595,8 @@ router.get("/sources-stream", async (req: Request, res: Response) => {
         }
       } catch {}
     }
-    // Bonus live streams from TopCinema & EgyDead if vault yielded fewer than 2 servers
-    if (emitted < 2 && (resolved.titleEn || titleParam)) {
+    // Bonus live streams from TopCinema & EgyDead if vault yielded fewer than 4 servers
+    if (emitted < 4 && (resolved.titleEn || titleParam)) {
       try {
         await resolveExternalFilmStreams({
           id: 0,

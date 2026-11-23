@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "./baseUrl";
 import { secureFetch, secureStreamFetch } from "./secureApi";
-import { extractFilmSourceOnPhone } from "./filmClientExtractor";
+import { extractFilmSourcesOnPhone } from "./filmClientExtractor";
 import {
   normalizeFilmSummary,
   type FilmDetail,
@@ -362,7 +362,7 @@ export async function streamFilmSources(params: {
 }): Promise<FilmServerLink[]> {
   const base = getBaseUrl();
   const mediaType: TmdbMediaType = params.tmdbType || params.type || "movie";
-  const cacheKey = `film-srcs-v6-${mediaType}-${params.tmdbId}-s${params.season}-e${params.episode}`;
+  const cacheKey = `film-srcs-v7-${mediaType}-${params.tmdbId}-s${params.season}-e${params.episode}`;
 
   if (!params.forceRefresh) {
     try {
@@ -428,9 +428,9 @@ export async function streamFilmSources(params: {
             if (embedKey && !seenEmbeds.has(embedKey) && !params.signal?.aborted) {
               seenEmbeds.add(embedKey);
               const extractIdx = idxCounter++;
-              const task = extractFilmSourceOnPhone(data.clientExtract, extractIdx, params.signal)
-                .then((extracted) => {
-                  if (extracted) pushUniqueSource(extracted);
+              const task = extractFilmSourcesOnPhone(data.clientExtract, extractIdx, params.signal)
+                .then((extractedList) => {
+                  for (const item of extractedList) pushUniqueSource(item);
                 })
                 .catch(() => {});
               pendingClientExtracts.push(task);

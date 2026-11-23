@@ -32,6 +32,7 @@ export type FilmStreamSource = {
   hardsubbed?: boolean;
   clientExtract?: FilmClientExtractDescriptor;
   clientExtracted?: boolean;
+  latencyMs?: number;
 };
 
 export type FilmServerLink = FilmStreamSource;
