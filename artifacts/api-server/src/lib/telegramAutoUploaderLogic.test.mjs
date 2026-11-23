@@ -5,7 +5,9 @@ import {
   parseBatchCommand,
   parseLeechCommand,
   parseImportCommand,
+  detectImplicitAutoCommand,
   extractCandidateEpisodeLinksFromHtml,
+  extractDirectMediaFromEpisodeHtml,
   classifyPullErrorArabic,
   formatReplacementAlertMessage,
   buildReplacementInlineKeyboard,
@@ -99,4 +101,51 @@ test("classifyPullErrorArabic & replacement alert produce clear Arabic messages 
       assert.ok(Buffer.byteLength(btn.callback_data, "utf8") <= 64);
     }
   }
+});
+
+test("supports mobile newline format without /import prefix and 'الي' spelling + arabic-toons #sets HTML extraction", () => {
+  const userMsg = [
+    "#سبيستون",
+    "دري لاند",
+    "من 5 الي 37",
+    "https://www.arabic-toons.com/driland-1437356611-anime-streaming.html",
+  ].join("\n");
+
+  assert.equal(detectImplicitAutoCommand(userMsg), "import");
+
+  const imp = parseImportCommand("/استيراد " + userMsg);
+  assert.equal(imp.ok, true);
+  assert.equal(imp.request.section, "spacetoon");
+  assert.equal(imp.request.title, "دري لاند");
+  assert.equal(imp.request.fromEp, 5);
+  assert.equal(imp.request.toEp, 37);
+  assert.equal(imp.request.sourceUrl, "https://www.arabic-toons.com/driland-1437356611-anime-streaming.html");
+
+  const leechMsg = "#سبيستون\nدري لاند\nمن 2\nhttps://example.com/ep2.mp4";
+  assert.equal(detectImplicitAutoCommand(leechMsg), "leech");
+
+  const sampleSeriesHtml = `
+    <a href="driland-1437356611-9504.html#sets">الحلقة 2</a>
+    <a href="driland-1437356611-9503.html#sets"><div>1</div><span>الحلقة 1</span></a>
+    <a href="driland-1437356611-9504.html#sets"><div>2</div><span>الحلقة 2</span></a>
+    <a href="driland-1437356611-9507.html#sets"><div>5</div><span>الحلقة 5</span></a>
+  `;
+  const eps = extractCandidateEpisodeLinksFromHtml(
+    sampleSeriesHtml,
+    "https://www.arabic-toons.com/driland-1437356611-anime-streaming.html"
+  );
+  assert.equal(eps.length, 3);
+  assert.deepEqual(
+    eps.map((e) => [e.episodeNumber, e.url]),
+    [
+      [1, "https://www.arabic-toons.com/driland-1437356611-9503.html"],
+      [2, "https://www.arabic-toons.com/driland-1437356611-9504.html"],
+      [5, "https://www.arabic-toons.com/driland-1437356611-9507.html"],
+    ]
+  );
+
+  const epHtml = `<video><source src="https://stream.foupix.com:8443/animeios_4/1437356611/driland_05.mp4?tkn=abc&amp;ua=123" type="video/mp4"></video>`;
+  const media = extractDirectMediaFromEpisodeHtml(epHtml, "https://www.arabic-toons.com/driland-1437356611-9507.html");
+  assert.equal(media?.kind, "mp4");
+  assert.equal(media?.url, "https://stream.foupix.com:8443/animeios_4/1437356611/driland_05.mp4?tkn=abc&ua=123");
 });

@@ -82,7 +82,7 @@ function parseHeaderMetadata(headerText) {
   }
 
   // Extract range "من 1 الى 10" or "1-10" or "من 5"
-  const rangeAr = cleaned.match(/(?:من|from)\s*(?:الحلقة|الحلقه|حلقة|حلقه|الفصل|فصل)?\s*(\d{1,4})\s*(?:الى|إلى|ل|حتى|to|-)\s*(\d{1,4})/i);
+  const rangeAr = cleaned.match(/(?:من|from)\s*(?:الحلقة|الحلقه|حلقة|حلقه|الفصل|فصل)?\s*(\d{1,4})\s*(?:الى|إلى|الي|إلي|ل|حتى|to|-)\s*(\d{1,4})/i);
   if (rangeAr) {
     startEp = Math.max(1, Number.parseInt(rangeAr[1], 10));
     endEp = Math.max(startEp, Number.parseInt(rangeAr[2], 10));
@@ -335,10 +335,10 @@ export function parseLeechCommand(rawText) {
         "ضع رابط كل حلقة في سطر منفصل بعد السطر الأول.",
     };
   }
-  if (rawLinkItems.length > 30) {
+  if (rawLinkItems.length > 50) {
     return {
       ok: false,
-      errorAr: "⚠️ الحد الأقصى في الدفعة الواحدة هو 30 رابطاً لحماية سرعة السيرفر — قسّمها إلى دفعتين.",
+      errorAr: "⚠️ الحد الأقصى في الدفعة الواحدة هو 50 رابطاً لحماية سرعة السيرفر — قسّمها إلى دفعتين.",
     };
   }
 
@@ -429,7 +429,7 @@ export function parseImportCommand(rawText) {
   }
 
   const fromEp = Math.max(1, meta.startEp || 1);
-  const toEp = meta.endEp != null ? Math.min(fromEp + 29, Math.max(fromEp, meta.endEp)) : fromEp + 11;
+  const toEp = meta.endEp != null ? Math.min(fromEp + 49, Math.max(fromEp, meta.endEp)) : fromEp + 11;
 
   return {
     ok: true,
@@ -448,48 +448,55 @@ export function parseImportCommand(rawText) {
   };
 }
 
-/* ── External HTML Series Page Link Extractor ─────────────────────────── */
+/* ── Implicit Mobile Auto-Command Detector (when user omits /استيراد or /سحب) ── */
+export function detectImplicitAutoCommand(rawText) {
+  const text = String(rawText || "").trim();
+  if (!text || text.startsWith("/")) return null;
+  const urls = text.match(/https?:\/\/\S+/gi) || [];
+  if (urls.length === 0) return null;
+  const tags = text.match(/#[\p{L}\p{N}_-]+/gu) || [];
+  const hasValidSection = tags.some((tag) => Boolean(normalizeSection(normalizeMediaTitle(tag.slice(1).replace(/_/g, " ")))));
+  if (!hasValidSection) return null;
 
+  const isDirectVideoOrHost = (u) =>
+    /\.(?:mp4|m3u8|mkv|webm|mov)(?:[?#]|$)/i.test(u) ||
+    /https?:\/\/(?:www\.)?(?:mediafire\.com\/file\/|pixeldrain\.com\/u\/|drive\.google\.com\/|ok\.ru\/video\/|mp4upload\.com\/)/i.test(u);
+
+  if (urls.length >= 2 || isDirectVideoOrHost(urls[0])) {
+    return "leech";
+  }
+  return "import";
+}
+
+/* ── External HTML Series Page Link Extractor ─────────────────────────── */
 export function extractCandidateEpisodeLinksFromHtml(html, baseUrl) {
   const rawHtml = String(html || "");
   if (!rawHtml) return [];
   const results = [];
-  const seen = new Set();
+  const seenUrls = new Set();
+  const seenEpisodes = new Set();
 
   const resolveHref = (raw) => {
+    const trimmed = String(raw || "").trim();
+    if (!trimmed || trimmed.startsWith("#") || /^(?:javascript|mailto|tel|data):/i.test(trimmed)) {
+      return null;
+    }
     try {
-      const u = new URL(raw, baseUrl).toString();
-      return isSafePublicMediaUrl(u) ? u : null;
+      const u = new URL(trimmed, baseUrl);
+      u.hash = "";
+      const out = u.toString();
+      return isSafePublicMediaUrl(out) ? out : null;
     } catch {
       return null;
     }
   };
 
-  // 1. Direct video/HLS URLs embedded in HTML/scripts
-  const directMatches = rawHtml.match(/https?:\/\/[^\s"'<>\\]+\.(?:mp4|m3u8|mkv|webm)(?:\?[^\s"'<>\\]*)?/gi) || [];
-  for (const m of directMatches) {
-    const clean = m.replace(/\\u0026/g, "&").replace(/\\\//g, "/");
-    if (isSafePublicMediaUrl(clean) && !seen.has(clean)) {
-      seen.add(clean);
-      results.push({ url: clean, episodeNumber: null, kind: "direct" });
-    }
-  }
-
-  // 2. Known file host links (MediaFire, Pixeldrain, Google Drive, OK.ru, MP4Upload)
-  const hostMatches = rawHtml.match(/https?:\/\/(?:www\.)?(?:mediafire\.com\/file\/[^\s"'<>]+|pixeldrain\.com\/u\/[^\s"'<>]+|drive\.google\.com\/file\/d\/[^\s"'<>]+|ok\.ru\/video\/[^\s"'<>]+|mp4upload\.com\/[^\s"'<>]+)/gi) || [];
-  for (const m of hostMatches) {
-    if (isSafePublicMediaUrl(m) && !seen.has(m)) {
-      seen.add(m);
-      results.push({ url: m, episodeNumber: null, kind: "host" });
-    }
-  }
-
-  // 3. Episode anchor links <a href="...">الحلقة 5</a>
-  const anchorRe = /<a\b[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  // 1. Episode anchor links <a href="...">الحلقة 5</a> (supports trailing #sets fragments!)
+  const anchorRe = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]{0,2000}?)<\/a>/gi;
   let m;
   while ((m = anchorRe.exec(rawHtml)) !== null) {
     const href = resolveHref(m[1]);
-    if (!href || seen.has(href)) continue;
+    if (!href || seenUrls.has(href)) continue;
     const text = toWesternDigits(m[2].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
     const epFromText = text.match(/(?:الحلقة|الحلقه|حلقة|حلقه|episode|ep)\s*[:\-]?\s*(\d{1,4})\b/i);
     const epFromUrl = href.match(/(?:episode|ep|ح|حلقة)[-_\/]?(\d{1,4})(?:[^\d]|$)/i);
@@ -498,9 +505,30 @@ export function extractCandidateEpisodeLinksFromHtml(html, baseUrl) {
       : epFromUrl
         ? Number.parseInt(epFromUrl[1], 10)
         : null;
-    if (epNum && epNum > 0) {
-      seen.add(href);
+    if (epNum && epNum > 0 && !seenEpisodes.has(epNum)) {
+      seenUrls.add(href);
+      seenEpisodes.add(epNum);
       results.push({ url: href, episodeNumber: epNum, kind: "episode_page" });
+    }
+  }
+
+  // 2. Direct video/HLS URLs embedded in HTML/scripts (if page has no numbered episode links)
+  const directMatches = rawHtml.match(/https?:\/\/[^\s"'<>\\]+\.(?:mp4|m3u8|mkv|webm)(?:\?[^\s"'<>\\]*)?/gi) || [];
+  for (const dm of directMatches) {
+    const clean = dm.replace(/&amp;/g, "&").replace(/\\u0026/g, "&").replace(/\\\//g, "/");
+    if (isSafePublicMediaUrl(clean) && !seenUrls.has(clean)) {
+      seenUrls.add(clean);
+      results.push({ url: clean, episodeNumber: null, kind: "direct" });
+    }
+  }
+
+  // 3. Known file host links (MediaFire, Pixeldrain, Google Drive, OK.ru, MP4Upload)
+  const hostMatches = rawHtml.match(/https?:\/\/(?:www\.)?(?:mediafire\.com\/file\/[^\s"'<>]+|pixeldrain\.com\/u\/[^\s"'<>]+|drive\.google\.com\/file\/d\/[^\s"'<>]+|ok\.ru\/video\/[^\s"'<>]+|mp4upload\.com\/[^\s"'<>]+)/gi) || [];
+  for (const hm of hostMatches) {
+    const clean = hm.replace(/&amp;/g, "&");
+    if (isSafePublicMediaUrl(clean) && !seenUrls.has(clean)) {
+      seenUrls.add(clean);
+      results.push({ url: clean, episodeNumber: null, kind: "host" });
     }
   }
 
@@ -508,6 +536,69 @@ export function extractCandidateEpisodeLinksFromHtml(html, baseUrl) {
   const numbered = results.filter((r) => r.episodeNumber != null).sort((a, b) => a.episodeNumber - b.episodeNumber);
   const unnumbered = results.filter((r) => r.episodeNumber == null);
   return numbered.length > 0 ? numbered : unnumbered;
+}
+
+/* ── Episode Watch Page Direct Video / HLS / Embed Extractor ──────────── */
+export function extractDirectMediaFromEpisodeHtml(html, baseUrl) {
+  const rawHtml = String(html || "");
+  if (!rawHtml) return null;
+
+  const normalizeCandidate = (raw) => {
+    const decoded = String(raw || "")
+      .trim()
+      .replace(/&amp;/g, "&")
+      .replace(/\\u0026/g, "&")
+      .replace(/\\\//g, "/");
+    try {
+      const full = new URL(decoded, baseUrl).toString();
+      return isSafePublicMediaUrl(full) ? full : null;
+    } catch {
+      return null;
+    }
+  };
+
+  // 1. Prefer direct MP4/WebM/MKV streams (fast direct HTTP pull)
+  const mp4Matches = rawHtml.match(/https?:\/\/[^\s"'<>\\]+\.(?:mp4|webm|mkv)(?:\?[^\s"'<>\\]*)?/gi) || [];
+  for (const m of mp4Matches) {
+    const u = normalizeCandidate(m);
+    if (u && !/(?:preview|trailer|thumb|logo|banner|ads?|intro_ad)\./i.test(u)) {
+      return { url: u, kind: "mp4" };
+    }
+  }
+
+  // 2. Direct HLS (.m3u8) playlists
+  const hlsMatches = rawHtml.match(/https?:\/\/[^\s"'<>\\]+\.m3u8(?:\?[^\s"'<>\\]*)?/gi) || [];
+  for (const m of hlsMatches) {
+    const u = normalizeCandidate(m);
+    if (u) return { url: u, kind: "hls" };
+  }
+
+  // 3. <source src="..."> or <video src="..."> tags (including relative paths)
+  const srcTagMatches = [...rawHtml.matchAll(/<(?:source|video)\b[^>]*\bsrc=["']([^"']+)["']/gi)];
+  for (const m of srcTagMatches) {
+    const u = normalizeCandidate(m[1]);
+    if (u) {
+      return { url: u, kind: /\.m3u8(?:[?#]|$)/i.test(u) ? "hls" : "mp4" };
+    }
+  }
+
+  // 4. Known file hosts inside page
+  const hostMatch = rawHtml.match(/https?:\/\/(?:www\.)?(?:mediafire\.com\/file\/[^\s"'<>]+|pixeldrain\.com\/u\/[^\s"'<>]+|drive\.google\.com\/file\/d\/[^\s"'<>]+|ok\.ru\/video\/[^\s"'<>]+)/i);
+  if (hostMatch) {
+    const u = normalizeCandidate(hostMatch[0]);
+    if (u) return { url: u, kind: "host" };
+  }
+
+  // 5. Embedded video player <iframe src="...">
+  const iframeMatches = [...rawHtml.matchAll(/<iframe\b[^>]*\bsrc=["']([^"']+)["']/gi)];
+  for (const m of iframeMatches) {
+    const u = normalizeCandidate(m[1]);
+    if (u && !/(?:facebook|twitter|instagram|google\.com\/recaptcha|disqus|doubleclick|googlesyndication|ads)/i.test(u)) {
+      return { url: u, kind: "iframe" };
+    }
+  }
+
+  return null;
 }
 
 /* ── Failure Classifier & Admin Replacement Alert Formatting ──────────── */

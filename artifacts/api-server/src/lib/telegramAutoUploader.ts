@@ -17,6 +17,7 @@ import {
   formatReplacementAlertMessage,
   buildReplacementInlineKeyboard,
   extractCandidateEpisodeLinksFromHtml,
+  extractDirectMediaFromEpisodeHtml,
   type BatchSessionSpec,
   type LeechJobSpec,
   type ImportRequestSpec,
@@ -519,8 +520,8 @@ export async function resolveAndEnqueueImport(
       }
     });
     const finalItems = mapped.length > 0
-      ? mapped.slice(0, 30)
-      : candidates.slice(0, Math.min(30, reqSpec.toEp - reqSpec.fromEp + 1)).map((c, idx) => ({
+      ? mapped.slice(0, 50)
+      : candidates.slice(0, Math.min(50, reqSpec.toEp - reqSpec.fromEp + 1)).map((c, idx) => ({
           episodeNumber: reqSpec.fromEp + idx,
           url: c.url,
         }));
@@ -1013,10 +1014,63 @@ async function downloadSourceToMp4(
     throw new Error(directErr);
   }
 
+  // Strategy B.5: If URL returned an HTML watch page (e.g. arabic-toons.com), extract direct MP4 / HLS / host / iframe
+  let ytTargetUrl = sourceUrl.startsWith("nova-internal://") ? resolved.url : sourceUrl;
+  if (/not_video_html_page/i.test(directErr) && !sourceUrl.startsWith("nova-internal://")) {
+    try {
+      const pageRes = await fetch(resolved.url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
+          ...(resolved.referer ? { Referer: resolved.referer } : {}),
+        },
+        signal: AbortSignal.timeout(20000),
+      });
+      if (pageRes.ok) {
+        const pageHtml = await pageRes.text();
+        if (/just a moment|cf-browser-verification|attention required! \| cloudflare/i.test(pageHtml)) {
+          throw new Error("cloudflare_403");
+        }
+        const extracted = extractDirectMediaFromEpisodeHtml(pageHtml, resolved.url);
+        if (extracted) {
+          if (extracted.kind === "hls") {
+            await runFfmpegHlsToMp4(extracted.url, outMp4, resolved.url);
+            return { filePath: outMp4 };
+          }
+          if (extracted.kind === "mp4") {
+            const subErr = await tryDirectHttpDownload(extracted.url, outMp4, resolved.url);
+            if (subErr === null) return { filePath: outMp4 };
+          }
+          if (extracted.kind === "host") {
+            const hostRes = await resolveInternalOrHostUrl(extracted.url);
+            if (hostRes.isHls) {
+              await runFfmpegHlsToMp4(hostRes.url, outMp4, hostRes.referer || resolved.url);
+              return { filePath: outMp4 };
+            }
+            const hostErr = await tryDirectHttpDownload(hostRes.url, outMp4, hostRes.referer || resolved.url);
+            if (hostErr === null) return { filePath: outMp4 };
+          }
+          if (extracted.kind === "iframe") {
+            ytTargetUrl = extracted.url;
+          }
+        }
+      }
+    } catch (htmlErr: any) {
+      if (/cloudflare/i.test(String(htmlErr?.message || ""))) {
+        throw htmlErr;
+      }
+    }
+  }
+
   // Strategy C: Fallback to yt-dlp for web video pages / embeds / hosts
-  const ytPath = await runYtDlpToMp4(sourceUrl.startsWith("nova-internal://") ? resolved.url : sourceUrl, workDir);
+  const ytPath = await runYtDlpToMp4(ytTargetUrl, workDir);
   if (ytPath) {
     return { filePath: ytPath };
+  }
+  if (ytTargetUrl !== sourceUrl && !sourceUrl.startsWith("nova-internal://")) {
+    const ytOrig = await runYtDlpToMp4(sourceUrl, workDir);
+    if (ytOrig) return { filePath: ytOrig };
   }
 
   throw new Error(directErr || "unsupported_url");

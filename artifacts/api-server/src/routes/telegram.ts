@@ -39,6 +39,7 @@ import {
   parseBatchCommand,
   parseLeechCommand,
   parseImportCommand,
+  detectImplicitAutoCommand,
   formatAutomationHelpMessage,
 } from "../lib/telegramAutoUploaderLogic.mjs";
 import {
@@ -2008,11 +2009,11 @@ async function handleUpdate(update: any) {
   /* /دفعة أو /batch — تفعيل وضع الدفعة السريع */
   if (/^\/(batch|دفعة|دفعه)(\s|$)/i.test(text)) {
     const parsed = parseBatchCommand(text);
-    if (!parsed.ok || !parsed.spec) {
+    if (!parsed.ok) {
       await sendMessage(chatId, parsed.errorAr || "❌ صيغة أمر /دفعة غير مكتملة.");
       return;
     }
-    const row = await startBatchSession(parsed.spec, String(from?.id || chatId));
+    const row = await startBatchSession(parsed.session, String(from?.id || chatId));
     const secInfo = getSectionDisplayInfo(row.section, row.audio_lang);
     await sendMessage(
       chatId,
@@ -2047,10 +2048,9 @@ async function handleUpdate(update: any) {
     return;
   }
 
-  /* /سحب أو /leech — سحب حلقات من روابط مباشرة أو مواقع فيديو ورفعها لتليجرام */
-  if (/^\/(leech|سحب|رفع_رابط|رفع_روابط)(\s|\n|$)/i.test(text)) {
-    const parsed = parseLeechCommand(text);
-    if (!parsed.ok || !parsed.job) {
+  const runLeechCommand = async (rawCmdText: string) => {
+    const parsed = parseLeechCommand(rawCmdText);
+    if (!parsed.ok) {
       await sendMessage(chatId, parsed.errorAr || "❌ صيغة أمر /سحب غير مكتملة.");
       return;
     }
@@ -2077,13 +2077,11 @@ async function handleUpdate(update: any) {
         },
       }
     );
-    return;
-  }
+  };
 
-  /* /استيراد أو /import — سحب مسلسل كامل تلقائياً (من مصادر التطبيق أو رابط خارجي) */
-  if (/^\/(import|استيراد|سحب_مسلسل)(\s|\n|$)/i.test(text)) {
-    const parsed = parseImportCommand(text);
-    if (!parsed.ok || !parsed.spec) {
+  const runImportCommand = async (rawCmdText: string) => {
+    const parsed = parseImportCommand(rawCmdText);
+    if (!parsed.ok) {
       await sendMessage(chatId, parsed.errorAr || "❌ صيغة أمر /استيراد غير مكتملة.");
       return;
     }
@@ -2092,10 +2090,10 @@ async function handleUpdate(update: any) {
       `⏳ <b>جارٍ فحص المصدر واستخراج الحلقات...</b>\nقد يستغرق هذا بضع ثوانٍ حسب سرعة المصدر.`
     );
     try {
-      const res = await resolveAndEnqueueImport(chatId, parsed.spec);
+      const res = await resolveAndEnqueueImport(chatId, parsed.request);
       await sendMessage(
         chatId,
-        res.summaryHtml,
+        res.messageAr,
         res.ok
           ? {
               reply_markup: {
@@ -2111,6 +2109,17 @@ async function handleUpdate(update: any) {
         `⚠️ حدث خطأ أثناء فحص المصدر: <code>${escapeTelegramHtml(String(err?.message || err).slice(0, 180))}</code>\n💡 يمكنك استخدام أمر /سحب مع الروابط المباشرة أو إرسال رابط بديل.`
       );
     }
+  };
+
+  /* /سحب أو /leech — سحب حلقات من روابط مباشرة أو مواقع فيديو ورفعها لتليجرام */
+  if (/^\/(leech|سحب|رفع_رابط|رفع_روابط)(\s|\n|$)/i.test(text)) {
+    await runLeechCommand(text);
+    return;
+  }
+
+  /* /استيراد أو /import — سحب مسلسل كامل تلقائياً (من مصادر التطبيق أو رابط خارجي) */
+  if (/^\/(import|استيراد|سحب_مسلسل)(\s|\n|$)/i.test(text)) {
+    await runImportCommand(text);
     return;
   }
 
@@ -2249,6 +2258,19 @@ async function handleUpdate(update: any) {
       } catch (err: any) {
         console.error("[tg-storage] admin pending reply error:", err?.message || err);
       }
+    }
+  }
+
+  /* إذا أرسل الأدمن رسالة تبدأ بـ #قسم ومعها رابط أو روابط (حتى بدون كتابة /استيراد أو /سحب) → نفّذها تلقائياً */
+  if (isAdminSender && text && !text.startsWith("/")) {
+    const implicitKind = detectImplicitAutoCommand(text);
+    if (implicitKind === "import") {
+      await runImportCommand(`/استيراد ${text}`);
+      return;
+    }
+    if (implicitKind === "leech") {
+      await runLeechCommand(`/سحب ${text}`);
+      return;
     }
   }
 
