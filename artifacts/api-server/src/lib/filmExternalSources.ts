@@ -1415,19 +1415,17 @@ function cleanExtractedUrl(raw: string): string {
     .trim();
 }
 
-// Hosts whose CDN tokens are NOT IP-locked (verified 200/206 from any user IP directly)
+// Hosts whose CDN tokens are NOT IP-locked AND work from datacenter IPs (verified 200/206 from any user IP directly)
 function isOpenDirectHost(hostname: string): boolean {
   const h = hostname.toLowerCase();
   return (
     h.includes("okstream.") ||
     h.includes("cloudcdn.casa") ||
-    h.includes("vidtube.") ||
-    h.includes("videotube.") ||
     h.includes("workers.dev")
   );
 }
 
-// Hosts that are known dead / Cloudflare-JS-only / unsupported for direct phone extraction
+// Hosts that are known dead / SPA-only / unsupported for direct phone extraction
 function isUnsupportedEmbedHost(hostname: string): boolean {
   const h = hostname.toLowerCase();
   return (
@@ -1436,35 +1434,23 @@ function isUnsupportedEmbedHost(hostname: string): boolean {
     h.includes("megacloud") ||
     h.includes("vidmoly") ||
     h.includes("dood") ||
+    h.includes("d0o0d") ||
+    h.includes("ds2play") ||
     h.includes("mixdrop") ||
-    h.includes("mega.nz")
+    h.includes("mega.nz") ||
+    h.includes("luluvdo.") ||
+    h.includes("byse") ||
+    h.includes("firestream.") ||
+    h.includes("frstream.")
   );
 }
 
-// Hosts whose CDN tokens are IP-bound to the extracting client IP (must extract directly on phone!)
+// Allow ALL non-blocked HTTP embed hosts to extract directly on the user residential phone IP
+// (handles rotated mirror domains + VidTube residential IP + FastVid/EarnVids + LuluStream + UpDown + Uqload + StreamWish + Filelions + OK.ru!)
 function isPhoneExtractableHost(hostname: string): boolean {
   const h = hostname.toLowerCase();
-  if (isUnsupportedEmbedHost(h)) return false;
-  return (
-    h.includes("fastvid.") ||
-    h.includes("earnvids") ||
-    h.includes("vidhide") ||
-    h.includes("lulustream") ||
-    h.includes("luluvdo") ||
-    h.includes("streamwish") ||
-    h.includes("swish") ||
-    h.includes("filelions") ||
-    h.includes("byse") ||
-    h.includes("updown.") ||
-    h.includes("uqload.") ||
-    h.includes("ok.ru") ||
-    h.includes("savefiles") ||
-    h.includes("firestream") ||
-    h.includes("voe.") ||
-    h.includes("okstream.") ||
-    h.includes("vidtube.") ||
-    h.includes("vidhls.")
-  );
+  if (!h || isUnsupportedEmbedHost(h)) return false;
+  return true;
 }
 
 async function extractDirectFromEmbedUrl(
@@ -1619,18 +1605,32 @@ async function extractTopCinemaStreams(
     name: decodeHtmlEntities(m[3].replace(/<[^>]+>/g, "")) || `Server ${m[2]}`,
   }));
 
-  // Prioritize known fast direct-extractable hosts first!
+  // Pre-filter known-dead / SPA-only buttons so every AJAX slot goes to working fast hosts!
+  const isDeadBtn = (name: string): boolean => {
+    const l = name.toLowerCase();
+    return (
+      l.includes("streamtape") ||
+      l.includes("dood") ||
+      l.includes("byse") ||
+      l.includes("firestream") ||
+      l.includes("mixdrop") ||
+      l.includes("vinovo")
+    );
+  };
   const priorityScore = (name: string): number => {
     const l = name.toLowerCase();
     if (l.includes("okstream")) return 1;
-    if (l.includes("streamwish") || l.includes("filelions") || l.includes("earnvids")) return 2;
-    if (l.includes("byse") || l.includes("lulu") || l.includes("firestream")) return 3;
-    if (l.includes("uqload") || l.includes("ok")) return 4;
-    if (l.includes("vidtube") || l.includes("videotube")) return 5;
-    if (l.includes("updown")) return 6;
-    return 9;
+    if (l.includes("vidtube") || l.includes("videotube")) return 2;
+    if (l.includes("lulu")) return 3;
+    if (l.includes("updown")) return 4;
+    if (l.includes("streamwish") || l.includes("filelions") || l.includes("earnvids") || l.includes("vidhide")) return 5;
+    if (l.includes("uqload") || l.includes("savefiles") || l.includes("ok")) return 6;
+    return 8;
   };
-  const ordered = [...srvBtns].sort((a, b) => priorityScore(a.name) - priorityScore(b.name)).slice(0, 6);
+  const ordered = srvBtns
+    .filter((b) => !isDeadBtn(b.name))
+    .sort((a, b) => priorityScore(a.name) - priorityScore(b.name))
+    .slice(0, 8);
 
   const out: ExternalResolvedSource[] = [];
   const seenUrls = new Set<string>();
@@ -1718,24 +1718,37 @@ async function extractEgyDeadStreams(
     return [];
   }
 
+  const isDeadEdBtn = (name: string): boolean => {
+    const l = String(name || "").toLowerCase();
+    return (
+      l.includes("vinovo") ||
+      l.includes("streamtape") ||
+      l.includes("dood") ||
+      l.includes("byse") ||
+      l.includes("mixdrop")
+    );
+  };
   const priorityScore = (name: string): number => {
     const l = String(name || "").toLowerCase();
-    if (l.includes("earnvids") || l.includes("fastv")) return 1;
-    if (l.includes("uqload")) return 2;
-    if (l === "ok" || l.includes("okru")) return 3;
-    if (l.includes("streamwish") || l.includes("savefiles")) return 4;
-    if (l.includes("voe") || l.includes("streamtape")) return 5;
-    if (l.includes("byse") || l.includes("lulu")) return 6;
-    return 9;
+    if (l.includes("uqload")) return 1;
+    if (l.includes("streamwish") || l.includes("vidhide") || l.includes("filelions")) return 2;
+    if (l.includes("earnvids") || l.includes("fastv")) return 3;
+    if (l.includes("lulu") || l.includes("savefiles")) return 4;
+    if (l === "ok" || l.includes("okru")) return 5;
+    if (l.includes("voe")) return 6;
+    return 8;
   };
-  const ordered = [...servers].sort((a, b) => priorityScore(a.name) - priorityScore(b.name)).slice(0, 5);
+  const ordered = servers
+    .filter((s) => !isDeadEdBtn(s.name))
+    .sort((a, b) => priorityScore(a.name) - priorityScore(b.name))
+    .slice(0, 7);
 
   const out: ExternalResolvedSource[] = [];
   const seenUrls = new Set<string>();
 
   // Resolve sequentially with small guard because EgyDead validates watch session cookies cleanly
   for (const srv of ordered) {
-    if (out.length >= 3) break;
+    if (out.length >= 5) break;
     try {
       const rRes = await fetch(`${EGYDEAD_BASE}/watch/resolve`, {
         method: "POST",
@@ -1806,13 +1819,32 @@ export async function resolveExternalFilmStreams(params: {
 
   let entry = getExternalRegistryEntry(params.id);
 
-  // If this is a vault title fallback (or unknown ID with titleHint), search TopCinema & EgyDead by title!
+  // If this is a vault title fallback (or unknown ID with titleHint), search TopCinema & EgyDead by title
+  // STRICT MATCHING: never blindly pick candidates[0] (which causes wrong-movie embeds!)
   if (!entry && params.titleHint) {
-    const candidates = await searchExternalCatalog(params.titleHint, params.type, 6);
+    const candidates = await searchExternalCatalog(params.titleHint, params.type, 8);
     const wantKey = canonicalTitleKey(params.titleHint, params.type);
-    const matched =
-      candidates.find((c) => canonicalTitleKey(c.titleEn || c.titleAr, c.tmdbType) === wantKey) ||
-      candidates[0];
+    const normWords = (s: string) =>
+      String(s || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9؀-ۿ]+/g, " ")
+        .trim()
+        .split(/s+/)
+        .filter((w) => w.length >= 2 && !/^(the|and|for|of|in|to|on|with|movie|film|season|episode|1080p|720p|web|dl)$/.test(w));
+    const wantWords = normWords(params.titleHint);
+    const isStrongMatch = (candTitle: string): boolean => {
+      if (canonicalTitleKey(candTitle, params.type) === wantKey) return true;
+      if (wantWords.length === 0) return false;
+      const candWords = new Set(normWords(candTitle));
+      let hits = 0;
+      for (const w of wantWords) if (candWords.has(w)) hits++;
+      return hits / wantWords.length >= 0.75 && hits >= Math.min(2, wantWords.length);
+    };
+    const matched = candidates.find(
+      (c) =>
+        c.tmdbType === params.type &&
+        (isStrongMatch(c.titleEn || "") || isStrongMatch(c.titleAr || "")),
+    );
     if (matched) entry = getExternalRegistryEntry(matched.id);
   }
   if (!entry) return [];
