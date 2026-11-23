@@ -81,6 +81,7 @@ export default function LibraryScreen() {
   const gridWidth = tvMode && width >= 700
     ? tvPosterWidth * gridColumns + 8 * (gridColumns - 1) + 32
     : Math.min(Math.max(width - 24, 0), 900);
+  const tvSearchWidth = Math.min(Math.max(Math.round(width * 0.22), 175), 250);
   const router = useRouter();
   const { watchHistory, favorites, removeFromHistory, setFavoriteStatus, removeFavorite, updateFavorite, syncAccountNow } = useApp();
   useFocusEffect(useCallback(() => {
@@ -184,8 +185,8 @@ export default function LibraryScreen() {
       if (tvMode && f.mangaId) return false;
       const ar = f.titleAr || (!f.mangaId ? getKnownArabicAnimeTitle(f.id, f.english, f.title) : null);
       const matchesSearch = !sq || [ar, f.english, f.title].some(v => (v || "").toLowerCase().includes(sq));
-      const matchesYear = !year || String(f.startYear || new Date(f.addedAt).getFullYear()) === year;
-      const matchesGenre = !genre || (f.genres || []).includes(genre);
+      const matchesYear = tvMode || !year || String(f.startYear || new Date(f.addedAt).getFullYear()) === year;
+      const matchesGenre = tvMode || !genre || (f.genres || []).includes(genre);
       return matchesSearch && matchesYear && matchesGenre;
     });
   }, [favorites, search, year, genre, tvMode]);
@@ -291,77 +292,147 @@ export default function LibraryScreen() {
   return (
     <View style={[s.container, { backgroundColor: colors.background }]}>
 
-      {/* ── Header ── */}
-      <View style={[s.header, { paddingTop: topPad + (tvMode ? 8 : 14) }]}>
-        <Text style={[s.title, { color: colors.text }]}>قائمتي</Text>
-        {counts[activeTab] > 0 && (
-          <View style={[s.countBadge, { backgroundColor: colors.primary + "20" }]}>
-            <Text style={[s.countText, { color: colors.primary }]}>{counts[activeTab]}</Text>
+      {tvMode ? (
+        /* ── TV Compact Merged Top Bar (Title + Tabs + Compact Search in 1 row) ── */
+        <View style={[s.tvTopBar, { paddingTop: topPad + 6, borderBottomColor: colors.border }]}>
+          <View style={s.tvTitleGroup}>
+            <Text style={[s.tvTitle, { color: colors.text }]} numberOfLines={1}>قائمتي</Text>
+            {counts[activeTab] > 0 && (
+              <View style={[s.countBadge, { backgroundColor: colors.primary + "22" }]}>
+                <Text style={[s.countText, { color: colors.primary }]}>{counts[activeTab]}</Text>
+              </View>
+            )}
           </View>
-        )}
-      </View>
 
-      {/* ── Tabs ── */}
-      <ScrollView
-        horizontal
-        focusable={false}
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={s.tabsRow}
-        style={s.tabsScroll}
-      >
-        {visibleTabs.map((tab, i) => {
-          const active = activeTab === i;
-          return (
-            <Pressable
-              key={tab.label}
-              onPress={() => handleTabPress(i)}
-              focusable={tvMode}
-              hasTVPreferredFocus={tvMode && i === activeTab}
-              style={({ focused }) => [
-                s.tabBtn,
-                tvMode && s.tvTabBtn,
-                { backgroundColor: active ? colors.primary : colors.card, borderColor: active ? colors.primary : colors.border },
-                tvMode && tvFocusStyle(focused),
-              ]}
-            >
-              <Ionicons
-                name={active ? tab.activeIcon : tab.icon}
-                size={tvMode ? 15 : 14}
-                color={active ? "#fff" : colors.mutedForeground}
-              />
-              <Text style={[s.tabText, tvMode && s.tvTabText, { color: active ? "#fff" : colors.mutedForeground }]}>
-                {tab.label}
-              </Text>
-              {counts[i] > 0 && (
-                <View style={[s.tabBadge, { backgroundColor: active ? "rgba(255,255,255,0.25)" : colors.primary + "30" }]}>
-                  <Text style={[s.tabBadgeText, tvMode && s.tvBadgeText, { color: active ? "#fff" : colors.primary }]}>{counts[i]}</Text>
-                </View>
-              )}
-            </Pressable>
-          );
-        })}
-      </ScrollView>
+          <ScrollView
+            horizontal
+            focusable={false}
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={s.tvTabsRow}
+            style={s.tvTabsScroll}
+          >
+            {visibleTabs.map((tab, i) => {
+              const active = activeTab === i;
+              return (
+                <Pressable
+                  key={tab.label}
+                  onPress={() => handleTabPress(i)}
+                  focusable={tvMode}
+                  hasTVPreferredFocus={tvMode && i === activeTab}
+                  style={({ focused }) => [
+                    s.tabBtn,
+                    s.tvTabBtn,
+                    { backgroundColor: active ? colors.primary : colors.card, borderColor: active ? colors.primary : colors.border },
+                    tvFocusStyle(focused),
+                  ]}
+                >
+                  <Ionicons
+                    name={active ? tab.activeIcon : tab.icon}
+                    size={14}
+                    color={active ? "#fff" : colors.mutedForeground}
+                  />
+                  <Text style={[s.tabText, s.tvTabText, { color: active ? "#fff" : colors.mutedForeground }]}>
+                    {tab.label}
+                  </Text>
+                  {counts[i] > 0 && (
+                    <View style={[s.tabBadge, { backgroundColor: active ? "rgba(255,255,255,0.25)" : colors.primary + "30" }]}>
+                      <Text style={[s.tabBadgeText, s.tvBadgeText, { color: active ? "#fff" : colors.primary }]}>{counts[i]}</Text>
+                    </View>
+                  )}
+                </Pressable>
+              );
+            })}
+          </ScrollView>
 
-      {/* ── Search ── */}
-      <View style={[s.searchWrap, tvMode && s.tvSearchWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        <Ionicons name="search-outline" size={16} color={colors.mutedForeground} />
-        <TextInput
-          value={search}
-          onChangeText={setSearch}
-          placeholder="ابحث في قائمتك..."
-          placeholderTextColor={colors.mutedForeground}
-          style={[s.searchInput, tvMode && s.tvSearchInput, { color: colors.text }]}
-        />
-        {search.length > 0 && (
-          <Pressable onPress={() => setSearch("")} hitSlop={8} focusable={tvMode}
-            style={({ focused }) => [tvMode && tvFocusStyle(focused)]}>
-            <Ionicons name="close-circle" size={16} color={colors.mutedForeground} />
-          </Pressable>
-        )}
-      </View>
+          <View style={[s.tvCompactSearchWrap, { width: tvSearchWidth, backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Ionicons name="search-outline" size={14} color={colors.mutedForeground} />
+            <TextInput
+              value={search}
+              onChangeText={setSearch}
+              placeholder="ابحث في قائمتك..."
+              placeholderTextColor={colors.mutedForeground}
+              style={[s.searchInput, s.tvSearchInput, { color: colors.text }]}
+            />
+            {search.length > 0 && (
+              <Pressable onPress={() => setSearch("")} hitSlop={8} focusable={tvMode}
+                style={({ focused }) => [tvFocusStyle(focused)]}>
+                <Ionicons name="close-circle" size={15} color={colors.mutedForeground} />
+              </Pressable>
+            )}
+          </View>
+        </View>
+      ) : (
+        <>
+          {/* ── Header ── */}
+          <View style={[s.header, { paddingTop: topPad + 14 }]}>
+            <Text style={[s.title, { color: colors.text }]}>قائمتي</Text>
+            {counts[activeTab] > 0 && (
+              <View style={[s.countBadge, { backgroundColor: colors.primary + "20" }]}>
+                <Text style={[s.countText, { color: colors.primary }]}>{counts[activeTab]}</Text>
+              </View>
+            )}
+          </View>
+
+          {/* ── Tabs ── */}
+          <ScrollView
+            horizontal
+            focusable={false}
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={s.tabsRow}
+            style={s.tabsScroll}
+          >
+            {visibleTabs.map((tab, i) => {
+              const active = activeTab === i;
+              return (
+                <Pressable
+                  key={tab.label}
+                  onPress={() => handleTabPress(i)}
+                  focusable={false}
+                  style={() => [
+                    s.tabBtn,
+                    { backgroundColor: active ? colors.primary : colors.card, borderColor: active ? colors.primary : colors.border },
+                  ]}
+                >
+                  <Ionicons
+                    name={active ? tab.activeIcon : tab.icon}
+                    size={14}
+                    color={active ? "#fff" : colors.mutedForeground}
+                  />
+                  <Text style={[s.tabText, { color: active ? "#fff" : colors.mutedForeground }]}>
+                    {tab.label}
+                  </Text>
+                  {counts[i] > 0 && (
+                    <View style={[s.tabBadge, { backgroundColor: active ? "rgba(255,255,255,0.25)" : colors.primary + "30" }]}>
+                      <Text style={[s.tabBadgeText, { color: active ? "#fff" : colors.primary }]}>{counts[i]}</Text>
+                    </View>
+                  )}
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+
+          {/* ── Search ── */}
+          <View style={[s.searchWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Ionicons name="search-outline" size={16} color={colors.mutedForeground} />
+            <TextInput
+              value={search}
+              onChangeText={setSearch}
+              placeholder="ابحث في قائمتك..."
+              placeholderTextColor={colors.mutedForeground}
+              style={[s.searchInput, { color: colors.text }]}
+            />
+            {search.length > 0 && (
+              <Pressable onPress={() => setSearch("")} hitSlop={8} focusable={false}>
+                <Ionicons name="close-circle" size={16} color={colors.mutedForeground} />
+              </Pressable>
+            )}
+          </View>
+        </>
+      )}
+
       {activeTab === 2 && (
-        <View style={s.libraryFilters}>
-          <ScrollView horizontal focusable={false} showsHorizontalScrollIndicator={false} contentContainerStyle={s.filterChips}>
+        <View style={[s.libraryFilters, tvMode && s.tvLibraryFilters]}>
+          <ScrollView horizontal focusable={false} showsHorizontalScrollIndicator={false} contentContainerStyle={[s.filterChips, tvMode && s.tvFilterChips]}>
             <Pressable
               onPress={() => setStatusFilter("all")}
               focusable={tvMode}
@@ -396,7 +467,7 @@ export default function LibraryScreen() {
                     tvMode && tvFocusStyle(focused),
                   ]}
                 >
-                  <Ionicons name={active ? st.activeIcon : st.icon} size={tvMode ? 14 : 12} color={active ? st.color : colors.textSecondary} />
+                  <Ionicons name={active ? st.activeIcon : st.icon} size={tvMode ? 13 : 12} color={active ? st.color : colors.textSecondary} />
                   <Text style={[
                     s.filterChipText,
                     tvMode && s.tvFilterChipText,
@@ -408,36 +479,37 @@ export default function LibraryScreen() {
               );
             })}
           </ScrollView>
-          <ScrollView horizontal focusable={false} showsHorizontalScrollIndicator={false} contentContainerStyle={s.filterChips}>
-            {LIBRARY_YEARS.map(y => (
-              <Pressable key={y || "all-years"} onPress={() => setYear(y)} focusable={tvMode}
-                style={({ focused }) => [
-                  s.filterChip,
-                  tvMode && s.tvFilterChip,
-                  year === y && s.filterChipActive,
-                  {
-                    backgroundColor: year === y ? colors.accentSurface : colors.surface,
-                    borderColor: year === y ? colors.accentBorder : colors.border,
-                  },
-                  tvMode && tvFocusStyle(focused),
-                ]}>
-                <Text style={[
-                  s.filterChipText,
-                  tvMode && s.tvFilterChipText,
-                  year === y && s.filterChipTextActive,
-                  { color: year === y ? colors.accent : colors.textSecondary },
-                ]}>{y || "كل الأعوام"}</Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-          <ScrollView horizontal focusable={false} showsHorizontalScrollIndicator={false} contentContainerStyle={s.filterChips}>
-            {["", "Action", "Adventure", "Comedy", "Drama", "Fantasy", "Romance", "Mystery", "Sports"].map(g => (
-              <Pressable key={g || "all-genres"} onPress={() => setGenre(g)} focusable={tvMode}
-                style={({ focused }) => [s.filterChip, tvMode && s.tvFilterChip, genre === g && s.filterChipActive, tvMode && tvFocusStyle(focused)]}>
-                <Text style={[s.filterChipText, tvMode && s.tvFilterChipText, genre === g && s.filterChipTextActive]}>{g || "كل التصنيفات"}</Text>
-              </Pressable>
-            ))}
-          </ScrollView>
+          {!tvMode && (
+            <>
+              <ScrollView horizontal focusable={false} showsHorizontalScrollIndicator={false} contentContainerStyle={s.filterChips}>
+                {LIBRARY_YEARS.map(y => (
+                  <Pressable key={y || "all-years"} onPress={() => setYear(y)} focusable={false}
+                    style={() => [
+                      s.filterChip,
+                      year === y && s.filterChipActive,
+                      {
+                        backgroundColor: year === y ? colors.accentSurface : colors.surface,
+                        borderColor: year === y ? colors.accentBorder : colors.border,
+                      },
+                    ]}>
+                    <Text style={[
+                      s.filterChipText,
+                      year === y && s.filterChipTextActive,
+                      { color: year === y ? colors.accent : colors.textSecondary },
+                    ]}>{y || "كل الأعوام"}</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+              <ScrollView horizontal focusable={false} showsHorizontalScrollIndicator={false} contentContainerStyle={s.filterChips}>
+                {["", "Action", "Adventure", "Comedy", "Drama", "Fantasy", "Romance", "Mystery", "Sports"].map(g => (
+                  <Pressable key={g || "all-genres"} onPress={() => setGenre(g)} focusable={false}
+                    style={() => [s.filterChip, genre === g && s.filterChipActive]}>
+                    <Text style={[s.filterChipText, genre === g && s.filterChipTextActive]}>{g || "كل التصنيفات"}</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </>
+          )}
         </View>
       )}
 
@@ -492,7 +564,7 @@ export default function LibraryScreen() {
               <Pressable
                 onPress={() => void openFavoriteItem(item)}
                 focusable={tvMode}
-                style={({ focused }) => [s.favCard, tvMode && s.tvFavCard, tvMode && tvFocusStyle(focused)]}
+                style={({ focused }) => [s.favCard, tvMode && s.tvFavCard, tvMode && width >= 700 && { flex: 0, width: tvPosterWidth }, tvMode && tvFocusStyle(focused)]}
               >
                 <LibraryImage
                   uri={item.thumbnail}
@@ -587,7 +659,7 @@ export default function LibraryScreen() {
             contentContainerStyle={[s.charGrid, { paddingBottom: insets.bottom + 100 }]}
             showsVerticalScrollIndicator={false}
             renderItem={({ item }) => (
-              <View style={s.charCard}>
+              <View style={[s.charCard, tvMode && width >= 700 && { flex: 0, width: tvPosterWidth }]}>
                 <LibraryImage uri={item.image} style={[s.charImg, { backgroundColor: "#1C1C22" }]} />
                 <Pressable
                   onPress={() => removeChar(item.id)}
@@ -643,9 +715,25 @@ const s = StyleSheet.create({
     paddingHorizontal: 13, paddingVertical: 8,
     borderRadius: 20, borderWidth: 1,
   },
-  tvTabBtn: { paddingHorizontal: 13, paddingVertical: 7, borderRadius: 11 },
+  tvTopBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 18,
+    paddingBottom: 6,
+    gap: 10,
+  },
+  tvTitleGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flexShrink: 0,
+  },
+  tvTitle: { fontSize: 20, fontFamily: "Cairo_800ExtraBold" },
+  tvTabsScroll: { flex: 1, flexGrow: 1, flexShrink: 1 },
+  tvTabsRow: { gap: 6, paddingVertical: 2, alignItems: "center" },
+  tvTabBtn: { paddingHorizontal: 11, paddingVertical: 5, borderRadius: 10 },
   tabText: { fontSize: 12, fontFamily: "Cairo_600SemiBold" },
-  tvTabText: { fontSize: 13 },
+  tvTabText: { fontSize: 12 },
   tabBadge: { paddingHorizontal: 5, paddingVertical: 1, borderRadius: 8 },
   tabBadgeText: { fontSize: 9, fontFamily: "Cairo_700Bold" },
   tvBadgeText: { fontSize: 11 },
@@ -683,7 +771,7 @@ const s = StyleSheet.create({
   favCard: { flex: 1, gap: 6, position: "relative" },
   favImg: { width: "100%", aspectRatio: 0.68, borderRadius: 10 },
   tvFavCard: { gap: 6 },
-  tvFavImg: { aspectRatio: 0.69, borderRadius: 12, borderWidth: 1.5, borderColor: "rgba(255,255,255,0.08)" },
+  tvFavImg: { aspectRatio: 0.72, borderRadius: 11, borderWidth: 1.5, borderColor: "rgba(255,255,255,0.08)" },
   favHeart: { position: "absolute", top: 6, right: 6, backgroundColor: "rgba(0,0,0,0.6)", borderRadius: 10, padding: 4 },
   tvFavHeart: { top: 7, right: 7, borderRadius: 11, padding: 5 },
   statusChip: { flexDirection: "row", alignItems: "center", gap: 5 },
@@ -712,8 +800,18 @@ const s = StyleSheet.create({
   emptyTitle: { fontSize: 17, fontFamily: "Cairo_700Bold", textAlign: "center" },
   emptyDesc: { fontSize: 12, fontFamily: "Cairo_400Regular", textAlign: "center", lineHeight: 20 },
   browseBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 22, paddingVertical: 11, borderRadius: 12, marginTop: 4 },
-  tvSearchWrap: { minHeight: 42, paddingHorizontal: 14, paddingVertical: 6, borderRadius: 11, marginBottom: 6 },
-  tvSearchInput: { fontSize: 13.5, lineHeight: 20 },
+  tvCompactSearchWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    height: 34,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    flexShrink: 0,
+  },
+  tvSearchWrap: { minHeight: 36, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 10, marginBottom: 4 },
+  tvSearchInput: { fontSize: 12, lineHeight: 18, paddingVertical: 0 },
   browseBtnText: { color: "#fff", fontFamily: "Cairo_700Bold", fontSize: 13 },
   libraryFilters: { gap: 5, marginBottom: 6 },
   filterChips: { paddingHorizontal: 16, gap: 7 },
@@ -721,6 +819,8 @@ const s = StyleSheet.create({
   filterChipActive: { backgroundColor: "rgba(139,92,246,0.22)", borderColor: "rgba(139,92,246,0.5)" },
   filterChipText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.5)" },
   filterChipTextActive: { color: "#c4b5fd" },
-  tvFilterChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 9 },
-  tvFilterChipText: { fontSize: 12 },
+  tvLibraryFilters: { gap: 0, marginBottom: 5 },
+  tvFilterChips: { paddingHorizontal: 18, gap: 6 },
+  tvFilterChip: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 9 },
+  tvFilterChipText: { fontSize: 11.5 },
 });
