@@ -362,7 +362,7 @@ export async function streamFilmSources(params: {
 }): Promise<FilmServerLink[]> {
   const base = getBaseUrl();
   const mediaType: TmdbMediaType = params.tmdbType || params.type || "movie";
-  const cacheKey = `film-srcs-v7-${mediaType}-${params.tmdbId}-s${params.season}-e${params.episode}`;
+  const cacheKey = `film-srcs-v8-${mediaType}-${params.tmdbId}-s${params.season}-e${params.episode}`;
 
   if (!params.forceRefresh) {
     try {

@@ -190,26 +190,25 @@ const GenreCard = React.memo(function GenreCard({
 
 const FilmBrowseCard = React.memo(function FilmBrowseCard({
   film,
-  onPress,
-  columns,
+  onPressFilm,
+  cardW,
+  cardH,
+  tvMode,
 }: {
   film: FilmSummary;
-  onPress: () => void;
-  columns: number;
+  onPressFilm: (film: FilmSummary) => void;
+  cardW: number;
+  cardH: number;
+  tvMode: boolean;
 }) {
   const { g } = useBrowseTheme();
-  const { width, height } = useWindowDimensions();
-  const tvMode = isTvDevice(width, height);
-  const gridW = Math.min(Math.max(width - 24, 280), tvMode ? 1100 : 900);
-  const cardW = Math.max(88, Math.floor((gridW - 24 - 10 * (columns - 1)) / columns));
-  const cardH = Math.round(cardW * 1.44);
   const isSeries = film.tmdbType === "tv";
   const fmtLabel =
     film.mediaType === "animation" ? "أنميشن" : isSeries ? "مسلسل" : "فيلم";
 
   return (
     <Pressable
-      onPress={onPress}
+      onPress={() => onPressFilm(film)}
       focusable={tvMode}
       style={({ focused }) => [
         g.card,
@@ -329,11 +328,22 @@ export default function BrowseScreen() {
   }, [params.category, params.type, params.sort, params.genre, params.year]);
 
   const effectiveYear = year || season;
+  const loadingMoreRef = useRef(false);
+  const requestSeqRef = useRef(0);
+  const hasUserScrolledRef = useRef(false);
 
   const loadPage = useCallback(
     async (targetPage: number, replace: boolean) => {
-      if (replace) setLoading(true);
-      else setLoadingMore(true);
+      if (!replace && loadingMoreRef.current) return;
+      const reqId = ++requestSeqRef.current;
+      if (replace) {
+        hasUserScrolledRef.current = false;
+        loadingMoreRef.current = false;
+        setLoading(true);
+      } else {
+        loadingMoreRef.current = true;
+        setLoadingMore(true);
+      }
       try {
         const res = await fetchFilmBrowse({
           category: (format || "all") as any,
@@ -342,6 +352,7 @@ export default function BrowseScreen() {
           year: effectiveYear ? Number(effectiveYear) : undefined,
           page: targetPage,
         });
+        if (reqId !== requestSeqRef.current) return;
         setPage(res.page);
         setTotalPages(res.totalPages);
         setTotalResults(res.totalResults || res.results.length);
@@ -349,20 +360,25 @@ export default function BrowseScreen() {
           if (replace) return res.results;
           const seen = new Set(prev.map((x) => `${x.tmdbType}:${x.id}`));
           const merged = [...prev];
+          let added = 0;
           for (const item of res.results) {
             const k = `${item.tmdbType}:${item.id}`;
             if (!seen.has(k)) {
               seen.add(k);
               merged.push(item);
+              added++;
             }
           }
-          return merged;
+          return added > 0 ? merged : prev;
         });
       } catch {
-        if (replace) setItems([]);
+        if (replace && reqId === requestSeqRef.current) setItems([]);
       } finally {
-        setLoading(false);
-        setLoadingMore(false);
+        if (reqId === requestSeqRef.current) {
+          setLoading(false);
+          setLoadingMore(false);
+          loadingMoreRef.current = false;
+        }
       }
     },
     [format, activeGenre, sort, effectiveYear],
@@ -371,6 +387,29 @@ export default function BrowseScreen() {
   useEffect(() => {
     void loadPage(1, true);
   }, [loadPage]);
+
+  const cardW = Math.max(88, Math.floor((gridWidth - 24 - 10 * (gridColumns - 1)) / gridColumns));
+  const cardH = Math.round(cardW * 1.44);
+  const rowHeight = cardH + 10;
+
+  const handlePressFilm = useCallback(
+    (item: FilmSummary) => {
+      router.push({
+        pathname: "/film/[id]",
+        params: { id: String(item.id), type: item.tmdbType, title: item.titleAr },
+      });
+    },
+    [router],
+  );
+
+  const getGridItemLayout = useCallback(
+    (_: any, index: number) => ({
+      length: rowHeight,
+      offset: rowHeight * index,
+      index,
+    }),
+    [rowHeight],
+  );
 
   const genreCovers = useMemo(() => {
     const map: Record<string, string> = {};
@@ -545,8 +584,8 @@ export default function BrowseScreen() {
           overScrollMode="never"
           initialNumToRender={12}
           maxToRenderPerBatch={8}
-          windowSize={5}
-          removeClippedSubviews={Platform.OS === "android"}
+          windowSize={7}
+          removeClippedSubviews={false}
           renderItem={({ item }) => (
             <GenreCard
               item={item}
@@ -571,22 +610,29 @@ export default function BrowseScreen() {
               data={items}
               style={{ width: gridWidth, alignSelf: "center" }}
               key={`film-grid-${gridColumns}`}
-              keyExtractor={(item, i) => `${item.tmdbType}-${item.id}-${i}`}
+              keyExtractor={(item) => `${item.tmdbType}-${item.id}`}
               numColumns={gridColumns}
+              getItemLayout={getGridItemLayout}
               contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 6, paddingBottom: 88 }}
               columnWrapperStyle={{ gap: 10, marginBottom: 10 }}
               showsVerticalScrollIndicator={false}
               overScrollMode="never"
-              initialNumToRender={9}
-              maxToRenderPerBatch={6}
-              windowSize={5}
-              removeClippedSubviews={Platform.OS === "android"}
+              initialNumToRender={12}
+              maxToRenderPerBatch={9}
+              windowSize={9}
+              removeClippedSubviews={false}
+              onScrollBeginDrag={() => {
+                hasUserScrolledRef.current = true;
+              }}
+              onMomentumScrollBegin={() => {
+                hasUserScrolledRef.current = true;
+              }}
               onEndReached={() => {
-                if (!loading && !loadingMore && page < totalPages) {
+                if (hasUserScrolledRef.current && !loading && !loadingMore && !loadingMoreRef.current && page < totalPages) {
                   void loadPage(page + 1, false);
                 }
               }}
-              onEndReachedThreshold={0.4}
+              onEndReachedThreshold={0.35}
               ListHeaderComponent={
                 items.length > 0 ? (
                   <View style={g.resultsHeading}>
@@ -612,13 +658,10 @@ export default function BrowseScreen() {
               renderItem={({ item }) => (
                 <FilmBrowseCard
                   film={item}
-                  columns={gridColumns}
-                  onPress={() =>
-                    router.push({
-                      pathname: "/film/[id]",
-                      params: { id: String(item.id), type: item.tmdbType, title: item.titleAr },
-                    })
-                  }
+                  cardW={cardW}
+                  cardH={cardH}
+                  tvMode={tvMode}
+                  onPressFilm={handlePressFilm}
                 />
               )}
             />

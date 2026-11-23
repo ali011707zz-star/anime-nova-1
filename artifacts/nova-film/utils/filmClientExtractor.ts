@@ -30,6 +30,35 @@ function setCachedExtract(embedUrl: string, links: FilmServerLink[]): void {
   }
 }
 
+// Pure Hermes / React Native safe URL helpers (never rely on URL.origin / URL.hostname / relative new URL!)
+export function getUrlOrigin(rawUrl: string): string {
+  const m = String(rawUrl || "").trim().match(/^(https?:\/\/[^\/?#]+)/i);
+  return m ? m[1] : "";
+}
+
+export function getUrlHostname(rawUrl: string): string {
+  const m = String(rawUrl || "").trim().match(/^https?:\/\/([^\/?#:]+)/i);
+  return m ? m[1].toLowerCase() : "";
+}
+
+export function resolveRelativeUrl(rel: string, base: string): string {
+  const s = String(rel || "").trim();
+  if (!s) return "";
+  if (/^https?:\/\//i.test(s)) return s;
+  const origin = getUrlOrigin(base);
+  if (!origin) return s;
+  if (s.startsWith("//")) {
+    const proto = base.toLowerCase().startsWith("http://") ? "http:" : "https:";
+    return `${proto}${s}`;
+  }
+  if (s.startsWith("/")) return `${origin}${s}`;
+  const cleanBase = base.split(/[?#]/)[0];
+  const dir = cleanBase.endsWith("/")
+    ? cleanBase
+    : cleanBase.slice(0, Math.max(origin.length, cleanBase.lastIndexOf("/") + 1));
+  return `${dir}${s}`;
+}
+
 function decodeHtmlEntities(input: string): string {
   return String(input || "")
     .replace(/&quot;/g, '"')
@@ -142,13 +171,8 @@ function extractSecondaryFastVariant(
     if (!next || next.startsWith("#")) continue;
     const resM = inf.match(/RESOLUTION=(\d+)x(\d+)/i);
     const height = resM ? Number.parseInt(resM[2], 10) : 0;
-    let absUrl = next;
-    try {
-      absUrl = next.startsWith("http") ? next : new URL(next, masterUrl).toString();
-    } catch {
-      continue;
-    }
-    if (absUrl === masterUrl) continue;
+    const absUrl = resolveRelativeUrl(next, masterUrl);
+    if (!absUrl || absUrl === masterUrl) continue;
     if (height >= 540 && height <= 800 && primaryTier !== "720p HD") {
       return { url: absUrl, tier: "720p HD" };
     }
@@ -159,19 +183,19 @@ function extractSecondaryFastVariant(
   return fallback480 ? { url: fallback480, tier: "480p SD" } : null;
 }
 
-/**
- * Extracts verified direct CDN stream(s) (HLS .m3u8 or progressive .mp4) directly on the user phone.
- * Runs from the user own residential IP with 0% VPS video bandwidth, measures CDN latency for
- * fastest-first ordering, and splits lighter 720p/480p variants when present for instant start & seek.
- */
 export async function extractFilmSourcesOnPhone(
   desc: FilmClientExtractDescriptor,
   index: number,
   parentSignal?: AbortSignal,
 ): Promise<FilmServerLink[]> {
-  const embedUrl = String(desc?.embedUrl || "").trim();
-  if (!embedUrl.startsWith("http")) return [];
+  const rawEmbed = String(desc?.embedUrl || "").trim();
+  if (!rawEmbed.startsWith("http")) return [];
   if (parentSignal?.aborted) return [];
+
+  // Normalize uqload /e/<id>.html -> /embed-<id>.html
+  const embedUrl = /uqload\.[^/]+\/e\/([a-z0-9]+)(?:\.html)?/i.test(rawEmbed)
+    ? rawEmbed.replace(/\/e\/([a-z0-9]+)(?:\.html)?/i, "/embed-$1.html")
+    : rawEmbed;
 
   const cached = getCachedExtract(embedUrl);
   if (cached) {
@@ -182,8 +206,9 @@ export async function extractFilmSourcesOnPhone(
   }
 
   try {
-    const parsedInitial = new URL(embedUrl);
-    const initialOrigin = parsedInitial.origin;
+    const initialOrigin = getUrlOrigin(embedUrl);
+    const initialHost = getUrlHostname(embedUrl);
+    if (!initialOrigin) return [];
 
     const res = await fetchWithTimeout(
       embedUrl,
@@ -197,12 +222,8 @@ export async function extractFilmSourcesOnPhone(
     );
     if (!res.ok) return [];
 
-    // Use the FINAL redirected origin so redirecting embeds (e.g. mirror domains) pass Referer checks!
-    let embedOrigin = initialOrigin;
-    try {
-      if (res.url) embedOrigin = new URL(res.url).origin;
-    } catch {}
-    const hostOrigin = `${embedOrigin}/`;
+    const finalOrigin = (res.url && getUrlOrigin(res.url)) || initialOrigin;
+    const hostOrigin = `${finalOrigin}/`;
 
     const html = await res.text();
     if (!html || html.length < 100) return [];
@@ -212,11 +233,11 @@ export async function extractFilmSourcesOnPhone(
     const cdnHeaders: Record<string, string> = {
       "User-Agent": PHONE_BROWSER_UA,
       Referer: hostOrigin,
-      Origin: embedOrigin,
+      Origin: finalOrigin,
     };
 
     // 1. OK.ru JSON manifest extraction
-    if (desc.hostKind === "okru" || parsedInitial.hostname.includes("ok.ru")) {
+    if (desc.hostKind === "okru" || initialHost.includes("ok.ru")) {
       const optMatch = html.match(/data-options="([^"]+)"/i);
       if (optMatch) {
         const decoded = decodeHtmlEntities(optMatch[1]);
@@ -304,7 +325,6 @@ export async function extractFilmSourcesOnPhone(
         };
         const outLinks: FilmServerLink[] = [primaryLink];
 
-        // Also expose fast-start 720p/480p variant if present in multi-bitrate master playlist
         const secondary = extractSecondaryFastVariant(manifest, m3u8, detectedTier);
         if (secondary) {
           const sqm = buildQualityMeta(secondary.tier);
@@ -328,7 +348,7 @@ export async function extractFilmSourcesOnPhone(
       }
     }
 
-    // 3. Direct progressive MP4 extraction (e.g. UpDown, Uqload, SaveFiles — supports instant byte-range seeking!)
+    // 3. Direct progressive MP4 extraction (UpDown, Uqload, SaveFiles — instant byte-range seeking!)
     const mp4Matches = combined.match(/https?:\/\/[^"'\s\\<>]+\.mp4[^"'\s\\<>]*/gi) || [];
     const mp4Candidates = Array.from(
       new Set(
