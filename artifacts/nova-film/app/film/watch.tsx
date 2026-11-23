@@ -384,6 +384,7 @@ export default function FilmWatchScreen() {
       const playUrl = resolveFilmPlayableUrl(src);
       const lower = playUrl.toLowerCase();
       const isHls =
+        src.kind === "hls" ||
         src.type === "hls" ||
         lower.includes("/api/anime/hls-proxy") ||
         lower.includes("/proxy/hls") ||
@@ -491,14 +492,17 @@ export default function FilmWatchScreen() {
       try {
         const [token, downloadToken] = await Promise.all([getAuthToken(), getDownloadToken()]);
         const isHls =
+          src.kind === "hls" ||
+          src.type === "hls" ||
           playUrl.includes("/api/anime/hls-proxy") ||
           playUrl.includes(".m3u8") ||
           playUrl.includes("master.txt");
         const siteLower = String(src.site || "").toLowerCase();
         const isHardsub = Boolean(src.hardsubbed) || siteLower === "vidhls" || siteLower === "vidhls-alt";
         const base = getBaseUrl();
+        const refHeader = src.headers?.Referer || src.headers?.referer || "";
         const downloadUrl = isHls
-          ? `${base}/api/film/download-mp4?site=${encodeURIComponent(siteTag)}&url=${encodeURIComponent(playUrl)}`
+          ? `${base}/api/film/download-mp4?site=${encodeURIComponent(siteTag)}&url=${encodeURIComponent(playUrl)}${refHeader ? `&ref=${encodeURIComponent(refHeader)}` : ""}`
           : playUrl;
         await startGlobalDownload({
           animeId: filmId,

@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "./baseUrl";
 import { secureFetch, secureStreamFetch } from "./secureApi";
+import { extractFilmSourceOnPhone } from "./filmClientExtractor";
 import {
   normalizeFilmSummary,
   type FilmDetail,
@@ -268,9 +269,10 @@ export async function fetchFilmSubtitleTracks(params: {
 
 function normalizeServerFromSSE(raw: any, index: number, base: string): FilmServerLink | null {
   if (!raw || typeof raw !== "object") return null;
-  const rawUrl = resolveAbsUrl(raw.proxyUrl || raw.directUrl || raw.url, base);
+  // Direct CDN first (0% VPS video bandwidth!) — never prefer VPS proxy over direct CDN
   const directUrl = resolveAbsUrl(raw.directUrl || raw.url, base);
   const proxyUrl = resolveAbsUrl(raw.proxyUrl, base);
+  const rawUrl = directUrl || proxyUrl;
   if (!rawUrl || (!rawUrl.startsWith("http://") && !rawUrl.startsWith("https://"))) {
     return null;
   }
@@ -302,21 +304,28 @@ function normalizeServerFromSSE(raw: any, index: number, base: string): FilmServ
   const isEmbed = Boolean(raw.isEmbed) || rawUrl.includes("mega.nz") || rawUrl.includes("mega.co.nz");
   const isHls =
     !isEmbed &&
-    (rawUrl.includes(".m3u8") || rawUrl.includes("hls-proxy") || rawUrl.includes("/hls/"));
+    (raw.type === "hls" ||
+      raw.kind === "hls" ||
+      rawUrl.includes(".m3u8") ||
+      rawUrl.includes("hls-proxy") ||
+      rawUrl.includes("/proxy/hls") ||
+      rawUrl.includes("/hls/"));
   const kind: FilmServerLink["kind"] = isEmbed ? "embed" : isHls ? "hls" : "direct";
   const subRaw = raw.subtitleUrl ? resolveAbsUrl(raw.subtitleUrl, base) : undefined;
+  const playDirect = directUrl || rawUrl;
 
   return {
-    id: `${raw.site || "srv"}-${index}-${rawUrl.slice(-18)}`,
+    id: `${raw.site || "srv"}-${index}-${playDirect.slice(-18)}`,
     name: label,
     label,
-    url: !isEmbed ? proxyUrl || directUrl || rawUrl : rawUrl,
+    url: !isEmbed ? playDirect : rawUrl,
     isEmbed,
     site: raw.site,
     quality,
     qualityTier,
     kind,
-    directUrl: !isEmbed ? proxyUrl || directUrl || rawUrl : undefined,
+    type: kind,
+    directUrl: !isEmbed ? playDirect : undefined,
     proxyUrl: proxyUrl || undefined,
     embedUrl: isEmbed ? rawUrl : undefined,
     subtitleUrl: subRaw,
@@ -353,7 +362,7 @@ export async function streamFilmSources(params: {
 }): Promise<FilmServerLink[]> {
   const base = getBaseUrl();
   const mediaType: TmdbMediaType = params.tmdbType || params.type || "movie";
-  const cacheKey = `film-srcs-v5-${mediaType}-${params.tmdbId}-s${params.season}-e${params.episode}`;
+  const cacheKey = `film-srcs-v6-${mediaType}-${params.tmdbId}-s${params.season}-e${params.episode}`;
 
   if (!params.forceRefresh) {
     try {
@@ -375,11 +384,23 @@ export async function streamFilmSources(params: {
     season: String(params.season),
     ep: String(params.episode),
     title: params.title,
+    clientExtract: "1",
   });
 
   const collected: FilmServerLink[] = [];
   const seen = new Set<string>();
+  const seenEmbeds = new Set<string>();
+  const pendingClientExtracts: Promise<void>[] = [];
   let idxCounter = 0;
+
+  const pushUniqueSource = (srv: FilmServerLink) => {
+    if (params.signal?.aborted) return;
+    const dedupeKey = srv.directUrl || srv.url || srv.embedUrl || srv.id;
+    if (!dedupeKey || seen.has(dedupeKey)) return;
+    seen.add(dedupeKey);
+    collected.push(srv);
+    params.onSource(srv);
+  };
 
   const processLineBatch = (chunkText: string, state: { currentEvent: string }) => {
     const lines = chunkText.split("\n");
@@ -400,14 +421,25 @@ export async function streamFilmSources(params: {
         const ev = state.currentEvent || data.type || "";
         if (ev === "status" && data.msg) {
           params.onStatus?.(String(data.msg));
-        } else if (ev === "source" || (!ev && (data.url || data.directUrl || data.proxyUrl))) {
+        } else if (ev === "source" || (!ev && (data.url || data.directUrl || data.proxyUrl || data.clientExtract))) {
+          // Direct phone-side extraction for IP-bound CDN hosts (0% VPS video bandwidth!)
+          if (data.clientExtract && typeof data.clientExtract.embedUrl === "string") {
+            const embedKey = data.clientExtract.embedUrl.trim();
+            if (embedKey && !seenEmbeds.has(embedKey) && !params.signal?.aborted) {
+              seenEmbeds.add(embedKey);
+              const extractIdx = idxCounter++;
+              const task = extractFilmSourceOnPhone(data.clientExtract, extractIdx, params.signal)
+                .then((extracted) => {
+                  if (extracted) pushUniqueSource(extracted);
+                })
+                .catch(() => {});
+              pendingClientExtracts.push(task);
+            }
+            continue;
+          }
           const normalized = normalizeServerFromSSE(data, idxCounter++, base);
           if (!normalized) continue;
-          const dedupeKey = normalized.directUrl || normalized.embedUrl || normalized.id;
-          if (seen.has(dedupeKey)) continue;
-          seen.add(dedupeKey);
-          collected.push(normalized);
-          params.onSource(normalized);
+          pushUniqueSource(normalized);
         }
       } catch {}
     }
@@ -443,10 +475,17 @@ export async function streamFilmSources(params: {
     // Graceful stop on network abort/timeout
   }
 
-  if (collected.length > 0) {
+  // Wait for any in-flight phone-side extractions before marking scan complete
+  if (pendingClientExtracts.length > 0 && !params.signal?.aborted) {
+    await Promise.allSettled(pendingClientExtracts);
+  }
+
+  if (collected.length > 0 && !params.signal?.aborted) {
     AsyncStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), items: collected })).catch(() => {});
   }
-  params.onDone?.();
+  if (!params.signal?.aborted) {
+    params.onDone?.();
+  }
   return collected;
 }
 
@@ -487,6 +526,6 @@ export async function resolveFilmSource(params: {
 export function resolveFilmPlayableUrl(srv: Partial<FilmServerLink> | null | undefined): string {
   if (!srv) return "";
   const base = getBaseUrl();
-  const target = srv.proxyUrl || srv.directUrl || srv.url || srv.embedUrl || "";
+  const target = srv.directUrl || srv.url || srv.proxyUrl || srv.embedUrl || "";
   return resolveAbsUrl(target, base);
 }

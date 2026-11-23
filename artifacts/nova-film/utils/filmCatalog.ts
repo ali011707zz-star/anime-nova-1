@@ -3,6 +3,13 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 export type TmdbMediaType = "movie" | "tv";
 export type FilmMediaType = "movie" | "series" | "animation";
 
+export type FilmClientExtractDescriptor = {
+  embedUrl: string;
+  referer: string;
+  tier?: string;
+  hostKind?: "standard" | "okru" | "fireplayer";
+};
+
 export type FilmStreamSource = {
   id: string;
   name: string;
@@ -23,6 +30,8 @@ export type FilmStreamSource = {
   isArabic?: boolean;
   isEmbed?: boolean;
   hardsubbed?: boolean;
+  clientExtract?: FilmClientExtractDescriptor;
+  clientExtracted?: boolean;
 };
 
 export type FilmServerLink = FilmStreamSource;
