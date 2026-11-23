@@ -89,6 +89,13 @@ export interface ExternalSeasonInfo {
   episodes?: ExternalEpisodeRef[];
 }
 
+export interface ClientExtractDescriptor {
+  embedUrl: string;
+  referer: string;
+  tier?: string;
+  hostKind?: "standard" | "okru" | "fireplayer";
+}
+
 export interface ExternalResolvedSource {
   site: string;
   label: string;
@@ -97,8 +104,11 @@ export interface ExternalResolvedSource {
   directUrl: string;
   proxyUrl?: string;
   isEmbed: boolean;
+  type?: "hls" | "mp4";
+  headers?: Record<string, string>;
   hardsubbed?: boolean;
   subtitleUrl?: string;
+  clientExtract?: ClientExtractDescriptor;
 }
 
 // ── Bounded LRU Map helper ──────────────────────────────────────────────────
@@ -1405,14 +1415,98 @@ function cleanExtractedUrl(raw: string): string {
     .trim();
 }
 
+// Hosts whose CDN tokens are NOT IP-locked (verified 200/206 from any user IP directly)
+function isOpenDirectHost(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  return (
+    h.includes("okstream.") ||
+    h.includes("cloudcdn.casa") ||
+    h.includes("vidtube.") ||
+    h.includes("videotube.") ||
+    h.includes("workers.dev")
+  );
+}
+
+// Hosts that are known dead / Cloudflare-JS-only / unsupported for direct phone extraction
+function isUnsupportedEmbedHost(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  return (
+    h.includes("streamtape") ||
+    h.includes("vinovo.") ||
+    h.includes("megacloud") ||
+    h.includes("vidmoly") ||
+    h.includes("dood") ||
+    h.includes("mixdrop") ||
+    h.includes("mega.nz")
+  );
+}
+
+// Hosts whose CDN tokens are IP-bound to the extracting client IP (must extract directly on phone!)
+function isPhoneExtractableHost(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  if (isUnsupportedEmbedHost(h)) return false;
+  return (
+    h.includes("fastvid.") ||
+    h.includes("earnvids") ||
+    h.includes("vidhide") ||
+    h.includes("lulustream") ||
+    h.includes("luluvdo") ||
+    h.includes("streamwish") ||
+    h.includes("swish") ||
+    h.includes("filelions") ||
+    h.includes("byse") ||
+    h.includes("updown.") ||
+    h.includes("uqload.") ||
+    h.includes("ok.ru") ||
+    h.includes("savefiles") ||
+    h.includes("firestream") ||
+    h.includes("voe.") ||
+    h.includes("okstream.") ||
+    h.includes("vidtube.") ||
+    h.includes("vidhls.")
+  );
+}
+
 async function extractDirectFromEmbedUrl(
   embedUrl: string,
-  hostLabel: string,
+  _hostLabel: string,
   referer: string,
-  providerTag: string,
+  _providerTag: string,
+  clientExtract = false,
 ): Promise<ExternalResolvedSource | null> {
   try {
     const u = new URL(embedUrl);
+    const host = u.hostname.toLowerCase();
+    if (isUnsupportedEmbedHost(host)) return null;
+
+    // For IP-bound embed hosts (FastVid/EarnVids, LuluStream, StreamWish, Filelions, UpDown, Uqload, OK.ru, etc.):
+    // Never proxy video through VPS! Hand the tiny embed descriptor to the user phone so the phone extracts
+    // using the USER own IP and streams 100% directly phone-to-CDN (0% VPS video bandwidth!).
+    if (!isOpenDirectHost(host)) {
+      if (clientExtract && isPhoneExtractableHost(host)) {
+        return {
+          site: "nv-direct",
+          label: "1080p FHD",
+          tier: "1080p FHD",
+          url: "",
+          directUrl: "",
+          isEmbed: false,
+          type: "hls",
+          hardsubbed: true,
+          clientExtract: {
+            embedUrl,
+            referer,
+            tier: "1080p FHD",
+            hostKind: host.includes("ok.ru") ? "okru" : "standard",
+          },
+        };
+      }
+      // Legacy clients without clientExtract: do NOT proxy IP-locked CDNs through VPS bandwidth.
+      return null;
+    }
+
+    // Open / non-IP-locked CDN (OkStream / cloudcdn.casa / VidTube):
+    // Extract direct raw m3u8 / mp4 on server and emit RAW CDN URL + headers (ZERO VPS video proxy!)
     const res = await fetch(embedUrl, {
       headers: {
         "User-Agent": BROWSER_UA,
@@ -1427,47 +1521,9 @@ async function extractDirectFromEmbedUrl(
     const unpacked = unpackDeanEdwards(html);
     const combined = `${html}\n${unpacked}`;
     const hostOrigin = `${u.origin}/`;
+    const directHeaders = { "User-Agent": BROWSER_UA, Referer: hostOrigin };
 
-    // 1. OK.ru special JSON extraction
-    if (u.hostname.includes("ok.ru")) {
-      const optMatch = html.match(/data-options="([^"]+)"/i);
-      if (optMatch) {
-        const decoded = decodeHtmlEntities(optMatch[1]);
-        const hlsMatch = decoded.match(/"hlsManifestUrl"\s*:\s*"(https?:\\\/\\\/[^"]+)"/i);
-        if (hlsMatch) {
-          const m3u8 = cleanExtractedUrl(hlsMatch[1]);
-          const proxyUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8)}&ref=${encodeURIComponent("https://ok.ru/")}`;
-          return {
-            site: "nv-ok",
-            label: "1080p FHD",
-            tier: "1080p FHD",
-            url: m3u8,
-            directUrl: proxyUrl,
-            proxyUrl,
-            isEmbed: false,
-            hardsubbed: true,
-          };
-        }
-      }
-    }
-
-    // Helper: strictly verify a direct MP4 URL is actually playable (200/206) without Referer
-    const verifyPlayableMp4 = async (candidateUrl: string): Promise<string | null> => {
-      try {
-        const probe = await fetch(candidateUrl, {
-          headers: { "User-Agent": "ExoPlayerLib/2.19.1", Range: "bytes=0-1" },
-          redirect: "follow",
-          signal: AbortSignal.timeout(4_500),
-        });
-        const ct = (probe.headers.get("content-type") || "").toLowerCase();
-        if ((probe.status === 200 || probe.status === 206) && !ct.includes("text/html")) {
-          return probe.url || candidateUrl;
-        }
-      } catch {}
-      return null;
-    };
-
-    // 2. HLS .m3u8 extraction (OkStream, FastVid/EarnVids, StreamWish, Filelions, VOE, Byse, LuluStream, etc.)
+    // 1. HLS .m3u8 direct extraction (0% VPS video bandwidth!)
     const m3u8Matches = combined.match(/https?:\/\/[^"'\s\\<>]+\.m3u8[^"'\s\\<>]*/gi) || [];
     const m3u8 = m3u8Matches
       .map(cleanExtractedUrl)
@@ -1475,7 +1531,7 @@ async function extractDirectFromEmbedUrl(
     if (m3u8) {
       try {
         const probe = await fetch(m3u8, {
-          headers: { "User-Agent": BROWSER_UA, Referer: hostOrigin, Accept: "*/*" },
+          headers: { ...directHeaders, Accept: "*/*" },
           signal: AbortSignal.timeout(4_500),
         });
         if (probe.ok) {
@@ -1486,15 +1542,15 @@ async function extractDirectFromEmbedUrl(
               : /1080|1920x/i.test(text)
                 ? "1080p FHD"
                 : "720p HD";
-            const proxyUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8)}&ref=${encodeURIComponent(hostOrigin)}`;
             return {
               site: "nv-direct",
               label: tier,
               tier,
               url: m3u8,
-              directUrl: proxyUrl,
-              proxyUrl,
+              directUrl: m3u8,
               isEmbed: false,
+              type: "hls",
+              headers: directHeaders,
               hardsubbed: true,
             };
           }
@@ -1504,24 +1560,34 @@ async function extractDirectFromEmbedUrl(
       }
     }
 
-    // 3. Direct MP4 extraction (Uqload, SaveFiles, UpDown etc.) — ONLY emit if verified 200/206!
+    // 2. Direct MP4 extraction — ONLY emit if verified 200/206!
     const mp4Matches = combined.match(/https?:\/\/[^"'\s\\<>]+\.mp4[^"'\s\\<>]*/gi) || [];
     const mp4 = mp4Matches
       .map(cleanExtractedUrl)
       .find((link) => !/thumb|sample|intro|logo|ads\./i.test(link));
     if (mp4) {
-      const verified = await verifyPlayableMp4(mp4);
-      if (verified) {
-        return {
-          site: "nv-direct",
-          label: "1080p FHD",
-          tier: "1080p FHD",
-          url: verified,
-          directUrl: verified,
-          isEmbed: false,
-          hardsubbed: true,
-        };
-      }
+      try {
+        const probe = await fetch(mp4, {
+          headers: { ...directHeaders, Range: "bytes=0-1" },
+          redirect: "follow",
+          signal: AbortSignal.timeout(4_500),
+        });
+        const ct = (probe.headers.get("content-type") || "").toLowerCase();
+        if ((probe.status === 200 || probe.status === 206) && !ct.includes("text/html")) {
+          const verified = probe.url || mp4;
+          return {
+            site: "nv-direct",
+            label: "1080p FHD",
+            tier: "1080p FHD",
+            url: verified,
+            directUrl: verified,
+            isEmbed: false,
+            type: "mp4",
+            headers: directHeaders,
+            hardsubbed: true,
+          };
+        }
+      } catch {}
     }
 
     return null;
@@ -1534,6 +1600,7 @@ async function extractDirectFromEmbedUrl(
 async function extractTopCinemaStreams(
   itemOrEpUrl: string,
   onSource?: (src: ExternalResolvedSource) => void,
+  clientExtract = false,
 ): Promise<ExternalResolvedSource[]> {
   const origin = await getTopCinemaOrigin();
   const baseItemUrl = normalizeUrlOrigin(itemOrEpUrl, origin);
@@ -1587,9 +1654,10 @@ async function extractTopCinemaStreams(
         const iframeUrl = aHtml.match(/src=["']([^"']+)["']/i)?.[1]?.trim();
         if (!iframeUrl || !iframeUrl.startsWith("http")) return;
 
-        const direct = await extractDirectFromEmbedUrl(iframeUrl, "سيرفر مباشر", `${origin}/`, "tc");
-        if (direct && !seenUrls.has(direct.url)) {
-          seenUrls.add(direct.url);
+        const direct = await extractDirectFromEmbedUrl(iframeUrl, "سيرفر مباشر", `${origin}/`, "tc", clientExtract);
+        const dedupeKey = direct ? (direct.url || direct.clientExtract?.embedUrl || "") : "";
+        if (direct && dedupeKey && !seenUrls.has(dedupeKey)) {
+          seenUrls.add(dedupeKey);
           out.push(direct);
           onSource?.(direct);
         }
@@ -1606,6 +1674,7 @@ async function extractTopCinemaStreams(
 async function extractEgyDeadStreams(
   itemOrEpUrl: string,
   onSource?: (src: ExternalResolvedSource) => void,
+  clientExtract = false,
 ): Promise<ExternalResolvedSource[]> {
   const safeItemUrl = safeEncodeUrl(itemOrEpUrl);
   let watchUrl = safeItemUrl;
@@ -1701,9 +1770,11 @@ async function extractEgyDeadStreams(
         "سيرفر مباشر",
         `${EGYDEAD_BASE}/`,
         "ed",
+        clientExtract,
       );
-      if (direct && !seenUrls.has(direct.url)) {
-        seenUrls.add(direct.url);
+      const dedupeKey = direct ? (direct.url || direct.clientExtract?.embedUrl || "") : "";
+      if (direct && dedupeKey && !seenUrls.has(dedupeKey)) {
+        seenUrls.add(dedupeKey);
         out.push(direct);
         onSource?.(direct);
       }
@@ -1722,9 +1793,11 @@ export async function resolveExternalFilmStreams(params: {
   season: number;
   ep: number;
   titleHint?: string;
+  clientExtract?: boolean;
   onSource?: (src: ExternalResolvedSource) => void;
 }): Promise<ExternalResolvedSource[]> {
-  const cacheKey = `strm:${params.id}:${params.type}:s${params.season}:e${params.ep}`;
+  const ce = Boolean(params.clientExtract);
+  const cacheKey = `strm:v2:${ce ? "ce1" : "ce0"}:${params.id}:${params.type}:s${params.season}:e${params.ep}`;
   const cached = streamCache.get(cacheKey);
   if (cached && cached.length > 0) {
     cached.forEach((s) => params.onSource?.(s));
@@ -1789,23 +1862,24 @@ export async function resolveExternalFilmStreams(params: {
   const emitted = new Set<string>();
   const allSources: ExternalResolvedSource[] = [];
   const emitOnce = (s: ExternalResolvedSource) => {
-    if (emitted.has(s.url)) return;
-    emitted.add(s.url);
+    const key = s.url || s.clientExtract?.embedUrl || "";
+    if (!key || emitted.has(key)) return;
+    emitted.add(key);
     allSources.push(s);
     params.onSource?.(s);
   };
 
   const tasks: Promise<any>[] = [];
-  if (tcPlayUrl) tasks.push(extractTopCinemaStreams(tcPlayUrl, emitOnce).catch(() => []));
-  if (edPlayUrl) tasks.push(extractEgyDeadStreams(edPlayUrl, emitOnce).catch(() => []));
+  if (tcPlayUrl) tasks.push(extractTopCinemaStreams(tcPlayUrl, emitOnce, ce).catch(() => []));
+  if (edPlayUrl) tasks.push(extractEgyDeadStreams(edPlayUrl, emitOnce, ce).catch(() => []));
 
   await Promise.all(tasks);
 
   allSources.sort((a, b) => {
     const score = (s: ExternalResolvedSource) => {
-      if (s.site.includes("streamtape")) return 3;
-      if (s.proxyUrl || s.url.includes(".m3u8")) return 1;
-      return 2;
+      if (s.directUrl && !s.clientExtract) return 1;
+      if (s.clientExtract) return 2;
+      return 3;
     };
     return score(a) - score(b);
   });

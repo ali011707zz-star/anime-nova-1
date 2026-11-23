@@ -534,16 +534,15 @@ async function resolveDivHardServer(
     else if (/1280x720|720p/i.test(streamInf) || /720/.test(titleHint)) tier = "720p HD";
     else if (/854x480|640x360|480p/i.test(streamInf)) tier = "480p SD";
 
-    const proxyUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(absMediaUrl)}&ref=${encodeURIComponent(refForHls)}`;
     outSources.push({
-      site: "divhard",
-      label: `${srvLabel} · ${tier} مباشر`,
+      site: "nv",
+      label: tier,
       tier,
       url: absMediaUrl,
-      directUrl: proxyUrl,
-      proxyUrl,
+      directUrl: absMediaUrl,
       isEmbed: false,
       type: "hls",
+      headers: { "User-Agent": BROWSER_UA, Referer: refForHls },
       hardsubbed: isHardsubbed,
     });
   } catch {
@@ -633,16 +632,17 @@ async function resolveMoviztimeServer(
               else if (/1280x720|720p/i.test(streamInf) || /\[720\]/.test(titleHint)) tier = "720p HD";
               else if (/854x480|640x360|480p/i.test(streamInf)) tier = "480p SD";
 
-              const proxyUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(masterUrl)}&ref=${encodeURIComponent(refForHls)}`;
               const subUrl = isHardsubbed ? undefined : outTracks.find((t) => t.lang === "ar")?.url;
+              const directHeaders = { "User-Agent": BROWSER_UA, Referer: refForHls };
               outSources.push({
-                site: "vidhls",
-                label: `${srvLabel} · ${tier.replace("1080p FHD", "1080p FHD مباشر").replace("720p HD", "720p HD مباشر").replace("4K UHD", "4K UHD مباشر")}`,
+                site: "nv",
+                label: tier,
                 tier,
                 url: masterUrl,
-                directUrl: proxyUrl,
-                proxyUrl,
+                directUrl: masterUrl,
                 isEmbed: false,
+                type: "hls",
+                headers: directHeaders,
                 subtitleUrl: subUrl,
                 hardsubbed: isHardsubbed,
               });
@@ -652,16 +652,16 @@ async function resolveMoviztimeServer(
                 .map((l) => l.trim())
                 .find((l) => l.startsWith("http"));
               if (childLine) {
-                const childProxyUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(childLine)}&ref=${encodeURIComponent(refForHls)}&child=1`;
                 const altTier = tier === "1080p FHD" ? "720p HD" : "1080p FHD";
                 outSources.push({
-                  site: "vidhls-alt",
-                  label: `سيرفر ${idx + 2}  · ${altTier}`,
+                  site: "vx",
+                  label: altTier,
                   tier: altTier,
                   url: childLine,
-                  directUrl: childProxyUrl,
-                  proxyUrl: childProxyUrl,
+                  directUrl: childLine,
                   isEmbed: false,
+                  type: "hls",
+                  headers: directHeaders,
                   subtitleUrl: subUrl,
                   hardsubbed: isHardsubbed,
                 });
@@ -1422,6 +1422,51 @@ router.get("/sources-stream", async (req: Request, res: Response) => {
     }
 
     const titleParam = String(req.query.title || "").trim();
+    const clientExtract = String(req.query.clientExtract || "") === "1";
+
+    // Unwrap any VPS proxy URL (/api/anime/hls-proxy or video-proxy) into a raw direct CDN URL + headers
+    const toDirectOnlySource = (sObj: any): any | null => {
+      if (!sObj || typeof sObj !== "object") return null;
+      if (sObj.clientExtract?.embedUrl) return sObj;
+      let rawUrl = String(sObj.url || sObj.directUrl || sObj.proxyUrl || "").trim();
+      let refHeader = sObj.headers?.Referer || sObj.headers?.referer || "";
+      const maybeProxy = String(sObj.proxyUrl || sObj.directUrl || rawUrl || "").trim();
+      if (maybeProxy.includes("/api/anime/hls-proxy") || maybeProxy.includes("/api/anime/video-proxy") || maybeProxy.includes("/proxy/hls")) {
+        try {
+          const parsed = new URL(maybeProxy.startsWith("http") ? maybeProxy : `https://local.invalid${maybeProxy}`);
+          const inner = parsed.searchParams.get("url");
+          const innerRef = parsed.searchParams.get("ref") || parsed.searchParams.get("referer");
+          if (inner && inner.startsWith("http")) rawUrl = inner;
+          if (innerRef && !refHeader) refHeader = innerRef;
+        } catch {}
+      }
+      if (!rawUrl.startsWith("http") || rawUrl.includes("/api/anime/hls-proxy") || rawUrl.includes("/api/anime/seg-proxy") || rawUrl.includes("/api/anime/video-proxy")) {
+        return null;
+      }
+      const nextHeaders: Record<string, string> = {
+        ...(sObj.headers && typeof sObj.headers === "object" ? sObj.headers : {}),
+      };
+      if (!nextHeaders["User-Agent"]) nextHeaders["User-Agent"] = BROWSER_UA;
+      if (refHeader && !nextHeaders.Referer) nextHeaders.Referer = refHeader;
+      const tier = /2160|4k/i.test(String(sObj.tier || sObj.label || ""))
+        ? "4K UHD"
+        : /1080|fhd/i.test(String(sObj.tier || sObj.label || ""))
+          ? "1080p FHD"
+          : "720p HD";
+      const isHls = sObj.type === "hls" || rawUrl.includes(".m3u8") || rawUrl.includes("/hls/");
+      const cleaned: any = {
+        ...sObj,
+        label: tier,
+        tier,
+        url: rawUrl,
+        directUrl: rawUrl,
+        isEmbed: false,
+        type: isHls ? "hls" : sObj.type || "mp4",
+        headers: nextHeaders,
+      };
+      delete cleaned.proxyUrl;
+      return cleaned;
+    };
 
     if (isExternalFilmId(tmdbId)) {
       sendEvent("status", { msg: "جاري تجهيز سيرفرات المشاهدة المباشرة..." });
@@ -1432,8 +1477,11 @@ router.get("/sources-stream", async (req: Request, res: Response) => {
         season,
         ep,
         titleHint: titleParam,
+        clientExtract,
         onSource: (sObj) => {
-          sendEvent("source", sObj);
+          const direct = toDirectOnlySource(sObj);
+          if (!direct) return;
+          sendEvent("source", direct);
           emittedExt++;
         },
       });
@@ -1469,6 +1517,7 @@ router.get("/sources-stream", async (req: Request, res: Response) => {
           season: String(season),
           ep: String(ep),
           title: resolved.titleEn,
+          mobile: "1",
         });
         const up = await fetch(`http://127.0.0.1:${port}/api/animation/sources-stream?${qs.toString()}`, {
           headers: {
@@ -1496,12 +1545,11 @@ router.get("/sources-stream", async (req: Request, res: Response) => {
                 try {
                   const sObj = JSON.parse(dtMatch[1]);
                   if (sObj && (sObj.url || sObj.directUrl || sObj.proxyUrl) && !/dahmer/i.test(String(sObj.label || sObj.site || ""))) {
-                    sendEvent("source", {
-                      ...sObj,
-                      tier: /2160|4k/i.test(sObj.label || "") ? "4K UHD" : /1080/i.test(sObj.label || "") ? "1080p FHD" : "720p HD",
-                      isEmbed: false,
-                    });
-                    emitted++;
+                    const direct = toDirectOnlySource(sObj);
+                    if (direct) {
+                      sendEvent("source", direct);
+                      emitted++;
+                    }
                   }
                 } catch {}
               }
@@ -1519,8 +1567,11 @@ router.get("/sources-stream", async (req: Request, res: Response) => {
           season,
           ep,
           titleHint: resolved.titleEn || titleParam,
+          clientExtract,
           onSource: (sObj) => {
-            sendEvent("source", sObj);
+            const direct = toDirectOnlySource(sObj);
+            if (!direct) return;
+            sendEvent("source", direct);
             emitted++;
           },
         });
