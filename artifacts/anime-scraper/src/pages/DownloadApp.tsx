@@ -264,8 +264,8 @@ export default function DownloadApp({ onBack }: { onBack?: () => void }) {
       }`}
     >
       <SEO
-        title="تطبيق انمي نوفا (أنمي نوفا APK v1.0.10) | تحميل تطبيق Anime NOVA للأندرويد والتلفاز الذكي"
-        description="حمل تطبيق انمي نوفا الرسمي (تطبيق أنمي نوفا Anime NOVA APK v1.0.10) مجاناً لهواتف الأندرويد وشاشات التلفاز الذكية Android TV (كود Downloader: 2576388). مشاهدة وتحميل الأنمي المترجم والمدبلج، قراءة المانجا والمانهوا، ومسلسلات سبيستون بدون إعلانات."
+        title="تحميل تطبيق أنمي نوفا APK v1.0.10 للأندرويد والتلفاز | Anime NOVA"
+        description="حمّل تطبيق أنمي نوفا الرسمي (Anime NOVA APK v1.0.10) مجاناً للأندرويد وشاشات Android TV (كود Downloader: 2576388) لمشاهدة الأنمي والمانجا وسبيستون بدون إعلانات."
         path="/app"
       />
       {/* ── Standalone Top Bar (Independent from Web App) ── */}

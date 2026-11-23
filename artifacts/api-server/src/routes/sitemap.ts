@@ -73,12 +73,13 @@ async function buildSitemap(): Promise<string> {
     url(`${BASE}/app`,        "1.0", "daily",   today),
     url(`${BASE}/browse`,     "0.9", "daily",   today),
     url(`${BASE}/manga`,      "0.9", "daily",   today),
+    url(`${BASE}/dubbed`,     "0.9", "daily",   today),
     url(`${BASE}/spacetoon`,  "0.9", "daily",   today),
     url(`${BASE}/cartoon`,    "0.8", "daily",   today),
     url(`${BASE}/animation`,  "0.8", "daily",   today),
-    url(`${BASE}/updates`,    "0.9", "hourly",  today),
+    url(`${BASE}/latest`,     "0.9", "hourly",  today),
+    url(`${BASE}/updates`,    "0.8", "daily",   today),
     url(`${BASE}/schedule`,   "0.8", "daily",   today),
-    url(`${BASE}/search`,     "0.7", "weekly",  today),
   ];
 
   const [p1, p2] = await Promise.all([fetchAnilistTrending(1), fetchAnilistTrending(2)]);
@@ -143,17 +144,18 @@ router.get("/robots.txt", (_req, res) => {
   res.setHeader("Cache-Control", "public, max-age=3600");
   res.send(`User-agent: *
 Allow: /
-Allow: /api/anilist
-Allow: /api/anime/
-Allow: /api/manga/
-Allow: /api/dubbed/
-Allow: /api/aw-dubbed/
-Allow: /api/stardima/
-Allow: /api/animation/
 Disallow: /api/admin/
 Disallow: /api/auth/
-Disallow: /auth/callback
+Disallow: /auth
 Disallow: /admin
+Disallow: /profile
+Disallow: /settings
+Disallow: /library
+Disallow: /history
+Disallow: /tv
+Disallow: /watch
+Disallow: /comments
+Disallow: /subscription
 
 Sitemap: ${BASE}/sitemap.xml
 `);

@@ -289,6 +289,9 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
                 <Route path="/download"                component={DownloadApp} />
                 <Route path="/app"                     component={DownloadApp} />
                 {/* Animation section hidden — disabled 2026-07-30 */}
+                <Route path="/spacetoon"                       component={DubbedCombinedLibrary} />
+                <Route path="/cartoon"                         component={DubbedCombinedLibrary} />
+                <Route path="/animation"                       component={DubbedCombinedLibrary} />
                 <Route path="/dubbed"                          component={DubbedCombinedLibrary} />
                 <Route path="/dubbed/watch"                    component={DubbedWatch} />
                 <Route path="/dubbed/:key"                     component={DubbedDetail} />

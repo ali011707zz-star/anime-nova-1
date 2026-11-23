@@ -10,23 +10,36 @@ interface SEOProps {
   image?: string;
   path?: string;
   type?: "website" | "video.other" | "video.episode";
+  noIndex?: boolean;
 }
 
-export default function SEO({ title, description, image, path, type = "website" }: SEOProps) {
+export default function SEO({
+  title,
+  description,
+  image,
+  path,
+  type = "website",
+  noIndex = false,
+}: SEOProps) {
   const fullTitle =
     title.includes("نوفا") || title.includes(SITE_NAME)
       ? title
-      : `${title} | انمي نوفا (أنمي نوفا - ${SITE_NAME})`;
+      : `${title} | أنمي نوفا - ${SITE_NAME}`;
   const desc =
     description ||
-    "موقع وتطبيق انمي نوفا (أنمي نوفا - Anime NOVA) الرسمي لمشاهدة وتحميل الأنمي المترجم والمدبلج وقراءة المانجا مجاناً بجودة عالية FHD بدون إعلانات.";
-  const url = path ? `${SITE_URL}${path}` : SITE_URL;
+    "موقع وتطبيق أنمي نوفا (Anime NOVA) لمشاهدة وتحميل الأنمي المترجم والمدبلج وقراءة المانجا ومسلسلات سبيستون مجاناً بجودة FHD بدون إعلانات.";
+  const cleanPath = !path || path === "/" ? "/" : path.replace(/\/+$/, "");
+  const url = cleanPath === "/" ? `${SITE_URL}/` : `${SITE_URL}${cleanPath}`;
   const img = image || DEFAULT_IMAGE;
+  const robots = noIndex
+    ? "noindex, follow"
+    : "index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1";
 
   return (
     <Helmet>
       <title>{fullTitle}</title>
       <meta name="description" content={desc} />
+      <meta name="robots" content={robots} />
       <link rel="canonical" href={url} />
       <meta property="og:title" content={fullTitle} />
       <meta property="og:description" content={desc} />
