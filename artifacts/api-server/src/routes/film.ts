@@ -48,19 +48,48 @@ type ResolvedSource = {
   headers?: Record<string, string>;
 };
 
+const PROXY_POSTER_HOSTS = [
+  "egydead.here",
+  "topcinemaa.one",
+  "topcinema.fan",
+  "moviztime.top",
+  "aoneroom.com",
+  "elcinema.com",
+];
+
+const ALLOWED_POSTER_PROXY_HOSTS = [
+  ...PROXY_POSTER_HOSTS,
+  "image.tmdb.org",
+  "tmdb.org",
+];
+
+function maybeProxyBlockedPoster(url: string): string {
+  try {
+    const h = new URL(url).hostname.toLowerCase();
+    if (PROXY_POSTER_HOSTS.some((d) => h === d || h.endsWith("." + d))) {
+      return `/api/film/poster?u=${encodeURIComponent(url)}`;
+    }
+  } catch {}
+  return url;
+}
+
 function encodeMediaUrl(raw?: string | null): string | null {
   const s = String(raw || "").trim();
-  if (!s || !s.startsWith("http")) return null;
+  if (!s) return null;
+  if (s.startsWith("/api/film/poster?")) return s;
+  if (!s.startsWith("http")) return null;
   if (s.includes("/uploads/images.jpg")) return null;
+  let normalized = s;
   try {
-    return new URL(s).toString();
+    normalized = new URL(s).toString();
   } catch {
     try {
-      return encodeURI(s);
+      normalized = encodeURI(s);
     } catch {
-      return s;
+      normalized = s;
     }
   }
+  return maybeProxyBlockedPoster(normalized);
 }
 
 function safeJsonArray<T = any>(raw: any): T[] {
@@ -796,6 +825,63 @@ async function resolveEpisodeFromVault(
 }
 
 // ── 1. Clean NOVA FILM remote config ─────────────────────────────────────────
+// Lightweight 7-day-cached poster proxy ONLY for ISP/hotlink-blocked poster hosts (zero video traffic!)
+router.get("/poster", async (req: Request, res: Response) => {
+  try {
+    const raw = String(req.query.u || req.query.url || "").trim();
+    if (!raw || !raw.startsWith("http")) {
+      res.status(400).end();
+      return;
+    }
+    let parsed: URL;
+    try {
+      parsed = new URL(raw);
+    } catch {
+      res.status(400).end();
+      return;
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      res.status(400).end();
+      return;
+    }
+    const host = parsed.hostname.toLowerCase();
+    const allowed = ALLOWED_POSTER_PROXY_HOSTS.some((d) => host === d || host.endsWith("." + d));
+    if (!allowed) {
+      res.status(403).end();
+      return;
+    }
+    const up = await fetch(parsed.toString(), {
+      headers: {
+        "User-Agent": BROWSER_UA,
+        Referer: `${parsed.origin}/`,
+        Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+      },
+      redirect: "follow",
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!up.ok) {
+      res.status(up.status === 404 ? 404 : 502).end();
+      return;
+    }
+    const ct = (up.headers.get("content-type") || "image/jpeg").toLowerCase();
+    if (!ct.startsWith("image/")) {
+      res.status(415).end();
+      return;
+    }
+    const buf = Buffer.from(await up.arrayBuffer());
+    if (buf.length === 0 || buf.length > 4 * 1024 * 1024) {
+      res.status(502).end();
+      return;
+    }
+    res.setHeader("Content-Type", ct);
+    res.setHeader("Cache-Control", "public, max-age=604800, immutable");
+    res.setHeader("Content-Length", String(buf.length));
+    res.end(buf);
+  } catch {
+    if (!res.headersSent) res.status(502).end();
+  }
+});
+
 router.get("/config", (_req: Request, res: Response) => {
   res.json({
     app: "nova-film",

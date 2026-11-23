@@ -558,7 +558,30 @@ const CATEGORY_MAP: Record<string, CategorySpec> = {
   },
 };
 
+function toClientPosterUrl(raw?: string | null): string {
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  if (s.startsWith("/api/film/poster?")) return s;
+  if (!s.startsWith("http")) return s;
+  try {
+    const h = new URL(s).hostname.toLowerCase();
+    if (
+      h === "egydead.here" ||
+      h.endsWith(".egydead.here") ||
+      h === "topcinemaa.one" ||
+      h.endsWith(".topcinemaa.one") ||
+      h.includes("topcinema.") ||
+      h.includes("moviztime.") ||
+      h.includes("aoneroom.")
+    ) {
+      return `/api/film/poster?u=${encodeURIComponent(s)}`;
+    }
+  } catch {}
+  return s;
+}
+
 function registryEntryToSummary(e: ExternalRegistryEntry): ExternalFilmSummary {
+  const safePoster = toClientPosterUrl(e.posterUrl);
   return {
     id: e.id,
     tmdbType: e.tmdbType,
@@ -566,8 +589,8 @@ function registryEntryToSummary(e: ExternalRegistryEntry): ExternalFilmSummary {
     titleAr: e.titleAr,
     titleEn: e.titleEn || e.titleAr,
     overviewAr: "",
-    posterUrl: e.posterUrl,
-    backdropUrl: e.posterUrl,
+    posterUrl: safePoster,
+    backdropUrl: safePoster,
     year: e.year || new Date().getFullYear(),
     imdbRating: e.imdbRating || 7.2,
     voteCount: 120,
@@ -1281,7 +1304,7 @@ export async function getExternalFilmDetail(id: number): Promise<any | null> {
           overview: overviewAr || "متاح للمشاهدة المباشرة عالية الجودة.",
           runtimeMin: 110,
           airDate: String(summary.year),
-          stillUrl: posterUrl,
+          stillUrl: toClientPosterUrl(posterUrl),
         },
       ]
     : episodes.map((ep) => ({
@@ -1293,13 +1316,13 @@ export async function getExternalFilmDetail(id: number): Promise<any | null> {
         overview: "",
         runtimeMin: 45,
         airDate: String(summary.year),
-        stillUrl: posterUrl,
+        stillUrl: toClientPosterUrl(posterUrl),
       }));
 
   const detailObj = {
     ...summary,
-    posterUrl,
-    backdropUrl: posterUrl,
+    posterUrl: toClientPosterUrl(posterUrl),
+    backdropUrl: toClientPosterUrl(posterUrl),
     genres,
     overviewAr: overviewAr || "متاح للمشاهدة المباشرة عالية الجودة عبر نوفا فيلم.",
     runtimeMin: isTv ? 45 : 110,
@@ -1365,7 +1388,7 @@ export async function getExternalSeasonEpisodes(id: number, seasonNumber: number
       overview: "",
       runtimeMin: 45,
       airDate: String(entry.year || ""),
-      stillUrl: entry.posterUrl,
+      stillUrl: toClientPosterUrl(entry.posterUrl),
     })),
   };
 }
