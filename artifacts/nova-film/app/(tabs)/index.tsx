@@ -252,6 +252,8 @@ export default function NovaFilmHomeScreen() {
   const dubbedSeries = effectiveHome?.dubbedSeries || [];
   const asianSeries = effectiveHome?.asianSeries || [];
   const animationList = effectiveHome?.animations || [];
+  const animationMovies = effectiveHome?.animationMovies || [];
+  const animationSeries = effectiveHome?.animationSeries || [];
 
   const allPool = useMemo(() => {
     const map = new Map<string, FilmSummary>();
@@ -269,6 +271,8 @@ export default function NovaFilmHomeScreen() {
       dubbedSeries,
       asianSeries,
       animationList,
+      animationMovies,
+      animationSeries,
     ]) {
       for (const item of arr) {
         map.set(`${item.tmdbType}:${item.id}`, item);
@@ -289,6 +293,8 @@ export default function NovaFilmHomeScreen() {
     dubbedSeries,
     asianSeries,
     animationList,
+    animationMovies,
+    animationSeries,
   ]);
 
   const continueItems = useMemo(() => {
@@ -321,7 +327,6 @@ export default function NovaFilmHomeScreen() {
       { key: "arabic-m", label: "أفلام عربية", subtitle: "أحدث الأفلام العربية بجودة عالية", color: "#EF4444", items: arabicMovies, browseType: "arabic_movies", browseSort: "year" },
       { key: "indian-m", label: "أفلام هندية", subtitle: "أحدث إنتاجات بوليوود والسينما الهندية", color: "#D97706", items: indianMovies, browseType: "indian_movies", browseSort: "year" },
       { key: "asian-m", label: "أفلام آسيوية", subtitle: "أبرز الأعمال الكورية والصينية واليابانية", color: "#EC4899", items: asianMovies, browseType: "asian", browseSort: "year" },
-      { key: "animation", label: "أنميشن", subtitle: "أفلام ومسلسلات الرسوم المتحركة العالمية", color: "#8B5CF6", items: animationList, browseType: "animation", browseSort: "year" },
       { key: "top-rated", label: "الأعلى تقييماً", subtitle: "روائع خالدة بأعلى تقييمات المشاهدين", color: "#38BDF8", items: topRatedItems, browseType: "movie", browseSort: "rating" },
     ].filter((t) => t.items.length > 0);
 
@@ -333,9 +338,15 @@ export default function NovaFilmHomeScreen() {
       { key: "asian-s", label: "مسلسلات آسيوية", subtitle: "أبرز الدراما الكورية والآسيوية", color: "#8B5CF6", items: asianSeries, browseType: "asian", browseSort: "year" },
     ].filter((t) => t.items.length > 0);
 
+    const animationTabs: TabOption[] = [
+      { key: "anim-movies", label: "أفلام أنميشن", subtitle: "أفلام الرسوم المتحركة العالمية بأعلى جودة", color: "#8B5CF6", items: animationMovies.length > 0 ? animationMovies : animationList, browseType: "animation_movies", browseSort: "popularity" },
+      { key: "anim-series", label: "مسلسلات أنميشن", subtitle: "مسلسلات الكرتون والأنميشن العالمية الكاملة", color: "#06b6d4", items: animationSeries, browseType: "animation_series", browseSort: "popularity" },
+    ].filter((t) => t.items.length > 0);
+
     const out: TabbedSectionSpec[] = [];
     if (movieTabs.length > 0) out.push({ key: "movies-tabbed", title: "🎬 الأفلام", tabs: movieTabs });
     if (seriesTabs.length > 0) out.push({ key: "series-tabbed", title: "📺 المسلسلات", tabs: seriesTabs });
+    if (animationTabs.length > 0) out.push({ key: "animation-tabbed", title: "✨ الأنميشن", tabs: animationTabs });
     return out;
   }, [
     effectiveHome,
@@ -351,6 +362,8 @@ export default function NovaFilmHomeScreen() {
     dubbedSeries,
     asianSeries,
     animationList,
+    animationMovies,
+    animationSeries,
   ]);
 
   const handleSeeAll = useCallback(

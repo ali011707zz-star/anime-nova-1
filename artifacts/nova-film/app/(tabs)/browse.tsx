@@ -42,7 +42,9 @@ const FORMAT_OPTIONS: AnimeFilterOption[] = [
   { label: "أفلام هندية", value: "indian_movies" },
   { label: "سينما آسيوية", value: "asian" },
   { label: "مسلسلات مدبلجة", value: "dubbed_series" },
-  { label: "أنميشن", value: "animation" },
+  { label: "أفلام أنميشن", value: "animation_movies" },
+  { label: "مسلسلات أنميشن", value: "animation_series" },
+  { label: "كل الأنميشن", value: "animation" },
 ];
 const VALID_FORMATS = new Set(FORMAT_OPTIONS.map((o) => o.value));
 
@@ -98,6 +100,8 @@ const FORMAT_AR: Record<string, string> = {
   indian_movies: "أفلام هندية",
   asian: "سينما آسيوية",
   dubbed_series: "مسلسلات مدبلجة",
+  animation_movies: "أفلام أنميشن",
+  animation_series: "مسلسلات أنميشن",
   animation: "أنميشن",
 };
 const BROWSE_PAGE_CACHE = new Map<string, { items: FilmSummary[]; page: number; totalPages: number; totalResults: number; ts: number }>();

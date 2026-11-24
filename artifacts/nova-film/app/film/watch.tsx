@@ -394,12 +394,47 @@ export default function FilmWatchScreen() {
     return () => sub.remove();
   }, [screen, handleBack]);
 
+  // Re-fetch Arabic subtitles once detail.realTmdbId / titleEn arrives if initial fetch had no Arabic track
+  useEffect(() => {
+    const hasAr = subtitles.some((t) => t.lang === "ar");
+    if (hasAr) return;
+    const resolvedId = detail?.realTmdbId || 0;
+    const resolvedTitle = detail?.titleEn || detail?.titleAr || "";
+    if (!resolvedId && !resolvedTitle) return;
+    const ctrl = new AbortController();
+    void fetchFilmSubtitleTracks({
+      tmdbId: resolvedId > 0 ? resolvedId : filmId,
+      type: tmdbType,
+      season: currentSeason,
+      episode: currentEpNum,
+      title: resolvedTitle,
+      signal: ctrl.signal,
+    }).then((tracks) => {
+      if (!ctrl.signal.aborted && tracks.length > 0) {
+        setSubtitles((prev) => {
+          if (prev.some((t) => t.lang === "ar") && !tracks.some((t) => t.lang === "ar")) return prev;
+          return tracks;
+        });
+      }
+    });
+    return () => ctrl.abort();
+  }, [detail?.realTmdbId, detail?.titleEn, detail?.titleAr, filmId, tmdbType, currentSeason, currentEpNum, subtitles.length]);
+
   // Convert FilmStreamSource[] to RiftPlayer PlayerSource[]
-  const arSubTrackUrl = useMemo(() => {
-    const ar = subtitles.find((t) => t.lang === "ar") || subtitles[0];
-    if (!ar?.url) return undefined;
-    return ar.url.startsWith("http") ? ar.url : `${getBaseUrl()}${ar.url}`;
+  const selectedSubTrack = useMemo(() => {
+    return subtitles.find((t) => t.lang === "ar") || subtitles[0] || null;
   }, [subtitles]);
+
+  const arSubTrackUrl = useMemo(() => {
+    if (!selectedSubTrack?.url) return undefined;
+    return selectedSubTrack.url.startsWith("http")
+      ? selectedSubTrack.url
+      : `${getBaseUrl()}${selectedSubTrack.url}`;
+  }, [selectedSubTrack]);
+
+  const arSubIsNativeArabic = useMemo(() => {
+    return selectedSubTrack?.lang === "ar";
+  }, [selectedSubTrack]);
 
   const playerSources: PlayerSource[] = useMemo(() => {
     return sources.map((src, idx) => {
@@ -430,12 +465,12 @@ export default function FilmWatchScreen() {
               ? src.subtitleUrl
               : `${getBaseUrl()}${src.subtitleUrl}`
             : arSubTrackUrl,
-        isArabic: true,
+        isArabic: isHardsub ? true : arSubIsNativeArabic,
         hardsubbed: isHardsub,
         headers: src.headers,
       };
     });
-  }, [sources, arSubTrackUrl]);
+  }, [sources, arSubTrackUrl, arSubIsNativeArabic]);
 
   const orderedPlaySources = useMemo(() => {
     if (playerSources.length === 0) return [];
@@ -556,7 +591,14 @@ export default function FilmWatchScreen() {
   }, [sources]);
 
   /* ══════════════ RIFT PLAYER (Original Glassy v5 Player) ══════════════ */
-  const activePlayerSources = sessionPlaySources.length > 0 ? sessionPlaySources : orderedPlaySources;
+  const activePlayerSources = useMemo(() => {
+    const baseList = sessionPlaySources.length > 0 ? sessionPlaySources : orderedPlaySources;
+    if (!arSubTrackUrl) return baseList;
+    return baseList.map((ps) => {
+      if (ps.hardsubbed || ps.subtitleUrl) return ps;
+      return { ...ps, subtitleUrl: arSubTrackUrl, isArabic: arSubIsNativeArabic };
+    });
+  }, [sessionPlaySources, orderedPlaySources, arSubTrackUrl, arSubIsNativeArabic]);
   if (screen === "player" && activePlayerSources.length > 0) {
     return (
       <RiftPlayer
@@ -900,67 +942,108 @@ export default function FilmWatchScreen() {
                           </View>
                         </View>
 
-                        {/* Right: السيرفر XX مع النقطة الخضراء */}
-                        <View
-                          style={{
-                            flex: 1,
-                            flexDirection: "row",
-                            alignItems: "center",
-                            justifyContent: "flex-end",
-                            gap: 8,
-                          }}
-                        >
-                          {src.recommended ? (
+                        {/* Right: السيرفر XX مع شارة نوع الترجمة (مثل أنمي نوفا) */}
+                        {(() => {
+                          const siteL = String(src.site || "").toLowerCase();
+                          const isHardsubRow =
+                            Boolean(src.hardsubbed) || siteL === "vidhls" || siteL === "vidhls-alt";
+                          return (
                             <View
                               style={{
-                                paddingHorizontal: 7,
-                                paddingVertical: 2,
-                                borderRadius: 6,
-                                backgroundColor: "rgba(16, 185, 129, 0.14)",
-                                borderWidth: 1,
-                                borderColor: "rgba(16, 185, 129, 0.35)",
+                                flex: 1,
+                                flexDirection: "column",
+                                alignItems: "flex-end",
+                                justifyContent: "center",
+                                gap: 4,
                               }}
                             >
-                              <Text
+                              <View
                                 style={{
-                                  color: "#10b981",
-                                  fontSize: tvMode ? 12 : 10,
-                                  fontFamily: "Cairo_700Bold",
+                                  flexDirection: "row",
+                                  alignItems: "center",
+                                  justifyContent: "flex-end",
+                                  gap: 8,
                                 }}
                               >
-                                موصى به
-                              </Text>
+                                {src.recommended ? (
+                                  <View
+                                    style={{
+                                      paddingHorizontal: 7,
+                                      paddingVertical: 2,
+                                      borderRadius: 6,
+                                      backgroundColor: "rgba(16, 185, 129, 0.14)",
+                                      borderWidth: 1,
+                                      borderColor: "rgba(16, 185, 129, 0.35)",
+                                    }}
+                                  >
+                                    <Text
+                                      style={{
+                                        color: "#10b981",
+                                        fontSize: tvMode ? 12 : 10,
+                                        fontFamily: "Cairo_700Bold",
+                                      }}
+                                    >
+                                      موصى به
+                                    </Text>
+                                  </View>
+                                ) : null}
+                                <Text
+                                  style={[
+                                    d.webRowTag,
+                                    tvMode && d.tvWebRowTag,
+                                    {
+                                      textAlign: "right",
+                                      color: colors.textPrimary,
+                                      fontSize: tvMode ? 15 : 13,
+                                      fontFamily: "Cairo_700Bold",
+                                    },
+                                    isFailed && { color: colors.destructive },
+                                  ]}
+                                  numberOfLines={1}
+                                >
+                                  السيرفر {tag}
+                                </Text>
+                                <View
+                                  style={[
+                                    d.webRowDot,
+                                    tvMode && d.tvWebRowDot,
+                                    {
+                                      width: 8,
+                                      height: 8,
+                                      borderRadius: 4,
+                                      backgroundColor: isFailed ? colors.destructive : "#34d399",
+                                    },
+                                  ]}
+                                />
+                              </View>
+                              <View
+                                style={{
+                                  paddingHorizontal: tvMode ? 10 : 8,
+                                  paddingVertical: tvMode ? 2.5 : 2,
+                                  borderRadius: 6,
+                                  borderWidth: 1,
+                                  backgroundColor: isHardsubRow
+                                    ? "rgba(16, 185, 129, 0.13)"
+                                    : "rgba(245, 158, 11, 0.11)",
+                                  borderColor: isHardsubRow
+                                    ? "rgba(16, 185, 129, 0.34)"
+                                    : "rgba(245, 158, 11, 0.30)",
+                                }}
+                              >
+                                <Text
+                                  style={{
+                                    fontFamily: "Cairo_700Bold",
+                                    fontSize: tvMode ? 12 : 10,
+                                    color: isHardsubRow ? "#10b981" : "#f59e0b",
+                                    includeFontPadding: false,
+                                  }}
+                                >
+                                  {isHardsubRow ? "ترجمة عربية مدمجة" : "ترجمة عربية خارجية"}
+                                </Text>
+                              </View>
                             </View>
-                          ) : null}
-                          <Text
-                            style={[
-                              d.webRowTag,
-                              tvMode && d.tvWebRowTag,
-                              {
-                                textAlign: "right",
-                                color: colors.textPrimary,
-                                fontSize: tvMode ? 15 : 13,
-                                fontFamily: "Cairo_700Bold",
-                              },
-                              isFailed && { color: colors.destructive },
-                            ]}
-                            numberOfLines={1}
-                          >
-                            السيرفر {tag}
-                          </Text>
-                          <View
-                            style={[
-                              d.webRowDot,
-                              tvMode && d.tvWebRowDot,
-                              {
-                                width: 8,
-                                height: 8,
-                                borderRadius: 4,
-                                backgroundColor: isFailed ? colors.destructive : "#34d399",
-                              },
-                            ]}
-                          />
-                        </View>
+                          );
+                        })()}
                       </Pressable>
                     );
                   })}
