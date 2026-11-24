@@ -1,3 +1,4 @@
+import { resolveVixSrcClient } from "./vixsrcClient";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "./baseUrl";
 import { secureFetch, secureStreamFetch } from "./secureApi";
@@ -317,6 +318,7 @@ export async function streamFilmSources(params: {
   episode: number;
   title: string;
   year?: number | string;
+  realTmdbId?: number | null;
   forceRefresh?: boolean;
   onStatus?: (msg: string) => void;
   onSource: (srv: FilmServerLink) => void;
@@ -325,17 +327,51 @@ export async function streamFilmSources(params: {
 }): Promise<FilmServerLink[]> {
   const base = getBaseUrl();
   const mediaType: TmdbMediaType = params.tmdbType || params.type || "movie";
-  const cacheKey = `film-srcs-v3-${mediaType}-${params.tmdbId}-s${params.season}-e${params.episode}`;
+  const cacheKey = `film-srcs-v4-${mediaType}-${params.tmdbId}-s${params.season}-e${params.episode}`;
+
+  const collected: FilmServerLink[] = [];
+  const seen = new Set<string>();
+  const emitUnique = (item: FilmServerLink) => {
+    const dedupeKey = item.directUrl || item.embedUrl || item.url || item.id;
+    if (!dedupeKey || seen.has(dedupeKey)) return;
+    seen.add(dedupeKey);
+    collected.push(item);
+    params.onSource(item);
+  };
+
+  let vixPromise: Promise<void> | null = null;
+  const triggerVixSrc = (realId: number | null | undefined) => {
+    if (vixPromise || !realId || !Number.isFinite(Number(realId)) || Number(realId) <= 0) return;
+    vixPromise = resolveVixSrcClient({
+      tmdbId: Number(realId),
+      type: mediaType,
+      season: params.season,
+      episode: params.episode,
+      forceRefresh: params.forceRefresh,
+      signal: params.signal,
+    })
+      .then((cbLink) => {
+        if (cbLink && !params.signal?.aborted) {
+          emitUnique(cbLink);
+        }
+      })
+      .catch(() => {});
+  };
+
+  // Start client-side Cobalt (VixSrc) immediately if realTmdbId is already known from detail
+  triggerVixSrc(params.realTmdbId);
 
   if (!params.forceRefresh) {
     try {
       const rawCache = await AsyncStorage.getItem(cacheKey);
       if (rawCache) {
-        const parsed = JSON.parse(rawCache) as { ts: number; items: FilmServerLink[] };
+        const parsed = JSON.parse(rawCache) as { ts: number; items: FilmServerLink[]; realTmdbId?: number | null };
         if (parsed?.items?.length > 0 && Date.now() - parsed.ts < SOURCES_CACHE_TTL) {
-          parsed.items.forEach((item) => params.onSource(item));
+          triggerVixSrc(parsed.realTmdbId);
+          parsed.items.forEach((item) => emitUnique(item));
+          if (vixPromise) await vixPromise;
           params.onDone?.();
-          return parsed.items;
+          return collected;
         }
       }
     } catch {}
@@ -349,9 +385,8 @@ export async function streamFilmSources(params: {
     title: params.title,
   });
 
-  const collected: FilmServerLink[] = [];
-  const seen = new Set<string>();
   let idxCounter = 0;
+  let discoveredRealTmdbId: number | null = params.realTmdbId ? Number(params.realTmdbId) : null;
 
   const processLineBatch = (chunkText: string, state: { currentEvent: string }) => {
     const lines = chunkText.split("\n");
@@ -370,16 +405,18 @@ export async function streamFilmSources(params: {
       try {
         const data = JSON.parse(line.slice(5).trim());
         const ev = state.currentEvent || data.type || "";
-        if (ev === "status" && data.msg) {
+        if (ev === "meta" && data.realTmdbId) {
+          const rid = Number(data.realTmdbId);
+          if (Number.isFinite(rid) && rid > 0) {
+            discoveredRealTmdbId = rid;
+            triggerVixSrc(rid);
+          }
+        } else if (ev === "status" && data.msg) {
           params.onStatus?.(String(data.msg));
         } else if (ev === "source" || (!ev && (data.url || data.directUrl || data.proxyUrl))) {
           const normalized = normalizeServerFromSSE(data, idxCounter++, base);
           if (!normalized) continue;
-          const dedupeKey = normalized.directUrl || normalized.embedUrl || normalized.id;
-          if (seen.has(dedupeKey)) continue;
-          seen.add(dedupeKey);
-          collected.push(normalized);
-          params.onSource(normalized);
+          emitUnique(normalized);
         }
       } catch {}
     }
@@ -415,8 +452,15 @@ export async function streamFilmSources(params: {
     // Graceful stop on network abort/timeout
   }
 
-  if (collected.length > 0) {
-    AsyncStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), items: collected })).catch(() => {});
+  if (vixPromise) {
+    await vixPromise;
+  }
+  const cacheable = collected.filter((item) => !item.clientSideOnly);
+  if (cacheable.length > 0) {
+    AsyncStorage.setItem(
+      cacheKey,
+      JSON.stringify({ ts: Date.now(), items: cacheable, realTmdbId: discoveredRealTmdbId }),
+    ).catch(() => {});
   }
   params.onDone?.();
   return collected;

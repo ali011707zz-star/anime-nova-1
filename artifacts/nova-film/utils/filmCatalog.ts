@@ -23,6 +23,8 @@ export type FilmStreamSource = {
   isArabic?: boolean;
   isEmbed?: boolean;
   hardsubbed?: boolean;
+  recommended?: boolean;
+  clientSideOnly?: boolean;
 };
 
 export type FilmServerLink = FilmStreamSource;
@@ -108,6 +110,7 @@ export type FilmSummary = {
 export type FavoriteFilmItem = FilmSummary;
 
 export type FilmDetail = FilmSummary & {
+  realTmdbId?: number | null;
   runtimeMin: number;
   durationOrSeasons: string;
   statusLabel: string;

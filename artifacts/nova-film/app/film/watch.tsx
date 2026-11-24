@@ -92,6 +92,7 @@ function normalizeQualityBucket(src: FilmStreamSource): "1080p" | "720p" | "480p
 
 function serverShortTag(src: FilmStreamSource, idx: number): string {
   const s = (src.site || "").toLowerCase();
+  if (s === "cb" || s.includes("cobalt") || s.includes("vixsrc")) return "CB";
   if (s === "vidhls") return "VH";
   if (s === "vidhls-alt") return "CD";
   if (s.includes("dahmer")) return "DH";
@@ -258,6 +259,8 @@ export default function FilmWatchScreen() {
       episode: currentEpNum,
       title: lookupTitle,
       year: lookupYear,
+      realTmdbId: detail?.realTmdbId,
+      forceRefresh: refreshNonce > 0,
       signal: controller.signal,
       onStatus: (msg) => {
         if (!controller.signal.aborted && msg) setStatusMsg(msg);
@@ -269,7 +272,7 @@ export default function FilmWatchScreen() {
         setSources((prev) => {
           const playUrl = resolveFilmPlayableUrl(src);
           if (!playUrl || prev.some((x) => resolveFilmPlayableUrl(x) === playUrl)) return prev;
-          return [...prev, src];
+          return src.recommended ? [src, ...prev] : [...prev, src];
         });
       },
       onDone: () => {
@@ -886,6 +889,28 @@ export default function FilmWatchScreen() {
                             gap: 8,
                           }}
                         >
+                          {src.recommended ? (
+                            <View
+                              style={{
+                                paddingHorizontal: 7,
+                                paddingVertical: 2,
+                                borderRadius: 6,
+                                backgroundColor: "rgba(16, 185, 129, 0.14)",
+                                borderWidth: 1,
+                                borderColor: "rgba(16, 185, 129, 0.35)",
+                              }}
+                            >
+                              <Text
+                                style={{
+                                  color: "#10b981",
+                                  fontSize: tvMode ? 12 : 10,
+                                  fontFamily: "Cairo_700Bold",
+                                }}
+                              >
+                                موصى به
+                              </Text>
+                            </View>
+                          ) : null}
                           <Text
                             style={[
                               d.webRowTag,
@@ -924,7 +949,7 @@ export default function FilmWatchScreen() {
           })}
 
           {/* ── Direct Download Servers Section (matching Anime NOVA downloadSection) ── */}
-          {sources.length > 0 && (
+          {sources.some((s) => !s.clientSideOnly) && (
             <View
               style={[
                 d.downloadSection,
@@ -995,7 +1020,7 @@ export default function FilmWatchScreen() {
                   }}
                 >
                   <Text style={{ color: "#22d3ee", fontSize: 10, fontFamily: "Cairo_700Bold" }}>
-                    {sources.length} سيرفر
+                    {sources.filter((s) => !s.clientSideOnly).length} سيرفر
                   </Text>
                 </View>
               </View>
@@ -1012,7 +1037,7 @@ export default function FilmWatchScreen() {
                   },
                 ]}
               >
-                {sources.map((src, idx) => {
+                {sources.filter((s) => !s.clientSideOnly).map((src, idx, arr) => {
                   const qk = normalizeQualityBucket(src);
                   const tag = serverShortTag(src, idx);
                   const stateKey = `${tag}:${qk}`;
@@ -1026,7 +1051,7 @@ export default function FilmWatchScreen() {
                       key={`dl-${stateKey}-${idx}`}
                       style={[
                         d.downloadRow,
-                        idx === sources.length - 1 && { borderBottomWidth: 0 },
+                        idx === arr.length - 1 && { borderBottomWidth: 0 },
                       ]}
                     >
                       {/* Left: Download button */}
