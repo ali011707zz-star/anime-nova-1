@@ -73,6 +73,7 @@ const EMPTY_STATS: DubbedCatalogFeedStats = {
 export function useDubbedCatalogFeed(
   section: DubbedCatalogSection,
   searchText: string,
+  _enabled = true,
 ) {
   const rawQuery = searchText.trim().length >= 2 ? searchText.trim() : "";
   const [query, setQuery] = useState(rawQuery);

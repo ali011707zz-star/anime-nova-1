@@ -498,7 +498,7 @@ export default function HomeScreen() {
 
   const renderHomeSection = ({ item: section }: { item: HomeSectionItem; index: number }) => {
     const sectionFocusable = true;
-    const handleSectionFocus = undefined;
+    const handleSectionFocus = undefined as (() => void) | undefined;
     if (section.kind === "anilist") {
       return (
         <SectionRow
