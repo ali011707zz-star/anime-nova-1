@@ -182,6 +182,36 @@ class NovaDownloadModule : Module() {
       ctx.startActivity(installIntent)
       "launched"
     }
+
+    AsyncFunction("openInAdm") { url: String, fileName: String ->
+      val cleanUrl = url.trim()
+      if (!cleanUrl.startsWith("http://") && !cleanUrl.startsWith("https://")) {
+        return@AsyncFunction false
+      }
+      val ctx = appContext()
+      val cleanName = fileName.trim().take(120)
+      val targets = listOf(
+        "com.dv.adm" to "com.dv.adm.AEditor",
+        "com.dv.adm.pay" to "com.dv.adm.pay.AEditor",
+      )
+      for ((pkg, cls) in targets) {
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+          setClassName(pkg, cls)
+          data = Uri.parse(cleanUrl)
+          putExtra(Intent.EXTRA_TEXT, cleanUrl)
+          if (cleanName.isNotBlank()) {
+            putExtra("com.android.extra.filename", cleanName)
+          }
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val launched = runCatching {
+          ctx.startActivity(intent)
+          true
+        }.getOrDefault(false)
+        if (launched) return@AsyncFunction true
+      }
+      false
+    }
   }
 
   private fun parseObject(raw: String): Map<String, String> {

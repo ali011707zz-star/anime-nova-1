@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Linking, Platform } from "react-native";
+import { Alert, Linking, Platform, Share } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { hasNativeOpenInAdm, openInAdmNative } from "expo-nova-download";
 import { getBaseUrl } from "@/utils/baseUrl";
 import {
   ADM_MARKET_URL,
@@ -262,37 +263,66 @@ export async function launchAdmDownload(params: {
     ep: params.ep,
     quality: params.quality,
   });
-  const intentUrls = buildAdmIntentUrls(params.directUrl, fileName);
 
-  for (const intentUrl of intentUrls) {
+  // 1. Native Android direct launch into com.dv.adm.AEditor / com.dv.adm.pay.AEditor
+  //    (zero extra taps + pre-filled filename when compiled into APK).
+  if (hasNativeOpenInAdm()) {
     try {
-      await Linking.openURL(intentUrl);
+      const opened = await openInAdmNative(params.directUrl, fileName);
+      if (opened) return true;
+    } catch {
+      /* fall through to not-installed alert */
+    }
+
+    const buttons: { text: string; style?: "default" | "cancel" | "destructive"; onPress?: () => void }[] = [
+      {
+        text: "تثبيت ADM",
+        onPress: () => {
+          void openAdmPlayStore();
+        },
+      },
+    ];
+    if (params.onFallbackInternal) {
+      buttons.push({
+        text: "التحميل داخل التطبيق",
+        onPress: params.onFallbackInternal,
+      });
+    }
+    buttons.push({ text: "إلغاء", style: "cancel" });
+
+    Alert.alert(
+      "تطبيق ADM غير مثبّت",
+      "لم يتم العثور على تطبيق Advanced Download Manager (ADM) على جهازك.\nيمكنك تثبيته الآن أو متابعة التنزيل داخل التطبيق.",
+      buttons,
+    );
+    return false;
+  }
+
+  // 2. OTA compatibility path for existing v1.0.10 APKs:
+  //    React Native Linking.openURL() does NOT parse intent:// URIs on Android,
+  //    whereas Share.share() dispatches Android Intent.ACTION_SEND (text/plain)
+  //    which ADM Editor (com.dv.adm) registers directly in the native chooser.
+  try {
+    await Share.share(
+      {
+        title: fileName,
+        message: params.directUrl,
+      },
+      {
+        dialogTitle: "اختر ADM Editor لبدء التنزيل",
+      },
+    );
+    return true;
+  } catch {
+    // Final fallback: direct HTTPS URL via OS chooser
+    try {
+      await Linking.openURL(params.directUrl);
       return true;
     } catch {
-      /* Try next ADM package (com.dv.adm -> com.dv.adm.pay) */
+      if (params.onFallbackInternal) {
+        params.onFallbackInternal();
+      }
+      return false;
     }
   }
-
-  const buttons: { text: string; style?: "default" | "cancel" | "destructive"; onPress?: () => void }[] = [
-    {
-      text: "تثبيت ADM",
-      onPress: () => {
-        void openAdmPlayStore();
-      },
-    },
-  ];
-  if (params.onFallbackInternal) {
-    buttons.push({
-      text: "التحميل داخل التطبيق",
-      onPress: params.onFallbackInternal,
-    });
-  }
-  buttons.push({ text: "إلغاء", style: "cancel" });
-
-  Alert.alert(
-    "تطبيق ADM غير مثبّت",
-    "لم يتم العثور على تطبيق Advanced Download Manager (ADM) على جهازك.\nيمكنك تثبيته الآن أو متابعة التنزيل داخل التطبيق.",
-    buttons,
-  );
-  return false;
 }

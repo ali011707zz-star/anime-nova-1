@@ -36,6 +36,7 @@ type NovaDownloadModule = {
   canInstallPackages(): Promise<boolean>;
   openInstallPermissionSettings(): Promise<boolean>;
   installApk(localPathOrUri: string): Promise<"launched" | "permission_required">;
+  openInAdm?: (url: string, fileName: string) => Promise<boolean>;
 };
 
 const nativeModule = requireOptionalNativeModule<NovaDownloadModule>("NovaDownload");
@@ -96,4 +97,15 @@ export async function installApkNative(localPathOrUri: string): Promise<"launche
     throw new Error("Native APK installer is unavailable");
   }
   return nativeModule.installApk(localPathOrUri);
+}
+
+export function hasNativeOpenInAdm(): boolean {
+  return typeof nativeModule?.openInAdm === "function";
+}
+
+export async function openInAdmNative(url: string, fileName: string): Promise<boolean> {
+  if (typeof nativeModule?.openInAdm !== "function") {
+    return false;
+  }
+  return nativeModule.openInAdm(url, fileName);
 }
