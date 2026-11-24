@@ -89,6 +89,7 @@ export interface StardimaV2ResolvedStream {
   serverId: string;
   serverName: string;
   quality: string;
+  embedUrl?: string;
 }
 
 interface RawScrapedItem {
@@ -1276,6 +1277,7 @@ async function resolveSingleStardimaV2Server(
     serverId: srv.id,
     serverName: srv.name,
     quality: srv.quality,
+    embedUrl,
   };
   resolvedStreamCache.set(cacheKey, {
     expiresAt: Date.now() + RESOLVED_STREAM_TTL_MS,

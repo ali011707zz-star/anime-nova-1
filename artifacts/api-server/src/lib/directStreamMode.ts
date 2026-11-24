@@ -19,7 +19,22 @@ export interface DirectModeFlags {
 }
 
 const IP_LOCKED_HOST_RE =
-  /(?:^|\.)(?:streamtape\.|dood\.|ds2play\.|d000d\.|d0o0d\.|filemoon\.|streamwish\.|swish\.|wishfast\.|earnvids\.|vidhide\.|dhtpre\.|peytonepre\.|ryderjet\.|byse\.|swiftplayers\.|lulustream\.|lulu\.|vidmoly\.|voe\.sx|mixdrop\.|uqload\.|ok\.ru|odnoklassniki\.ru|megamax\.|share4max\.|filelions\.|updown\.|mp4upload\.|sendvid\.)/i;
+  /(?:^|\.)(?:streamtape\.|strtape\.|tapecontent\.|dood\.|ds2play\.|d000d\.|d0000d\.|d0o0d\.|filemoon\.|streamwish\.|swish\.|wishfast\.|cdnwish\.|swdyu\.|earnvids\.|vidhide\.|vidhidepro\.|dhtpre\.|peytonepre\.|ryderjet\.|byse\.|swiftplayers\.|lulustream\.|lulu\.|vidmoly\.|moly\.|voe\.sx|mixdrop\.|mxdrop\.|mxcontent\.net|uqload\.|ok\.ru|odnoklassniki\.ru|megamax\.|share4max\.|filelions\.|updown\.|mp4upload\.|sendvid\.|cloudwindow-route\.|caseyseemavoid\.|streamhg\.|hgcloud\.|vidtube\.|streamruby\.)/i;
+
+export function hasIpLockedQueryParam(rawUrl: string): boolean {
+  const s = String(rawUrl || "");
+  // StreamWish / MegaMax / FileMoon / VidHide embed CDNs lock tokens to the extractor IP via &i=<ip-prefix> or &asn=1
+  return /[?&](?:i=\d{1,3}\.\d{1,3}|asn=1)(?:&|$)/i.test(s);
+}
+
+const MANIFEST_ONLY_SITES = new Set(["reflix", "reflix_dub", "reanime", "anime4up2"]);
+
+function appendDirectSegsParam(proxyUrl: string): string {
+  if (!proxyUrl) return proxyUrl;
+  if (/[?&]directSegs=1(?:&|$)/i.test(proxyUrl)) return proxyUrl;
+  const sep = proxyUrl.includes("?") ? "&" : "?";
+  return `${proxyUrl}${sep}directSegs=1`;
+}
 
 const EMBED_PAGE_PATH_RE = /\/(?:e|v|d|embed|embed-[a-z0-9_-]+|videoembed|iframe)\//i;
 
@@ -166,6 +181,31 @@ export function toDirectAnimeSource<T extends Record<string, any>>(
     };
   }
 
+  // Manifest-Only Direct Mode for encrypted/signed HLS playlists (RE / ReAnime manifestKey, AD 2 VnxPlayer):
+  // VPS decrypts only the tiny ~5KB .m3u8 text playlist, while 100% of video segments (.ts/.m4s)
+  // stream directly from external CDNs to the user's device (0 video bytes on VPS).
+  const isManifestOnlySource =
+    (Boolean(source.manifestKey) || MANIFEST_ONLY_SITES.has(site)) &&
+    /(?:^|\/)api\/anime\/hls-proxy(?:[?#]|$)/i.test(primaryCandidate);
+  if (isManifestOnlySource) {
+    const manifestOnlyUrl = appendDirectSegsParam(primaryCandidate);
+    const segReferer =
+      site === "reflix" || site === "reflix_dub" || site === "reanime"
+        ? "https://flixcloud.cc/"
+        : String(source.headers?.Referer || source.headers?.referer || source.referer || "").trim();
+    const headers = buildDirectPlaybackHeaders(source.headers, segReferer);
+    return {
+      ...source,
+      url: manifestOnlyUrl,
+      directUrl: manifestOnlyUrl,
+      directType: "hls",
+      isEmbed: false,
+      corsOk: true,
+      headers,
+      deliveryMode: "direct",
+    };
+  }
+
   const unwrappedDirect = unwrapProxyUrl(String(source.directUrl || ""), decryptFn, isEncryptedFn);
   const unwrappedUrl = unwrapProxyUrl(String(source.url || ""), decryptFn, isEncryptedFn);
   const unwrappedRaw = unwrapProxyUrl(String(source.rawUrl || ""), decryptFn, isEncryptedFn);
@@ -205,7 +245,7 @@ export function toDirectAnimeSource<T extends Record<string, any>>(
   const needsClientExtract =
     clientExtractEnabled &&
     Boolean(embedCandidate) &&
-    (source.isEmbed || !chosenDirect || isIpLockedHost(chosenHost) || isIpLockedHost(embedHost));
+    (source.isEmbed || !chosenDirect || isIpLockedHost(chosenHost) || isIpLockedHost(embedHost) || hasIpLockedQueryParam(chosenDirect));
 
   if (needsClientExtract) {
     return {
@@ -293,7 +333,7 @@ export function toDirectDubbedPayload<T extends Record<string, any>>(
   let embedHost = "";
   try { if (embedUrl) embedHost = new URL(embedUrl).hostname.toLowerCase(); } catch { /* ignore */ }
 
-  if (clientExtractEnabled && embedUrl && isPhoneExtractableEmbedUrl(embedUrl) && (isIpLockedHost(directHost) || isIpLockedHost(embedHost))) {
+  if (clientExtractEnabled && embedUrl && isPhoneExtractableEmbedUrl(embedUrl) && (isIpLockedHost(directHost) || isIpLockedHost(embedHost) || hasIpLockedQueryParam(directUrl))) {
     return {
       ...payload,
       hlsUrl: directUrl,

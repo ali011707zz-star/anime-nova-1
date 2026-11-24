@@ -2313,7 +2313,7 @@ async function parseShareMaxMultiStreams(
   fileId: string,
   referer: string,
   forDownload = false,
-): Promise<Array<{ url: string; type: "hls" | "mp4"; quality: string; referer: string }>> {
+): Promise<Array<{ url: string; type: "hls" | "mp4"; quality: string; referer: string; embedUrl?: string }>> {
   const iframeUrl = `https://${host}/iframe/${fileId}`;
   const FALLBACK_VERSION = "d98bcc9c79d1c5ff36a86cc41dfcd275";
   try {
@@ -2358,7 +2358,7 @@ async function parseShareMaxMultiStreams(
       return "720p";
     };
 
-    const extractOneQuality = async (qObj: any): Promise<{ url: string; type: "hls" | "mp4"; quality: string; referer: string } | null> => {
+    const extractOneQuality = async (qObj: any): Promise<{ url: string; type: "hls" | "mp4"; quality: string; referer: string; embedUrl?: string } | null> => {
       const quality = normalizeQ(qObj?.label || qObj?.quality || qObj?.name || "");
       const mirrors: any[] = Array.isArray(qObj?.mirrors) ? qObj.mirrors : [];
       const scoreMirror = (m: any): number => {
@@ -2399,7 +2399,7 @@ async function parseShareMaxMultiStreams(
           if (drv === "voe" || link.includes("voe.sx")) {
             const voe = await parseVoe(link, iframeUrl);
             if (voe && await verifyHlsManifestFast(voe.url, voe.referer, 2800)) {
-              return { url: voe.url, type: "hls", quality, referer: voe.referer };
+              return { url: voe.url, type: "hls", quality, referer: voe.referer, embedUrl: link };
             }
           } else if (drv === "ok" || link.includes("ok.ru/videoembed/")) {
             const okm = link.match(/\/videoembed\/(\d+)/);
@@ -2407,11 +2407,11 @@ async function parseShareMaxMultiStreams(
               const vids = await extractOkRuVideo(okm[1]);
               const mp4Src = forDownload ? vids.find((v: any) => v.type === "mp4" && v.url) : null;
               if (mp4Src) {
-                return { url: mp4Src.url, type: "mp4", quality, referer: "https://ok.ru/" };
+                return { url: mp4Src.url, type: "mp4", quality, referer: "https://ok.ru/", embedUrl: link };
               }
               const hlsSrc = vids.find((v: any) => v.type === "hls" && v.url);
               if (hlsSrc && await verifyHlsManifestFast(hlsSrc.url, "https://ok.ru/", 2800)) {
-                return { url: hlsSrc.url, type: "hls", quality, referer: "https://ok.ru/" };
+                return { url: hlsSrc.url, type: "hls", quality, referer: "https://ok.ru/", embedUrl: link };
               }
             }
           } else {
@@ -2426,24 +2426,24 @@ async function parseShareMaxMultiStreams(
             const outRef = finalOrigin ? `${finalOrigin}/` : iframeUrl;
             if (drv === "streamtape") {
               const st = parseStreamtape(html);
-              if (st?.url) return { url: st.url, type: st.type, quality, referer: outRef };
+              if (st?.url) return { url: st.url, type: st.type, quality, referer: outRef, embedUrl: r.url || link };
             } else if (drv === "mixdrop" || link.includes("mixdrop") || link.includes("mxdrop")) {
               const mdUrl = parseMixDrop(html);
-              if (mdUrl) return { url: mdUrl, type: "mp4", quality, referer: outRef };
+              if (mdUrl) return { url: mdUrl, type: "mp4", quality, referer: outRef, embedUrl: r.url || link };
             } else if (drv === "mp4upload" || link.includes("mp4upload")) {
               const unpacked = unpackPacked(html);
               const mp4Url = parseMp4Upload(unpacked || html) || parseMp4Upload(html);
-              if (mp4Url) return { url: mp4Url, type: "mp4", quality, referer: outRef };
+              if (mp4Url) return { url: mp4Url, type: "mp4", quality, referer: outRef, embedUrl: r.url || link };
             } else {
               const sw = parseStreamwish(html);
               if (sw?.url) {
                 if (sw.type !== "hls" || await verifyHlsManifestFast(sw.url, outRef, 2800)) {
-                  return { url: sw.url, type: sw.type, quality, referer: outRef };
+                  return { url: sw.url, type: sw.type, quality, referer: outRef, embedUrl: r.url || link };
                 }
               }
               const vh = parseVidhidePro(html, finalOrigin);
               if (vh && await verifyHlsManifestFast(vh, outRef, 2800)) {
-                return { url: vh, type: "hls", quality, referer: outRef };
+                return { url: vh, type: "hls", quality, referer: outRef, embedUrl: r.url || link };
               }
             }
           }
@@ -2453,7 +2453,7 @@ async function parseShareMaxMultiStreams(
     };
 
     const settled = await Promise.allSettled(streams.data.slice(0, 4).map(extractOneQuality));
-    const out: Array<{ url: string; type: "hls" | "mp4"; quality: string; referer: string }> = [];
+    const out: Array<{ url: string; type: "hls" | "mp4"; quality: string; referer: string; embedUrl?: string }> = [];
     const seenQ = new Set<string>();
     for (const r of settled) {
       if (r.status === "fulfilled" && r.value && !seenQ.has(r.value.quality)) {
@@ -5936,6 +5936,7 @@ async function getAnime4up2HardsubSources(
           return directStreams.map((ds): UnifiedSource => ({
             name: `أنمي فور أب (مدمج) · ${ds.quality}`,
             url: megaEntry.url,
+            embedUrl: ds.embedUrl || megaEntry.url,
             directUrl: ds.type === "hls"
               ? `/api/anime/hls-proxy?url=${encodeURIComponent(ds.url)}&ref=${encodeURIComponent(ds.referer)}`
               : ds.url,
@@ -5945,7 +5946,7 @@ async function getAnime4up2HardsubSources(
             quality: ds.quality,
             qualityRank: qRank(ds.quality),
             site: "anime4up2_hard",
-          }));
+          } as UnifiedSource));
         }
       }
     }
@@ -18648,13 +18649,14 @@ function toVpsSegProxy(absUrl: string, ref: string, trace = ""): string {
   return `${NOVA_PUBLIC_URL}/api/anime/seg-proxy?url=${encryptParam(absUrl)}&ref=${encryptParam(ref || absUrl)}${traceParam}`;
 }
 
-function toVpsHlsProxy(absUrl: string, ref: string, manifestKey = "", trace = ""): string {
+function toVpsHlsProxy(absUrl: string, ref: string, manifestKey = "", trace = "", directSegments = false): string {
   const params = new URLSearchParams({
     url: encryptParam(absUrl),
     ref: encryptParam(ref || absUrl),
   });
   if (manifestKey) params.set("mk", encryptParam(manifestKey));
   if (trace) params.set("trace", trace);
+  if (directSegments) params.set("directSegs", "1");
   params.set("child", "1");
   return `${NOVA_PUBLIC_URL}/api/anime/hls-proxy?${params.toString()}`;
 }
@@ -18727,6 +18729,7 @@ function rewriteM3u8ForVPS(
   manifestKey = "",
   trace = "",
   preferredAudio = "",
+  directSegments = false,
 ): string {
   const normalizedManifest = preferredAudio ? selectHlsPreferredAudio(manifest, preferredAudio) : manifest;
   const lines = normalizedManifest.split("\n");
@@ -18749,7 +18752,10 @@ function rewriteM3u8ForVPS(
         const targetRef = hlsRefererForTarget(abs, ref);
         // EXT-X-MEDIA قد تشير لـ playlist (صوت/ترجمة بديلة)
         if (t.startsWith("#EXT-X-MEDIA") && /\.m3u8/i.test(uri)) {
-            return `URI="${toVpsHlsProxy(abs, targetRef, manifestKey, trace)}"`;
+            return `URI="${toVpsHlsProxy(abs, targetRef, manifestKey, trace, directSegments)}"`;
+        }
+        if (directSegments && t.startsWith("#EXT-X-MAP")) {
+          return `URI="${abs}"`;
         }
         return `URI="${toVpsSegmentOrClient(abs, targetRef, trace)}"`;
       });
@@ -18762,7 +18768,9 @@ function rewriteM3u8ForVPS(
     const abs = toAbsoluteUrl(t, baseUrl);
     const targetRef = hlsRefererForTarget(abs, ref);
     if (nextIsPlaylist || /\.m3u8(\?|#|$)/i.test(t)) {
-      out.push(toVpsHlsProxy(abs, targetRef, manifestKey, trace));
+      out.push(toVpsHlsProxy(abs, targetRef, manifestKey, trace, directSegments));
+    } else if (directSegments) {
+      out.push(abs);
     } else {
       out.push(toVpsSegmentOrClient(abs, targetRef, trace));
     }
@@ -18815,6 +18823,7 @@ async function serveHlsVPS(
   traceRoute: string,
   res: import("express").Response,
   preferredAudio = "",
+  directSegments = false,
 ): Promise<void> {
   const requestStartedAt = Date.now();
   mediaMetrics.activeManifests++;
@@ -18826,7 +18835,7 @@ async function serveHlsVPS(
   // مساعد: إرسال manifest مُعاد كتابته للعميل
   function sendManifest(body: string): void {
     if (res.headersSent) return;
-    const rewritten = rewriteM3u8ForVPS(body, url, ref, manifestKey, trace, preferredAudio);
+    const rewritten = rewriteM3u8ForVPS(body, url, ref, manifestKey, trace, preferredAudio, directSegments);
     res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Cache-Control", "public, max-age=2, stale-while-revalidate=2");
@@ -19366,7 +19375,8 @@ router.get("/anime/hls-proxy", async (req, res) => {
   res.setHeader("Access-Control-Expose-Headers", "Accept-Ranges, Content-Length, Content-Range, Content-Type");
 
   const preferredAudio = String(req.query.audio || "").trim().toLowerCase();
-  await serveHlsVPS(url, ref, manifestKey, trace, traceRoute, res, preferredAudio);
+  const directSegments = String(req.query.directSegs || "").trim() === "1";
+  await serveHlsVPS(url, ref, manifestKey, trace, traceRoute, res, preferredAudio, directSegments);
 });
 
 // ── video-proxy: VPS يبث الفيديو مع Referer الصحيح ─────────────────────────

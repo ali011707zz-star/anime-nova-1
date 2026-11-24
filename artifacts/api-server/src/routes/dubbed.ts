@@ -998,7 +998,7 @@ router.get("/dubbed/sd2/watch-src", async (req, res) => {
     const proxiedUrl = proxyPath + "?url=" + encodeURIComponent(resolved.streamUrl) + "&ref=" + encodeURIComponent(resolved.referer);
     res.setHeader("Cache-Control", "no-store");
     const directMode = getDirectModeFlags(req);
-    const basePayload = { hlsUrl: proxiedUrl, rawUrl: resolved.streamUrl, referer: resolved.referer, type: resolved.type, serverId: resolved.serverId, serverName: resolved.serverName, quality: resolved.quality };
+    const basePayload = { hlsUrl: proxiedUrl, rawUrl: resolved.streamUrl, referer: resolved.referer, type: resolved.type, serverId: resolved.serverId, serverName: resolved.serverName, quality: resolved.quality, ...(resolved.embedUrl ? { embedUrl: resolved.embedUrl } : {}) };
     if (directMode.directOnly) {
       res.setHeader("X-Nova-Direct-Active", "1");
       console.info(`[direct-${directMode.appVersion}] route=sd2-watch-src server=${resolved.serverId || "auto"}`);
@@ -1353,6 +1353,28 @@ router.get("/dubbed/watch-src", async (req, res) => {
       return { hlsUrl: proxied, rawUrl, type: "mp4" };
     }
 
+    const directModeAt = getDirectModeFlags(req);
+    function sendAtResolved(resolved: { hlsUrl: string; rawUrl: string; type: string }) {
+      if (directModeAt.directOnly) {
+        res.setHeader("X-Nova-Direct-Active", "1");
+        console.info(`[direct-${directModeAt.appVersion}] route=arabic-toons-watch-src type=${resolved.type}`);
+        res.json({
+          ...resolved,
+          hlsUrl: resolved.rawUrl,
+          rawUrl: resolved.rawUrl,
+          referer: AT_BASE + "/",
+          headers: {
+            "User-Agent": BROWSER_UA,
+            Referer: AT_BASE + "/",
+            Origin: AT_BASE,
+          },
+          deliveryMode: "direct",
+        });
+        return;
+      }
+      res.json(resolved);
+    }
+
     // Pattern 1: videoSrc = "https://stream.foupix.com:8443/...mp4?tkn=..."  (main pattern)
     // arabic-toons uses: videoSrc = "URL"+ "&_=" + Date.now()  — بدون كلمة const
     const videoSrcMatch = html.match(/(?:const\s+)?videoSrc\s*=\s*["']([^"']+(?:\.mp4|\.m3u8)[^"']*)["']/);
@@ -1360,7 +1382,7 @@ router.get("/dubbed/watch-src", async (req, res) => {
       const rawUrl = videoSrcMatch[1].split('"')[0].split("'")[0]; // strip any trailing quote
       const isHls = rawUrl.includes(".m3u8");
       const resolved = await resolveVideoUrl(rawUrl, isHls ? "hls" : "mp4");
-      res.json(resolved);
+      sendAtResolved(resolved);
       return;
     }
 
@@ -1369,7 +1391,7 @@ router.get("/dubbed/watch-src", async (req, res) => {
     if (fileMatch) {
       const rawUrl = fileMatch[1];
       const resolved = await resolveVideoUrl(rawUrl, "mp4");
-      res.json(resolved);
+      sendAtResolved(resolved);
       return;
     }
 
@@ -2494,6 +2516,41 @@ router.get("/aw-dubbed/watch-src", async (req, res) => {
       rows.map(async row => {
         const rawUrl = await toPlayUrl(row.link, row.server);
         if (!rawUrl) return null;
+        if (directMode.directOnly) {
+          const lowerLink = String(row.link || "").toLowerCase();
+          const isStreamtape = row.server === "ST" || lowerLink.includes("streamtape.") || lowerLink.includes("strtape.");
+          if (isStreamtape && directMode.clientExtract) {
+            const embedUrl = row.link.replace(/\/v\//i, "/e/");
+            return {
+              quality: row.quality || "720p",
+              name:    serverLabel(row.server),
+              rawUrl:  embedUrl,
+              hlsUrl:  embedUrl,
+              deliveryMode: "client-extract",
+              clientExtract: {
+                embedUrl,
+                referer: "https://streamtape.com/",
+                hostKind: "standard" as const,
+              },
+            };
+          }
+          if (rawUrl.includes("/api/aw-dubbed/mf-stream")) {
+            return {
+              quality: row.quality || "720p",
+              name:    serverLabel(row.server),
+              rawUrl,
+              hlsUrl: null,
+              deliveryMode: "direct",
+            };
+          }
+          return {
+            quality: row.quality || "720p",
+            name:    serverLabel(row.server),
+            rawUrl,
+            hlsUrl: rawUrl,
+            deliveryMode: "direct",
+          };
+        }
         return {
           quality: row.quality || "720p",
           name:    serverLabel(row.server),
@@ -2502,15 +2559,22 @@ router.get("/aw-dubbed/watch-src", async (req, res) => {
         };
       })
     );
-    const allSources = resolved.filter(Boolean) as { quality: string; name: string; rawUrl: string; hlsUrl: null }[];
 
+    const allSources = resolved.filter(Boolean) as Array<{
+      quality: string;
+      name: string;
+      rawUrl: string;
+      hlsUrl: string | null;
+      deliveryMode?: string;
+      clientExtract?: { embedUrl: string; referer: string; hostKind: "okru" | "standard" };
+    }>;
     if (!allSources.length) {
       res.status(404).json({ error: "لا توجد مصادر متاحة لهذه الحلقة حالياً" });
       return;
     }
 
     res.setHeader("Cache-Control", "no-cache");
-    res.json({ allSources, rawUrl: allSources[0]?.rawUrl ?? null, hlsUrl: null });
+    res.json({ allSources, rawUrl: allSources[0]?.rawUrl ?? null, hlsUrl: directMode.directOnly ? (allSources[0]?.hlsUrl ?? null) : null });
   } catch (e: any) {
     res.status(502).json({ error: String(e?.message || e) });
   }
