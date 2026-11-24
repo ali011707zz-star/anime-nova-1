@@ -93,7 +93,7 @@ export interface ClientExtractDescriptor {
   embedUrl: string;
   referer: string;
   tier?: string;
-  hostKind?: "standard" | "okru" | "fireplayer";
+  hostKind?: "standard" | "okru" | "fireplayer" | "byse";
 }
 
 export interface ExternalResolvedSource {
@@ -1462,9 +1462,18 @@ function isUnsupportedEmbedHost(hostname: string): boolean {
     h.includes("mixdrop") ||
     h.includes("mega.nz") ||
     h.includes("luluvdo.") ||
-    h.includes("byse") ||
     h.includes("firestream.") ||
     h.includes("frstream.")
+  );
+}
+
+// Byse / FileMoon encrypted challenge+PoW hosts (extracted 100% client-side on user phone via enc-dec.app -> 0% VPS bandwidth)
+function isByseHost(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  return (
+    h.includes("byse") ||
+    h.includes("filemoon") ||
+    h.includes("mfw09.")
   );
 }
 
@@ -1506,7 +1515,7 @@ async function extractDirectFromEmbedUrl(
             embedUrl,
             referer,
             tier: "1080p FHD",
-            hostKind: host.includes("ok.ru") ? "okru" : "standard",
+            hostKind: host.includes("ok.ru") ? "okru" : isByseHost(host) ? "byse" : "standard",
           },
         };
       }
@@ -1634,7 +1643,6 @@ async function extractTopCinemaStreams(
     return (
       l.includes("streamtape") ||
       l.includes("dood") ||
-      l.includes("byse") ||
       l.includes("firestream") ||
       l.includes("mixdrop") ||
       l.includes("vinovo")
@@ -1646,6 +1654,7 @@ async function extractTopCinemaStreams(
     if (l.includes("vidtube") || l.includes("videotube")) return 2;
     if (l.includes("lulu")) return 3;
     if (l.includes("updown")) return 4;
+    if (l.includes("byse") || l.includes("filemoon")) return 4;
     if (l.includes("streamwish") || l.includes("filelions") || l.includes("earnvids") || l.includes("vidhide")) return 5;
     if (l.includes("uqload") || l.includes("savefiles") || l.includes("ok")) return 6;
     return 8;
@@ -1747,7 +1756,6 @@ async function extractEgyDeadStreams(
       l.includes("vinovo") ||
       l.includes("streamtape") ||
       l.includes("dood") ||
-      l.includes("byse") ||
       l.includes("mixdrop")
     );
   };
@@ -1756,6 +1764,7 @@ async function extractEgyDeadStreams(
     if (l.includes("uqload")) return 1;
     if (l.includes("streamwish") || l.includes("vidhide") || l.includes("filelions")) return 2;
     if (l.includes("earnvids") || l.includes("fastv")) return 3;
+    if (l.includes("byse") || l.includes("filemoon")) return 3;
     if (l.includes("lulu") || l.includes("savefiles")) return 4;
     if (l === "ok" || l.includes("okru")) return 5;
     if (l.includes("voe")) return 6;
