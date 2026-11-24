@@ -2823,17 +2823,121 @@ async function fetchAwDubbedLatestRows(): Promise<DubbedLatestItem[]> {
   }
 }
 
+function getDubbedSeriesKey(item: Partial<DubbedLatestItem> | null | undefined): string {
+  if (!item) return "";
+  const kind = String(item.dubbedKind || item.source || "").trim().toLowerCase();
+  if (kind === "sd2") {
+    const slug = String(item.sd2Slug || "").trim().toLowerCase();
+    if (slug) return `sd2:${slug}`;
+  }
+  if (kind === "dubbed-anime") {
+    const slug = String(item.dubbedSlug || "").trim().toLowerCase();
+    if (slug) return `dubbed-anime:${slug}`;
+  }
+  if (kind === "aw-dubbed") {
+    const k = String(item.awKey || item.awSeries || "").trim().toLowerCase();
+    if (k) return `aw-dubbed:${k}`;
+  }
+  return String(item.id || "").replace(/:\d+$/, "").trim().toLowerCase();
+}
+
+function extractSd2PlayableInfo(detail: any): { playable: boolean; latestEpisode: number } {
+  const seasons = Array.isArray(detail?.seasons) ? detail.seasons : [];
+  let totalEps = 0;
+  let lastNonEmptyEps: any[] = [];
+  for (const sn of seasons) {
+    const eps = Array.isArray(sn?.episodes) ? sn.episodes.filter((e: any) => Boolean(e?.watchUrl || e?.url)) : [];
+    if (eps.length > 0) {
+      totalEps += eps.length;
+      lastNonEmptyEps = eps;
+    }
+  }
+  if (totalEps <= 0) return { playable: false, latestEpisode: 0 };
+  const maxEp = lastNonEmptyEps.reduce((m: number, e: any) => Math.max(m, Number(e?.number) || 0), 0);
+  return { playable: true, latestEpisode: maxEp > 0 ? maxEp : lastNonEmptyEps.length };
+}
+
+const _dubbedVerifyCache = new Map<string, { ok: boolean; realEpisode?: number; expiresAt: number }>();
+const DUBBED_VERIFY_OK_TTL_MS = 20 * 60 * 1000;
+const DUBBED_VERIFY_FAIL_TTL_MS = 5 * 60 * 1000;
+
+async function verifyDubbedLatestItem(
+  item: DubbedLatestItem,
+): Promise<{ ok: boolean; realEpisode?: number }> {
+  const kind = String(item?.dubbedKind || item?.source || "").trim().toLowerCase();
+  const seriesKey = getDubbedSeriesKey(item);
+  if (!seriesKey) return { ok: false };
+
+  const cached = _dubbedVerifyCache.get(seriesKey);
+  if (cached && Date.now() < cached.expiresAt) {
+    return { ok: cached.ok, realEpisode: cached.realEpisode };
+  }
+
+  let result: { ok: boolean; realEpisode?: number } = { ok: false };
+  try {
+    if (kind === "sd2") {
+      const slug = String(item.sd2Slug || "").trim();
+      if (!slug) return { ok: false };
+      const mediaType = item.isMovie ? "movie" : "series";
+      const detail = await Promise.race([
+        getStardimaV2Episodes(slug, mediaType).catch(() => null),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+      ]);
+      const info = extractSd2PlayableInfo(detail);
+      if (info.playable) {
+        result = { ok: true, realEpisode: item.isMovie ? 1 : info.latestEpisode };
+      } else {
+        result = { ok: false };
+      }
+    } else if (kind === "dubbed-anime") {
+      const slug = String(item.dubbedSlug || "").trim();
+      if (!slug) return { ok: false };
+      const detail: any = await Promise.race([
+        getAnimeZidDetail(slug).catch(() => null),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+      ]);
+      const epsArr = Array.isArray(detail?.episodes) ? detail.episodes : [];
+      const epCount = Math.max(epsArr.length, Number(detail?.episodesCount || 0) || 0);
+      if (epCount > 0 || (item.isMovie && detail)) {
+        result = { ok: true, realEpisode: item.isMovie ? 1 : epCount };
+      } else {
+        result = { ok: false };
+      }
+    } else if (kind === "aw-dubbed") {
+      const hasKey = Boolean(String(item.awKey || item.awSeries || "").trim());
+      const epNum = Number(item.episode || 0);
+      result = { ok: hasKey && Number.isFinite(epNum) && epNum > 0, realEpisode: epNum > 0 ? Math.round(epNum) : undefined };
+    } else {
+      result = { ok: Number(item.episode || 0) > 0 };
+    }
+  } catch {
+    result = { ok: false };
+  }
+
+  // Keep cache bounded
+  if (_dubbedVerifyCache.size > 300) _dubbedVerifyCache.clear();
+  _dubbedVerifyCache.set(seriesKey, {
+    ok: result.ok,
+    realEpisode: result.realEpisode,
+    expiresAt: Date.now() + (result.ok ? DUBBED_VERIFY_OK_TTL_MS : DUBBED_VERIFY_FAIL_TTL_MS),
+  });
+  return result;
+}
+
 async function fetchAnimeZidLatestRows(): Promise<DubbedLatestItem[]> {
   try {
     const data: any = await getAnimeZidCatalog({ page: 1, sort: "newest" });
     const rows: any[] = Array.isArray(data?.results) ? data.results : [];
     const out: DubbedLatestItem[] = [];
-    for (const r of rows.slice(0, 12)) {
+    for (const r of rows.slice(0, 16)) {
       const slug = String(r?.slug || r?.id || "").trim();
       const title = String(r?.title || "").trim();
       if (!slug || !title) continue;
       const isMovie = String(r?.mediaType || "").toLowerCase() === "movie";
-      const epCount = Math.max(1, Number(r?.episodesCount || 1) || 1);
+      const rawEpCount = Number(r?.episodesCount || 0);
+      // Never fabricate episode 1 for empty/unreleased series with 0 episodes
+      if (!isMovie && (!Number.isFinite(rawEpCount) || rawEpCount <= 0)) continue;
+      const epCount = isMovie ? 1 : Math.round(rawEpCount);
       out.push({
         id: `dubbed-anime:${slug}:${epCount}`,
         dubbedKind: "dubbed-anime",
@@ -2849,6 +2953,7 @@ async function fetchAnimeZidLatestRows(): Promise<DubbedLatestItem[]> {
         updatedAt: r?.updatedAt ? String(r.updatedAt) : null,
         dubbedSlug: slug,
       });
+      if (out.length >= 12) break;
     }
     return out;
   } catch (err: any) {
@@ -2860,54 +2965,52 @@ async function fetchAnimeZidLatestRows(): Promise<DubbedLatestItem[]> {
 async function fetchSd2LatestRows(): Promise<DubbedLatestItem[]> {
   try {
     const catalog = await getStardimaV2Catalog(false);
-    const newest = [...catalog]
+    const candidates = [...catalog]
       .sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0))
-      .slice(0, 12);
+      .slice(0, 18);
 
-    // For top 6 series, try to read cached/live latest episode count without blocking long
-    const enriched = await Promise.all(
-      newest.map(async (item, idx): Promise<DubbedLatestItem | null> => {
-        const slug = String(item.slug || "").trim();
-        const title = String(item.title || "").trim();
-        if (!slug || !title) return null;
+    // Strictly verify EVERY candidate (series & movies) has real playable episodes before listing it.
+    // Never invent a fake episode=1 for empty/placeholder StarDima pages!
+    const results: (DubbedLatestItem | null)[] = new Array(candidates.length).fill(null);
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < candidates.length) {
+        const idx = cursor++;
+        const item = candidates[idx];
+        const slug = String(item?.slug || "").trim();
+        const title = String(item?.title || "").trim();
+        if (!slug || !title) continue;
         const isMovie = Boolean(item.isMovie || item.mediaType === "movie");
-        let epNum = 1;
-        if (!isMovie && idx < 6) {
-          try {
-            const detail = await Promise.race([
-              getStardimaV2Episodes(slug, "series"),
-              new Promise<null>((resolve) => setTimeout(() => resolve(null), 3500)),
-            ]);
-            if (detail?.seasons?.length) {
-              const lastSeason = detail.seasons[detail.seasons.length - 1];
-              const eps = Array.isArray(lastSeason?.episodes) ? lastSeason.episodes : [];
-              if (eps.length > 0) {
-                const maxEp = eps.reduce((m, e) => Math.max(m, Number(e.number) || 0), 0);
-                epNum = maxEp > 0 ? maxEp : eps.length;
-              }
-            }
-          } catch {}
-        }
-        return {
-          id: `sd2:${slug}:${epNum}`,
-          dubbedKind: "sd2",
-          sectionLabel: "كرتون مدبلج 2",
-          source: "sd2",
-          name: title,
-          titleAr: title,
-          english: title,
-          episode: epNum,
-          cover: String(item.image || "").trim(),
-          year: String(item.year || ""),
-          isMovie,
-          updatedAt: null,
-          sd2Slug: slug,
-          sd2Id: Number(item.id) || 0,
-          languageLabel: String(item.languageLabel || item.providerLabel || ""),
-        };
-      }),
-    );
-    return enriched.filter((x): x is DubbedLatestItem => Boolean(x));
+        try {
+          const detail = await Promise.race([
+            getStardimaV2Episodes(slug, isMovie ? "movie" : "series").catch(() => null),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+          ]);
+          const info = extractSd2PlayableInfo(detail);
+          if (!info.playable) continue;
+          const epNum = isMovie ? 1 : info.latestEpisode;
+          results[idx] = {
+            id: `sd2:${slug}:${epNum}`,
+            dubbedKind: "sd2",
+            sectionLabel: "كرتون مدبلج 2",
+            source: "sd2",
+            name: title,
+            titleAr: title,
+            english: title,
+            episode: epNum,
+            cover: String(item.image || "").trim(),
+            year: String(item.year || ""),
+            isMovie,
+            updatedAt: null,
+            sd2Slug: slug,
+            sd2Id: Number(item.id) || 0,
+            languageLabel: String(item.languageLabel || item.providerLabel || ""),
+          };
+        } catch {}
+      }
+    };
+    await Promise.all([worker(), worker(), worker(), worker()]);
+    return results.filter((x): x is DubbedLatestItem => Boolean(x)).slice(0, 12);
   } catch (err: any) {
     logger.warn({ err: err?.message || String(err) }, "dubbed: sd2 latest fetch failed");
     return [];
@@ -2923,6 +3026,23 @@ function isWithinRecentWindow(iso: string | null | undefined): boolean {
   if (!Number.isFinite(ts)) return false;
   const age = Date.now() - ts;
   return age >= -24 * 60 * 60 * 1000 && age <= DUBBED_RECENT_WINDOW_MS;
+}
+
+async function saveRecordedDubbedReleases(items: DubbedLatestItem[]): Promise<void> {
+  const SB_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
+  const SB_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+  if (!SB_URL || !SB_KEY) return;
+  await fetch(`${SB_URL}/rest/v1/app_config`, {
+    method: "POST",
+    headers: {
+      apikey: SB_KEY,
+      Authorization: `Bearer ${SB_KEY}`,
+      "Content-Type": "application/json",
+      Prefer: "resolution=merge-duplicates",
+    },
+    body: JSON.stringify({ key: DUBBED_RECENT_CONFIG_KEY, value: JSON.stringify(items.slice(0, 30)) }),
+    signal: AbortSignal.timeout(8_000),
+  });
 }
 
 async function readRecordedDubbedReleases(): Promise<DubbedLatestItem[]> {
@@ -2954,29 +3074,33 @@ export async function recordDubbedRecentRelease(item: any): Promise<void> {
   const SB_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
   if (!SB_URL || !SB_KEY || !item?.id) return;
   try {
+    // Refuse to record any title that does not currently have playable episodes
+    const check = await verifyDubbedLatestItem(item as DubbedLatestItem);
+    if (!check.ok) {
+      logger.info({ id: item.id, name: item.name }, "dubbed: skipped recording unplayable/empty release");
+      return;
+    }
+    const resolvedEp = check.realEpisode && check.realEpisode > 0 ? check.realEpisode : Math.max(1, Number(item.episode || 1) || 1);
+    const seriesKey = getDubbedSeriesKey(item);
+    const resolvedId = seriesKey ? `${seriesKey}:${resolvedEp}` : String(item.id);
     const existing = await readRecordedDubbedReleases();
     const stamped: DubbedLatestItem = {
       ...item,
+      id: resolvedId,
+      episode: resolvedEp,
       updatedAt: new Date().toISOString(),
     };
     const next = [
       stamped,
-      ...existing.filter((x) => x.id !== stamped.id),
+      ...existing.filter((x) => {
+        const xKey = getDubbedSeriesKey(x);
+        return xKey ? xKey !== seriesKey : x.id !== stamped.id;
+      }),
     ]
       .filter((x) => isWithinRecentWindow(x.updatedAt))
       .slice(0, 30);
 
-    await fetch(`${SB_URL}/rest/v1/app_config`, {
-      method: "POST",
-      headers: {
-        apikey: SB_KEY,
-        Authorization: `Bearer ${SB_KEY}`,
-        "Content-Type": "application/json",
-        Prefer: "resolution=merge-duplicates",
-      },
-      body: JSON.stringify({ key: DUBBED_RECENT_CONFIG_KEY, value: JSON.stringify(next) }),
-      signal: AbortSignal.timeout(8_000),
-    });
+    await saveRecordedDubbedReleases(next);
     _dubbedRecentCache = null;
   } catch (err: any) {
     logger.warn({ err: err?.message || String(err) }, "dubbed: failed to record recent release");
@@ -3004,7 +3128,7 @@ async function buildDubbedLatestFeed(): Promise<DubbedLatestItem[]> {
 }
 
 async function buildStrictlyRecentDubbedFeed(): Promise<DubbedLatestItem[]> {
-  // Combine ONLY genuinely recent releases (within last 14 days):
+  // Combine ONLY genuinely recent releases (within last 14 days) AND verify every item has playable episodes:
   // 1) Newly detected dubbed releases stamped by our 10-min monitor
   // 2) Any aw-dubbed / live rows whose real updatedAt/imported_at is within the last 14 days
   const [recorded, awItems] = await Promise.all([
@@ -3016,16 +3140,59 @@ async function buildStrictlyRecentDubbedFeed(): Promise<DubbedLatestItem[]> {
   combined.sort((a, b) => {
     const ta = a.updatedAt ? Date.parse(a.updatedAt) : 0;
     const tb = b.updatedAt ? Date.parse(b.updatedAt) : 0;
-    return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+    if (tb !== ta) return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+    return (Number(b.episode) || 0) - (Number(a.episode) || 0);
   });
-  const seen = new Set<string>();
+
+  // Deduplicate by canonical series key (never show the same series twice with different episode numbers)
+  const seenSeries = new Set<string>();
   const deduped: DubbedLatestItem[] = [];
   for (const item of combined) {
-    if (!item.id || seen.has(item.id)) continue;
-    seen.add(item.id);
+    const seriesKey = getDubbedSeriesKey(item);
+    if (!seriesKey || seenSeries.has(seriesKey)) continue;
+    seenSeries.add(seriesKey);
     deduped.push(item);
   }
-  return deduped.slice(0, 24);
+
+  // Verify every candidate has real playable episodes (cached 20 min) so no item ever opens to "لا توجد حلقات"
+  const verifiedList: (DubbedLatestItem | null)[] = new Array(deduped.length).fill(null);
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < deduped.length) {
+      const idx = cursor++;
+      const item = deduped[idx];
+      const check = await verifyDubbedLatestItem(item);
+      if (!check.ok) continue;
+      const realEp = check.realEpisode && check.realEpisode > 0 ? check.realEpisode : item.episode;
+      const sKey = getDubbedSeriesKey(item);
+      verifiedList[idx] = {
+        ...item,
+        episode: realEp,
+        id: sKey ? `${sKey}:${realEp}` : item.id,
+      };
+    }
+  };
+  await Promise.all([worker(), worker(), worker(), worker()]);
+  const playable = verifiedList.filter((x): x is DubbedLatestItem => Boolean(x)).slice(0, 24);
+
+  // Self-heal recorded list in Supabase if we pruned broken (0-episode) or duplicate entries
+  if (recorded.length > 0) {
+    const playableKeys = new Set(playable.map((x) => getDubbedSeriesKey(x)));
+    const cleanedRecorded: DubbedLatestItem[] = [];
+    const seenRec = new Set<string>();
+    for (const r of recorded) {
+      const k = getDubbedSeriesKey(r);
+      if (!k || seenRec.has(k) || !playableKeys.has(k)) continue;
+      seenRec.add(k);
+      const match = playable.find((p) => getDubbedSeriesKey(p) === k);
+      cleanedRecorded.push(match ? { ...r, episode: match.episode, id: match.id } : r);
+    }
+    if (cleanedRecorded.length !== recorded.length) {
+      void saveRecordedDubbedReleases(cleanedRecorded).catch(() => {});
+    }
+  }
+
+  return playable;
 }
 
 router.get("/dubbed/latest-episodes", async (req, res) => {
