@@ -4,6 +4,7 @@ import { getTelegramAnimeSources } from "../lib/telegramStorage.js";
 import { getTelegramEpisodeById, getEpisodeFileSizeFallback, getStreamSigningSecret, streamTelegramEpisodeRange } from "../lib/telegramStorage.js";
 import { parseHttpByteRange, verifyTgStreamToken } from "../lib/telegramStorageLogic.mjs";
 import { logger } from "../lib/logger.js";
+import { getDirectModeFlags, toDirectAnimeSource } from "../lib/directStreamMode.js";
 import {
   SOURCE_AVAILABILITY_CONCURRENCY,
   orderAvailabilityJobs,
@@ -15407,6 +15408,11 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
   const progressive = String(req.query.progressive || "") === "1";
   const forDownload = String(req.query.forDownload || "") === "1";
   const isMobileClient = (req.headers["x-nova-client"] || "").toString().includes("mobile");
+  const directMode = getDirectModeFlags(req);
+  if (directMode.directOnly) {
+    res.setHeader("X-Nova-Direct-Active", "1");
+    console.info(`[direct-${directMode.appVersion}] route=fetch-source site=${sourceTraceSite} ep=${ep} clientExtract=${directMode.clientExtract ? 1 : 0}`);
+  }
   const excludedCandidateKeys = (() => {
     try {
       const raw = req.query.exclude;
@@ -15508,6 +15514,9 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
       qualityRank: source.qualityRank || classified.qualityRank,
       ...(derivedHeaders ? { headers: derivedHeaders } : {}),
     };
+    if (directMode.directOnly) {
+      return toDirectAnimeSource(normalized, directMode.clientExtract);
+    }
     const wrapped = isMobileClient ? wrapForMobile(normalized) : normalized;
     return {
       ...wrapped,
@@ -16236,6 +16245,9 @@ router.get("/anime/fetch-source", scraperQueueMiddleware, async (req, res) => {
           ...(derivedHeaders || {}),
           "X-Nova-Kawaii-Direct": "1",
         };
+      }
+      if (directMode.directOnly) {
+        return toDirectAnimeSource({ ...s, headers: derivedHeaders || s.headers }, directMode.clientExtract);
       }
       const wrapped = isMobileClient ? wrapForMobile({ ...s, headers: derivedHeaders || s.headers }) : s;
       // corsOk=true: لا تشفير على directUrl — RiftPlayer يحتاج URL الخام لكشف kawaii CDN

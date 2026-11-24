@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import { Router } from "express";
 import { load } from "cheerio";
 import { logger } from "../lib/logger";
+import { getDirectModeFlags, toDirectDubbedPayload } from "../lib/directStreamMode.js";
 import { getTelegramDubbedCatalogItems, getTelegramDubbedEpisodes, getTelegramSd2CatalogItems, getTelegramSd2Detail, getTelegramAnimeZidCatalogItems, getTelegramAnimeZidDetail, getTelegramAwDubbedCatalogItems, getTelegramAwDubbedEpisodes, getTelegramAwDubbedWatchSrc, TG_SPACETOON_ID_BASE, getTelegramSpacetoonCatalogItems, getTelegramSpacetoonEpisodes, getTelegramSpacetoonWatchSrc, getTelegramEpisodeQualities, getTelegramEpisodeById, buildSignedStreamPath, buildSignedStreamUrl, buildSubtitleUrl } from "../lib/telegramStorage.js";
 import { streamMultiRangeMediaVPS } from "../lib/multiRangeStreamer.js";
 import { mergeAwSourceRows } from "../lib/awSourceRows.mjs";
@@ -766,6 +767,13 @@ router.get("/dubbed/carateen/watch-src", async (req, res) => {
       `${proxyPath}?url=${encodeURIComponent(rawUrl)}` +
       `&ref=${encodeURIComponent("https://carateen.tv/")}`;
     res.setHeader("Cache-Control", "no-store");
+    const directMode = getDirectModeFlags(req);
+    if (directMode.directOnly) {
+      res.setHeader("X-Nova-Direct-Active", "1");
+      console.info(`[direct-${directMode.appVersion}] route=carateen-watch-src provider=${provider} showId=${showId}`);
+      res.json(toDirectDubbedPayload({ hlsUrl: proxiedUrl, rawUrl, referer: "https://carateen.tv/", type: isHls ? "hls" : "mp4" }, "https://carateen.tv/", directMode.clientExtract));
+      return;
+    }
     res.json({ hlsUrl: proxiedUrl, type: isHls ? "hls" : "mp4" });
   } catch (error) {
     logger.warn(
@@ -989,7 +997,15 @@ router.get("/dubbed/sd2/watch-src", async (req, res) => {
     const proxyPath = isHls ? "/api/anime/hls-proxy" : "/api/anime/video-proxy";
     const proxiedUrl = proxyPath + "?url=" + encodeURIComponent(resolved.streamUrl) + "&ref=" + encodeURIComponent(resolved.referer);
     res.setHeader("Cache-Control", "no-store");
-    res.json({ hlsUrl: proxiedUrl, rawUrl: resolved.streamUrl, referer: resolved.referer, type: resolved.type, serverId: resolved.serverId, serverName: resolved.serverName, quality: resolved.quality });
+    const directMode = getDirectModeFlags(req);
+    const basePayload = { hlsUrl: proxiedUrl, rawUrl: resolved.streamUrl, referer: resolved.referer, type: resolved.type, serverId: resolved.serverId, serverName: resolved.serverName, quality: resolved.quality };
+    if (directMode.directOnly) {
+      res.setHeader("X-Nova-Direct-Active", "1");
+      console.info(`[direct-${directMode.appVersion}] route=sd2-watch-src server=${resolved.serverId || "auto"}`);
+      res.json(toDirectDubbedPayload(basePayload, resolved.referer || "", directMode.clientExtract));
+      return;
+    }
+    res.json(basePayload);
   } catch (error: any) {
     logger.warn({ err: error, watchUrl, serverId }, "dubbed: StarDima V2 stream unavailable");
     res.status(502).json({ error: error?.message || "تعذر استخراج رابط الفيديو" });
@@ -1252,6 +1268,13 @@ router.get("/dubbed/watch-src", async (req, res) => {
         `${proxyPath}?url=${encodeURIComponent(rawUrl)}` +
         `&ref=${encodeURIComponent("https://carateen.tv/")}`;
       res.setHeader("Cache-Control", "no-store");
+      const directMode = getDirectModeFlags(req);
+      if (directMode.directOnly) {
+        res.setHeader("X-Nova-Direct-Active", "1");
+        console.info(`[direct-${directMode.appVersion}] route=legacy-carateen-watch-src provider=${provider}`);
+        res.json(toDirectDubbedPayload({ hlsUrl: proxiedUrl, rawUrl, referer: "https://carateen.tv/", type: isHls ? "hls" : "mp4" }, "https://carateen.tv/", directMode.clientExtract));
+        return;
+      }
       res.json({ hlsUrl: proxiedUrl, type: isHls ? "hls" : "mp4" });
     } catch (error) {
       logger.warn(
@@ -1355,6 +1378,13 @@ router.get("/dubbed/watch-src", async (req, res) => {
     if (srcMatch) {
       const hlsRaw = srcMatch[1];
       const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(hlsRaw)}&ref=${encodeURIComponent(AT_BASE + "/")}`;
+      const directMode = getDirectModeFlags(req);
+      if (directMode.directOnly) {
+        res.setHeader("X-Nova-Direct-Active", "1");
+        console.info(`[direct-${directMode.appVersion}] route=arabic-toons-watch-src`);
+        res.json(toDirectDubbedPayload({ hlsUrl: proxied, rawUrl: hlsRaw, referer: AT_BASE + "/", type: "hls" }, AT_BASE + "/", directMode.clientExtract));
+        return;
+      }
       res.json({ hlsUrl: proxied, rawUrl: hlsRaw, type: "hls" });
       return;
     }
@@ -2430,8 +2460,14 @@ router.get("/aw-dubbed/watch-src", async (req, res) => {
       return srv;
     }
 
+    const directMode = getDirectModeFlags(req);
+    if (directMode.directOnly) {
+      res.setHeader("X-Nova-Direct-Active", "1");
+      console.info(`[direct-${directMode.appVersion}] route=aw-dubbed-watch-src series=${series} ep=${ep}`);
+    }
     /** لفّ رابط مباشر عبر video-proxy حتى يلتقطه RiftPlayer isDirect branch */
     function wrapProxy(directUrl: string): string {
+      if (directMode.directOnly) return directUrl;
       return `/api/anime/video-proxy?url=${encodeURIComponent(directUrl)}&ref=${encodeURIComponent("https://animenovaa.duckdns.org")}`;
     }
 
@@ -2717,6 +2753,13 @@ router.get("/dubbed/animezid/watch-src", async (req, res) => {
   try {
     const resolved = await resolveAnimeZidWatchSrc(vid, sourceId);
     res.setHeader("Cache-Control", "no-store");
+    const directMode = getDirectModeFlags(req);
+    if (directMode.directOnly && resolved) {
+      res.setHeader("X-Nova-Direct-Active", "1");
+      console.info(`[direct-${directMode.appVersion}] route=animezid-watch-src vid=${vid} sourceId=${sourceId || "auto"}`);
+      res.json(toDirectDubbedPayload(resolved, String((resolved as any).referer || "https://animezid.org/"), directMode.clientExtract));
+      return;
+    }
     res.json(resolved);
   } catch (error: any) {
     logger.warn({ err: error, vid, sourceId }, "dubbed: AnimeZid stream unavailable");
