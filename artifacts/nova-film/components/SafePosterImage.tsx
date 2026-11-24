@@ -1,9 +1,9 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Image, ImageProps, ImageStyle, Platform, StyleProp, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { resolveFilmImageUrl } from "@/utils/filmCatalog";
 
-type Props = Omit<ImageProps, "source"> & {
+type Props = Omit<ImageProps, "source" | "style"> & {
   uri?: string | null;
   fallbackUris?: (string | null | undefined)[];
   style?: StyleProp<ImageStyle>;
@@ -28,15 +28,17 @@ export const SafePosterImage = React.memo(function SafePosterImage({
         .filter((u): u is string => Boolean(u)),
     [uri, fallbackKey],
   );
+  const candidatesKey = candidates.join("|");
 
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [allFailed, setAllFailed] = useState(candidates.length === 0);
+  const [errState, setErrState] = useState<{ key: string; idx: number; failed: boolean }>({
+    key: candidatesKey,
+    idx: 0,
+    failed: candidates.length === 0,
+  });
 
-  useEffect(() => {
-    setCurrentIndex(0);
-    setAllFailed(candidates.length === 0);
-  }, [uri, fallbackKey, candidates.length]);
-
+  // Synchronously derive index/failed for current candidatesKey (zero 1-frame stale bleed on recycled FlatList cells!)
+  const currentIndex = errState.key === candidatesKey ? errState.idx : 0;
+  const allFailed = errState.key === candidatesKey ? errState.failed : candidates.length === 0;
   const activeUri = candidates[currentIndex];
 
   if (allFailed || !activeUri) {
@@ -50,6 +52,7 @@ export const SafePosterImage = React.memo(function SafePosterImage({
   return (
     <Image
       {...rest}
+      key={activeUri}
       source={{ uri: activeUri }}
       style={[styles.base, style]}
       resizeMode={resizeMode}
@@ -57,9 +60,9 @@ export const SafePosterImage = React.memo(function SafePosterImage({
       resizeMethod={Platform.OS === "android" ? "resize" : undefined}
       onError={() => {
         if (currentIndex + 1 < candidates.length) {
-          setCurrentIndex((prev) => prev + 1);
+          setErrState({ key: candidatesKey, idx: currentIndex + 1, failed: false });
         } else {
-          setAllFailed(true);
+          setErrState({ key: candidatesKey, idx: currentIndex, failed: true });
         }
       }}
     />

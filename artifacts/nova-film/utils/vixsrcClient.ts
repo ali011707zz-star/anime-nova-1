@@ -171,10 +171,6 @@ export async function resolveVixSrcClient(params: {
     }
     if (!playlistUrl || !m3u8Text) return null;
 
-    const isFhd =
-      canPlayFHD ||
-      /RESOLUTION=\d+x1080|RESOLUTION=1920x|1080p/i.test(m3u8Text);
-
     const link: FilmServerLink = {
       id: `cb-vixsrc-${cacheKey}`,
       name: "السيرفر CB",
@@ -182,9 +178,9 @@ export async function resolveVixSrcClient(params: {
       url: playlistUrl,
       directUrl: playlistUrl,
       site: "cb",
-      quality: isFhd ? "1080p FHD" : "720p HD",
-      qualityTier: isFhd ? "FHD" : "HD",
-      tier: isFhd ? "1080p FHD" : "720p HD",
+      quality: "1080p FHD",
+      qualityTier: "FHD",
+      tier: "1080p FHD",
       kind: "hls",
       type: "hls",
       isEmbed: false,

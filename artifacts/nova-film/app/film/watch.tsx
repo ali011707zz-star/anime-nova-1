@@ -86,6 +86,7 @@ function SpinRing({ size = 48 }: { size?: number }) {
 }
 
 function normalizeQualityBucket(src: FilmStreamSource): "1080p" | "720p" | "480p" {
+  if ((src.site || "").toLowerCase() === "cb") return "1080p";
   const raw = `${src.tier || ""} ${src.quality || ""} ${src.label || ""}`.toLowerCase();
   if (/2160|4k|1080|fhd/.test(raw)) return "1080p";
   if (/480|360|sd/.test(raw)) return "480p";

@@ -414,10 +414,10 @@ export default function BrowseScreen() {
   const getItemLayout = useCallback(
     (_: any, index: number) => ({
       length: rowStride,
-      offset: rowStride * Math.floor(index / gridColumns),
+      offset: rowStride * index,
       index,
     }),
-    [rowStride, gridColumns],
+    [rowStride],
   );
 
   const renderFilmItem = useCallback(
@@ -686,17 +686,30 @@ export default function BrowseScreen() {
               showsVerticalScrollIndicator={false}
               overScrollMode="never"
               initialNumToRender={12}
-              maxToRenderPerBatch={9}
+              maxToRenderPerBatch={12}
               updateCellsBatchingPeriod={30}
-              windowSize={5}
+              windowSize={9}
               getItemLayout={getItemLayout}
-              removeClippedSubviews={Platform.OS === "android"}
+              removeClippedSubviews={false}
               onEndReachedThreshold={0.45}
               onEndReached={() => {
                 if (!loading && !loadingMore && page < totalPages) {
                   void loadPage(page + 1, false);
                 }
               }}
+              ListEmptyComponent={
+                <View style={g.center}>
+                  <Ionicons name="film-outline" size={40} color={colors.textMuted} />
+                  <Text style={g.emptyText}>لا توجد أعمال مطابقة للفلاتر الحالية</Text>
+                </View>
+              }
+              ListFooterComponent={
+                loadingMore ? (
+                  <View style={{ paddingVertical: 16, alignItems: "center" }}>
+                    <ActivityIndicator color={colors.accent} size="small" />
+                  </View>
+                ) : null
+              }
               renderItem={renderFilmItem}
             />
           )}

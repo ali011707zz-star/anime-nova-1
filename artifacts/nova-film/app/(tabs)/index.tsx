@@ -267,24 +267,6 @@ export default function NovaFilmHomeScreen() {
         browseSort: "year",
       },
       {
-        key: "arabic-movies",
-        title: "أفلام عربية",
-        subtitle: "أحدث الأفلام العربية بجودة عالية",
-        accentColor: "#EF4444",
-        items: arabicMovies,
-        browseType: "arabic_movies",
-        browseSort: "year",
-      },
-      {
-        key: "arabic-series",
-        title: "مسلسلات عربية",
-        subtitle: "أحدث المسلسلات والدراما العربية",
-        accentColor: "#F97316",
-        items: arabicSeries,
-        browseType: "arabic_series",
-        browseSort: "year",
-      },
-      {
         key: "popular-series",
         title: "المسلسلات العالمية",
         subtitle: "مواسم كاملة وحلقات متجددة",
@@ -294,39 +276,12 @@ export default function NovaFilmHomeScreen() {
         browseSort: "popularity",
       },
       {
-        key: "turkish-series",
-        title: "مسلسلات تركية",
-        subtitle: "أبرز المسلسلات التركية المترجمة",
-        accentColor: "#E11D48",
-        items: turkishSeries,
-        browseType: "turkish_series",
-        browseSort: "year",
-      },
-      {
-        key: "indian-movies",
-        title: "أفلام هندية",
-        subtitle: "أحدث إنتاجات بوليوود والسينما الهندية",
-        accentColor: "#D97706",
-        items: indianMovies,
-        browseType: "indian_movies",
-        browseSort: "year",
-      },
-      {
         key: "asian",
-        title: "سينما آسيوية",
-        subtitle: "أبرز الأعمال الكورية والصينية واليابانية",
+        title: "سينما آسيوية وعربية وتركية",
+        subtitle: "أبرز الأعمال الكورية والصينية والهندية",
         accentColor: "#EC4899",
         items: asianMovies,
         browseType: "asian",
-        browseSort: "year",
-      },
-      {
-        key: "dubbed-series",
-        title: "مسلسلات مدبلجة",
-        subtitle: "أعمال مدبلجة بالعربية جاهزة للمشاهدة",
-        accentColor: "#14B8A6",
-        items: dubbedSeries,
-        browseType: "dubbed_series",
         browseSort: "year",
       },
       {
@@ -349,20 +304,7 @@ export default function NovaFilmHomeScreen() {
       },
     ];
     return specs.filter((r) => r.items.length > 0);
-  }, [
-    effectiveHome,
-    trendingMovies,
-    latestMovies,
-    arabicMovies,
-    arabicSeries,
-    popularSeries,
-    turkishSeries,
-    indianMovies,
-    asianMovies,
-    dubbedSeries,
-    topRatedItems,
-    animationList,
-  ]);
+  }, [effectiveHome, trendingMovies, latestMovies, popularSeries, asianMovies, topRatedItems, animationList]);
 
   const handleSeeAll = useCallback(
     (browseType: string, browseSort: string) => {
