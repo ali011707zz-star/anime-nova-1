@@ -28,6 +28,15 @@ import {
   startGlobalDownload,
   subscribeActiveDownloads,
 } from "@/utils/downloadManager";
+import { DownloadMethodModal } from "@/components/DownloadMethodModal";
+import {
+  getDownloadMethodPref,
+  isAdmAvailableOnDevice,
+  isSiteStaticallyEligibleForAdm,
+  launchAdmDownload,
+  resolveStrictAdmUrlForClient,
+  showAdmIneligibleAlert,
+} from "@/utils/admDownloader";
 
 const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
 const ROW_LTR = I18nManager.isRTL ? "row-reverse" : "row";
@@ -119,6 +128,7 @@ export default function DubbedWatchScreen() {
   const [resumeTime, setResumeTime] = useState(0);
   const [episodeList, setEpisodeList] = useState<DubbedEpRef[]>([]);
   const [dlStates, setDlStates] = useState<Record<string, "idle" | "fetching" | "downloading" | "done" | "error">>({});
+  const [pendingAdmSlot, setPendingAdmSlot] = useState<DubbedServerSlot | null>(null);
   const [dlProgress, setDlProgress] = useState<Record<string, number>>({});
 
   const mountedRef = useRef(true);
@@ -1230,7 +1240,7 @@ export default function DubbedWatchScreen() {
     return subscribeActiveDownloads(sync);
   }, [slots, numericAnimeId, episodeNumber]);
 
-  const handleDownloadSlot = useCallback(async (slot: DubbedServerSlot) => {
+  const handleDownloadSlot = useCallback(async (slot: DubbedServerSlot, downloadMode: "internal" | "adm" = "internal") => {
     const current = dlStates[slot.key] ?? "idle";
     if (current === "fetching" || current === "downloading" || current === "done") return;
 
@@ -1246,6 +1256,41 @@ export default function DubbedWatchScreen() {
       }
 
       const base = getBaseUrl();
+
+      if (downloadMode === "adm") {
+        const effectiveProvider = isAzSource
+          ? "az"
+          : isSd2Source
+            ? "sd2"
+            : isCarateenSource
+              ? provider
+              : "arabic-toons";
+        const admCheck = await resolveStrictAdmUrlForClient({
+          url: extracted.url,
+          rawUrl: extracted.rawUrl,
+          directType: extracted.contentType === "hls" ? "hls" : "mp4",
+          site: slot.site,
+          provider: effectiveProvider,
+          apiBase: base,
+        });
+        setDlStates((p) => ({ ...p, [slot.key]: "idle" }));
+        if (admCheck.eligible && admCheck.directUrl) {
+          await launchAdmDownload({
+            directUrl: admCheck.directUrl,
+            title: title || "مدبلج",
+            ep: episodeNumber,
+            quality: slot.quality,
+            onFallbackInternal: () => {
+              void handleDownloadSlot(slot, "internal");
+            },
+          });
+          return;
+        }
+        showAdmIneligibleAlert(admCheck.messageAr, () => {
+          void handleDownloadSlot(slot, "internal");
+        });
+        return;
+      }
       const [authToken, downloadToken] = await Promise.all([
         getAuthToken(),
         getDownloadToken(),
@@ -1289,7 +1334,32 @@ export default function DubbedWatchScreen() {
     } catch {
       setDlStates((p) => ({ ...p, [slot.key]: "error" }));
     }
-  }, [dlStates, episodeNumber, extractPlayableSource, numericAnimeId, posterUrl, title]);
+  }, [dlStates, episodeNumber, extractPlayableSource, isAzSource, isCarateenSource, isSd2Source, numericAnimeId, posterUrl, provider, title]);
+
+  const handleDownloadSlotPress = useCallback(async (slot: DubbedServerSlot) => {
+    const effectiveProvider = isAzSource
+      ? "az"
+      : isSd2Source
+        ? "sd2"
+        : isCarateenSource
+          ? provider
+          : "arabic-toons";
+    const admPossible =
+      isAdmAvailableOnDevice({ platformOs: Platform.OS, tvMode }) &&
+      isSiteStaticallyEligibleForAdm(slot.site, effectiveProvider);
+    if (!admPossible) {
+      void handleDownloadSlot(slot, "internal");
+      return;
+    }
+    const pref = await getDownloadMethodPref();
+    if (pref === "internal") {
+      void handleDownloadSlot(slot, "internal");
+    } else if (pref === "adm") {
+      void handleDownloadSlot(slot, "adm");
+    } else {
+      setPendingAdmSlot(slot);
+    }
+  }, [handleDownloadSlot, isAzSource, isCarateenSource, isSd2Source, provider, tvMode]);
 
   const retryAfterPlaybackError = useCallback(() => {
     if (!mountedRef.current) return;
@@ -1783,7 +1853,7 @@ export default function DubbedWatchScreen() {
                 return (
                   <Pressable
                     key={`dl-${slot.key}`}
-                    onPress={() => void handleDownloadSlot(slot)}
+                    onPress={() => void handleDownloadSlotPress(slot)}
                     disabled={isBusy || dlState === "done"}
                     focusable={tvMode}
                     style={({ focused, pressed }) => [
@@ -1865,6 +1935,24 @@ export default function DubbedWatchScreen() {
           </View>
         )}
       </ScrollView>
+      {!tvMode && (
+        <DownloadMethodModal
+          visible={Boolean(pendingAdmSlot)}
+          serverLabel={pendingAdmSlot ? `السيرفر ${pendingAdmSlot.shortName}` : undefined}
+          qualityLabel={pendingAdmSlot ? pendingAdmSlot.quality.toUpperCase() : undefined}
+          onClose={() => setPendingAdmSlot(null)}
+          onChooseInternal={() => {
+            const picked = pendingAdmSlot;
+            setPendingAdmSlot(null);
+            if (picked) void handleDownloadSlot(picked, "internal");
+          }}
+          onChooseAdm={() => {
+            const picked = pendingAdmSlot;
+            setPendingAdmSlot(null);
+            if (picked) void handleDownloadSlot(picked, "adm");
+          }}
+        />
+      )}
     </View>
   );
 }

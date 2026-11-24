@@ -28,6 +28,15 @@ import {
   cancelActiveDownload,
 } from "@/utils/downloadManager";
 import { openIsolatedPlayer } from "@/lib/isolatedPlayer";
+import { DownloadMethodModal } from "@/components/DownloadMethodModal";
+import {
+  getDownloadMethodPref,
+  isAdmAvailableOnDevice,
+  isSiteStaticallyEligibleForAdm,
+  launchAdmDownload,
+  resolveStrictAdmUrlForClient,
+  showAdmIneligibleAlert,
+} from "@/utils/admDownloader";
 import { ensureDownloadAllowed, ensureWatchAccess, getAdState } from "@/utils/adPolicy";
 import { RewardedAdPrompt } from "@/components/RewardedAdPrompt";
 import { startMobileWatchAnalytics } from "@/utils/analytics";
@@ -1163,6 +1172,7 @@ export default function WatchScreen() {
   }>({});
   /* slotStatus: حالة كل مصدر في المنتقي (idle → fetching → ready/failed) */
   const [slotStatus,  setSlotStatus]  = useState<Record<string, "idle" | "fetching" | "ready" | "failed">>({});
+  const [pendingAdmSlot, setPendingAdmSlot] = useState<{ site: string; quality: QualityKey; tag: string } | null>(null);
   /* حالات التنزيل لكل موقع وجودة (site:quality) */
   const [downloadStates,   setDownloadStates]   = useState<Record<string, "idle" | "downloading" | "done" | "error">>({});
   const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
@@ -2505,7 +2515,7 @@ export default function WatchScreen() {
   }, [anime, epNum]);
 
   /* ── تنزيل حلقة من موقع معين (Global — يستمر عند التنقل) ── */
-  const handleDownloadSite = useCallback(async (site: string, preferredQuality?: QualityKey): Promise<boolean> => {
+  const handleDownloadSite = useCallback(async (site: string, preferredQuality?: QualityKey, downloadMode: "internal" | "adm" = "internal"): Promise<boolean> => {
     if (!isAwDubbed && !DOWNLOAD_SOURCE_SITES.has(site)) return false;
     const stateKey = preferredQuality ? `${site}:${preferredQuality}` : site;
     const wantedQuality = preferredQuality ? PICKER_QUALITY[preferredQuality] : undefined;
@@ -2534,6 +2544,35 @@ export default function WatchScreen() {
         : (best.subtitleUrl || globalSubUrl);
       const subtitleCandidate = subRaw;
       const subtitleUrl = normalizeProviderSubtitleUrl(site, subtitleCandidate, base);
+
+      if (downloadMode === "adm") {
+        const admCheck = await resolveStrictAdmUrlForClient({
+          url: rawUrl,
+          rawUrl: best.rawUrl,
+          directUrl: best.directUrl,
+          directType: best.directType,
+          site: isAwDubbed ? "animewitcher" : site,
+          isEmbed: best.isEmbed,
+          headers,
+          apiBase: base,
+        });
+        if (admCheck.eligible && admCheck.directUrl) {
+          await launchAdmDownload({
+            directUrl: admCheck.directUrl,
+            title: displayTitle,
+            ep: epNum,
+            quality: getSrcQuality(best),
+            onFallbackInternal: () => {
+              void handleDownloadSite(site, preferredQuality, "internal");
+            },
+          });
+          return true;
+        }
+        showAdmIneligibleAlert(admCheck.messageAr, () => {
+          void handleDownloadSite(site, preferredQuality, "internal");
+        });
+        return true;
+      }
 
       const [token, downloadToken] = await Promise.all([getAuthToken(), getDownloadToken()]);
       const isHlsDownload = best.directType === "hls" || isHlsMediaUrl(proxyUrl);
@@ -2576,7 +2615,7 @@ export default function WatchScreen() {
    * - إذا كان المصدر مجلوباً مسبقاً وفيه رابط مباشر صالح → يُنزَّل فوراً.
    * - إذا لم يُجلب بعد → يجلبه بالوضع السريع (progressive=1&forDownload=1) ثم يبدأ التنزيل.
    */
-  const handleFetchAndDownload = useCallback(async (site: string, preferredQuality: QualityKey) => {
+  const handleFetchAndDownload = useCallback(async (site: string, preferredQuality: QualityKey, downloadMode: "internal" | "adm" = "internal") => {
     if (!isAwDubbed && !DOWNLOAD_SOURCE_SITES.has(site)) return;
     const stateKey = `${site}:${preferredQuality}`;
     const wantedQuality = PICKER_QUALITY[preferredQuality];
@@ -2597,13 +2636,12 @@ export default function WatchScreen() {
       if (!allowed || !isMountedRef.current) return;
 
       if (isAwDubbed) {
-        const ok = await handleDownloadSite(site, preferredQuality);
+        const ok = await handleDownloadSite(site, preferredQuality, downloadMode);
         if (!ok && isMountedRef.current) {
           setDownloadStates(prev => ({ ...prev, [stateKey]: "error" }));
         }
         return;
       }
-
       /* لا تعتمد على fetchedSitesRef وحده — تحقق فعلياً من وجود مصدر مباشر صالح داخل sources */
       const cachedSiteSrcs = sources.filter(s => s.site === site);
       const isDirectMp4Src = (s: Src) =>
@@ -2611,13 +2649,13 @@ export default function WatchScreen() {
       const cachedBest = (wantedQuality
         ? cachedSiteSrcs.find(s =>
             getSrcQuality(s) === wantedQuality &&
-            (site === "anime4up2_hard" ? isDirectMp4Src(s) : isDirectPlayable(s)),
+            (site === "anime4up2_hard" || downloadMode === "adm" ? isDirectMp4Src(s) : isDirectPlayable(s)),
           )
-        : undefined) ?? (site === "anime4up2_hard"
+        : undefined) ?? (site === "anime4up2_hard" || downloadMode === "adm"
         ? cachedSiteSrcs.find(isDirectMp4Src)
         : cachedSiteSrcs.find(isDirectPlayable));
       if (cachedBest && isDirectPlayable(cachedBest)) {
-        const ok = await handleDownloadSite(site, preferredQuality);
+        const ok = await handleDownloadSite(site, preferredQuality, downloadMode);
         if (ok) return;
       }
 
@@ -2748,12 +2786,40 @@ export default function WatchScreen() {
       const subRaw    = subtitlesDisabledForSite(site) ? undefined : (best.subtitleUrl || globalSubUrl);
       const subtitleCandidate = subRaw;
       const subtitleUrl = normalizeProviderSubtitleUrl(site, subtitleCandidate, base);
+      if (downloadMode === "adm") {
+        const admCheck = await resolveStrictAdmUrlForClient({
+          url: rawUrl,
+          rawUrl: best.rawUrl,
+          directUrl: best.directUrl,
+          directType: best.directType,
+          site,
+          isEmbed: best.isEmbed,
+          headers: hdrs,
+          apiBase: base,
+        });
+        if (admCheck.eligible && admCheck.directUrl) {
+          await launchAdmDownload({
+            directUrl: admCheck.directUrl,
+            title: displayTitle,
+            ep: epNum,
+            quality: getSrcQuality(best),
+            onFallbackInternal: () => {
+              void handleDownloadSite(site, preferredQuality, "internal");
+            },
+          });
+          return;
+        }
+        showAdmIneligibleAlert(admCheck.messageAr, () => {
+          void handleDownloadSite(site, preferredQuality, "internal");
+        });
+        return;
+      }
+
       const [token, downloadToken] = await Promise.all([getAuthToken(), getDownloadToken()]);
       const isHlsDownload = best.directType === "hls" || isHlsMediaUrl(proxyUrl);
       const downloadUrl = (DOWNLOAD_SUBTITLE_SITES.has(site) || isHlsDownload)
         ? buildEmbeddedDownloadUrl(site, proxyUrl, subtitleUrl, base)
         : proxyUrl;
-
       setDownloadStates(prev => ({ ...prev, [stateKey]: "downloading" }));
       setDownloadProgress(prev => ({ ...prev, [stateKey]: 0 }));
       await startGlobalDownload({
@@ -2783,6 +2849,24 @@ export default function WatchScreen() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAwDubbed, sourceAnimeId, awAnimeId, titleVariants, sources, downloadStates, dlFetchingSites, anime, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, anslayerId, displayTitle, coverUrl, globalSubUrl, handleDownloadSite]);
+
+  const handleDownloadSlotPress = useCallback(async (slot: { site: string; quality: QualityKey; tag: string }) => {
+    const admPossible =
+      isAdmAvailableOnDevice({ platformOs: Platform.OS, tvMode }) &&
+      (isAwDubbed || isSiteStaticallyEligibleForAdm(slot.site));
+    if (!admPossible) {
+      void handleFetchAndDownload(slot.site, slot.quality, "internal");
+      return;
+    }
+    const pref = await getDownloadMethodPref();
+    if (pref === "internal") {
+      void handleFetchAndDownload(slot.site, slot.quality, "internal");
+    } else if (pref === "adm") {
+      void handleFetchAndDownload(slot.site, slot.quality, "adm");
+    } else {
+      setPendingAdmSlot(slot);
+    }
+  }, [handleFetchAndDownload, isAwDubbed, tvMode]);
 
   /* ── خروج آمن من شاشة المشاهدة ──
      مسار "أحدث الحلقات" لا يملك صفحة حلقات خلفه دائماً، كما أن router.back()
@@ -3694,7 +3778,7 @@ export default function WatchScreen() {
                 return (
                   <Pressable
                     key={stateKey}
-                    onPress={() => { if (canTriggerDl) void handleFetchAndDownload(slot.site, slot.quality); }}
+                    onPress={() => { if (canTriggerDl) void handleDownloadSlotPress({ site: slot.site, quality: slot.quality, tag: slot.tag }); }}
                     disabled={!canTriggerDl}
                     focusable={tvMode}
                     accessibilityRole="button"
@@ -3789,6 +3873,24 @@ export default function WatchScreen() {
 
         </ScrollView>
       </TvFocusGuideView>
+      {!tvMode && (
+        <DownloadMethodModal
+          visible={Boolean(pendingAdmSlot)}
+          serverLabel={pendingAdmSlot ? `السيرفر ${pendingAdmSlot.tag}` : undefined}
+          qualityLabel={pendingAdmSlot ? pendingAdmSlot.quality.toUpperCase() : undefined}
+          onClose={() => setPendingAdmSlot(null)}
+          onChooseInternal={() => {
+            const picked = pendingAdmSlot;
+            setPendingAdmSlot(null);
+            if (picked) void handleFetchAndDownload(picked.site, picked.quality, "internal");
+          }}
+          onChooseAdm={() => {
+            const picked = pendingAdmSlot;
+            setPendingAdmSlot(null);
+            if (picked) void handleFetchAndDownload(picked.site, picked.quality, "adm");
+          }}
+        />
+      )}
     </View>
   );
 }

@@ -25,6 +25,15 @@ import {
   startGlobalDownload,
   subscribeActiveDownloads,
 } from "@/utils/downloadManager";
+import { DownloadMethodModal } from "@/components/DownloadMethodModal";
+import {
+  getDownloadMethodPref,
+  isAdmAvailableOnDevice,
+  isSiteStaticallyEligibleForAdm,
+  launchAdmDownload,
+  resolveStrictAdmUrlForClient,
+  showAdmIneligibleAlert,
+} from "@/utils/admDownloader";
 
 type CatalogServer = {
   id?: number | string;
@@ -162,6 +171,7 @@ export default function StardimaServersScreen() {
   const [openingServerId, setOpeningServerId] = useState("");
   const [retryKey, setRetryKey] = useState(0);
   const [dlStates, setDlStates] = useState<Record<string, "idle" | "fetching" | "downloading" | "done" | "error">>({});
+  const [pendingAdmServer, setPendingAdmServer] = useState<CatalogServer | null>(null);
   const [dlProgress, setDlProgress] = useState<Record<string, number>>({});
   const requestRef = useRef<AbortController | null>(null);
 
@@ -280,7 +290,7 @@ export default function StardimaServersScreen() {
     return subscribeActiveDownloads(sync);
   }, [servers, numericAnimeId, numericEp]);
 
-  const handleDownloadServer = useCallback(async (server: CatalogServer) => {
+  const handleDownloadServer = useCallback(async (server: CatalogServer, downloadMode: "internal" | "adm" = "internal") => {
     const serverId = String(server.id || "");
     if (!serverId) return;
     const current = dlStates[serverId] ?? "idle";
@@ -295,6 +305,7 @@ export default function StardimaServersScreen() {
       const data = await response.json().catch(() => ({})) as {
         playable?: boolean;
         streamUrl?: string | null;
+        rawUrl?: string | null;
         mediaType?: string | null;
       };
       if (!response.ok || !data.playable || !data.streamUrl) {
@@ -305,6 +316,34 @@ export default function StardimaServersScreen() {
       const rawStreamUrl = data.streamUrl.startsWith("/")
         ? `${base}${data.streamUrl}`
         : data.streamUrl;
+
+      if (downloadMode === "adm") {
+        const qualityLabel = String(server.quality || "720p").trim();
+        const admCheck = await resolveStrictAdmUrlForClient({
+          url: rawStreamUrl,
+          rawUrl: data.rawUrl || data.streamUrl,
+          mediaType: data.mediaType,
+          site: `stardima_${serverId}`,
+          apiBase: base,
+        });
+        setDlStates((p) => ({ ...p, [serverId]: "idle" }));
+        if (admCheck.eligible && admCheck.directUrl) {
+          await launchAdmDownload({
+            directUrl: admCheck.directUrl,
+            title,
+            ep: numericEp,
+            quality: qualityLabel,
+            onFallbackInternal: () => {
+              void handleDownloadServer(server, "internal");
+            },
+          });
+          return;
+        }
+        showAdmIneligibleAlert(admCheck.messageAr, () => {
+          void handleDownloadServer(server, "internal");
+        });
+        return;
+      }
 
       const [authToken, downloadToken] = await Promise.all([
         getAuthToken(),
@@ -336,6 +375,25 @@ export default function StardimaServersScreen() {
       setDlStates((p) => ({ ...p, [serverId]: "error" }));
     }
   }, [dlStates, numericAnimeId, numericEp, poster, title]);
+
+  const handleDownloadServerPress = useCallback(async (server: CatalogServer) => {
+    const serverId = String(server.id || "");
+    const admPossible =
+      isAdmAvailableOnDevice({ platformOs: Platform.OS, tvMode }) &&
+      isSiteStaticallyEligibleForAdm(`stardima_${serverId}`);
+    if (!admPossible) {
+      void handleDownloadServer(server, "internal");
+      return;
+    }
+    const pref = await getDownloadMethodPref();
+    if (pref === "internal") {
+      void handleDownloadServer(server, "internal");
+    } else if (pref === "adm") {
+      void handleDownloadServer(server, "adm");
+    } else {
+      setPendingAdmServer(server);
+    }
+  }, [handleDownloadServer, tvMode]);
 
   const qualityGroups = useMemo(() => {
     const groups = new Map<string, CatalogServer[]>();
@@ -687,7 +745,7 @@ export default function StardimaServersScreen() {
                   return (
                     <TvPressable
                       key={`dl-${sId || idx}`}
-                      onPress={() => void handleDownloadServer(server)}
+                      onPress={() => void handleDownloadServerPress(server)}
                       disabled={isBusy || dlState === "done"}
                       focusable={tvMode}
                       style={({ focused, pressed }) => [
@@ -751,6 +809,24 @@ export default function StardimaServersScreen() {
           ) : null}
           {actionError ? <Text style={[styles.message, { color: colors.destructive }]}>{actionError}</Text> : null}
         </ScrollView>
+      )}
+      {!tvMode && (
+        <DownloadMethodModal
+          visible={Boolean(pendingAdmServer)}
+          serverLabel={pendingAdmServer ? `السيرفر ${String(pendingAdmServer.server_name || pendingAdmServer.source_host || "")}` : undefined}
+          qualityLabel={pendingAdmServer ? String(pendingAdmServer.quality || "720p").toUpperCase() : undefined}
+          onClose={() => setPendingAdmServer(null)}
+          onChooseInternal={() => {
+            const picked = pendingAdmServer;
+            setPendingAdmServer(null);
+            if (picked) void handleDownloadServer(picked, "internal");
+          }}
+          onChooseAdm={() => {
+            const picked = pendingAdmServer;
+            setPendingAdmServer(null);
+            if (picked) void handleDownloadServer(picked, "adm");
+          }}
+        />
       )}
     </View>
   );

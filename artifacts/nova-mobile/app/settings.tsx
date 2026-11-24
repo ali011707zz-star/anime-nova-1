@@ -13,6 +13,11 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { isTvDevice, TvPressable, tvFocusStyle, useTvMetrics, useTvModeOverride, type TvModeOverride } from "@/utils/tv";
+import {
+  isAdmAvailableOnDevice,
+  useDownloadMethodPref,
+  type DownloadMethodPref,
+} from "@/utils/admDownloader";
 
 const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -1888,6 +1893,8 @@ export default function SettingsScreen() {
   const topPad = Platform.OS === "web" ? 0 : insets.top;
   const [tvOverride, updateTvOverride] = useTvModeOverride();
   const { tv: tvMode } = useTvMetrics();
+  const [downloadMethod, updateDownloadMethod] = useDownloadMethodPref();
+  const showAdmSetting = isAdmAvailableOnDevice({ platformOs: Platform.OS, tvMode });
 
   const { toast, show: showToast } = useToast();
   const [notifs, setNotifs] = useState(true);
@@ -2393,6 +2400,68 @@ export default function SettingsScreen() {
               </View>
             </View>
           </Card>
+          {showAdmSetting && (
+            <Card>
+              <View style={{ padding: 16 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 14 }}>
+                  <View style={[ts.navIcon, { backgroundColor: downloadMethod === "adm" ? "rgba(16,185,129,0.14)" : colors.surfaceElevated, borderColor: downloadMethod === "adm" ? "rgba(16,185,129,0.4)" : colors.border }]}>
+                    <Ionicons name="cloud-download-outline" size={18} color={downloadMethod === "adm" ? "#10b981" : colors.accent} />
+                  </View>
+                  <View style={{ flex: 1, alignItems: "flex-end" }}>
+                    <Text style={[ts.navLabel, { color: colors.textPrimary }]}>طريقة التحميل</Text>
+                    <Text style={[ts.navSub, { color: colors.textSecondary }]}>
+                      {downloadMethod === "adm"
+                        ? "التحميل عبر ADM لملفات MP4 المباشرة الخارجية فقط"
+                        : downloadMethod === "internal"
+                          ? "التحميل داخل التطبيق مباشرة بدون سؤال"
+                          : "اسألني في كل مرة بين التحميل داخل التطبيق أو ADM"}
+                    </Text>
+                  </View>
+                </View>
+                <View style={ts.themesRow}>
+                  {([
+                    { label: "اسألني كل مرة", value: "ask" as DownloadMethodPref, icon: "help-circle-outline" as const },
+                    { label: "داخل التطبيق", value: "internal" as DownloadMethodPref, icon: "download-outline" as const },
+                    { label: "عبر ADM", value: "adm" as DownloadMethodPref, icon: "flash-outline" as const },
+                  ]).map((opt) => {
+                    const active = downloadMethod === opt.value;
+                    const activeColor = opt.value === "adm" ? "#10b981" : "#06b6d4";
+                    const activeBg = opt.value === "adm" ? "rgba(16,185,129,0.15)" : "rgba(6,182,212,0.15)";
+                    return (
+                      <Pressable
+                        key={opt.value}
+                        onPress={async () => {
+                          await updateDownloadMethod(opt.value);
+                          showToast(
+                            opt.value === "adm"
+                              ? "تم اختيار ADM (لملفات MP4 المباشرة فقط) ⚡"
+                              : opt.value === "internal"
+                                ? "تم ضبط التحميل داخل التطبيق 📥"
+                                : "سيظهر لك خيار التحميل عند كل تنزيل",
+                          );
+                        }}
+                        style={[
+                          ts.themeBtn,
+                          {
+                            paddingVertical: 10,
+                            backgroundColor: active ? activeBg : colors.surface,
+                            borderColor: active ? activeColor : colors.border,
+                          },
+                        ]}
+                      >
+                        <Ionicons
+                          name={opt.icon}
+                          size={16}
+                          color={active ? activeColor : colors.textMuted}
+                        />
+                        <Text style={[ts.themeLabel, { color: active ? activeColor : colors.textMuted }]}>{opt.label}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+            </Card>
+          )}
         </View>
 
         {/* ══════ الإشعارات ══════ */}
