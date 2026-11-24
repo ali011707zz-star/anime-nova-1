@@ -334,7 +334,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
                 <Text style={[s.logoText, tvMode && s.tvLogoText, { color: colors.textPrimary }]}>
                   NOVA <Text style={{ color: "#F59E0B" }}>FILM</Text>
                 </Text>
-                <Text style={[s.logoSub, tvMode && s.tvLogoSub, { color: colors.textMuted }]}>منصة الأفلام والمسلسلات</Text>
+                <Text style={[s.logoSub, tvMode && s.tvLogoSub, { color: colors.textMuted }]}>منصة الأفلام والمسلسلات والأنميشن</Text>
               </View>
             </View>
             <Pressable

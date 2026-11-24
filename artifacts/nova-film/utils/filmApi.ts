@@ -49,7 +49,7 @@ function resolveAbsUrl(url: string | undefined, base: string): string {
   return `${base}${url.startsWith("/") ? url : `/${url}`}`;
 }
 
-export const FILM_HOME_CACHE_KEY = "nova_film_home_cache_v3";
+export const FILM_HOME_CACHE_KEY = "nova_film_home_cache_v4";
 let _memHomeFeed: FilmHomeFeed | undefined = undefined;
 
 function normalizeHomeFeed(raw: any): FilmHomeFeed {

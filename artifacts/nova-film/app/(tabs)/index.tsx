@@ -251,6 +251,7 @@ export default function NovaFilmHomeScreen() {
   const turkishSeries = effectiveHome?.turkishSeries || [];
   const dubbedSeries = effectiveHome?.dubbedSeries || [];
   const asianSeries = effectiveHome?.asianSeries || [];
+  const animationList = effectiveHome?.animations || [];
 
   const allPool = useMemo(() => {
     const map = new Map<string, FilmSummary>();
@@ -267,6 +268,7 @@ export default function NovaFilmHomeScreen() {
       turkishSeries,
       dubbedSeries,
       asianSeries,
+      animationList,
     ]) {
       for (const item of arr) {
         map.set(`${item.tmdbType}:${item.id}`, item);
@@ -286,6 +288,7 @@ export default function NovaFilmHomeScreen() {
     turkishSeries,
     dubbedSeries,
     asianSeries,
+    animationList,
   ]);
 
   const continueItems = useMemo(() => {
@@ -318,6 +321,7 @@ export default function NovaFilmHomeScreen() {
       { key: "arabic-m", label: "أفلام عربية", subtitle: "أحدث الأفلام العربية بجودة عالية", color: "#EF4444", items: arabicMovies, browseType: "arabic_movies", browseSort: "year" },
       { key: "indian-m", label: "أفلام هندية", subtitle: "أحدث إنتاجات بوليوود والسينما الهندية", color: "#D97706", items: indianMovies, browseType: "indian_movies", browseSort: "year" },
       { key: "asian-m", label: "أفلام آسيوية", subtitle: "أبرز الأعمال الكورية والصينية واليابانية", color: "#EC4899", items: asianMovies, browseType: "asian", browseSort: "year" },
+      { key: "animation", label: "أنميشن", subtitle: "أفلام ومسلسلات الرسوم المتحركة العالمية", color: "#8B5CF6", items: animationList, browseType: "animation", browseSort: "year" },
       { key: "top-rated", label: "الأعلى تقييماً", subtitle: "روائع خالدة بأعلى تقييمات المشاهدين", color: "#38BDF8", items: topRatedItems, browseType: "movie", browseSort: "rating" },
     ].filter((t) => t.items.length > 0);
 
@@ -346,6 +350,7 @@ export default function NovaFilmHomeScreen() {
     turkishSeries,
     dubbedSeries,
     asianSeries,
+    animationList,
   ]);
 
   const handleSeeAll = useCallback(
