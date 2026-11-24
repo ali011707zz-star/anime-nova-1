@@ -26,6 +26,10 @@ android/
 !modules/nova-media3/android/src/main/java/expo/modules/novamedia3/NovaVolumeModule.kt
 !modules/nova-media3/ios/
 !modules/nova-media3/ios/NovaVolumeModule.swift
+!modules/nova-download/
+!modules/nova-download/android/
+!modules/nova-download/android/build.gradle
+!modules/nova-download/android/src/
 *.orig.*
 *.jks
 *.p8
