@@ -343,10 +343,10 @@ jobs:
             gradle/wrapper/gradle-wrapper.properties
 
           grep -q '^ext.kotlinVersion' build.gradle || {
-            printf '\n// react-native-video + expo-updates KSP compatibility with RN 0.81 / Expo 54\next.kotlinVersion = "2.0.21"\next.kspVersion = "2.0.21-1.0.28"\n' >> build.gradle
+            printf '\n// react-native-video + expo-updates KSP compatibility with RN 0.81 / Expo 54\next.kotlinVersion = "2.1.20"\next.kspVersion = "2.1.20-2.0.1"\n' >> build.gradle
           }
           grep -q '^kotlinVersion=' gradle.properties || {
-            printf '\nkotlinVersion=2.0.21\nkspVersion=2.0.21-1.0.28\n' >> gradle.properties
+            printf '\nkotlinVersion=2.1.20\nkspVersion=2.1.20-2.0.1\n' >> gradle.properties
           }
 
           RNV_BUILD="../node_modules/react-native-video/android/build.gradle"
@@ -402,8 +402,8 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-8.13-${{ hashFiles('artifacts/nova-mobile/android/app/build.gradle') }}
-          restore-keys: gradle-${{ runner.os }}-8.13-
+          key: gradle-${{ runner.os }}-8.13-v2-${{ hashFiles('artifacts/nova-mobile/android/app/build.gradle') }}
+          restore-keys: gradle-${{ runner.os }}-8.13-v2-
 
       - name: 🔨 Build APK
         working-directory: artifacts/nova-mobile/android
