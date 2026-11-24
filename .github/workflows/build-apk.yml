@@ -31,6 +31,7 @@ env:
 jobs:
   publish-v1010-instant:
     name: Instant Publish Signed v1.0.10 APK
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.publish_to_website == 'true' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -466,6 +467,7 @@ jobs:
           retention-days: 30
 
       - name: 🌐 Upload newly built APK to server
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.publish_to_website == 'true' && github.ref == 'refs/heads/main' }}
         run: |
           set -euo pipefail
           APK_FILE="$(find artifacts/nova-mobile/android/app/build/outputs/apk/release -name '*.apk' | head -1)"

@@ -4,7 +4,12 @@ import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { getBaseUrl } from "./baseUrl";
 import { secureFetch } from "./secureApi";
-import { shouldRefreshFcmToken } from "./pushTokenPolicy.mjs";
+import {
+  buildPushSyncSignature,
+  shouldProcessPushTokenEvent,
+  shouldRefreshFcmToken,
+  shouldSkipDuplicatePushRegister,
+} from "./pushTokenPolicy.mjs";
 
 export const PUSH_REGISTERED_KEY = "nova-push-token-registered-v1";
 export const PUSH_ENABLED_KEY = "nova-push-notifications-enabled-v1";
@@ -12,10 +17,19 @@ const PUSH_TOKEN_KEY = "nova-expo-push-token-v1";
 const FCM_TOKEN_CHECKED_AT_KEY = "nova-fcm-token-checked-at-v1";
 export const PUSH_CHANNEL_ID = "nova-alerts-v2";
 const CHANNEL_ID = PUSH_CHANNEL_ID;
+
 let registrationInFlight: Promise<boolean> | null = null;
 let registrationAgain = false;
 let forceTokenRefreshAgain = false;
 let tokenListener: { remove: () => void } | null = null;
+
+// Session-level loop & dedupe guards (prevents the Android getDevicePushTokenAsync ->
+// addPushTokenListener infinite feedback loop while keeping token rotation self-healing).
+let hasVerifiedNativeTokenThisSession = false;
+let lastKnownToken: string | null = null;
+let lastSyncedSignature: string | null = null;
+let lastSyncedAt = 0;
+let lastTokenEventAt = 0;
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -91,17 +105,22 @@ async function registerPushNotificationsOnce(forceTokenRefresh = false): Promise
       await AsyncStorage.setItem(PUSH_REGISTERED_KEY, "0").catch(() => {});
       return false;
     }
-    const previousToken = await AsyncStorage.getItem(PUSH_TOKEN_KEY);
+
+    const previousToken = (await AsyncStorage.getItem(PUSH_TOKEN_KEY))?.trim() || null;
+    if (previousToken && !lastKnownToken) {
+      lastKnownToken = previousToken;
+    }
     const checkedAt = Number(await AsyncStorage.getItem(FCM_TOKEN_CHECKED_AT_KEY) || 0);
-    // Always query Play Services for the live native FCM token on Android so
-    // rotated/unregistered tokens self-heal immediately; fall back to previousToken
-    // only if Play Services temporarily throws.
+
+    // Verify the live native FCM token at most once per app launch (or on explicit
+    // forceTokenRefresh / weekly boundary) instead of on every foreground focus,
+    // preventing Android's getDevicePushTokenAsync -> addPushTokenListener loop.
     const shouldFetchNow = useDirectFcm
-      ? true
+      ? (!hasVerifiedNativeTokenThisSession || shouldRefreshFcmToken(previousToken, checkedAt, Date.now(), forceTokenRefresh))
       : shouldRefreshFcmToken(previousToken, checkedAt, Date.now(), forceTokenRefresh);
+
     let token = !shouldFetchNow ? previousToken || undefined : undefined;
     let fetchedDeviceToken = false;
-
     if (token) {
       console.info("[push] reusing recently checked push token");
     } else {
@@ -112,6 +131,10 @@ async function registerPushNotificationsOnce(forceTokenRefresh = false): Promise
             : await Notifications.getExpoPushTokenAsync({ projectId: id! });
           token = String(tokenResponse.data || "").trim();
           fetchedDeviceToken = Boolean(token && useDirectFcm);
+          if (token && useDirectFcm) {
+            hasVerifiedNativeTokenThisSession = true;
+            lastKnownToken = token;
+          }
           break;
         } catch (error) {
           console.warn(`[push] ${useDirectFcm ? "FCM" : "Expo"} token request failed attempt=${attempt}/3:`, error instanceof Error ? error.message : String(error));
@@ -121,18 +144,18 @@ async function registerPushNotificationsOnce(forceTokenRefresh = false): Promise
     }
 
     if (!token && useDirectFcm && previousToken) {
-      // Keep notifications registered with the last known-good FCM token if
-      // a scheduled refresh fails temporarily; retry the refresh next week.
       token = previousToken;
       await AsyncStorage.setItem(FCM_TOKEN_CHECKED_AT_KEY, String(Date.now())).catch(() => {});
       console.warn("[push] using the last known FCM token after refresh failed");
     }
+
     if (!token) {
       console.warn(`[push] ${useDirectFcm ? "FCM" : "Expo"} returned an empty device token`);
       await AsyncStorage.setItem(PUSH_REGISTERED_KEY, "0").catch(() => {});
       return false;
     }
 
+    lastKnownToken = token;
     if (fetchedDeviceToken) {
       await AsyncStorage.multiSet([
         [PUSH_TOKEN_KEY, token],
@@ -141,9 +164,7 @@ async function registerPushNotificationsOnce(forceTokenRefresh = false): Promise
         console.warn("[push] could not persist refreshed FCM token metadata:", error instanceof Error ? error.message : String(error));
       });
     }
-    console.info(useDirectFcm ? "[push] native FCM token obtained" : `[push] Expo token obtained projectId=${id}`);
 
-    phase = "Token Registration";
     let storedUserId: string | undefined;
     try {
       const rawUser = await AsyncStorage.getItem("nova-mobile-user");
@@ -153,6 +174,25 @@ async function registerPushNotificationsOnce(forceTokenRefresh = false): Promise
       }
     } catch { /* ignore */ }
 
+    const tokenChanged = Boolean(previousToken && previousToken !== token);
+    if (
+      !tokenChanged &&
+      shouldSkipDuplicatePushRegister(
+        token,
+        storedUserId,
+        lastSyncedSignature,
+        lastSyncedAt,
+        Date.now(),
+        undefined,
+        forceTokenRefresh,
+      )
+    ) {
+      return true;
+    }
+
+    console.info(useDirectFcm ? "[push] native FCM token obtained" : `[push] Expo token obtained projectId=${id}`);
+    phase = "Token Registration";
+
     let response: Response | undefined;
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       try {
@@ -161,7 +201,7 @@ async function registerPushNotificationsOnce(forceTokenRefresh = false): Promise
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             token,
-            ...(previousToken && previousToken !== token ? { previousToken } : {}),
+            ...(tokenChanged && previousToken ? { previousToken } : {}),
             ...(storedUserId ? { userId: storedUserId } : {}),
             platform: Platform.OS,
             channelId: CHANNEL_ID,
@@ -175,6 +215,7 @@ async function registerPushNotificationsOnce(forceTokenRefresh = false): Promise
       }
       if (attempt < 3) await wait(500 * 2 ** (attempt - 1));
     }
+
     if (!response?.ok) {
       const detail = response ? (await response.text().catch(() => "")).slice(0, 180) : "";
       console.warn(`[push] server registration failed${response ? ` status=${response.status}` : ""}${detail ? ` detail=${detail}` : ""}`);
@@ -182,6 +223,8 @@ async function registerPushNotificationsOnce(forceTokenRefresh = false): Promise
       return false;
     }
 
+    lastSyncedSignature = buildPushSyncSignature(token, storedUserId);
+    lastSyncedAt = Date.now();
     await AsyncStorage.multiSet([
       [PUSH_TOKEN_KEY, token],
       [PUSH_REGISTERED_KEY, "1"],
@@ -203,8 +246,11 @@ export async function registerPushNotifications(options: { forceTokenRefresh?: b
   if (Platform.OS === "web") return false;
   if (!(await arePushNotificationsEnabled())) return false;
   if (registrationInFlight) {
-    registrationAgain = true;
-    if (options.forceTokenRefresh) forceTokenRefreshAgain = true;
+    // Only queue a follow-up pass when explicitly forced (e.g., genuine token rotation).
+    if (options.forceTokenRefresh) {
+      registrationAgain = true;
+      forceTokenRefreshAgain = true;
+    }
     return registrationInFlight;
   }
 
@@ -230,6 +276,10 @@ export async function unregisterPushNotifications(): Promise<boolean> {
   }
 
   const token = await AsyncStorage.getItem(PUSH_TOKEN_KEY);
+  lastKnownToken = null;
+  lastSyncedSignature = null;
+  lastSyncedAt = 0;
+  hasVerifiedNativeTokenThisSession = false;
   await AsyncStorage.setItem(PUSH_REGISTERED_KEY, "0").catch(() => {});
   if (!token) {
     await AsyncStorage.removeItem(FCM_TOKEN_CHECKED_AT_KEY).catch(() => {});
@@ -261,7 +311,7 @@ export async function setPushNotificationsEnabled(enabled: boolean): Promise<boo
   await AsyncStorage.setItem(PUSH_ENABLED_KEY, enabled ? "1" : "0");
   if (!enabled) return unregisterPushNotifications();
 
-  const registered = await registerPushNotifications();
+  const registered = await registerPushNotifications({ forceTokenRefresh: true });
   if (!registered) {
     await AsyncStorage.setItem(PUSH_ENABLED_KEY, "0");
     await AsyncStorage.setItem(PUSH_REGISTERED_KEY, "0").catch(() => {});
@@ -271,7 +321,7 @@ export async function setPushNotificationsEnabled(enabled: boolean): Promise<boo
 
 /**
  * The native token listener covers FCM/APNs. Refresh the platform's registered
- * token through the same registration path when the native token rolls.
+ * token through the same registration path ONLY when the native token genuinely rolls.
  */
 export async function getCachedPushToken(): Promise<string | null> {
   if (Platform.OS === "web") return null;
@@ -301,13 +351,15 @@ export async function getActivePushToken(options: { requestPermission?: boolean 
     if (options.requestPermission) {
       await AsyncStorage.setItem(PUSH_ENABLED_KEY, "1").catch(() => {});
     }
-    await registerPushNotifications({ forceTokenRefresh: true }).catch(() => false);
+    const existingCached = await getCachedPushToken();
+    await registerPushNotifications({ forceTokenRefresh: !existingCached }).catch(() => false);
     const cached = await getCachedPushToken();
     if (cached) return { token: cached };
     if (Platform.OS === "android") {
       const resp = await Notifications.getDevicePushTokenAsync().catch(() => null);
       const raw = String(resp?.data || "").trim();
       if (raw.length >= 20) {
+        lastKnownToken = raw;
         await AsyncStorage.setItem(PUSH_TOKEN_KEY, raw).catch(() => {});
         return { token: raw };
       }
@@ -321,15 +373,26 @@ export async function getActivePushToken(options: { requestPermission?: boolean 
 export function subscribeToPushTokenChanges(): () => void {
   if (Platform.OS === "web") return () => {};
   tokenListener?.remove();
-  tokenListener = Notifications.addPushTokenListener(() => {
-    console.info("[push] native device token changed; refreshing push registration");
-    void registerPushNotifications({ forceTokenRefresh: true });
+  tokenListener = Notifications.addPushTokenListener((event) => {
+    const incoming = typeof event?.data === "string" ? event.data.trim() : "";
+    void (async () => {
+      const known = lastKnownToken || (await AsyncStorage.getItem(PUSH_TOKEN_KEY))?.trim() || null;
+      const now = Date.now();
+      if (!shouldProcessPushTokenEvent(incoming, known, lastTokenEventAt, now)) {
+        return;
+      }
+      lastTokenEventAt = now;
+      lastKnownToken = incoming;
+      console.info("[push] native device token changed; refreshing push registration");
+      void registerPushNotifications({ forceTokenRefresh: true });
+    })();
   });
   return () => {
     tokenListener?.remove();
     tokenListener = null;
   };
 }
+
 export async function sendDelayedTestPush(delaySeconds = 10): Promise<{
   ok: boolean;
   scheduledInSeconds?: number;
