@@ -41,6 +41,9 @@ export function classifyDeliveryBadge(url, deliveryModeHint) {
   if (deliveryModeHint === "vps-vip" || lower.includes("/api/tg-stream/")) {
     return { mode: "vps-vip", shortLabel: "VIP", badgeLabel: "👑 NOVA VIP" };
   }
+  if (lower.includes("/api/anime/hls-proxy") && lower.includes("directsegs=1")) {
+    return { mode: "direct", shortLabel: "مباشر", badgeLabel: "⚡ مباشر من جهازك" };
+  }
   if (
     lower.includes("/api/anime/hls-proxy") ||
     lower.includes("/api/anime/video-proxy") ||
@@ -89,6 +92,95 @@ export function unpackPackerBlocks(html) {
   return results;
 }
 
+function decodeBase64String(input) {
+  const clean = String(input || "").replace(/[^A-Za-z0-9+/=]/g, "");
+  if (!clean) return "";
+  try {
+    if (typeof atob === "function") return atob(clean);
+  } catch { /* fallback below */ }
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  let bits = 0;
+  let value = 0;
+  let output = "";
+  for (let i = 0; i < clean.length; i += 1) {
+    const ch = clean[i];
+    if (ch === "=") break;
+    const idx = alphabet.indexOf(ch);
+    if (idx < 0) continue;
+    value = (value << 6) | idx;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      output += String.fromCharCode((value >>> bits) & 0xff);
+    }
+  }
+  return output;
+}
+
+function evalStreamTapeConcatExpr(expr) {
+  const parts = [];
+  const tokenRe = /\(?\s*(?:'((?:\\.|[^'\\])*)'|"((?:\\.|[^"\\])*)")\s*\)?((?:\.substring\(\s*\d+(?:\s*,\s*\d+)?\s*\))*)/g;
+  let m;
+  while ((m = tokenRe.exec(expr)) !== null) {
+    let val = (m[1] ?? m[2] ?? "").replace(/\\'/g, "'").replace(/\\"/g, '"').replace(/\\\//g, "/");
+    const subChain = m[3] || "";
+    const subRe = /\.substring\(\s*(\d+)(?:\s*,\s*(\d+))?\s*\)/g;
+    let sm;
+    while ((sm = subRe.exec(subChain)) !== null) {
+      const start = Number(sm[1]);
+      val = sm[2] !== undefined ? val.substring(start, Number(sm[2])) : val.substring(start);
+    }
+    parts.push(val);
+  }
+  return parts.join("");
+}
+
+function extractStreamTapeUrl(text, baseUrl) {
+  if (typeof text !== "string" || !text.includes("get_video")) return null;
+  const assignRe = /getElementById\(\s*['"](?:robotlink|ideoolink|norobotlink)['"]\s*\)\.innerHTML\s*=\s*([^;\n]+)/gi;
+  let lastValid = null;
+  let m;
+  while ((m = assignRe.exec(text)) !== null) {
+    const built = evalStreamTapeConcatExpr(m[1]).trim();
+    if (!built || !built.includes("get_video?") || !built.includes("token=")) continue;
+    const candidate = built.startsWith("http")
+      ? built
+      : built.startsWith("//")
+        ? `https:${built}`
+        : `https://${built.replace(/^\/+/, "")}`;
+    const normalized = normalizeExtractedUrl(candidate, baseUrl);
+    if (normalized) {
+      lastValid = normalized.includes("stream=1") ? normalized : `${normalized}&stream=1`;
+    }
+  }
+  if (lastValid) return { url: lastValid, type: "mp4" };
+  return null;
+}
+
+/**
+ * Detects a single-hop JS redirect (e.g. voe.sx/e/... -> caseyseemavoid.com/e/...)
+ * so the mobile extractor can follow it once on the phone's residential IP.
+ */
+export function extractSingleHopRedirect(html, baseUrl = "") {
+  if (typeof html !== "string" || !html) return null;
+  const patterns = [
+    /window\.location(?:\.href)?\s*=\s*["'](https?:\/\/[^"'\s<>]+)["']/i,
+    /location\.replace\(\s*["'](https?:\/\/[^"'\s<>]+)["']\s*\)/i,
+  ];
+  for (const re of patterns) {
+    const m = html.match(re);
+    if (!m?.[1]) continue;
+    const target = normalizeExtractedUrl(m[1], baseUrl);
+    if (!target || target === baseUrl) continue;
+    try {
+      const u = new URL(target);
+      if (u.pathname === "/" || /doubleclick|googlesyndication|popads|exoclick/i.test(u.hostname)) continue;
+      return target;
+    } catch { /* ignore */ }
+  }
+  return null;
+}
+
 function normalizeExtractedUrl(candidate, baseUrl) {
   let clean = String(candidate || "")
     .trim()
@@ -111,7 +203,8 @@ function normalizeExtractedUrl(candidate, baseUrl) {
 
 /**
  * Pure HTML/JS media extractor executed on the user's phone (residential IP).
- * Finds direct .m3u8 (HLS) or .mp4 streams from standard embed pages and OK.ru.
+ * Finds direct .m3u8 (HLS) or .mp4 streams from standard embed pages, OK.ru,
+ * MixDrop (MDCore.wurl), StreamTape (robotlink + substring), and VOE.
  */
 export function extractMediaUrlFromHtml(html, baseUrl = "", hostKind = "standard") {
   if (typeof html !== "string" || !html) return null;
@@ -150,9 +243,36 @@ export function extractMediaUrlFromHtml(html, baseUrl = "", hostKind = "standard
   const unpackedBlocks = unpackPackerBlocks(html);
   const haystacks = [...unpackedBlocks, html];
 
+  // 2a. StreamTape robotlink / ideoolink concatenation with .substring()
+  for (const text of haystacks) {
+    const st = extractStreamTapeUrl(text, baseUrl);
+    if (st) return st;
+  }
+
+  // 2b. MixDrop MDCore.wurl (often protocol-relative inside packed JS)
+  for (const text of haystacks) {
+    const mdMatch = text.match(/MDCore\.wurl\s*=\s*["']((?:https?:)?\/\/[^"'\s<>]+)["']/i);
+    if (mdMatch?.[1]) {
+      const url = normalizeExtractedUrl(mdMatch[1], baseUrl);
+      if (url) {
+        return { url, type: /\.m3u8(?:[?#]|$)/i.test(url) ? "hls" : "mp4" };
+      }
+    }
+  }
+
+  // 2c. VOE / similar hosts using base64 atob() for HLS source
+  for (const text of haystacks) {
+    const b64Match = text.match(/['"]?hls['"]?\s*[:=]\s*atob\(\s*["']([A-Za-z0-9+/=]{16,})["']\s*\)/i);
+    if (b64Match?.[1]) {
+      const decoded = decodeBase64String(b64Match[1]);
+      const url = normalizeExtractedUrl(decoded, baseUrl);
+      if (url && /\.m3u8/i.test(url)) return { url, type: "hls" };
+    }
+  }
+
   const hlsPatterns = [
-    /(?:file|src|hls|url|source|manifest)\s*[:=]\s*["'](https?:\/\/[^"'\s<>]+\.m3u8[^"'\s<>]*)["']/i,
-    /["'](https?:\/\/[^"'\s<>\\]+\.m3u8(?:[^"'\s<>\\]*)?)["']/i,
+    /(?:file|src|hls|url|source|manifest|['"]hls['"])\s*[:=]\s*["']((?:https?:)?\/\/[^"'\s<>]+\.m3u8[^"'\s<>]*)["']/i,
+    /["']((?:https?:)?\/\/[^"'\s<>\\]+\.m3u8(?:[^"'\s<>\\]*)?)["']/i,
     /(https?:\/\/[^\s"'<>\\]+\.m3u8[^\s"'<>\\]*)/i,
   ];
   for (const text of haystacks) {
@@ -166,9 +286,9 @@ export function extractMediaUrlFromHtml(html, baseUrl = "", hostKind = "standard
   }
 
   const mp4Patterns = [
-    /(?:file|src|url|source)\s*[:=]\s*["'](https?:\/\/[^"'\s<>]+\.mp4[^"'\s<>]*)["']/i,
-    /<source[^>]+src=["'](https?:\/\/[^"'\s<>]+\.mp4[^"'\s<>]*)["']/i,
-    /["'](https?:\/\/[^"'\s<>\\]+\.mp4(?:\?[^"'\s<>\\]*)?)["']/i,
+    /(?:file|src|url|source|wurl)\s*[:=]\s*["']((?:https?:)?\/\/[^"'\s<>]+\.mp4[^"'\s<>]*)["']/i,
+    /<source[^>]+src=["']((?:https?:)?\/\/[^"'\s<>]+\.mp4[^"'\s<>]*)["']/i,
+    /["']((?:https?:)?\/\/[^"'\s<>\\]+\.mp4(?:\?[^"'\s<>\\]*)?)["']/i,
   ];
   for (const text of haystacks) {
     for (const pattern of mp4Patterns) {

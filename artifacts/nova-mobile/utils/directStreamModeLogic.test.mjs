@@ -5,6 +5,7 @@ import {
   buildDirectStreamHeaders,
   classifyDeliveryBadge,
   extractMediaUrlFromHtml,
+  extractSingleHopRedirect,
   isDirectStreamVersion,
 } from "./directStreamModeLogic.mjs";
 
@@ -38,6 +39,7 @@ test("classifyDeliveryBadge accurately distinguishes direct, client-extract, VIP
   assert.equal(classifyDeliveryBadge("https://cdn.example.com/master.m3u8", "client-extract").mode, "client-extract");
   assert.equal(classifyDeliveryBadge("/api/tg-stream/123?sig=abc", "vps-vip").mode, "vps-vip");
   assert.equal(classifyDeliveryBadge("https://animenovaa.duckdns.org/api/anime/hls-proxy?url=x").mode, "vps-proxy");
+  assert.equal(classifyDeliveryBadge("https://animenovaa.duckdns.org/api/anime/hls-proxy?url=x&directSegs=1").mode, "direct");
 });
 
 test("extractMediaUrlFromHtml extracts HLS from standard embed, packed JS, and OK.ru metadata", () => {
@@ -60,4 +62,35 @@ test("extractMediaUrlFromHtml extracts HLS from standard embed, packed JS, and O
     url: "https://vd.okcdn.ru/hls/master.m3u8",
     type: "hls",
   });
+});
+
+
+test("extractMediaUrlFromHtml supports MixDrop protocol-relative, StreamTape robotlink, VOE atob, and 1-hop redirects", () => {
+  const mixdropHtml = `<script>MDCore.wurl = "//a-delivery29.mxcontent.net/v/abc123.mp4?s=sig&e=999";</script>`;
+  assert.deepEqual(extractMediaUrlFromHtml(mixdropHtml, "https://mixdrop.top/e/abc123"), {
+    url: "https://a-delivery29.mxcontent.net/v/abc123.mp4?s=sig&e=999",
+    type: "mp4",
+  });
+
+  const streamtapeHtml = `<script>
+    document.getElementById('robotlink').innerHTML = '//streamtape.com/get_video?id=decoy' + ('xx&token=bad').substring(2);
+    document.getElementById('robotlink').innerHTML = '//streamtape.com/get_video?id=real123' + ('abcd&expires=999&ip=1.2.3.4&token=ok789').substring(2).substring(2);
+  </script>`;
+  assert.deepEqual(extractMediaUrlFromHtml(streamtapeHtml, "https://streamtape.com/e/real123"), {
+    url: "https://streamtape.com/get_video?id=real123&expires=999&ip=1.2.3.4&token=ok789&stream=1",
+    type: "mp4",
+  });
+
+  const voeB64 = Buffer.from("https://cdn.caseyseemavoid.com/hls/master.m3u8?t=1").toString("base64");
+  const voeHtml = `<script>var sources = {'hls': atob("${voeB64}")};</script>`;
+  assert.deepEqual(extractMediaUrlFromHtml(voeHtml, "https://caseyseemavoid.com/e/xyz"), {
+    url: "https://cdn.caseyseemavoid.com/hls/master.m3u8?t=1",
+    type: "hls",
+  });
+
+  const redirectHtml = `<script>window.location.href = 'https://caseyseemavoid.com/e/kfyoo8ru12gl';</script>`;
+  assert.equal(
+    extractSingleHopRedirect(redirectHtml, "https://voe.sx/e/kfyoo8ru12gl"),
+    "https://caseyseemavoid.com/e/kfyoo8ru12gl",
+  );
 });

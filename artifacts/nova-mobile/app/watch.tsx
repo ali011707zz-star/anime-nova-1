@@ -83,6 +83,7 @@ function safeDecodeURIComponent(value: string | undefined): string {
 // animephoenix أُزيل من WEBVIEW_RESOLVE_SITES — الآن يُرجع روابط مباشرة (phoenixpr CDN) لا iframes
 const WEBVIEW_RESOLVE_SITES = new Set(["animelek", "animedar", "ristoanime", "faselhd_db", "mycima"]);
 function needsHiddenResolve(s: Src): boolean {
+  if (isDirectStreamActive() && Boolean(s.clientExtract?.embedUrl)) return true;
   return !!s.isEmbed && !!s.site && WEBVIEW_RESOLVE_SITES.has(s.site);
 }
 
@@ -292,6 +293,7 @@ function isEmbedSrc(s: Src): boolean {
 }
 function isMobilePlayable(s: Src): boolean {
   if (Platform.OS !== "web") {
+    if (isDirectStreamActive() && s.clientExtract?.embedUrl && isValidSourceUrl(s.clientExtract.embedUrl)) return true;
     return isDirectPlayable(s) || (needsHiddenResolve(s) && isValidSourceUrl(getPlayUrl(s)));
   }
   return isDirectPlayable(s) || (Boolean(s.isEmbed) && isValidSourceUrl(getPlayUrl(s)));
@@ -1520,7 +1522,7 @@ export default function WatchScreen() {
 
         const response = await fetch(
           withDirectStreamParams(`${getBaseUrl()}/api/aw-dubbed/watch-src?series=${encodeURIComponent(awSeries)}&ep=${epNum}`),
-          { signal: controller.signal },
+          { signal: controller.signal, headers: getDirectRequestHeaders() },
         );
         if (!response.ok) throw new Error(`aw_sources_${response.status}`);
         const data = await response.json();
@@ -1538,6 +1540,9 @@ export default function WatchScreen() {
           isEmbed: false,
           awPickerKey: entry.pickerKey,
           awQualityKey: entry.qualityKey,
+          deliveryMode: entry.deliveryMode,
+          clientExtract: entry.clientExtract,
+          headers: entry.headers,
         }));
         const nextSlots: Record<string, Partial<Record<QualityKey, AvailableSlot>>> = {};
         const nextStatus: Record<string, "ready"> = {};
@@ -2190,6 +2195,7 @@ export default function WatchScreen() {
         if (!selected && awSeries) {
           const response = await fetch(
             withDirectStreamParams(`${getBaseUrl()}/api/aw-dubbed/watch-src?series=${encodeURIComponent(awSeries)}&ep=${epNum}`),
+            { headers: getDirectRequestHeaders() },
           );
           if (response.ok) {
             const data = await response.json();
@@ -2205,6 +2211,9 @@ export default function WatchScreen() {
               isEmbed: false,
               awPickerKey: entry.pickerKey,
               awQualityKey: entry.qualityKey,
+              deliveryMode: entry.deliveryMode,
+              clientExtract: entry.clientExtract,
+              headers: entry.headers,
             }));
             setSources(nextSources);
             selected = nextSources.find(source =>
@@ -2430,10 +2439,11 @@ export default function WatchScreen() {
           subtitleUrl: normalizeProviderSubtitleUrl(sourceSite, raw.subtitleUrl, base),
         }, base);
         const checkEmbedUrl = (mapped.directUrl || mapped.url || "").toLowerCase();
+        const hasDirectClientExtract = isDirectStreamActive() && Boolean(mapped.clientExtract?.embedUrl && isValidSourceUrl(mapped.clientExtract.embedUrl));
         const hardRejectReason = isBlockedSource(mapped) ? "blocked"
           : (mapped.isEmbed && (checkEmbedUrl.includes("mega.nz") || checkEmbedUrl.includes("mega.co.nz"))) ? "unsupported_embed"
           : (Platform.OS !== "web" && mapped.isEmbed && !needsHiddenResolve(mapped)) ? "unsupported_embed"
-          : !isValidSourceUrl(getPlayUrl(mapped)) ? "invalid_url"
+          : (!hasDirectClientExtract && !isValidSourceUrl(getPlayUrl(mapped))) ? "invalid_url"
           : !isMobilePlayable(mapped) ? "not_playable"
           : "";
         if (hardRejectReason) {
@@ -3256,7 +3266,7 @@ export default function WatchScreen() {
           ⏳ جاري تجهيز المصدر…
         </Text>
         {/* WebView مخفي 100% — يزور الصفحة المحمية خلفياً ثم يُستبدل تلقائياً بالمشغّل الداخلي */}
-        {resolveUrl2 ? (
+        {(playingSrc.clientExtract?.embedUrl || resolveUrl2) ? (
           <HiddenResolverWebView
             pageUrl={playingSrc.clientExtract?.embedUrl || resolveUrl2}
             refererOverride={playingSrc.clientExtract?.referer}

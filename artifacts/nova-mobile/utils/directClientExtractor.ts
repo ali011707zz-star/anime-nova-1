@@ -5,6 +5,7 @@ import {
   buildDirectStreamHeaders,
   classifyDeliveryBadge,
   extractMediaUrlFromHtml,
+  extractSingleHopRedirect,
   isDirectStreamVersion,
 } from "./directStreamModeLogic.mjs";
 
@@ -75,13 +76,34 @@ export async function extractDirectStreamOnPhone(
       signal: ctrl.signal,
     });
     if (!res.ok) return null;
-    const html = await res.text();
-    const found = extractMediaUrlFromHtml(html, res.url || embedUrl, descriptor.hostKind || "standard");
+    let finalUrl = res.url || embedUrl;
+    let html = await res.text();
+    let found = extractMediaUrlFromHtml(html, finalUrl, descriptor.hostKind || "standard");
+    if (!found?.url) {
+      const hopUrl = extractSingleHopRedirect(html, finalUrl);
+      if (hopUrl) {
+        const res2 = await fetch(hopUrl, {
+          method: "GET",
+          headers: {
+            "User-Agent": MOBILE_DIRECT_UA,
+            Accept: "text/html,application/xhtml+xml,*/*",
+            Referer: finalUrl,
+          },
+          redirect: "follow",
+          signal: ctrl.signal,
+        });
+        if (res2.ok) {
+          finalUrl = res2.url || hopUrl;
+          html = await res2.text();
+          found = extractMediaUrlFromHtml(html, finalUrl, descriptor.hostKind || "standard");
+        }
+      }
+    }
     if (!found?.url) return null;
 
     let finalOrigin = origin;
-    try { finalOrigin = new URL(res.url || embedUrl).origin; } catch { /* ignore */ }
-    const playbackReferer = res.url || embedUrl || referer;
+    try { finalOrigin = new URL(finalUrl).origin; } catch { /* ignore */ }
+    const playbackReferer = finalUrl || referer;
     return {
       url: found.url,
       type: found.type,

@@ -20,3 +20,4 @@ export declare function extractMediaUrlFromHtml(
   baseUrl?: string,
   hostKind?: "okru" | "standard",
 ): { url: string; type: "hls" | "mp4" } | null;
+export function extractSingleHopRedirect(html: string, baseUrl?: string): string | null;

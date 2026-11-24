@@ -129,7 +129,13 @@ const SNIFF_SCRIPT = `
   function isVideoUrl(u) {
     if (!u || typeof u !== "string") return false;
     var s = u.toLowerCase();
-    return s.includes(".m3u8") || s.includes(".mp4") || s.includes(".mkv");
+    return (
+      s.includes(".m3u8") ||
+      s.includes(".mp4") ||
+      s.includes(".mkv") ||
+      s.includes("/get_video?") ||
+      s.includes("mxcontent.net/")
+    );
   }
 
   // مواقع وسيطة (relay) تحتوي على iframe داخلها يخدم الفيديو الحقيقي
@@ -137,7 +143,8 @@ const SNIFF_SCRIPT = `
     "ifrom.net", "myframe.to", "vidsrc.in", "vidsrc.xyz", "vidsrc.rip",
     "vidsrc.me", "filemoon", "streamwish", "embedsb", "embed.su",
     "vidplay", "smashystream", "novembed", "4dsply", "play.streamhd",
-    "uqload", "mixdrop", "doodstream",
+    "uqload", "mixdrop", "doodstream", "voe.sx", "streamtape",
+    "caseyseemavoid", "tapecontent",
   ];
   function isRelayDomain(u) {
     if (!u || typeof u !== "string") return false;
@@ -157,13 +164,17 @@ const SNIFF_SCRIPT = `
 
   function report(url, type) {
     if (reported || !url) return;
+    var clean = String(url).trim();
+    if (clean.indexOf("//") === 0) clean = "https:" + clean;
+    if (!/^https?:\/\//i.test(clean)) return;
     reported = true;
     sendMsg({
       kind: "resolved",
-      url: url,
-      type: type || (url.toLowerCase().includes(".m3u8") ? "hls" : "mp4"),
+      url: clean,
+      type: type || (clean.toLowerCase().includes(".m3u8") ? "hls" : "mp4"),
       referer: location.href,
       origin: location.origin,
+      ua: navigator.userAgent || "",
     });
   }
 
@@ -252,6 +263,30 @@ const SNIFF_SCRIPT = `
     pollCount++;
     if (reported || pollCount > 40) { clearInterval(poll); return; }
     try {
+      if (window.MDCore && typeof window.MDCore.wurl === "string" && window.MDCore.wurl.length > 8) {
+        report(window.MDCore.wurl, "mp4");
+        return;
+      }
+      var stIds = ["robotlink", "ideoolink", "norobotlink"];
+      for (var sIdx = 0; sIdx < stIds.length; sIdx++) {
+        var stEl = document.getElementById(stIds[sIdx]);
+        var stTxt = stEl && (stEl.textContent || stEl.innerText || "").trim();
+        if (stTxt && stTxt.indexOf("get_video?") !== -1 && stTxt.indexOf("token=") !== -1) {
+          var stUrl = stTxt.indexOf("http") === 0 ? stTxt : "https://" + stTxt.replace(/^\/+/, "");
+          if (stUrl.indexOf("stream=1") === -1) stUrl += "&stream=1";
+          report(stUrl, "mp4");
+          return;
+        }
+      }
+      if (window.sources && typeof window.sources.hls === "string" && window.sources.hls.indexOf(".m3u8") !== -1) {
+        report(window.sources.hls, "hls");
+        return;
+      }
+      var vids = document.querySelectorAll("video,source");
+      for (var vIdx = 0; vIdx < vids.length; vIdx++) {
+        var vSrc = vids[vIdx].currentSrc || vids[vIdx].src || vids[vIdx].getAttribute("src") || "";
+        if (isVideoUrl(vSrc)) { report(vSrc); return; }
+      }
       var entries = performance.getEntriesByType("resource");
       for (var i = 0; i < entries.length; i++) {
         if (isVideoUrl(entries[i].name)) { report(entries[i].name); break; }
@@ -280,10 +315,16 @@ export function HiddenResolverWebView({ pageUrl, refererOverride, timeoutMs = 22
     try {
       const data = JSON.parse(e.nativeEvent.data);
       if (data?.kind === "resolved" && data.url) {
+        const hdrs: Record<string, string> = {};
+        if (data.referer) {
+          hdrs.Referer = data.referer;
+          hdrs.Origin = data.origin || data.referer;
+        }
+        if (data.ua) hdrs["User-Agent"] = data.ua;
         finish(() => onResolved({
           url: data.url,
           type: data.type,
-          headers: data.referer ? { Referer: data.referer, Origin: data.origin || data.referer } : undefined,
+          headers: Object.keys(hdrs).length > 0 ? hdrs : undefined,
         }));
       } else if (data?.kind === "follow_iframe" && data.url && !followedRef.current && !doneRef.current) {
         // رابط iframe وسيط (مثل ifrom.net) — تابعه ليتمكن SNIFF_SCRIPT من الاعتراض داخله
