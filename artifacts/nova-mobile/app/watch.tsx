@@ -12,6 +12,15 @@ import { useVideoPlayer, VideoView } from "expo-video";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
 import { HiddenResolverWebView, ResolvedStream } from "@/components/HiddenResolverWebView";
+import {
+  extractDirectStreamOnPhone,
+  getDeliveryBadge,
+  getDirectRequestHeaders,
+  isDirectStreamActive,
+  resolveMediaFireDirectOnPhone,
+  withDirectStreamParams,
+  type ClientExtractDescriptor,
+} from "@/utils/directClientExtractor";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getWatchContentId, useApp } from "@/context/AppContext";
@@ -98,6 +107,8 @@ interface Src {
   skipOutro?: { start: number; end: number };
   /** Referer/Origin headers مطلوبة للـ CDN — مُعادة من الخادم لتجنب الاعتماد على تحليل رابط الـ proxy */
   headers?: Record<string, string>;
+  deliveryMode?: string;
+  clientExtract?: ClientExtractDescriptor;
 }
 
 const SUBTITLE_DISABLED_SITES = new Set([
@@ -409,6 +420,7 @@ function isKawaiiMobileCdnUrl(value: string): boolean {
 }
 
 function normalizeKawaiiMobileSource(source: Src, base: string): Src {
+  if (isDirectStreamActive()) return source;
   if (String(source.site || "").toLowerCase() !== "kawaii") return source;
 
   const candidates = [source.rawUrl, source.url, source.directUrl]
@@ -1507,7 +1519,7 @@ export default function WatchScreen() {
         setWatchUnlocked(true);
 
         const response = await fetch(
-          `${getBaseUrl()}/api/aw-dubbed/watch-src?series=${encodeURIComponent(awSeries)}&ep=${epNum}`,
+          withDirectStreamParams(`${getBaseUrl()}/api/aw-dubbed/watch-src?series=${encodeURIComponent(awSeries)}&ep=${epNum}`),
           { signal: controller.signal },
         );
         if (!response.ok) throw new Error(`aw_sources_${response.status}`);
@@ -2088,6 +2100,51 @@ export default function WatchScreen() {
       setScreen(isEmbedSrc(src) ? "embed" : "native");
       return;
     }
+    if (isDirectStreamActive() && src.clientExtract?.embedUrl) {
+      setScreen("loading");
+      void (async () => {
+        const extracted = await extractDirectStreamOnPhone(src.clientExtract!);
+        if (!isMountedRef.current) return;
+        if (extracted?.url) {
+          setPlayingSrc({
+            ...src,
+            directUrl: extracted.url,
+            url: extracted.url,
+            directType: extracted.type,
+            headers: extracted.headers,
+            isEmbed: false,
+            deliveryMode: "client-extract",
+            clientExtract: undefined,
+            subtitleUrl,
+          });
+          setScreen("native");
+        } else {
+          setScreen("resolving");
+        }
+      })();
+      return;
+    }
+    const initialPlayUrl = getPlayUrl(src);
+    if (isDirectStreamActive() && initialPlayUrl.includes("/api/aw-dubbed/mf-stream")) {
+      setScreen("loading");
+      void (async () => {
+        const mfDirect = await resolveMediaFireDirectOnPhone(initialPlayUrl, getBaseUrl());
+        if (!isMountedRef.current) return;
+        if (mfDirect) {
+          setPlayingSrc({
+            ...src,
+            directUrl: mfDirect,
+            url: mfDirect,
+            directType: "mp4",
+            isEmbed: false,
+            deliveryMode: "direct",
+            subtitleUrl,
+          });
+        }
+        setScreen("native");
+      })();
+      return;
+    }
     if (isDirectPlayable(src)) { setScreen("native"); return; }
     /* مواقع محمية (Cloudflare/Turnstile) — حاول استخراج رابط الفيديو الحقيقي
        عبر WebView مخفي (IP الجهاز السكني) قبل عرض بطاقة "يحتاج تطبيق أصلي" */
@@ -2105,6 +2162,8 @@ export default function WatchScreen() {
       isEmbed: false,
       headers: stream.headers || playingSrc.headers,
       directType: stream.type,
+      deliveryMode: "client-extract",
+      clientExtract: undefined,
     };
     setPlayingSrc(resolved);
     setScreen("native");
@@ -2130,7 +2189,7 @@ export default function WatchScreen() {
         );
         if (!selected && awSeries) {
           const response = await fetch(
-            `${getBaseUrl()}/api/aw-dubbed/watch-src?series=${encodeURIComponent(awSeries)}&ep=${epNum}`,
+            withDirectStreamParams(`${getBaseUrl()}/api/aw-dubbed/watch-src?series=${encodeURIComponent(awSeries)}&ep=${epNum}`),
           );
           if (response.ok) {
             const data = await response.json();
@@ -2258,6 +2317,7 @@ export default function WatchScreen() {
     const lookupTraceId = `${playbackTraceId}-s-${lookupSiteTag}`;
     qs.set("trace", lookupTraceId);
     qs.set("site", site);
+    withDirectStreamParams(qs);
     qs.set("anilistId", sourceAnimeId || "0");
     qs.set("titles", JSON.stringify(titleVariants));
     if (preferredQuality) qs.set("quality", preferredQuality);
@@ -2670,6 +2730,7 @@ export default function WatchScreen() {
       if (preferredQuality) qs.set("quality", preferredQuality);
       qs.set("progressive", "1");
       qs.set("forDownload", "1");
+      withDirectStreamParams(qs);
       if (titleArStr) qs.set("titleAr", titleArStr);
       if (site === "anslayer" && anslayerId) qs.set("anslayerId", anslayerId);
       if (site === "animewitcher" && awAnimeId) qs.set("awAnimeId", awAnimeId);
@@ -3061,19 +3122,30 @@ export default function WatchScreen() {
     if (!rawUrl) return [];
     /* headers: استخدم ما أعاده الخادم أولاً، ثم استخرجها من رابط الـ proxy. */
     const headers = playingSrc.headers || extractProxyHeaders(rawUrl);
-    const proxyUrl = isAwDubbed
+    const isDirectExternal =
+      isDirectStreamActive() &&
+      /^https?:\/\//i.test(rawUrl) &&
+      !rawUrl.includes("/api/anime/hls-proxy") &&
+      !rawUrl.includes("/api/anime/video-proxy") &&
+      !rawUrl.includes("/api/aw-dubbed/mf-stream");
+    const proxyUrl = (isAwDubbed || isDirectExternal)
       ? resolveUrl(rawUrl, base)
       : ensureVpsProxy(rawUrl, headers, base, playingSrc.directType === "hls");
-    const url = withPlaybackTrace(proxyUrl, `${playbackTraceId}-0`, base);
+    const url = isDirectExternal
+      ? proxyUrl
+      : withPlaybackTrace(proxyUrl, `${playbackTraceId}-0`, base);
     if (!url) return [];
     const site = playingSrc.site || "";
     const isArabic = isAwDubbed || ARABIC_PLAYBACK_SITES.has(site);
+    const deliveryTag = isDirectStreamActive()
+      ? ` · ${getDeliveryBadge(url, playingSrc.deliveryMode).badgeLabel}`
+      : "";
     return [{
       url,
       headers,
-      label: isAwDubbed
+      label: (isAwDubbed
         ? `سيرفر · ${playingSrc.name || "AW"}`
-        : `سيرفر · ${getSiteTag(site)}`,
+        : `سيرفر · ${getSiteTag(site)}`) + deliveryTag,
       quality: getSrcQuality(playingSrc),
       site,
       subtitleUrl: subtitlesDisabledForSite(site)
@@ -3186,7 +3258,8 @@ export default function WatchScreen() {
         {/* WebView مخفي 100% — يزور الصفحة المحمية خلفياً ثم يُستبدل تلقائياً بالمشغّل الداخلي */}
         {resolveUrl2 ? (
           <HiddenResolverWebView
-            pageUrl={resolveUrl2}
+            pageUrl={playingSrc.clientExtract?.embedUrl || resolveUrl2}
+            refererOverride={playingSrc.clientExtract?.referer}
             onResolved={handleHiddenResolved}
             onFailed={handleHiddenFailed}
           />

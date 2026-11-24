@@ -2,7 +2,7 @@ name: 🤖 بناء APK أندرويد
 
 on:
   push:
-    branches: [main]
+    branches: [main, test/v1.0.11]
   workflow_dispatch:
     inputs:
       backend_domain:
@@ -462,7 +462,7 @@ jobs:
       - name: 📱 Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: AnimeNova-v${{ github.run_number }}
+          name: AnimeNova-v1.0.11-test-r${{ github.run_number }}
           path: artifacts/nova-mobile/android/app/build/outputs/apk/release/*.apk
           retention-days: 30
 

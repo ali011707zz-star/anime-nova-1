@@ -101,6 +101,7 @@ async function doFetchFreshToken(): Promise<string | null> {
           "Content-Type": "application/json",
           "X-Nova-Client": CLIENT_ID,
           "X-Nova-Version": APP_VERSION,
+          ...(APP_VERSION >= "1.0.11" ? { "X-Nova-Direct-Mode": "1" } : {}),
           "X-Nova-Package": APP_PACKAGE,
           "User-Agent": APP_UA,
         },
@@ -217,6 +218,7 @@ export async function secureFetch(
       ...(options.headers as Record<string, string> || {}),
       "X-Nova-Client": CLIENT_ID,
       "X-Nova-Version": APP_VERSION,
+          ...(APP_VERSION >= "1.0.11" ? { "X-Nova-Direct-Mode": "1" } : {}),
       "X-Nova-Package": APP_PACKAGE,
       "User-Agent": APP_UA,
     };
@@ -256,6 +258,7 @@ export async function secureStreamFetch(
     Accept: "text/event-stream",
     "X-Nova-Client": CLIENT_ID,
     "X-Nova-Version": APP_VERSION,
+          ...(APP_VERSION >= "1.0.11" ? { "X-Nova-Direct-Mode": "1" } : {}),
     "X-Nova-Package": APP_PACKAGE,
     "User-Agent": APP_UA,
   };
