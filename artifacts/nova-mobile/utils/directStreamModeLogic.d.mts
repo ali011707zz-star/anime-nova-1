@@ -21,3 +21,5 @@ export declare function extractMediaUrlFromHtml(
   hostKind?: "okru" | "standard",
 ): { url: string; type: "hls" | "mp4" } | null;
 export function extractSingleHopRedirect(html: string, baseUrl?: string): string | null;
+export function extractMediaFireFileKey(rawUrl: string | null | undefined): string | null;
+export function extractMediaFireDirectUrlFromHtml(html: string): string | null;

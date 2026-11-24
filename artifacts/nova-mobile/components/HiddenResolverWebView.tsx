@@ -126,8 +126,18 @@ const SNIFF_SCRIPT = `
   if (window.__novaHiddenSniffInstalled) return;
   window.__novaHiddenSniffInstalled = true;
 
+  function isDecoyUrl(u) {
+    var s = String(u || "").toLowerCase();
+    return (
+      s.indexOf("test-videos.co.uk") !== -1 ||
+      s.indexOf("big_buck_bunny") !== -1 ||
+      s.indexOf("samplelib.com") !== -1 ||
+      s.indexOf("commondatastorage.googleapis.com/gtv-videos-bucket") !== -1
+    );
+  }
   function isVideoUrl(u) {
     if (!u || typeof u !== "string") return false;
+    if (isDecoyUrl(u)) return false;
     var s = u.toLowerCase();
     return (
       s.includes(".m3u8") ||
@@ -166,7 +176,7 @@ const SNIFF_SCRIPT = `
     if (reported || !url) return;
     var clean = String(url).trim();
     if (clean.indexOf("//") === 0) clean = "https:" + clean;
-    if (!/^https?:\/\//i.test(clean)) return;
+    if (!/^https?:\\/\\//i.test(clean)) return;
     reported = true;
     sendMsg({
       kind: "resolved",
@@ -257,12 +267,96 @@ const SNIFF_SCRIPT = `
     return origOpen.apply(this, arguments);
   };
 
+  function decodeB64Utf8(str) {
+    try {
+      var clean = String(str || "").replace(/-/g, "+").replace(/_/g, "/").replace(/[^A-Za-z0-9+/=]/g, "");
+      var bin = atob(clean);
+      var bytes = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      if (typeof TextDecoder === "function") return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+      return bin;
+    } catch (e) { return ""; }
+  }
+  function scanVoeJsonScripts() {
+    try {
+      var scripts = document.querySelectorAll('script[type="application/json"]');
+      for (var i = 0; i < scripts.length; i++) {
+        try {
+          var arr = JSON.parse((scripts[i].textContent || "").trim());
+          var raw = Array.isArray(arr) ? arr[0] : null;
+          if (typeof raw !== "string" || raw.length < 40) continue;
+          var s = raw.replace(/[a-zA-Z]/g, function(c) {
+            var base = c <= "Z" ? 65 : 97;
+            return String.fromCharCode(((c.charCodeAt(0) - base + 13) % 26) + base);
+          });
+          var junks = ["@$", "^^", "~@", "%?", "*~", "!!", "#&"];
+          for (var j = 0; j < junks.length; j++) s = s.split(junks[j]).join("");
+          s = decodeB64Utf8(s);
+          var shifted = "";
+          for (var k = 0; k < s.length; k++) shifted += String.fromCharCode(s.charCodeAt(k) - 3);
+          s = shifted.split("").reverse().join("");
+          s = decodeB64Utf8(s);
+          var parsed = JSON.parse(s);
+          var media = (parsed && (parsed.source || parsed.hls)) || "";
+          if (media && isVideoUrl(media)) {
+            report(media, media.toLowerCase().indexOf(".m3u8") !== -1 ? "hls" : "mp4");
+            return true;
+          }
+        } catch (e2) {}
+      }
+    } catch (e) {}
+    return false;
+  }
+  function scanPackedScripts() {
+    try {
+      var sc = document.scripts;
+      for (var i = 0; i < sc.length; i++) {
+        var txt = sc[i].textContent || "";
+        if (txt.indexOf("eval(function(p,a,c,k,e,") === -1) continue;
+        var re = /eval\\(function\\(p,a,c,k,e,[dr]\\)\\{[\\s\\S]*?\\}\\'?\\('([\\s\\S]*?)',\\s*(\\d+),\\s*(\\d+),\\s*'([\\s\\S]*?)'\\.split\\('\\|'\\)/;
+        var reExact = /eval\\(function\\(p,a,c,k,e,[dr]\\)\\{[\\s\\S]*?\\}\\('([\\s\\S]*?)',\\s*(\\d+),\\s*(\\d+),\\s*'([\\s\\S]*?)'\\.split\\('\\|'\\)/;
+        var m = reExact.exec(txt) || re.exec(txt);
+        if (!m) continue;
+        var bs = String.fromCharCode(92);
+        var payload = m[1].split(bs + "'").join("'").split(bs + bs).join(bs);
+        var radix = Number(m[2]), count = Number(m[3]), symtab = m[4].split("|");
+        var enc = function(num) {
+          var first = num < radix ? "" : enc(Math.floor(num / radix));
+          var rem = num % radix;
+          return first + (rem > 35 ? String.fromCharCode(rem + 29) : rem.toString(36));
+        };
+        var unpacked = payload;
+        while (count--) if (symtab[count]) unpacked = unpacked.replace(new RegExp(bs + "b" + enc(count) + bs + "b", "g"), symtab[count]);
+        var uMatch = unpacked.match(/(https?:\\/\\/[^"'\\s<>]+\\.(?:m3u8|mp4)[^"'\\s<>]*)/i);
+        if (uMatch && uMatch[1] && isVideoUrl(uMatch[1])) {
+          report(uMatch[1]);
+          return true;
+        }
+      }
+    } catch (e) {}
+    return false;
+  }
+  function triggerAutoPlay() {
+    try {
+      if (window.jwplayer && typeof window.jwplayer === "function") {
+        try { window.jwplayer().play(true); } catch (e) {}
+      }
+      var btns = document.querySelectorAll('.vjs-big-play-button,.plyr__control--overlaid,.play-button,[aria-label*="Play"]');
+      for (var i = 0; i < btns.length; i++) { try { btns[i].click(); } catch (e) {} }
+      var vids = document.querySelectorAll("video");
+      for (var j = 0; j < vids.length; j++) { try { vids[j].muted = true; vids[j].play && vids[j].play(); } catch (e) {} }
+    } catch (e) {}
+  }
+
   // 4) fallback: افحص أداء الشبكة كل 500ms لأي مورد فيديو (لبعض المشغّلات المُخصّصة)
   var pollCount = 0;
   var poll = setInterval(function () {
     pollCount++;
     if (reported || pollCount > 40) { clearInterval(poll); return; }
     try {
+      if (scanVoeJsonScripts()) return;
+      if (pollCount === 1 && scanPackedScripts()) return;
+      if (pollCount === 1 || pollCount === 4) triggerAutoPlay();
       if (window.MDCore && typeof window.MDCore.wurl === "string" && window.MDCore.wurl.length > 8) {
         report(window.MDCore.wurl, "mp4");
         return;
@@ -272,13 +366,13 @@ const SNIFF_SCRIPT = `
         var stEl = document.getElementById(stIds[sIdx]);
         var stTxt = stEl && (stEl.textContent || stEl.innerText || "").trim();
         if (stTxt && stTxt.indexOf("get_video?") !== -1 && stTxt.indexOf("token=") !== -1) {
-          var stUrl = stTxt.indexOf("http") === 0 ? stTxt : "https://" + stTxt.replace(/^\/+/, "");
+          var stUrl = stTxt.indexOf("http") === 0 ? stTxt : "https://" + stTxt.replace(/^\\/+/, "");
           if (stUrl.indexOf("stream=1") === -1) stUrl += "&stream=1";
           report(stUrl, "mp4");
           return;
         }
       }
-      if (window.sources && typeof window.sources.hls === "string" && window.sources.hls.indexOf(".m3u8") !== -1) {
+      if (window.sources && typeof window.sources.hls === "string" && isVideoUrl(window.sources.hls)) {
         report(window.sources.hls, "hls");
         return;
       }
@@ -355,7 +449,21 @@ export function HiddenResolverWebView({ pageUrl, refererOverride, timeoutMs = 22
       injectedJavaScriptBeforeContentLoaded={AD_BLOCK_SCRIPT + SNIFF_SCRIPT}
       onMessage={handleMessage}
       onError={() => finish(() => onFailed("load-error"))}
-      onHttpError={() => { /* لا نفشل فوراً — قد تكون صفحة وسيطة قبل التحدي */ }}
+      onHttpError={(ev) => {
+        const status = ev?.nativeEvent?.statusCode;
+        const m = currentUrl.match(/^https?:\/\/(?:www\.)?voe\.sx\/e\/([a-z0-9_-]+)/i);
+        if (m?.[1] && status === 403 && !followedRef.current && !doneRef.current) {
+          followedRef.current = true;
+          let mirrorOrigin = "https://caseyseemavoid.com";
+          if (refererOverride) {
+            try {
+              const rOrigin = new URL(refererOverride).origin;
+              if (!/voe\.sx$/i.test(rOrigin)) mirrorOrigin = rOrigin;
+            } catch {}
+          }
+          setCurrentUrl(`${mirrorOrigin}/e/${m[1]}`);
+        }
+      }}
       javaScriptEnabled
       domStorageEnabled
       thirdPartyCookiesEnabled

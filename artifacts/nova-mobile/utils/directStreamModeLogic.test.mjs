@@ -94,3 +94,67 @@ test("extractMediaUrlFromHtml supports MixDrop protocol-relative, StreamTape rob
     "https://caseyseemavoid.com/e/kfyoo8ru12gl",
   );
 });
+
+function encodeVoePayload(obj) {
+  let s = Buffer.from(JSON.stringify(obj), "utf8").toString("base64");
+  s = [...s].reverse().join("");
+  s = [...s].map((ch) => String.fromCharCode(ch.charCodeAt(0) + 3)).join("");
+  s = Buffer.from(s, "utf8").toString("base64");
+  const junk = ["@$", "^^", "~@", "%?"];
+  s = s.slice(0, 12) + junk[0] + s.slice(12, 24) + junk[2] + s.slice(24);
+  return s.replace(/[a-zA-Z]/g, (c) => {
+    const base = c <= "Z" ? 65 : 97;
+    return String.fromCharCode(((c.charCodeAt(0) - base + 13) % 26) + base);
+  });
+}
+
+import {
+  extractMediaFireFileKey,
+  extractMediaFireDirectUrlFromHtml,
+} from "./directStreamModeLogic.mjs";
+
+test("extractMediaUrlFromHtml decodes VOE 6-step JSON payload and ignores decoy MP4s", () => {
+  const encrypted = encodeVoePayload({
+    source: "https://cdn-edge.caseyseemavoid.com/engine/hls2/01/abc/master.m3u8?t=99",
+  });
+  const html = `
+    <video><source src="https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4"></video>
+    <script>var decoy = "https://samplelib.com/lib/preview/mp4/sample-5s.mp4";</script>
+    <script type="application/json">${JSON.stringify([encrypted])}</script>
+  `;
+  assert.deepEqual(extractMediaUrlFromHtml(html, "https://caseyseemavoid.com/e/xyz123"), {
+    url: "https://cdn-edge.caseyseemavoid.com/engine/hls2/01/abc/master.m3u8?t=99",
+    type: "hls",
+  });
+
+  const decoyOnly = `<video src="https://test-videos.co.uk/vids/big_buck_bunny.mp4"></video>`;
+  assert.equal(extractMediaUrlFromHtml(decoyOnly, "https://caseyseemavoid.com/e/xyz123"), null);
+});
+
+test("extractMediaFireFileKey and extractMediaFireDirectUrlFromHtml resolve AF and AW MediaFire formats", () => {
+  assert.equal(
+    extractMediaFireFileKey("https://download2393.mediafire.com/7ab8cd9ef0123456/u8x9y0z1a2b3c4d/episode_1.mp4"),
+    "u8x9y0z1a2b3c4d",
+  );
+  assert.equal(
+    extractMediaFireFileKey("https://animenovaa.duckdns.org/api/aw-dubbed/mf-stream?link=https%3A%2F%2Fwww.mediafire.com%2Ffile%2Fabc12345xyz%2Fep1.mp4%2Ffile"),
+    "abc12345xyz",
+  );
+  assert.equal(
+    extractMediaFireFileKey("https://www.mediafire.com/file/k9m8n7b6v5c4/ep2.mp4/file"),
+    "k9m8n7b6v5c4",
+  );
+
+  const mfHtml = `<a class="input popsok" aria-label="Download file" href="https://download1582.mediafire.com/fresh123token/k9m8n7b6v5c4/ep2.mp4" id="downloadButton">Download</a>`;
+  assert.equal(
+    extractMediaFireDirectUrlFromHtml(mfHtml),
+    "https://download1582.mediafire.com/fresh123token/k9m8n7b6v5c4/ep2.mp4",
+  );
+
+  const scrambled = Buffer.from("https://download999.mediafire.com/tok/key12345/video.mp4").toString("base64");
+  const mfScrambledHtml = `<a id="downloadButton" data-scrambled-url="${scrambled}" href="#">Download</a>`;
+  assert.equal(
+    extractMediaFireDirectUrlFromHtml(mfScrambledHtml),
+    "https://download999.mediafire.com/tok/key12345/video.mp4",
+  );
+});

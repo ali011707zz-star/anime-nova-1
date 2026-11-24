@@ -96,7 +96,8 @@ function isProgressiveSourceUrl(url: string, contentType?: PlayerSource["content
     /\.(?:mp4|m4v|webm|mov)(?:[?#]|$)/i.test(lower) ||
     lower.includes("/api/dubbed/stream") ||
     lower.includes("/api/aw-dubbed/mf-stream") ||
-    lower.includes("/api/anime/video-proxy")
+    lower.includes("/api/anime/video-proxy") ||
+    lower.includes("pixeldrain.com/api/file/")
   );
 }
 

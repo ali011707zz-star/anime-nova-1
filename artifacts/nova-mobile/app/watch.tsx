@@ -17,8 +17,11 @@ import {
   getDeliveryBadge,
   getDirectRequestHeaders,
   isDirectStreamActive,
+  MOBILE_DIRECT_UA,
+  resolveAd2OnPhone,
   resolveMediaFireDirectOnPhone,
   withDirectStreamParams,
+  type Ad2PhoneResolvedSource,
   type ClientExtractDescriptor,
 } from "@/utils/directClientExtractor";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -1273,7 +1276,8 @@ export default function WatchScreen() {
     hasStartedPlayback: boolean;
   };
   const progressivePlaybackRef = useRef<ProgressivePlayback | null>(null);
-  const handlePickSiteRef = useRef<(site: string, quality?: QualityKey, excludeKeys?: string[]) => Promise<void>>(async () => {});
+  const awFailedKeysRef = useRef<Set<string>>(new Set());
+  const handlePickSiteRef = useRef<(site: string, quality?: QualityKey, excludeKeys?: string[], skipQualityParam?: boolean) => Promise<void>>(async () => {});
 
   /* ── تعقّب الـ mount ── */
   useEffect(() => {
@@ -1987,6 +1991,7 @@ export default function WatchScreen() {
     inFlightSitesRef.current.clear();
     fetchedSitesRef.current.clear();
     progressivePlaybackRef.current = null;
+    awFailedKeysRef.current.clear();
     lastTimeRef.current = 0;
     lastDurationRef.current = 0;
     setResumeTime(0);
@@ -2106,9 +2111,13 @@ export default function WatchScreen() {
       return;
     }
     if (isDirectStreamActive() && src.clientExtract?.embedUrl) {
+      const descriptor: ClientExtractDescriptor = {
+        ...src.clientExtract,
+        referer: src.clientExtract.referer || src.headers?.Referer || "",
+      };
       setScreen("loading");
       void (async () => {
-        const extracted = await extractDirectStreamOnPhone(src.clientExtract!);
+        const extracted = await extractDirectStreamOnPhone(descriptor);
         if (!isMountedRef.current) return;
         if (extracted?.url) {
           setPlayingSrc({
@@ -2124,25 +2133,41 @@ export default function WatchScreen() {
           });
           setScreen("native");
         } else {
+          setPlayingSrc({ ...src, clientExtract: descriptor, subtitleUrl });
           setScreen("resolving");
         }
       })();
       return;
     }
     const initialPlayUrl = getPlayUrl(src);
-    if (isDirectStreamActive() && initialPlayUrl.includes("/api/aw-dubbed/mf-stream")) {
+    const isMediaFirePlayUrl =
+      initialPlayUrl.includes("/api/aw-dubbed/mf-stream") ||
+      /https?:\/\/download\d*\.mediafire\.com\//i.test(initialPlayUrl);
+    if (isDirectStreamActive() && isMediaFirePlayUrl) {
       setScreen("loading");
       void (async () => {
         const mfDirect = await resolveMediaFireDirectOnPhone(initialPlayUrl, getBaseUrl());
         if (!isMountedRef.current) return;
-        if (mfDirect) {
+        if (mfDirect?.url) {
           setPlayingSrc({
             ...src,
-            directUrl: mfDirect,
-            url: mfDirect,
+            directUrl: mfDirect.url,
+            url: mfDirect.url,
+            directType: "mp4",
+            headers: mfDirect.headers,
+            isEmbed: false,
+            deliveryMode: "client-extract",
+            subtitleUrl,
+          });
+        } else if (/https?:\/\/download\d*\.mediafire\.com\//i.test(initialPlayUrl)) {
+          const proxied = `${getBaseUrl()}/api/anime/video-proxy?url=${encodeURIComponent(initialPlayUrl)}&ref=${encodeURIComponent("https://www.mediafire.com/")}`;
+          setPlayingSrc({
+            ...src,
+            directUrl: proxied,
+            url: proxied,
             directType: "mp4",
             isEmbed: false,
-            deliveryMode: "direct",
+            deliveryMode: "vps-proxy",
             subtitleUrl,
           });
         }
@@ -2180,7 +2205,7 @@ export default function WatchScreen() {
   }, []);
 
   /* ── جلب مصدر واحد عند ضغط المستخدم على زر المصدر ── */
-  const handlePickSite = useCallback(async (site: string, preferredQuality?: QualityKey, excludeKeys: string[] = []) => {
+  const handlePickSite = useCallback(async (site: string, preferredQuality?: QualityKey, excludeKeys: string[] = [], skipQualityParam = false) => {
     if (tvMode && excludeKeys.length === 0 && Date.now() - pickerOpenedAtRef.current < 180) {
       return;
     }
@@ -2225,6 +2250,8 @@ export default function WatchScreen() {
           setSlotStatus(prev => ({ ...prev, [slotKey]: "failed" }));
           return;
         }
+        awFailedKeysRef.current.clear();
+        if (selected.awPickerKey) awFailedKeysRef.current.add(selected.awPickerKey);
         setSlotStatus(prev => ({ ...prev, [slotKey]: "ready" }));
         playSrc(selected);
       } catch {
@@ -2329,7 +2356,7 @@ export default function WatchScreen() {
     withDirectStreamParams(qs);
     qs.set("anilistId", sourceAnimeId || "0");
     qs.set("titles", JSON.stringify(titleVariants));
-    if (preferredQuality) qs.set("quality", preferredQuality);
+    if (preferredQuality && !skipQualityParam) qs.set("quality", preferredQuality);
     qs.set("progressive", "1");
     if (requestExcludeKeys.length) qs.set("exclude", JSON.stringify(requestExcludeKeys));
     if (titleArStr) qs.set("titleAr", titleArStr);
@@ -2344,6 +2371,7 @@ export default function WatchScreen() {
     let streamDoneSeen = false;
     let lookupStartedAt = Date.now();
     let bestAlternateCandidate: Src | null = null;
+    let retryWithoutQuality = false;
     const markQualityFailed = () => {
       if (!preferredQuality) return;
       setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "failed" }));
@@ -2441,7 +2469,7 @@ export default function WatchScreen() {
         const checkEmbedUrl = (mapped.directUrl || mapped.url || "").toLowerCase();
         const hasDirectClientExtract = isDirectStreamActive() && Boolean(mapped.clientExtract?.embedUrl && isValidSourceUrl(mapped.clientExtract.embedUrl));
         const hardRejectReason = isBlockedSource(mapped) ? "blocked"
-          : (mapped.isEmbed && (checkEmbedUrl.includes("mega.nz") || checkEmbedUrl.includes("mega.co.nz"))) ? "unsupported_embed"
+          : (checkEmbedUrl.includes("mega.nz") || checkEmbedUrl.includes("mega.co.nz")) ? "unsupported_embed"
           : (Platform.OS !== "web" && mapped.isEmbed && !needsHiddenResolve(mapped)) ? "unsupported_embed"
           : (!hasDirectClientExtract && !isValidSourceUrl(getPlayUrl(mapped))) ? "invalid_url"
           : !isMobilePlayable(mapped) ? "not_playable"
@@ -2482,13 +2510,45 @@ export default function WatchScreen() {
           "primary",
         );
       }
+      if (!receivedCandidate && isDirectStreamActive() && site === "anime4up2" && !currentSiteCtrl.signal.aborted && isMountedRef.current) {
+        const ad2Phone = await resolveAd2OnPhone(Number(sourceAnimeId || anime || 0), epNum, currentSiteCtrl.signal);
+        if (ad2Phone?.primary?.url && isMountedRef.current && progressivePlaybackRef.current === playback) {
+          const toAd2Src = (item: Ad2PhoneResolvedSource, idx: number): Src => ({
+            site: "anime4up2",
+            name: item.name,
+            label: item.label,
+            quality: preferredQuality || item.quality,
+            url: item.url,
+            directUrl: item.url,
+            rawUrl: item.url,
+            directType: "hls",
+            isEmbed: false,
+            deliveryMode: "direct",
+            headers: item.headers,
+            subtitleUrl: item.subtitleUrl,
+            skipIntro: item.skipIntro,
+            skipOutro: item.skipOutro,
+            candidateKey: `ad2-phone-${idx}-${item.label}`,
+          });
+          const primarySrc = toAd2Src(ad2Phone.primary, 0);
+          ad2Phone.fallbacks.forEach((fb, i) => {
+            const fbSrc = toAd2Src(fb, i + 1);
+            playback.fallbackSources.push(fbSrc);
+            setSources(prev => prev.some(item => item.candidateKey === fbSrc.candidateKey) ? prev : [...prev, fbSrc]);
+          });
+          acceptPlayableCandidate(primarySrc, primarySrc.candidateKey!, "primary");
+        }
+      }
       playback.streamOpen = false;
       console.info(
         `[playback-trace] id=${lookupTraceId} component=source stage=stream_end site=${lookupSiteTag} elapsed_ms=${Date.now() - lookupStartedAt} candidates=${receivedCandidateCount} rejected=${rejectedCandidateCount} done=${streamDoneSeen}`,
       );
       if (!isMountedRef.current) return;
       if (!receivedCandidate && !playback.retryPending) {
-        if (
+        if (site === "animeify" && preferredQuality && !skipQualityParam) {
+          playback.retryPending = true;
+          retryWithoutQuality = true;
+        } else if (
           playback.attemptedKeys.length > attemptedBeforeRequest
           && playback.attemptedKeys.length < 12
         ) {
@@ -2530,10 +2590,15 @@ export default function WatchScreen() {
             playback.attemptedKeys.push(fallback.candidateKey);
           }
           playSrc(fallback);
+        } else if (retryWithoutQuality) {
+          const excluded = [...playback.attemptedKeys];
+          setTimeout(() => {
+            void handlePickSiteRef.current(site, preferredQuality, excluded, true);
+          }, 0);
         } else if (playback.attemptedKeys.length < 12) {
           const excluded = [...playback.attemptedKeys];
           setTimeout(() => {
-            void handlePickSiteRef.current(site, preferredQuality, excluded);
+            void handlePickSiteRef.current(site, preferredQuality, excluded, skipQualityParam);
           }, 0);
         } else {
           markQualityFailed();
@@ -2999,6 +3064,36 @@ export default function WatchScreen() {
   const onRiftError = useCallback(() => {
     if (isAwDubbed) {
       saveProgress();
+      if (playingSrc?.awPickerKey) {
+        awFailedKeysRef.current.add(playingSrc.awPickerKey);
+      }
+      const curUrl = playingSrc ? getPlayUrl(playingSrc) : "";
+      const isDirectPixeldrain =
+        isDirectStreamActive() &&
+        curUrl.includes("pixeldrain.com/api/file/") &&
+        !curUrl.includes("/api/anime/video-proxy");
+      if (isDirectPixeldrain && playingSrc) {
+        const proxied = `${getBaseUrl()}/api/anime/video-proxy?url=${encodeURIComponent(curUrl)}`;
+        setPlayingSrc({
+          ...playingSrc,
+          url: proxied,
+          directUrl: proxied,
+          directType: "mp4",
+          headers: undefined,
+          deliveryMode: "vps-proxy",
+        });
+        return;
+      }
+      const nextAw = sources.find((s) => {
+        if (!s.awPickerKey || awFailedKeysRef.current.has(s.awPickerKey)) return false;
+        const u = getPlayUrl(s).toLowerCase();
+        return Boolean(u) && !u.includes("mega.nz") && !u.includes("mega.co.nz");
+      });
+      if (nextAw) {
+        awFailedKeysRef.current.add(nextAw.awPickerKey!);
+        playSrc(nextAw);
+        return;
+      }
       if (playingSrc?.awPickerKey && playingSrc.awQualityKey) {
         setSlotStatus(prev => ({
           ...prev,
@@ -3072,7 +3167,7 @@ export default function WatchScreen() {
         }, 0);
       }
     }
-  }, [isAwDubbed, playingSrc, saveProgress, srcCacheKey, playSrc, playbackTraceId]);
+  }, [isAwDubbed, playingSrc, sources, saveProgress, srcCacheKey, playSrc, playbackTraceId]);
 
   const onRiftProgress = useCallback((pos: number, dur: number) => {
     if (Number.isFinite(pos) && pos >= 0) {
@@ -3150,9 +3245,19 @@ export default function WatchScreen() {
     const deliveryTag = isDirectStreamActive()
       ? ` · ${getDeliveryBadge(url, playingSrc.deliveryMode).badgeLabel}`
       : "";
+    const contentType: PlayerSource["contentType"] =
+      playingSrc.directType === "hls" || /\.m3u8(?:[?#]|$)/i.test(url)
+        ? "hls"
+        : (playingSrc.directType === "mp4" || isAwDubbed || url.includes("pixeldrain.com/api/file/"))
+          ? "progressive"
+          : undefined;
+    const effectiveHeaders =
+      headers ||
+      (url.includes("pixeldrain.com/api/file/") ? { "User-Agent": MOBILE_DIRECT_UA } : undefined);
     return [{
       url,
-      headers,
+      contentType,
+      headers: effectiveHeaders,
       label: (isAwDubbed
         ? `سيرفر · ${playingSrc.name || "AW"}`
         : `سيرفر · ${getSiteTag(site)}`) + deliveryTag,
