@@ -39,7 +39,6 @@ const FORMAT_OPTIONS: AnimeFilterOption[] = [
   { label: "الكل", value: "all" },
   { label: "أفلام أجنبية", value: "movie" },
   { label: "مسلسلات", value: "series" },
-  { label: "أنميشن", value: "animation" },
 ];
 
 const STATUS_OPTIONS: AnimeFilterOption[] = [

@@ -42,7 +42,6 @@ const FORMAT_OPTIONS: AnimeFilterOption[] = [
   { label: "أفلام هندية", value: "indian_movies" },
   { label: "سينما آسيوية", value: "asian" },
   { label: "مسلسلات مدبلجة", value: "dubbed_series" },
-  { label: "أنميشن", value: "animation" },
 ];
 const VALID_FORMATS = new Set(FORMAT_OPTIONS.map((o) => o.value));
 
@@ -79,7 +78,6 @@ const GENRES_WITH_COVERS = [
   { genre: "فانتازيا", ar: "فانتازيا", color: "#7C3AED", icon: "sparkles-outline" },
   { genre: "جريمة", ar: "جريمة", color: "#2563EB", icon: "shield-outline" },
   { genre: "عائلي", ar: "عائلي", color: "#16A34A", icon: "people-outline" },
-  { genre: "أنميشن", ar: "أنميشن", color: "#0284C7", icon: "color-palette-outline" },
   { genre: "وثائقي", ar: "وثائقي", color: "#9333EA", icon: "earth-outline" },
 ];
 
@@ -98,7 +96,6 @@ const FORMAT_AR: Record<string, string> = {
   indian_movies: "أفلام هندية",
   asian: "سينما آسيوية",
   dubbed_series: "مسلسلات مدبلجة",
-  animation: "أنميشن",
 };
 const BROWSE_PAGE_CACHE = new Map<string, { items: FilmSummary[]; page: number; totalPages: number; totalResults: number; ts: number }>();
 const BROWSE_CACHE_TTL = 4 * 60_000;

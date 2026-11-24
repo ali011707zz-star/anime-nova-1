@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -43,57 +43,122 @@ function formatRemaining(pos: number, dur: number): string {
   return `متبقي ${left} د`;
 }
 
-type HomeRailSpec = {
+type TabOption = {
   key: string;
-  title: string;
+  label: string;
   subtitle: string;
-  accentColor: string;
+  color: string;
   items: FilmSummary[];
   browseType: string;
   browseSort: string;
 };
 
-const QUICK_PILLS = [
-  { label: "الكل", icon: "grid-outline", type: "all", color: "#0EA5E9" },
-  { label: "أفلام أجنبية", icon: "film-outline", type: "movie", color: "#F59E0B" },
-  { label: "مسلسلات", icon: "albums-outline", type: "series", color: "#10B981" },
-  { label: "أنميشن", icon: "sparkles-outline", type: "animation", color: "#8B5CF6" },
-] as const;
+type TabbedSectionSpec = {
+  key: string;
+  title: string;
+  tabs: TabOption[];
+};
 
-const HomePosterRail = React.memo(function HomePosterRail({
-  rail,
+const TabbedHomeSection = React.memo(function TabbedHomeSection({
+  section,
   railCardWidth,
   watchedMap,
   isTv,
   onSeeAll,
+  colors,
 }: {
-  rail: HomeRailSpec;
+  section: TabbedSectionSpec;
   railCardWidth: number;
   watchedMap: Record<string, boolean>;
   isTv: boolean;
   onSeeAll: (browseType: string, browseSort: string) => void;
+  colors: ReturnType<typeof useColors>;
 }) {
+  const [activeKey, setActiveKey] = useState<string>(section.tabs[0]?.key || "");
+  const listRef = useRef<FlatList<FilmSummary>>(null);
+  const activeTab = useMemo(
+    () => section.tabs.find((t) => t.key === activeKey) || section.tabs[0],
+    [section.tabs, activeKey],
+  );
   const itemStride = railCardWidth + 11;
+
+  if (!activeTab) return null;
+
   return (
     <View style={s.sectionWrap}>
       <FilmSectionHeader
-        title={rail.title}
-        subtitle={rail.subtitle}
-        accentColor={rail.accentColor}
-        onSeeAll={() => onSeeAll(rail.browseType, rail.browseSort)}
+        title={section.title}
+        subtitle={activeTab.subtitle}
+        accentColor={activeTab.color}
+        onSeeAll={() => onSeeAll(activeTab.browseType, activeTab.browseSort)}
         focusable={isTv}
       />
-      <FlatList
-        data={rail.items}
+      <ScrollView
         horizontal
-        keyExtractor={(item) => `${rail.browseType}-${item.tmdbType}-${item.id}`}
+        showsHorizontalScrollIndicator={false}
+        overScrollMode="never"
+        style={{ marginBottom: 12 }}
+        contentContainerStyle={{
+          paddingHorizontal: 14,
+          gap: 8,
+          flexDirection: "row",
+          alignItems: "center",
+        }}
+      >
+        {section.tabs.map((tabOpt) => {
+          const isActive = activeTab.key === tabOpt.key;
+          return (
+            <Pressable
+              key={tabOpt.key}
+              onPress={() => {
+                setActiveKey(tabOpt.key);
+                listRef.current?.scrollToOffset({ offset: 0, animated: false });
+              }}
+              style={({ pressed }) => [
+                {
+                  paddingHorizontal: 16,
+                  paddingVertical: 7,
+                  borderRadius: 12,
+                  borderWidth: 1,
+                  flexShrink: 0,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: isActive ? `${tabOpt.color}22` : colors.card,
+                  borderColor: isActive ? `${tabOpt.color}88` : colors.border,
+                  opacity: pressed ? 0.85 : 1,
+                },
+              ]}
+            >
+              <Text
+                style={{
+                  fontSize: 12.5,
+                  lineHeight: 19,
+                  fontFamily: "Cairo_700Bold",
+                  color: isActive ? tabOpt.color : colors.textSecondary,
+                  includeFontPadding: false,
+                  textAlign: "center",
+                  paddingHorizontal: 3,
+                  flexShrink: 0,
+                }}
+              >
+                {` ${tabOpt.label} `}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+      <FlatList
+        ref={listRef}
+        data={activeTab.items}
+        horizontal
+        keyExtractor={(item) => `${activeTab.key}-${item.tmdbType}-${item.id}`}
         showsHorizontalScrollIndicator={false}
         overScrollMode="never"
         nestedScrollEnabled
         initialNumToRender={4}
         maxToRenderPerBatch={4}
-        windowSize={3}
-        removeClippedSubviews={Platform.OS === "android"}
+        windowSize={5}
+        removeClippedSubviews={false}
         getItemLayout={(_, index) => ({ length: itemStride, offset: itemStride * index, index })}
         contentContainerStyle={{ paddingHorizontal: 14, gap: 11 }}
         renderItem={({ item }) => {
@@ -178,14 +243,14 @@ export default function NovaFilmHomeScreen() {
   const trendingMovies = effectiveHome?.trendingMovies || [];
   const latestMovies = effectiveHome?.latestMovies || [];
   const arabicMovies = effectiveHome?.arabicMovies || [];
+  const indianMovies = effectiveHome?.indianMovies || [];
+  const asianMovies = effectiveHome?.asianMovies || [];
+  const topRatedItems = effectiveHome?.topRated || [];
+  const popularSeries = effectiveHome?.popularSeries || [];
   const arabicSeries = effectiveHome?.arabicSeries || [];
   const turkishSeries = effectiveHome?.turkishSeries || [];
-  const indianMovies = effectiveHome?.indianMovies || [];
   const dubbedSeries = effectiveHome?.dubbedSeries || [];
-  const asianMovies = effectiveHome?.asianMovies || [];
-  const popularSeries = effectiveHome?.popularSeries || [];
-  const topRatedItems = effectiveHome?.topRated || [];
-  const animationList = effectiveHome?.animations || [];
+  const asianSeries = effectiveHome?.asianSeries || [];
 
   const allPool = useMemo(() => {
     const map = new Map<string, FilmSummary>();
@@ -194,14 +259,14 @@ export default function NovaFilmHomeScreen() {
       trendingMovies,
       latestMovies,
       arabicMovies,
+      indianMovies,
+      asianMovies,
+      topRatedItems,
+      popularSeries,
       arabicSeries,
       turkishSeries,
-      indianMovies,
       dubbedSeries,
-      asianMovies,
-      popularSeries,
-      topRatedItems,
-      animationList,
+      asianSeries,
     ]) {
       for (const item of arr) {
         map.set(`${item.tmdbType}:${item.id}`, item);
@@ -213,14 +278,14 @@ export default function NovaFilmHomeScreen() {
     trendingMovies,
     latestMovies,
     arabicMovies,
+    indianMovies,
+    asianMovies,
+    topRatedItems,
+    popularSeries,
     arabicSeries,
     turkishSeries,
-    indianMovies,
     dubbedSeries,
-    asianMovies,
-    popularSeries,
-    topRatedItems,
-    animationList,
+    asianSeries,
   ]);
 
   const continueItems = useMemo(() => {
@@ -245,66 +310,43 @@ export default function NovaFilmHomeScreen() {
       .filter(Boolean) as { rec: FilmPlaybackRecord; title: FilmSummary }[];
   }, [playbackHistory, allPool]);
 
-  const rails = useMemo<HomeRailSpec[]>(() => {
+  const sections = useMemo<TabbedSectionSpec[]>(() => {
     if (!effectiveHome) return [];
-    const specs: HomeRailSpec[] = [
-      {
-        key: "trending",
-        title: "الأعمال الرائجة هذا الأسبوع",
-        subtitle: "الأكثر مشاهدة وتداولاً في المنصة",
-        accentColor: "#0EA5E9",
-        items: trendingMovies,
-        browseType: "movie",
-        browseSort: "popularity",
-      },
-      {
-        key: "latest-movies",
-        title: "الأفلام الأجنبية",
-        subtitle: "أحدث الإصدارات السينمائية المترجمة",
-        accentColor: "#F59E0B",
-        items: latestMovies,
-        browseType: "movie",
-        browseSort: "year",
-      },
-      {
-        key: "popular-series",
-        title: "المسلسلات العالمية",
-        subtitle: "مواسم كاملة وحلقات متجددة",
-        accentColor: "#10B981",
-        items: popularSeries,
-        browseType: "series",
-        browseSort: "popularity",
-      },
-      {
-        key: "asian",
-        title: "سينما آسيوية وعربية وتركية",
-        subtitle: "أبرز الأعمال الكورية والصينية والهندية",
-        accentColor: "#EC4899",
-        items: asianMovies,
-        browseType: "asian",
-        browseSort: "year",
-      },
-      {
-        key: "top-rated",
-        title: "الأعلى تقييماً في التاريخ",
-        subtitle: "روائع خالدة بأعلى تقييمات المشاهدين",
-        accentColor: "#38BDF8",
-        items: topRatedItems,
-        browseType: "movie",
-        browseSort: "rating",
-      },
-      {
-        key: "animations",
-        title: "أفلام ومسلسلات الأنميشن",
-        subtitle: "عالم الرسوم المتحركة العائلية والسينمائية",
-        accentColor: "#8B5CF6",
-        items: animationList,
-        browseType: "animation",
-        browseSort: "year",
-      },
-    ];
-    return specs.filter((r) => r.items.length > 0);
-  }, [effectiveHome, trendingMovies, latestMovies, popularSeries, asianMovies, topRatedItems, animationList]);
+    const movieTabs: TabOption[] = [
+      { key: "trending", label: "الرائجة", subtitle: "الأكثر مشاهدة وتداولاً هذا الأسبوع", color: "#06b6d4", items: trendingMovies, browseType: "movie", browseSort: "popularity" },
+      { key: "foreign", label: "أفلام أجنبية", subtitle: "أحدث الإصدارات السينمائية المترجمة", color: "#F59E0B", items: latestMovies, browseType: "movie", browseSort: "year" },
+      { key: "arabic-m", label: "أفلام عربية", subtitle: "أحدث الأفلام العربية بجودة عالية", color: "#EF4444", items: arabicMovies, browseType: "arabic_movies", browseSort: "year" },
+      { key: "indian-m", label: "أفلام هندية", subtitle: "أحدث إنتاجات بوليوود والسينما الهندية", color: "#D97706", items: indianMovies, browseType: "indian_movies", browseSort: "year" },
+      { key: "asian-m", label: "أفلام آسيوية", subtitle: "أبرز الأعمال الكورية والصينية واليابانية", color: "#EC4899", items: asianMovies, browseType: "asian", browseSort: "year" },
+      { key: "top-rated", label: "الأعلى تقييماً", subtitle: "روائع خالدة بأعلى تقييمات المشاهدين", color: "#38BDF8", items: topRatedItems, browseType: "movie", browseSort: "rating" },
+    ].filter((t) => t.items.length > 0);
+
+    const seriesTabs: TabOption[] = [
+      { key: "global-s", label: "مسلسلات عالمية", subtitle: "مواسم كاملة وحلقات متجددة", color: "#10B981", items: popularSeries, browseType: "series", browseSort: "popularity" },
+      { key: "arabic-s", label: "مسلسلات عربية", subtitle: "أحدث المسلسلات والدراما العربية", color: "#F97316", items: arabicSeries, browseType: "arabic_series", browseSort: "year" },
+      { key: "turkish-s", label: "مسلسلات تركية", subtitle: "أبرز المسلسلات التركية المترجمة", color: "#E11D48", items: turkishSeries, browseType: "turkish_series", browseSort: "year" },
+      { key: "dubbed-s", label: "مسلسلات مدبلجة", subtitle: "أعمال مدبلجة بالعربية جاهزة للمشاهدة", color: "#14B8A6", items: dubbedSeries, browseType: "dubbed_series", browseSort: "year" },
+      { key: "asian-s", label: "مسلسلات آسيوية", subtitle: "أبرز الدراما الكورية والآسيوية", color: "#8B5CF6", items: asianSeries, browseType: "asian", browseSort: "year" },
+    ].filter((t) => t.items.length > 0);
+
+    const out: TabbedSectionSpec[] = [];
+    if (movieTabs.length > 0) out.push({ key: "movies-tabbed", title: "🎬 الأفلام", tabs: movieTabs });
+    if (seriesTabs.length > 0) out.push({ key: "series-tabbed", title: "📺 المسلسلات", tabs: seriesTabs });
+    return out;
+  }, [
+    effectiveHome,
+    trendingMovies,
+    latestMovies,
+    arabicMovies,
+    indianMovies,
+    asianMovies,
+    topRatedItems,
+    popularSeries,
+    arabicSeries,
+    turkishSeries,
+    dubbedSeries,
+    asianSeries,
+  ]);
 
   const handleSeeAll = useCallback(
     (browseType: string, browseSort: string) => {
@@ -425,31 +467,7 @@ export default function NovaFilmHomeScreen() {
           <>
             <FilmHeroSection items={heroItems} tvFocusable={isTv} />
 
-            {/* Quick Category Pills (without hidden Schedule route) */}
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              overScrollMode="never"
-              contentContainerStyle={s.quickPillsRow}
-            >
-              {QUICK_PILLS.map((pill) => (
-                <Pressable
-                  key={pill.label}
-                  onPress={() => router.push({ pathname: "/(tabs)/browse" as any, params: { category: pill.type, sort: "popularity", genre: "", year: "" } })}
-                  style={({ pressed }) => [
-                    s.quickPill,
-                    {
-                      backgroundColor: colors.card,
-                      borderColor: colors.border,
-                      opacity: pressed ? 0.85 : 1,
-                    },
-                  ]}
-                >
-                  <Ionicons name={pill.icon as any} size={14} color={pill.color} />
-                  <Text style={[s.quickPillText, { color: colors.textPrimary }]}>{pill.label}</Text>
-                </Pressable>
-              ))}
-            </ScrollView>
+            <View style={{ height: 10 }} />
 
             {/* Continue Watching */}
             {continueItems.length > 0 ? (
@@ -458,7 +476,7 @@ export default function NovaFilmHomeScreen() {
                   title="متابعة المشاهدة"
                   subtitle="استأنف من حيث توقفت تلقائياً"
                   accentColor="#0EA5E9"
-                  seeAllLabel="قائمتي"
+                  seeAllLabel="السجل الكامل"
                   onSeeAll={() => router.push("/(tabs)/library" as any)}
                 />
                 <FlatList
@@ -574,26 +592,27 @@ export default function NovaFilmHomeScreen() {
   return (
     <View style={[s.container, { backgroundColor: colors.background }]}>
       <FlatList
-        data={rails}
+        data={sections}
         keyExtractor={(item) => item.key}
         ListHeaderComponent={renderListHeader}
         showsVerticalScrollIndicator={false}
         overScrollMode="never"
         initialNumToRender={2}
         maxToRenderPerBatch={2}
-        windowSize={4}
-        removeClippedSubviews={Platform.OS === "android"}
+        windowSize={5}
+        removeClippedSubviews={false}
         contentContainerStyle={{ paddingBottom: 98 }}
         refreshControl={
           <RefreshControl refreshing={isRefetching} onRefresh={handleRefresh} tintColor={colors.homeAccent} />
         }
         renderItem={({ item }) => (
-          <HomePosterRail
-            rail={item}
+          <TabbedHomeSection
+            section={item}
             railCardWidth={railCardWidth}
             watchedMap={watchedMap}
             isTv={isTv}
             onSeeAll={handleSeeAll}
+            colors={colors}
           />
         )}
       />
