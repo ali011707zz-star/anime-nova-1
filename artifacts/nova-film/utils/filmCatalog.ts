@@ -1,3 +1,4 @@
+import { getBaseUrl } from "./baseUrl";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export type TmdbMediaType = "movie" | "tv";
@@ -183,8 +184,8 @@ export function normalizeFilmSummary(raw: any): FilmSummary {
       : raw?.mediaType === "animation"
         ? "animation"
         : "movie";
-  const posterUrl = raw?.posterUrl || raw?.poster || null;
-  const backdropUrl = raw?.backdropUrl || raw?.backdrop || posterUrl;
+  const posterUrl = resolveFilmImageUrl(raw?.posterUrl || raw?.poster || null) || null;
+  const backdropUrl = resolveFilmImageUrl(raw?.backdropUrl || raw?.backdrop || null) || posterUrl;
   const imdbRating = Number(raw?.imdbRating ?? raw?.rating ?? 0) || 0;
   const titleAr = String(raw?.titleAr || raw?.title || raw?.titleEn || "").trim();
   const titleEn = String(raw?.titleEn || raw?.englishTitle || titleAr).trim();
@@ -238,9 +239,39 @@ export function buildFilmPlaybackKey(
   return `${tmdbType}:${titleId}:s${seasonNumber}:e${episodeNumber}`;
 }
 
-export function getImageSource(url?: string | null): { uri: string } | undefined {
+
+const BLOCKED_POSTER_HOST_HINTS = [
+  "egydead",
+  "topcinema",
+  "moviztime",
+  "aoneroom",
+  "elcinema",
+];
+
+export function resolveFilmImageUrl(url?: string | null): string | undefined {
   if (!url || typeof url !== "string") return undefined;
-  return { uri: url };
+  const s = url.trim();
+  if (!s || s.includes("/uploads/images.jpg")) return undefined;
+  const base = getBaseUrl().replace(/\/+$/, "");
+  if (s.startsWith("/")) {
+    return `${base}${s}`;
+  }
+  if (/^https?:\/\//i.test(s)) {
+    try {
+      const host = new URL(s).hostname.toLowerCase();
+      if (BLOCKED_POSTER_HOST_HINTS.some((kw) => host.includes(kw))) {
+        return `${base}/api/film/poster?u=${encodeURIComponent(s)}`;
+      }
+    } catch {}
+    return s;
+  }
+  return undefined;
+}
+
+export function getImageSource(url?: string | null): { uri: string } | undefined {
+  const resolved = resolveFilmImageUrl(url);
+  if (!resolved) return undefined;
+  return { uri: resolved };
 }
 
 export async function loadFavoriteFilms(): Promise<FilmSummary[]> {

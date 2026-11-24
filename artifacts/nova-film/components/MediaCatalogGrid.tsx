@@ -12,6 +12,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { useColors } from "@/hooks/useColors";
+import { SafePosterImage } from "@/components/SafePosterImage";
 import { fetchFilmBrowse } from "@/utils/filmApi";
 import { FilmSummary } from "@/utils/filmCatalog";
 import { isTvDevice, tvFocusStyle, TvPressable as Pressable } from "@/utils/tv";
@@ -193,17 +194,12 @@ export function MediaCatalogGrid({
             },
           ]}
         >
-          {item.poster ? (
-            <Image
-              source={{ uri: item.poster }}
-              style={StyleSheet.absoluteFill}
-              resizeMode="cover"
-            />
-          ) : (
-            <View style={styles.posterPlaceholder}>
-              <Ionicons name="film-outline" size={28} color={colors.textMuted} />
-            </View>
-          )}
+          <SafePosterImage
+            uri={item.poster}
+            style={StyleSheet.absoluteFill}
+            resizeMode="cover"
+            iconSize={28}
+          />
           <LinearGradient
             colors={["transparent", "rgba(0,0,0,0.82)"]}
             style={styles.posterGradient}

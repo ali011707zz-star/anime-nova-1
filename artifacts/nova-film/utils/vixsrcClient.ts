@@ -120,13 +120,13 @@ export async function resolveVixSrcClient(params: {
     if (!embedRes.ok) return null;
     const html = await embedRes.text();
 
-    const masterBlockMatch = html.match(/masterPlaylist\s*=\s*\{[\s\S]{0,600}?\}/);
-    const block = masterBlockMatch ? masterBlockMatch[0] : html;
+    // Capture full masterPlaylist block including nested params:{...} AND outer url:'...'
+    const mpIdx = html.indexOf("masterPlaylist");
+    const block = mpIdx >= 0 ? html.slice(mpIdx, mpIdx + 900) : html;
     const urlMatch = block.match(/url\s*:\s*['"]([^'"]+)['"]/);
     const tokenMatch = block.match(/['"]token['"]\s*:\s*['"]([^'"]+)['"]/);
     const expiresMatch = block.match(/['"]expires['"]\s*:\s*['"]([^'"]+)['"]/);
     const asnMatch = block.match(/['"]asn['"]\s*:\s*['"]([^'"]*)['"]/);
-
     if (!urlMatch?.[1] || !tokenMatch?.[1] || !expiresMatch?.[1]) return null;
 
     const basePlaylistUrl = urlMatch[1].replace(/\\\//g, "/");
@@ -134,10 +134,10 @@ export async function resolveVixSrcClient(params: {
     const expires = expiresMatch[1];
     const asn = asnMatch?.[1] || "";
     const canPlayFHD = /window\.canPlayFHD\s*=\s*true/i.test(html);
-
     const sep = basePlaylistUrl.includes("?") ? "&" : "?";
     const asnPart = asn ? `&asn=${encodeURIComponent(asn)}` : "";
-    const playlistUrl = `${basePlaylistUrl}${sep}token=${encodeURIComponent(token)}&expires=${encodeURIComponent(expires)}${asnPart}&h=1&lang=en`;
+    const fhdPart = canPlayFHD ? "&h=1" : "";
+    const baseSigned = `${basePlaylistUrl}${sep}token=${encodeURIComponent(token)}&expires=${encodeURIComponent(expires)}${asnPart}${fhdPart}`;
 
     const playHeaders: Record<string, string> = {
       Referer: embedUrl,
@@ -145,19 +145,31 @@ export async function resolveVixSrcClient(params: {
       "User-Agent": VIX_UA,
     };
 
-    // Step 3: Validate playlist directly on the device IP so we never show a dead/403 server
-    const m3u8Res = await fetchWithTimeout(
-      playlistUrl,
-      {
-        ...playHeaders,
-        Accept: "application/vnd.apple.mpegurl, application/x-mpegURL, */*",
-      },
-      6000,
-      params.signal,
-    );
-    if (!m3u8Res.ok) return null;
-    const m3u8Text = await m3u8Res.text();
-    if (!m3u8Text.includes("#EXTM3U")) return null;
+    // Validate playlist directly on the device IP (omit &h=1 when canPlayFHD=false to prevent 403)
+    const candidateUrls = [`${baseSigned}&lang=en`, baseSigned];
+    let playlistUrl = "";
+    let m3u8Text = "";
+    for (const candidate of candidateUrls) {
+      try {
+        const m3u8Res = await fetchWithTimeout(
+          candidate,
+          {
+            ...playHeaders,
+            Accept: "application/vnd.apple.mpegurl, application/x-mpegURL, */*",
+          },
+          5500,
+          params.signal,
+        );
+        if (!m3u8Res.ok) continue;
+        const txt = await m3u8Res.text();
+        if (txt.includes("#EXTM3U")) {
+          playlistUrl = candidate;
+          m3u8Text = txt;
+          break;
+        }
+      } catch {}
+    }
+    if (!playlistUrl || !m3u8Text) return null;
 
     const isFhd =
       canPlayFHD ||

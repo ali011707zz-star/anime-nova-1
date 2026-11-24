@@ -35,10 +35,16 @@ const SORT_OPTIONS: AnimeFilterOption[] = [
 const FORMAT_OPTIONS: AnimeFilterOption[] = [
   { label: "الكل", value: "all" },
   { label: "أفلام أجنبية", value: "movie" },
-  { label: "مسلسلات", value: "series" },
-  { label: "سينما آسيوية وعربية", value: "asian" },
+  { label: "مسلسلات أجنبية", value: "series" },
+  { label: "أفلام عربية", value: "arabic_movies" },
+  { label: "مسلسلات عربية", value: "arabic_series" },
+  { label: "مسلسلات تركية", value: "turkish_series" },
+  { label: "أفلام هندية", value: "indian_movies" },
+  { label: "سينما آسيوية", value: "asian" },
+  { label: "مسلسلات مدبلجة", value: "dubbed_series" },
   { label: "أنميشن", value: "animation" },
 ];
+const VALID_FORMATS = new Set(FORMAT_OPTIONS.map((o) => o.value));
 
 const STATUS_OPTIONS: AnimeFilterOption[] = [
   { label: "الكل", value: "" },
@@ -83,11 +89,19 @@ const FILTER_GENRES: AnimeFilterOption[] = [
 ];
 
 const FORMAT_AR: Record<string, string> = {
+  all: "الكل",
   movie: "أفلام أجنبية",
-  series: "مسلسلات",
-  asian: "سينما آسيوية وعربية",
+  series: "مسلسلات أجنبية",
+  arabic_movies: "أفلام عربية",
+  arabic_series: "مسلسلات عربية",
+  turkish_series: "مسلسلات تركية",
+  indian_movies: "أفلام هندية",
+  asian: "سينما آسيوية",
+  dubbed_series: "مسلسلات مدبلجة",
   animation: "أنميشن",
 };
+const BROWSE_PAGE_CACHE = new Map<string, { items: FilmSummary[]; page: number; totalPages: number; totalResults: number; ts: number }>();
+const BROWSE_CACHE_TTL = 4 * 60_000;
 
 function useBrowseTheme() {
   const colors = useColors();
@@ -98,27 +112,30 @@ function useBrowseTheme() {
   return { colors, g };
 }
 
+type BrowseStyles = ReturnType<typeof makeG>;
+
 const GenreCard = React.memo(function GenreCard({
   item,
   liveCoverUrl,
   onPress,
   columns,
   horizontal = false,
+  g,
+  tvMode,
 }: {
   item: (typeof GENRES_WITH_COVERS)[0];
   liveCoverUrl?: string;
-  onPress: () => void;
+  onPress: (genre: string) => void;
   columns: number;
   horizontal?: boolean;
+  g: BrowseStyles;
+  tvMode: boolean;
 }) {
-  const { g } = useBrowseTheme();
-  const { width, height } = useWindowDimensions();
-  const tvMode = isTvDevice(width, height);
   const [imgErr, setImgErr] = useState(false);
-
+  const handlePress = useCallback(() => onPress(item.genre), [onPress, item.genre]);
   return (
     <Pressable
-      onPress={onPress}
+      onPress={handlePress}
       focusable={tvMode}
       style={({ focused }) => [
         g.genreCard,
@@ -145,11 +162,11 @@ const GenreCard = React.memo(function GenreCard({
         </Text>
         <View style={[g.genreFloatingPosterWrap, horizontal && g.horizontalGenreFloatingPosterWrap]}>
           {liveCoverUrl && !imgErr ? (
-            <Image
-              source={{ uri: liveCoverUrl }}
+            <SafePosterImage
+              uri={liveCoverUrl}
               style={g.genreFloatingPoster}
               resizeMode="cover"
-              fadeDuration={0}
+              iconSize={horizontal ? 12 : 14}
               onError={() => setImgErr(true)}
             />
           ) : (
@@ -163,26 +180,26 @@ const GenreCard = React.memo(function GenreCard({
 
 const FilmBrowseCard = React.memo(function FilmBrowseCard({
   film,
-  onPress,
-  columns,
+  onSelect,
+  cardW,
+  cardH,
+  g,
+  tvMode,
 }: {
   film: FilmSummary;
-  onPress: () => void;
-  columns: number;
+  onSelect: (film: FilmSummary) => void;
+  cardW: number;
+  cardH: number;
+  g: BrowseStyles;
+  tvMode: boolean;
 }) {
-  const { g } = useBrowseTheme();
-  const { width, height } = useWindowDimensions();
-  const tvMode = isTvDevice(width, height);
-  const gridW = Math.min(Math.max(width - 24, 280), tvMode ? 1100 : 900);
-  const cardW = Math.max(88, Math.floor((gridW - 24 - 10 * (columns - 1)) / columns));
-  const cardH = Math.round(cardW * 1.44);
   const isSeries = film.tmdbType === "tv";
   const fmtLabel =
     film.mediaType === "animation" ? "أنميشن" : isSeries ? "مسلسل" : "فيلم";
-
+  const handlePress = useCallback(() => onSelect(film), [onSelect, film]);
   return (
     <Pressable
-      onPress={onPress}
+      onPress={handlePress}
       focusable={tvMode}
       style={({ focused }) => [
         g.card,
@@ -197,7 +214,6 @@ const FilmBrowseCard = React.memo(function FilmBrowseCard({
         ) : (
           <View style={[g.cardImg, g.cardNoImg]} />
         )}
-
         {film.imdbRating ? (
           <View style={[g.scoreBadge, tvMode && g.tvScoreBadge]}>
             <Ionicons name="star" size={tvMode ? 13 : 7} color="#FBBF24" />
@@ -206,7 +222,6 @@ const FilmBrowseCard = React.memo(function FilmBrowseCard({
             </Text>
           </View>
         ) : null}
-
         <View
           style={[
             g.fmtBadge,
@@ -216,7 +231,6 @@ const FilmBrowseCard = React.memo(function FilmBrowseCard({
         >
           <Text style={[g.fmtText, tvMode && g.tvFmtText]}>{fmtLabel}</Text>
         </View>
-
         <View style={g.cardBottom}>
           <Text
             style={[g.cardTitleAr, tvMode && g.tvCardTitle]}
@@ -261,7 +275,7 @@ export default function BrowseScreen() {
 
   const [format, setFormat] = useState<string>(() => {
     const c = String(params.category || params.type || "all");
-    return ["movie", "series", "animation", "asian"].includes(c) ? c : "all";
+    return VALID_FORMATS.has(c) ? c : "all";
   });
   const [activeGenre, setActiveGenre] = useState<string>(() => String(params.genre || ""));
   const [sort, setSort] = useState<string>(() => {
@@ -283,7 +297,7 @@ export default function BrowseScreen() {
 
   useEffect(() => {
     const rawCat = params.category ?? params.type;
-    if (typeof rawCat === "string" && ["movie", "series", "animation", "asian", "all"].includes(rawCat)) {
+    if (typeof rawCat === "string" && VALID_FORMATS.has(rawCat)) {
       setFormat(rawCat);
       setView("list");
       setSeason("");
@@ -303,10 +317,47 @@ export default function BrowseScreen() {
 
   const effectiveYear = year || season;
 
+  const cardW = useMemo(
+    () => Math.max(88, Math.floor((gridWidth - 24 - 10 * (gridColumns - 1)) / gridColumns)),
+    [gridWidth, gridColumns],
+  );
+  const cardH = Math.round(cardW * 1.44);
+  const rowStride = cardH + 10;
+  const reqIdRef = useRef(0);
+
+  const handleSelectFilm = useCallback(
+    (film: FilmSummary) => {
+      router.push({
+        pathname: "/film/[id]" as any,
+        params: {
+          id: String(film.id),
+          type: film.tmdbType,
+          title: film.titleAr || film.titleEn,
+        },
+      });
+    },
+    [router],
+  );
+
   const loadPage = useCallback(
     async (targetPage: number, replace: boolean) => {
-      if (replace) setLoading(true);
-      else setLoadingMore(true);
+      const myReqId = ++reqIdRef.current;
+      const cacheKey = `${format || "all"}|${activeGenre || "الكل"}|${sort || "popularity"}|${effectiveYear || ""}|p${targetPage}`;
+      if (replace) {
+        const hit = BROWSE_PAGE_CACHE.get(cacheKey);
+        if (hit && Date.now() - hit.ts < BROWSE_CACHE_TTL && hit.items.length > 0) {
+          setItems(hit.items);
+          setPage(hit.page);
+          setTotalPages(hit.totalPages);
+          setTotalResults(hit.totalResults);
+          setLoading(false);
+          setLoadingMore(false);
+          return;
+        }
+        setLoading(true);
+      } else {
+        setLoadingMore(true);
+      }
       try {
         const res = await fetchFilmBrowse({
           category: (format || "all") as any,
@@ -315,30 +366,72 @@ export default function BrowseScreen() {
           year: effectiveYear ? Number(effectiveYear) : undefined,
           page: targetPage,
         });
+        if (myReqId !== reqIdRef.current) return;
         setPage(res.page);
         setTotalPages(res.totalPages);
         setTotalResults(res.totalResults || res.results.length);
-        setItems((prev) => {
-          if (replace) return res.results;
-          const seen = new Set(prev.map((x) => `${x.tmdbType}:${x.id}`));
-          const merged = [...prev];
-          for (const item of res.results) {
-            const k = `${item.tmdbType}:${item.id}`;
-            if (!seen.has(k)) {
-              seen.add(k);
-              merged.push(item);
+        if (replace) {
+          setItems(res.results);
+          if (res.results.length > 0) {
+            if (BROWSE_PAGE_CACHE.size > 40) {
+              const oldest = BROWSE_PAGE_CACHE.keys().next().value;
+              if (oldest) BROWSE_PAGE_CACHE.delete(oldest);
             }
+            BROWSE_PAGE_CACHE.set(cacheKey, {
+              items: res.results,
+              page: res.page,
+              totalPages: res.totalPages,
+              totalResults: res.totalResults || res.results.length,
+              ts: Date.now(),
+            });
           }
-          return merged;
-        });
+        } else {
+          setItems((prev) => {
+            const seen = new Set(prev.map((x) => `${x.tmdbType}:${x.id}`));
+            const merged = [...prev];
+            for (const item of res.results) {
+              const k = `${item.tmdbType}:${item.id}`;
+              if (!seen.has(k)) {
+                seen.add(k);
+                merged.push(item);
+              }
+            }
+            return merged;
+          });
+        }
       } catch {
-        if (replace) setItems([]);
+        if (myReqId === reqIdRef.current && replace) setItems([]);
       } finally {
-        setLoading(false);
-        setLoadingMore(false);
+        if (myReqId === reqIdRef.current) {
+          setLoading(false);
+          setLoadingMore(false);
+        }
       }
     },
     [format, activeGenre, sort, effectiveYear],
+  );
+
+  const getItemLayout = useCallback(
+    (_: any, index: number) => ({
+      length: rowStride,
+      offset: rowStride * Math.floor(index / gridColumns),
+      index,
+    }),
+    [rowStride, gridColumns],
+  );
+
+  const renderFilmItem = useCallback(
+    ({ item }: { item: FilmSummary }) => (
+      <FilmBrowseCard
+        film={item}
+        onSelect={handleSelectFilm}
+        cardW={cardW}
+        cardH={cardH}
+        g={g}
+        tvMode={tvMode}
+      />
+    ),
+    [handleSelectFilm, cardW, cardH, g, tvMode],
   );
 
   useEffect(() => {
@@ -488,6 +581,44 @@ export default function BrowseScreen() {
           horizontal
           showsHorizontalScrollIndicator={false}
           overScrollMode="never"
+          contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 6, gap: 7, flexDirection: ROW_RTL }}
+        >
+          {FORMAT_OPTIONS.map((opt) => {
+            const active = format === opt.value && view === "list";
+            return (
+              <Pressable
+                key={opt.value}
+                onPress={() => {
+                  setFormat(opt.value);
+                  setView("list");
+                  listRef.current?.scrollToOffset({ offset: 0, animated: false });
+                }}
+                style={{
+                  paddingHorizontal: 12,
+                  paddingVertical: 6,
+                  borderRadius: 10,
+                  backgroundColor: active ? colors.accent : colors.surfaceElevated,
+                  borderWidth: 1,
+                  borderColor: active ? colors.accent : colors.border,
+                }}
+              >
+                <Text
+                  style={{
+                    fontSize: 11.5,
+                    fontFamily: "Cairo_700Bold",
+                    color: active ? "#FFFFFF" : colors.textSecondary,
+                  }}
+                >
+                  {opt.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          overScrollMode="never"
           style={g.mobileGenreRail}
           contentContainerStyle={g.mobileGenreRailContent}
         >
@@ -498,7 +629,9 @@ export default function BrowseScreen() {
               liveCoverUrl={genreCovers[item.genre]}
               columns={genreColumns}
               horizontal
-              onPress={() => openGenre(item.genre)}
+              g={g}
+              tvMode={tvMode}
+              onPress={openGenre}
             />
           ))}
         </ScrollView>
@@ -525,7 +658,9 @@ export default function BrowseScreen() {
               item={item}
               liveCoverUrl={genreCovers[item.genre]}
               columns={genreColumns}
-              onPress={() => openGenre(item.genre)}
+              g={g}
+              tvMode={tvMode}
+              onPress={openGenre}
             />
           )}
         />
@@ -544,56 +679,25 @@ export default function BrowseScreen() {
               data={items}
               style={{ width: gridWidth, alignSelf: "center" }}
               key={`film-grid-${gridColumns}`}
-              keyExtractor={(item, i) => `${item.tmdbType}-${item.id}-${i}`}
+              keyExtractor={(item) => `${item.tmdbType}-${item.id}`}
               numColumns={gridColumns}
               contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 6, paddingBottom: 88 }}
               columnWrapperStyle={{ gap: 10, marginBottom: 10 }}
               showsVerticalScrollIndicator={false}
               overScrollMode="never"
-              initialNumToRender={9}
-              maxToRenderPerBatch={6}
+              initialNumToRender={12}
+              maxToRenderPerBatch={9}
+              updateCellsBatchingPeriod={30}
               windowSize={5}
+              getItemLayout={getItemLayout}
               removeClippedSubviews={Platform.OS === "android"}
+              onEndReachedThreshold={0.45}
               onEndReached={() => {
                 if (!loading && !loadingMore && page < totalPages) {
                   void loadPage(page + 1, false);
                 }
               }}
-              onEndReachedThreshold={0.4}
-              ListHeaderComponent={
-                items.length > 0 ? (
-                  <View style={g.resultsHeading}>
-                    <Text style={g.resultsHeadingText}>
-                      النتائج ({totalResults || items.length})
-                    </Text>
-                  </View>
-                ) : null
-              }
-              ListEmptyComponent={
-                <View style={g.center}>
-                  <Ionicons name="film-outline" size={40} color={colors.textMuted} />
-                  <Text style={g.emptyText}>لا توجد أعمال مطابقة للفلاتر الحالية</Text>
-                </View>
-              }
-              ListFooterComponent={
-                loadingMore ? (
-                  <View style={{ paddingVertical: 16, alignItems: "center" }}>
-                    <ActivityIndicator color={colors.accent} size="small" />
-                  </View>
-                ) : null
-              }
-              renderItem={({ item }) => (
-                <FilmBrowseCard
-                  film={item}
-                  columns={gridColumns}
-                  onPress={() =>
-                    router.push({
-                      pathname: "/film/[id]",
-                      params: { id: String(item.id), type: item.tmdbType, title: item.titleAr },
-                    })
-                  }
-                />
-              )}
+              renderItem={renderFilmItem}
             />
           )}
         </>

@@ -16,10 +16,22 @@ export type FilmHomeFeed = {
   hero: FilmSummary[];
   trendingMovies: FilmSummary[];
   latestMovies: FilmSummary[];
+  foreignMovies?: FilmSummary[];
+  arabicMovies?: FilmSummary[];
+  turkishMovies?: FilmSummary[];
+  indianMovies?: FilmSummary[];
   asianMovies: FilmSummary[];
   popularSeries: FilmSummary[];
+  latestSeries?: FilmSummary[];
+  arabicSeries?: FilmSummary[];
+  turkishSeries?: FilmSummary[];
+  indianSeries?: FilmSummary[];
+  asianSeries?: FilmSummary[];
+  dubbedSeries?: FilmSummary[];
   topRated: FilmSummary[];
   animations: FilmSummary[];
+  animationMovies?: FilmSummary[];
+  animationSeries?: FilmSummary[];
 };
 
 export type FilmBrowseResponse = {
@@ -37,18 +49,31 @@ function resolveAbsUrl(url: string | undefined, base: string): string {
   return `${base}${url.startsWith("/") ? url : `/${url}`}`;
 }
 
-export const FILM_HOME_CACHE_KEY = "nova_film_home_cache_v1";
+export const FILM_HOME_CACHE_KEY = "nova_film_home_cache_v2";
 let _memHomeFeed: FilmHomeFeed | undefined = undefined;
 
 function normalizeHomeFeed(raw: any): FilmHomeFeed {
+  const mapArr = (v: any) => (Array.isArray(v) ? v.map(normalizeFilmSummary) : []);
   return {
-    hero: Array.isArray(raw?.hero) ? raw.hero.map(normalizeFilmSummary) : [],
-    trendingMovies: Array.isArray(raw?.trendingMovies) ? raw.trendingMovies.map(normalizeFilmSummary) : [],
-    latestMovies: Array.isArray(raw?.latestMovies) ? raw.latestMovies.map(normalizeFilmSummary) : [],
-    asianMovies: Array.isArray(raw?.asianMovies) ? raw.asianMovies.map(normalizeFilmSummary) : [],
-    popularSeries: Array.isArray(raw?.popularSeries) ? raw.popularSeries.map(normalizeFilmSummary) : [],
-    topRated: Array.isArray(raw?.topRated) ? raw.topRated.map(normalizeFilmSummary) : [],
-    animations: Array.isArray(raw?.animations) ? raw.animations.map(normalizeFilmSummary) : [],
+    hero: mapArr(raw?.hero),
+    trendingMovies: mapArr(raw?.trendingMovies),
+    latestMovies: mapArr(raw?.latestMovies),
+    foreignMovies: mapArr(raw?.foreignMovies),
+    arabicMovies: mapArr(raw?.arabicMovies),
+    turkishMovies: mapArr(raw?.turkishMovies),
+    indianMovies: mapArr(raw?.indianMovies),
+    asianMovies: mapArr(raw?.asianMovies),
+    popularSeries: mapArr(raw?.popularSeries),
+    latestSeries: mapArr(raw?.latestSeries),
+    arabicSeries: mapArr(raw?.arabicSeries),
+    turkishSeries: mapArr(raw?.turkishSeries),
+    indianSeries: mapArr(raw?.indianSeries),
+    asianSeries: mapArr(raw?.asianSeries),
+    dubbedSeries: mapArr(raw?.dubbedSeries),
+    topRated: mapArr(raw?.topRated),
+    animations: mapArr(raw?.animations),
+    animationMovies: mapArr(raw?.animationMovies),
+    animationSeries: mapArr(raw?.animationSeries),
   };
 }
 
@@ -272,10 +297,16 @@ function normalizeServerFromSSE(raw: any, index: number, base: string): FilmServ
     quality = "360p SD";
   }
 
+  if (rawUrl.includes("erebus.cursed.st")) return null;
   const isEmbed = Boolean(raw.isEmbed) || rawUrl.includes("mega.nz") || rawUrl.includes("mega.co.nz");
   const isHls =
     !isEmbed &&
-    (rawUrl.includes(".m3u8") || rawUrl.includes("hls-proxy") || rawUrl.includes("/hls/"));
+    (raw.type === "hls" ||
+      raw.kind === "hls" ||
+      rawUrl.includes(".m3u8") ||
+      rawUrl.includes("hls-proxy") ||
+      rawUrl.includes("/hls/") ||
+      rawUrl.includes("ex.divhard.com/api/media.php"));
   const kind: FilmServerLink["kind"] = isEmbed ? "embed" : isHls ? "hls" : "direct";
   const subRaw = raw.subtitleUrl ? resolveAbsUrl(raw.subtitleUrl, base) : undefined;
 
@@ -289,6 +320,7 @@ function normalizeServerFromSSE(raw: any, index: number, base: string): FilmServ
     quality,
     qualityTier,
     kind,
+    type: kind,
     directUrl: !isEmbed ? proxyUrl || directUrl || rawUrl : undefined,
     proxyUrl: proxyUrl || undefined,
     embedUrl: isEmbed ? rawUrl : undefined,
@@ -308,7 +340,7 @@ function normalizeServerFromSSE(raw: any, index: number, base: string): FilmServ
   };
 }
 
-const SOURCES_CACHE_TTL = 40 * 60_000;
+const SOURCES_CACHE_TTL = 3 * 60_000;
 
 export async function streamFilmSources(params: {
   tmdbId: number | string;
@@ -327,7 +359,7 @@ export async function streamFilmSources(params: {
 }): Promise<FilmServerLink[]> {
   const base = getBaseUrl();
   const mediaType: TmdbMediaType = params.tmdbType || params.type || "movie";
-  const cacheKey = `film-srcs-v4-${mediaType}-${params.tmdbId}-s${params.season}-e${params.episode}`;
+  const cacheKey = `film-srcs-v5-${mediaType}-${params.tmdbId}-s${params.season}-e${params.episode}`;
 
   const collected: FilmServerLink[] = [];
   const seen = new Set<string>();

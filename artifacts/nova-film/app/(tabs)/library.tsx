@@ -16,6 +16,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
+import { SafePosterImage } from "@/components/SafePosterImage";
 import {
   FilmPlaybackProgress,
   FavoriteFilmItem,
@@ -188,12 +189,12 @@ export default function LibraryScreen() {
         onPress={() => openHistoryPlayback(item)}
       >
         <View style={s.historyImageContainer}>
-          <Image
-            source={{ uri: item.poster || item.backdrop }}
+          <SafePosterImage
+            uri={item.poster || item.backdrop}
+            fallbackUris={[item.backdrop, item.poster]}
             style={s.historyImage}
             resizeMode="cover"
-                  fadeDuration={0}
-                  resizeMethod={Platform.OS === "android" ? "resize" : undefined}
+            iconSize={26}
           />
           <View style={s.kindBadge}>
             <Ionicons
@@ -487,12 +488,12 @@ export default function LibraryScreen() {
               }
             >
               <View style={s.favImgContainer}>
-                <Image
-                  source={{ uri: item.poster || item.posterUrl || "" }}
+                <SafePosterImage
+                  uri={item.poster || item.posterUrl}
+                  fallbackUris={[item.posterUrl, item.poster]}
                   style={s.favImg}
                   resizeMode="cover"
-                  fadeDuration={0}
-                  resizeMethod={Platform.OS === "android" ? "resize" : undefined}
+                  iconSize={24}
                 />
                 <LinearGradient
                   colors={[

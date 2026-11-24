@@ -20,11 +20,13 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DrawerMenu } from "@/components/DrawerMenu";
 import { FilmHeroSection } from "@/components/FilmHeroSection";
 import { FilmPosterCard, getFilmRailCardWidth } from "@/components/FilmPosterCard";
+import { SafePosterImage } from "@/components/SafePosterImage";
 import { FilmSectionHeader } from "@/components/FilmSectionHeader";
 import { useColors } from "@/hooks/useColors";
 import { fetchFilmHome, getMemoryFilmHome, loadCachedFilmHome, type FilmHomeFeed } from "@/utils/filmApi";
 import {
   getImageSource,
+  resolveFilmImageUrl,
   loadAllPlaybackProgress,
   loadWatchedMap,
   makeEpisodeKey,
@@ -175,6 +177,11 @@ export default function NovaFilmHomeScreen() {
   const heroItems = effectiveHome?.hero || [];
   const trendingMovies = effectiveHome?.trendingMovies || [];
   const latestMovies = effectiveHome?.latestMovies || [];
+  const arabicMovies = effectiveHome?.arabicMovies || [];
+  const arabicSeries = effectiveHome?.arabicSeries || [];
+  const turkishSeries = effectiveHome?.turkishSeries || [];
+  const indianMovies = effectiveHome?.indianMovies || [];
+  const dubbedSeries = effectiveHome?.dubbedSeries || [];
   const asianMovies = effectiveHome?.asianMovies || [];
   const popularSeries = effectiveHome?.popularSeries || [];
   const topRatedItems = effectiveHome?.topRated || [];
@@ -182,20 +189,58 @@ export default function NovaFilmHomeScreen() {
 
   const allPool = useMemo(() => {
     const map = new Map<string, FilmSummary>();
-    for (const arr of [heroItems, trendingMovies, latestMovies, asianMovies, popularSeries, topRatedItems, animationList]) {
+    for (const arr of [
+      heroItems,
+      trendingMovies,
+      latestMovies,
+      arabicMovies,
+      arabicSeries,
+      turkishSeries,
+      indianMovies,
+      dubbedSeries,
+      asianMovies,
+      popularSeries,
+      topRatedItems,
+      animationList,
+    ]) {
       for (const item of arr) {
         map.set(`${item.tmdbType}:${item.id}`, item);
       }
     }
     return map;
-  }, [heroItems, trendingMovies, latestMovies, asianMovies, popularSeries, topRatedItems, animationList]);
+  }, [
+    heroItems,
+    trendingMovies,
+    latestMovies,
+    arabicMovies,
+    arabicSeries,
+    turkishSeries,
+    indianMovies,
+    dubbedSeries,
+    asianMovies,
+    popularSeries,
+    topRatedItems,
+    animationList,
+  ]);
 
   const continueItems = useMemo(() => {
     return playbackHistory
       .map((rec) => {
-        const matched = rec.titleSnapshot || allPool.get(`${rec.tmdbType}:${rec.titleId}`);
-        if (!matched) return null;
-        return { rec, title: matched };
+        const poolItem = allPool.get(`${rec.tmdbType}:${rec.titleId}`);
+        const snap = rec.titleSnapshot;
+        if (!snap && !poolItem) return null;
+        const bestPoster =
+          resolveFilmImageUrl(poolItem?.posterUrl || snap?.posterUrl || poolItem?.backdropUrl || snap?.backdropUrl) || null;
+        const bestBackdrop =
+          resolveFilmImageUrl(poolItem?.backdropUrl || snap?.backdropUrl || bestPoster) || bestPoster;
+        const title: FilmSummary = {
+          ...(poolItem || snap!),
+          posterUrl: bestPoster,
+          backdropUrl: bestBackdrop,
+          poster: bestPoster || "",
+          backdrop: bestBackdrop || "",
+        };
+        return { rec, title };
       })
       .filter(Boolean) as { rec: FilmPlaybackRecord; title: FilmSummary }[];
   }, [playbackHistory, allPool]);
@@ -222,6 +267,24 @@ export default function NovaFilmHomeScreen() {
         browseSort: "year",
       },
       {
+        key: "arabic-movies",
+        title: "أفلام عربية",
+        subtitle: "أحدث الأفلام العربية بجودة عالية",
+        accentColor: "#EF4444",
+        items: arabicMovies,
+        browseType: "arabic_movies",
+        browseSort: "year",
+      },
+      {
+        key: "arabic-series",
+        title: "مسلسلات عربية",
+        subtitle: "أحدث المسلسلات والدراما العربية",
+        accentColor: "#F97316",
+        items: arabicSeries,
+        browseType: "arabic_series",
+        browseSort: "year",
+      },
+      {
         key: "popular-series",
         title: "المسلسلات العالمية",
         subtitle: "مواسم كاملة وحلقات متجددة",
@@ -231,12 +294,39 @@ export default function NovaFilmHomeScreen() {
         browseSort: "popularity",
       },
       {
+        key: "turkish-series",
+        title: "مسلسلات تركية",
+        subtitle: "أبرز المسلسلات التركية المترجمة",
+        accentColor: "#E11D48",
+        items: turkishSeries,
+        browseType: "turkish_series",
+        browseSort: "year",
+      },
+      {
+        key: "indian-movies",
+        title: "أفلام هندية",
+        subtitle: "أحدث إنتاجات بوليوود والسينما الهندية",
+        accentColor: "#D97706",
+        items: indianMovies,
+        browseType: "indian_movies",
+        browseSort: "year",
+      },
+      {
         key: "asian",
-        title: "سينما آسيوية وعربية وتركية",
-        subtitle: "أبرز الأعمال الكورية والصينية والهندية",
+        title: "سينما آسيوية",
+        subtitle: "أبرز الأعمال الكورية والصينية واليابانية",
         accentColor: "#EC4899",
         items: asianMovies,
         browseType: "asian",
+        browseSort: "year",
+      },
+      {
+        key: "dubbed-series",
+        title: "مسلسلات مدبلجة",
+        subtitle: "أعمال مدبلجة بالعربية جاهزة للمشاهدة",
+        accentColor: "#14B8A6",
+        items: dubbedSeries,
+        browseType: "dubbed_series",
         browseSort: "year",
       },
       {
@@ -259,7 +349,20 @@ export default function NovaFilmHomeScreen() {
       },
     ];
     return specs.filter((r) => r.items.length > 0);
-  }, [effectiveHome, trendingMovies, latestMovies, popularSeries, asianMovies, topRatedItems, animationList]);
+  }, [
+    effectiveHome,
+    trendingMovies,
+    latestMovies,
+    arabicMovies,
+    arabicSeries,
+    popularSeries,
+    turkishSeries,
+    indianMovies,
+    asianMovies,
+    dubbedSeries,
+    topRatedItems,
+    animationList,
+  ]);
 
   const handleSeeAll = useCallback(
     (browseType: string, browseSort: string) => {
@@ -459,15 +562,13 @@ export default function NovaFilmHomeScreen() {
                           },
                         ]}
                       >
-                        {imgSrc ? (
-                          <Image
-                            source={imgSrc}
-                            style={StyleSheet.absoluteFill}
-                            resizeMode="cover"
-                            fadeDuration={0}
-                            resizeMethod={Platform.OS === "android" ? "resize" : undefined}
-                          />
-                        ) : null}
+                        <SafePosterImage
+                          uri={title.backdropUrl || title.posterUrl}
+                          fallbackUris={[title.posterUrl, title.backdropUrl]}
+                          style={StyleSheet.absoluteFill}
+                          resizeMode="cover"
+                          iconSize={26}
+                        />
                         <LinearGradient
                           colors={["rgba(9,10,12,0.15)", "rgba(9,10,12,0.92)"]}
                           locations={[0.25, 1]}

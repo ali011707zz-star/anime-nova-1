@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Image, ImageProps, ImageStyle, Platform, StyleProp, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { resolveFilmImageUrl } from "@/utils/filmCatalog";
 
 type Props = Omit<ImageProps, "source"> & {
   uri?: string | null;
@@ -23,8 +24,8 @@ export const SafePosterImage = React.memo(function SafePosterImage({
   const candidates = useMemo(
     () =>
       [uri, ...fallbackUris]
-        .filter((u): u is string => typeof u === "string" && u.trim().length > 0)
-        .map((u) => u.trim()),
+        .map((u) => resolveFilmImageUrl(u))
+        .filter((u): u is string => Boolean(u)),
     [uri, fallbackKey],
   );
 

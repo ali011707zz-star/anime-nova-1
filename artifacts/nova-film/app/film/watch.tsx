@@ -20,6 +20,7 @@ import { SafePosterImage } from "@/components/SafePosterImage";
 import type { ThemePalette } from "@/constants/colors";
 import { useColors } from "@/hooks/useColors";
 import { getBaseUrl } from "@/utils/baseUrl";
+import { resolveVixSrcClient } from "@/utils/vixsrcClient";
 import {
   getActiveDownloadsSnapshot,
   getDownloads,
@@ -43,6 +44,7 @@ import {
   loadEpisodePlaybackProgress,
   loadWatchedMap,
   makeEpisodeKey,
+  resolveFilmImageUrl,
   savePlaybackProgress,
   toggleEpisodeWatched,
 } from "@/utils/filmCatalog";
@@ -228,7 +230,10 @@ export default function FilmWatchScreen() {
     };
   }, [filmId, currentSeason, currentEpNum, tmdbType]);
 
-  // Stream sources & subtitles
+  const detailRef = useRef<FilmDetail | null>(null);
+  detailRef.current = detail;
+
+  // Stream sources & subtitles (stable deps so detail load NEVER aborts & restarts an in-flight stream!)
   useEffect(() => {
     const controller = new AbortController();
     setScanning(true);
@@ -238,8 +243,9 @@ export default function FilmWatchScreen() {
     setSelectedIndex(0);
     setStatusMsg("جاري فحص السيرفرات المتاحة...");
 
-    const lookupTitle = detail?.titleEn || params.english || detail?.titleAr || params.title || "";
-    const lookupYear = detail?.year;
+    const dNow = detailRef.current;
+    const lookupTitle = dNow?.titleEn || params.english || dNow?.titleAr || params.title || "";
+    const lookupYear = dNow?.year;
 
     void fetchFilmSubtitleTracks({
       tmdbId: filmId,
@@ -259,7 +265,7 @@ export default function FilmWatchScreen() {
       episode: currentEpNum,
       title: lookupTitle,
       year: lookupYear,
-      realTmdbId: detail?.realTmdbId,
+      realTmdbId: dNow?.realTmdbId,
       forceRefresh: refreshNonce > 0,
       signal: controller.signal,
       onStatus: (msg) => {
@@ -267,7 +273,6 @@ export default function FilmWatchScreen() {
       },
       onSource: (src) => {
         if (controller.signal.aborted) return;
-        // Filter out any legacy broken embed-only entries
         if (src.isEmbed) return;
         setSources((prev) => {
           const playUrl = resolveFilmPlayableUrl(src);
@@ -281,18 +286,30 @@ export default function FilmWatchScreen() {
     });
 
     return () => controller.abort();
-  }, [
-    filmId,
-    tmdbType,
-    currentSeason,
-    currentEpNum,
-    detail?.titleEn,
-    detail?.titleAr,
-    detail?.year,
-    params.english,
-    params.title,
-    refreshNonce,
-  ]);
+  }, [filmId, tmdbType, currentSeason, currentEpNum, refreshNonce]);
+
+  // Trigger client-side Cobalt (CB / VixSrc) immediately when detail.realTmdbId arrives without restarting SSE
+  useEffect(() => {
+    const rid = detail?.realTmdbId;
+    if (!rid || !Number.isFinite(rid) || rid <= 0) return;
+    const controller = new AbortController();
+    void resolveVixSrcClient({
+      tmdbId: rid,
+      type: tmdbType,
+      season: currentSeason,
+      episode: currentEpNum,
+      forceRefresh: refreshNonce > 0,
+      signal: controller.signal,
+    }).then((cbLink) => {
+      if (!cbLink || controller.signal.aborted) return;
+      setSources((prev) => {
+        const playUrl = resolveFilmPlayableUrl(cbLink);
+        if (!playUrl || prev.some((x) => x.site === "cb" || resolveFilmPlayableUrl(x) === playUrl)) return prev;
+        return [cbLink, ...prev];
+      });
+    });
+    return () => controller.abort();
+  }, [detail?.realTmdbId, tmdbType, currentSeason, currentEpNum, refreshNonce]);
 
   const titleSnapshot: FilmSummary = useMemo(
     () =>
@@ -303,8 +320,8 @@ export default function FilmWatchScreen() {
         titleAr: params.title || "عمل سينمائي",
         titleEn: params.english || params.title || "",
         overviewAr: "",
-        posterUrl: params.poster || null,
-        backdropUrl: params.poster || null,
+        posterUrl: resolveFilmImageUrl(params.poster) || null,
+        backdropUrl: resolveFilmImageUrl(params.poster) || null,
         year: 2025,
         imdbRating: 7.8,
         qualityBadge: "1080p FHD",
@@ -389,9 +406,12 @@ export default function FilmWatchScreen() {
       const lower = playUrl.toLowerCase();
       const isHls =
         src.type === "hls" ||
+        src.kind === "hls" ||
         lower.includes("/api/anime/hls-proxy") ||
         lower.includes("/proxy/hls") ||
         lower.includes(".m3u8") ||
+        lower.includes("/hls/") ||
+        lower.includes("ex.divhard.com/api/media.php") ||
         lower.includes("master.txt");
       const siteLower = String(src.site || "").toLowerCase();
       const isHardsub = Boolean(src.hardsubbed) || siteLower === "vidhls" || siteLower === "vidhls-alt";

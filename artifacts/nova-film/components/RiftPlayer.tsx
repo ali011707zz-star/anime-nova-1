@@ -86,7 +86,8 @@ function isHlsSourceUrl(url: string, contentType?: PlayerSource["contentType"]):
     /\.m3u8(?:[?#]|$)/i.test(lower) ||
     lower.includes("/api/anime/hls-proxy") ||
     lower.includes("/proxy/hls") ||
-    /\/(?:hls|playlist)(?:\/|[?#]|$)/i.test(lower)
+    /\/(?:hls|playlist)(?:\/|[?#]|$)/i.test(lower) ||
+    lower.includes("ex.divhard.com/api/media.php")
   );
 }
 
