@@ -3074,7 +3074,7 @@ function ExpoRiftPlayer({
         contentFit={contentFit}
         /* TextureView keeps the shared surface capture-friendly and avoids
            maintaining a second TV-only native player implementation. */
-        surfaceType={Platform.OS === "android" ? "textureView" : undefined}
+        surfaceType={Platform.OS === "android" ? "surfaceView" : undefined}
       />
 
       {/* Smooth first-frame handoff instead of a sudden black jump. */}
