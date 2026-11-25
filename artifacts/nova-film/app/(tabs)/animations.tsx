@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ActivityIndicator,
   FlatList,
+  I18nManager,
   Platform,
   RefreshControl,
   StyleSheet,
@@ -21,6 +22,8 @@ import { fetchFilmBrowse } from "@/utils/filmApi";
 import { type FilmSummary } from "@/utils/filmCatalog";
 import { isTvDevice, TvPressable as Pressable, usePhoneScale } from "@/utils/tv";
 import { tvFocusStyle } from "@/utils/tvFocus";
+
+const ROW_RTL = I18nManager.isRTL ? ("row" as const) : ("row-reverse" as const);
 
 type AnimTab = "animation_movies" | "animation_series";
 
@@ -290,7 +293,7 @@ export default function AnimationsTabScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
-      {/* ── Sleek Surface Header (deterministic LTR coordinates: Search TOP-LEFT, Title + Back TOP-RIGHT) ── */}
+      {/* ── Sleek Surface Header: Back FAR TOP-RIGHT, Title right-aligned beside Back, Search FAR TOP-LEFT ── */}
       <View
         style={[
           styles.headerSurface,
@@ -301,7 +304,59 @@ export default function AnimationsTabScreen() {
         ]}
       >
         <View style={styles.headerRow}>
-          {/* TOP-LEFT: Single Search Button for active tab */}
+          {/* FAR TOP-RIGHT GROUP: Back Arrow at far right + Title aligned right next to it */}
+          <View style={styles.headerTitleGroup}>
+            <Pressable
+              onPress={handleBack}
+              focusable={tvMode}
+              accessibilityRole="button"
+              accessibilityLabel="رجوع"
+              style={({ pressed, focused }) => [
+                styles.iconBtn,
+                {
+                  backgroundColor: colors.input,
+                  borderColor: colors.border,
+                  opacity: pressed ? 0.78 : 1,
+                },
+                tvMode && tvFocusStyle(focused),
+              ]}
+            >
+              <Ionicons
+                name="chevron-forward"
+                size={Math.round(20 * phoneScale)}
+                color={colors.textPrimary}
+              />
+            </Pressable>
+
+            <View style={{ flex: 1, alignItems: "stretch", minWidth: 0 }}>
+              <Text
+                numberOfLines={1}
+                style={{
+                  color: colors.textPrimary,
+                  fontSize: Math.round(17 * phoneScale),
+                  fontFamily: "Cairo_800ExtraBold",
+                  includeFontPadding: false,
+                  textAlign: "right",
+                }}
+              >
+                أنميشن
+              </Text>
+              <Text
+                numberOfLines={1}
+                style={{
+                  color: colors.textMuted,
+                  fontSize: Math.round(11 * phoneScale),
+                  fontFamily: "Cairo_600SemiBold",
+                  includeFontPadding: false,
+                  textAlign: "right",
+                }}
+              >
+                {tabMeta.subtitle}
+              </Text>
+            </View>
+          </View>
+
+          {/* FAR TOP-LEFT: Single Search Button for active tab */}
           <Pressable
             onPress={handleToggleSearch}
             focusable={tvMode}
@@ -323,59 +378,9 @@ export default function AnimationsTabScreen() {
               color={searchOpen ? colors.accent : colors.textPrimary}
             />
           </Pressable>
-
-          {/* CENTER-RIGHT: Title + Subtitle */}
-          <View style={{ flex: 1, alignItems: "flex-end", paddingHorizontal: 10 }}>
-            <Text
-              style={{
-                color: colors.textPrimary,
-                fontSize: Math.round(17 * phoneScale),
-                fontFamily: "Cairo_800ExtraBold",
-                includeFontPadding: false,
-                textAlign: "right",
-              }}
-            >
-              أنميشن
-            </Text>
-            <Text
-              numberOfLines={1}
-              style={{
-                color: colors.textMuted,
-                fontSize: Math.round(11 * phoneScale),
-                fontFamily: "Cairo_600SemiBold",
-                includeFontPadding: false,
-                textAlign: "right",
-              }}
-            >
-              {tabMeta.subtitle}
-            </Text>
-          </View>
-
-          {/* FAR TOP-RIGHT: Back Arrow (exact match with all NOVA FILM screens) */}
-          <Pressable
-            onPress={handleBack}
-            focusable={tvMode}
-            accessibilityRole="button"
-            accessibilityLabel="رجوع"
-            style={({ pressed, focused }) => [
-              styles.iconBtn,
-              {
-                backgroundColor: colors.input,
-                borderColor: colors.border,
-                opacity: pressed ? 0.78 : 1,
-              },
-              tvMode && tvFocusStyle(focused),
-            ]}
-          >
-            <Ionicons
-              name="chevron-forward"
-              size={Math.round(20 * phoneScale)}
-              color={colors.textPrimary}
-            />
-          </Pressable>
         </View>
 
-        {/* ── Clean Text-Only Segmented Switcher: أفلام أنميشن | مسلسلات أنميشن ── */}
+        {/* ── Clean Text-Only Segmented Switcher: أفلام أنميشن (Right) | مسلسلات أنميشن (Left) ── */}
         <View
           style={[
             styles.segmentedBar,
@@ -428,11 +433,7 @@ export default function AnimationsTabScreen() {
               },
             ]}
           >
-            {currentQuery.length > 0 ? (
-              <Pressable onPress={() => setCurrentQuery("")} hitSlop={8}>
-                <Ionicons name="close-circle" size={18} color={colors.textMuted} />
-              </Pressable>
-            ) : null}
+            <Ionicons name="search" size={16} color={colors.accent} />
             <TextInput
               ref={inputRef}
               value={currentQuery}
@@ -450,7 +451,11 @@ export default function AnimationsTabScreen() {
                 includeFontPadding: false,
               }}
             />
-            <Ionicons name="search" size={16} color={colors.accent} />
+            {currentQuery.length > 0 ? (
+              <Pressable onPress={() => setCurrentQuery("")} hitSlop={8}>
+                <Ionicons name="close-circle" size={18} color={colors.textMuted} />
+              </Pressable>
+            ) : null}
           </View>
         )}
       </View>
@@ -556,10 +561,17 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   headerRow: {
-    flexDirection: "row",
-    direction: "ltr",
+    flexDirection: ROW_RTL,
     alignItems: "center",
     justifyContent: "space-between",
+    gap: 10,
+  },
+  headerTitleGroup: {
+    flex: 1,
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    gap: 10,
+    minWidth: 0,
   },
   iconBtn: {
     width: 36,
@@ -568,10 +580,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
+    flexShrink: 0,
   },
   segmentedBar: {
-    flexDirection: "row",
-    direction: "rtl",
+    flexDirection: ROW_RTL,
     alignItems: "center",
     padding: 3,
     borderRadius: 12,
@@ -587,8 +599,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   searchBox: {
-    flexDirection: "row",
-    direction: "ltr",
+    flexDirection: ROW_RTL,
     alignItems: "center",
     gap: 8,
     paddingHorizontal: 12,

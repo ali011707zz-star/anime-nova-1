@@ -1,12 +1,13 @@
 import { Tabs } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import React from "react";
 import { Platform, StyleSheet, Text, View } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { TvPressable, useTvFullScreenOverlay, useTvMetrics } from "@/utils/tv";
 
 type TabIconProps = {
-  name: keyof typeof Ionicons.glyphMap;
+  name: string;
+  family?: "ion" | "mci";
   label: string;
   color: string;
   focused: boolean;
@@ -15,10 +16,14 @@ type TabIconProps = {
   fontSize: number;
 };
 
-function TabIcon({ name, label, color, focused, tvMode = false, iconSize, fontSize }: TabIconProps) {
+function TabIcon({ name, family = "ion", label, color, focused, tvMode = false, iconSize, fontSize }: TabIconProps) {
   return (
     <View style={styles.tabItem}>
-      <Ionicons name={name} size={iconSize} color={color} />
+      {family === "mci" ? (
+        <MaterialCommunityIcons name={name as keyof typeof MaterialCommunityIcons.glyphMap} size={iconSize + 1} color={color} />
+      ) : (
+        <Ionicons name={name as keyof typeof Ionicons.glyphMap} size={iconSize} color={color} />
+      )}
       <Text
         style={[
           styles.tabLabel,
@@ -112,7 +117,7 @@ export default function TabLayout() {
         name="animations"
         options={{
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon name={focused ? "color-palette" : "color-palette-outline"} label="أنميشن" color={color} focused={focused} tvMode={tvMode} iconSize={iconSize} fontSize={labelSize} />
+            <TabIcon family="mci" name={focused ? "animation-play" : "animation-play-outline"} label="أنميشن" color={color} focused={focused} tvMode={tvMode} iconSize={iconSize} fontSize={labelSize} />
           ),
         }}
       />
