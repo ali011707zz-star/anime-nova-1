@@ -299,11 +299,15 @@ jobs:
             os.makedirs("/etc/nginx/snippets", exist_ok=True)
             snippet_path = "/etc/nginx/snippets/nova-ota-1011.conf"
 
+            # Clean any stale backup files first
+            for stale in glob.glob("/etc/nginx/sites-enabled/*.bak*"):
+                os.remove(stale)
+
             # Find active nginx site config serving animenovaa.duckdns.org with proxy_pass
             candidates = []
             for pattern in ["/etc/nginx/sites-enabled/*", "/etc/nginx/conf.d/*.conf"]:
-                for p in glob.glob(pattern):
-                    if os.path.isfile(p):
+                for p in sorted(glob.glob(pattern)):
+                    if os.path.isfile(p) and ".bak" not in os.path.basename(p):
                         txt = open(p, "r", encoding="utf-8", errors="ignore").read()
                         if "animenovaa.duckdns.org" in txt and "proxy_pass" in txt:
                             candidates.append((p, txt))
@@ -346,9 +350,6 @@ jobs:
             with open(snippet_path, "w", encoding="utf-8") as f:
                 f.write(snippet_body)
 
-            # Clean any stale backup files accidentally placed in sites-enabled
-            for stale in glob.glob("/etc/nginx/sites-enabled/*.bak-ota1011"):
-                os.remove(stale)
             include_line = "    include /etc/nginx/snippets/nova-ota-1011.conf;"
             backup_path = "/tmp/anime-nova.nginx.bak-ota1011"
 
