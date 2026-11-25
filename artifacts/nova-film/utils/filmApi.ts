@@ -1,8 +1,10 @@
 import { resolveVixSrcClient } from "./vixsrcClient";
+import { Image } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "./baseUrl";
 import { secureFetch, secureStreamFetch } from "./secureApi";
 import {
+  resolveFilmImageUrl,
   normalizeFilmSummary,
   type FilmDetail,
   type FilmEpisode,
@@ -125,6 +127,7 @@ export async function fetchFilmHome(): Promise<FilmHomeFeed> {
   if (hasHomeContent(normalized)) {
     _memHomeFeed = normalized;
     AsyncStorage.setItem(FILM_HOME_CACHE_KEY, JSON.stringify(normalized)).catch(() => {});
+    scheduleBackgroundAnimWarm();
   }
   return normalized;
 }
@@ -537,4 +540,140 @@ export function resolveFilmPlayableUrl(srv: Partial<FilmServerLink> | null | und
   const base = getBaseUrl();
   const target = srv.proxyUrl || srv.directUrl || srv.url || srv.embedUrl || "";
   return resolveAbsUrl(target, base);
+}
+
+
+export type AnimTabKey = "animation_movies" | "animation_series";
+
+type AnimPageCacheEntry = {
+  items: FilmSummary[];
+  page: number;
+  totalPages: number;
+  ts: number;
+};
+
+const ANIM_MEM_CACHE = new Map<string, AnimPageCacheEntry>();
+const ANIM_CACHE_TTL_MS = 15 * 60_000;
+const PREFETCHED_POSTERS = new Set<string>();
+let _warmStarted = false;
+
+export function toFastGridPosterUrl(url?: string | null): string | undefined {
+  const resolved = resolveFilmImageUrl(url);
+  if (!resolved) return undefined;
+  if (resolved.includes("image.tmdb.org/t/p/w780/")) {
+    return resolved.replace("/t/p/w780/", "/t/p/w500/");
+  }
+  return resolved;
+}
+
+export function normalizeAnimGridSummary(raw: any): FilmSummary {
+  const item = normalizeFilmSummary(raw);
+  const fastPoster = toFastGridPosterUrl(item.posterUrl);
+  return fastPoster && fastPoster !== item.posterUrl ? { ...item, posterUrl: fastPoster } : item;
+}
+
+export function animCacheKey(tab: AnimTabKey, page = 1, q = ""): string {
+  return `${tab}|p${page}|q=${q.trim().toLowerCase()}`;
+}
+
+export function getMemoryAnimPage(tab: AnimTabKey, page = 1, q = ""): AnimPageCacheEntry | null {
+  const key = animCacheKey(tab, page, q);
+  const hit = ANIM_MEM_CACHE.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.ts > ANIM_CACHE_TTL_MS) {
+    ANIM_MEM_CACHE.delete(key);
+    return null;
+  }
+  ANIM_MEM_CACHE.delete(key);
+  ANIM_MEM_CACHE.set(key, hit);
+  return hit;
+}
+
+export function setMemoryAnimPage(tab: AnimTabKey, page: number, q: string, items: FilmSummary[], totalPages: number): void {
+  const key = animCacheKey(tab, page, q);
+  const normalized = items.map(normalizeAnimGridSummary);
+  if (ANIM_MEM_CACHE.size >= 40) {
+    const oldest = ANIM_MEM_CACHE.keys().next().value;
+    if (oldest) ANIM_MEM_CACHE.delete(oldest);
+  }
+  ANIM_MEM_CACHE.set(key, { items: normalized, page, totalPages, ts: Date.now() });
+  if (page === 1 && !q.trim() && normalized.length > 0) {
+    AsyncStorage.setItem(
+      `nova_film_anim_p1_${tab}_v1`,
+      JSON.stringify({ items: normalized.slice(0, 24), totalPages }),
+    ).catch(() => {});
+  }
+}
+
+export async function loadDiskAnimPage(tab: AnimTabKey): Promise<AnimPageCacheEntry | null> {
+  const mem = getMemoryAnimPage(tab, 1, "");
+  if (mem) return mem;
+  try {
+    const raw = await AsyncStorage.getItem(`nova_film_anim_p1_${tab}_v1`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const items = Array.isArray(parsed?.items) ? parsed.items.map(normalizeAnimGridSummary).filter((x: FilmSummary) => x && x.id) : [];
+    if (items.length === 0) return null;
+    const totalPages = Number(parsed?.totalPages || 25);
+    const entry: AnimPageCacheEntry = { items, page: 1, totalPages, ts: Date.now() - (ANIM_CACHE_TTL_MS - 60_000) };
+    ANIM_MEM_CACHE.set(animCacheKey(tab, 1, ""), entry);
+    return entry;
+  } catch {
+    return null;
+  }
+}
+
+export function getHomeSeedAnimItems(tab: AnimTabKey): FilmSummary[] {
+  const home = _memHomeFeed;
+  if (!home) return [];
+  const list = tab === "animation_movies" ? home.animationMovies : home.animationSeries;
+  return Array.isArray(list) ? list.map(normalizeAnimGridSummary) : [];
+}
+
+export function prefetchAnimPosterBatch(items: FilmSummary[], limit = 18): void {
+  const urls: string[] = [];
+  for (let i = 0; i < items.length && urls.length < limit; i++) {
+    const u = toFastGridPosterUrl(items[i]?.posterUrl || items[i]?.backdropUrl);
+    if (!u || PREFETCHED_POSTERS.has(u)) continue;
+    if (PREFETCHED_POSTERS.size >= 260) {
+      const oldest = PREFETCHED_POSTERS.values().next().value;
+      if (oldest) PREFETCHED_POSTERS.delete(oldest);
+    }
+    PREFETCHED_POSTERS.add(u);
+    urls.push(u);
+  }
+  for (const u of urls) {
+    Image.prefetch(u).catch(() => {});
+  }
+}
+
+export async function prefetchAnimTabPage(tab: AnimTabKey): Promise<FilmSummary[] | null> {
+  const existing = getMemoryAnimPage(tab, 1, "");
+  if (existing && existing.items.length > 0) {
+    prefetchAnimPosterBatch(existing.items, 15);
+    return existing.items;
+  }
+  try {
+    const res = await fetchFilmBrowse({ category: tab, sort: "popularity", page: 1 });
+    if (res.results.length > 0) {
+      setMemoryAnimPage(tab, 1, "", res.results, res.totalPages || 25);
+      prefetchAnimPosterBatch(res.results, 15);
+      return res.results;
+    }
+  } catch {}
+  return null;
+}
+
+export function scheduleBackgroundAnimWarm(): void {
+  if (_warmStarted) return;
+  _warmStarted = true;
+  setTimeout(() => {
+    void (async () => {
+      await Promise.allSettled([loadDiskAnimPage("animation_movies"), loadDiskAnimPage("animation_series")]);
+      const m = await prefetchAnimTabPage("animation_movies");
+      if (m) prefetchAnimPosterBatch(m, 12);
+      const s = await prefetchAnimTabPage("animation_series");
+      if (s) prefetchAnimPosterBatch(s, 12);
+    })();
+  }, 650);
 }

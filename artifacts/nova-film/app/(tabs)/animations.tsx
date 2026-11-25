@@ -14,18 +14,28 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-
 import { SafePosterImage } from "@/components/SafePosterImage";
 import type { ThemePalette } from "@/constants/colors";
 import { useColors } from "@/hooks/useColors";
-import { fetchFilmBrowse } from "@/utils/filmApi";
+import {
+  fetchFilmBrowse,
+  getHomeSeedAnimItems,
+  getMemoryAnimPage,
+  loadDiskAnimPage,
+  normalizeAnimGridSummary,
+  prefetchAnimPosterBatch,
+  prefetchAnimTabPage,
+  setMemoryAnimPage,
+  toFastGridPosterUrl,
+  type AnimTabKey,
+} from "@/utils/filmApi";
 import { type FilmSummary } from "@/utils/filmCatalog";
 import { isTvDevice, TvPressable as Pressable, usePhoneScale } from "@/utils/tv";
 import { tvFocusStyle } from "@/utils/tvFocus";
 
 const ROW_RTL = I18nManager.isRTL ? ("row" as const) : ("row-reverse" as const);
 
-type AnimTab = "animation_movies" | "animation_series";
+type AnimTab = AnimTabKey;
 
 const TAB_CONFIG: Record<
   AnimTab,
@@ -43,6 +53,18 @@ const TAB_CONFIG: Record<
   },
 };
 
+function getInitialSeed(tab: AnimTab): { items: FilmSummary[]; totalPages: number; hasExactCache: boolean } | null {
+  const mem = getMemoryAnimPage(tab, 1, "");
+  if (mem && mem.items.length > 0) {
+    return { items: mem.items, totalPages: mem.totalPages, hasExactCache: true };
+  }
+  const homeSeed = getHomeSeedAnimItems(tab);
+  if (homeSeed.length > 0) {
+    return { items: homeSeed, totalPages: 25, hasExactCache: false };
+  }
+  return null;
+}
+
 const AnimCard = React.memo(function AnimCard({
   item,
   cardW,
@@ -57,6 +79,7 @@ const AnimCard = React.memo(function AnimCard({
   tvMode: boolean;
 }) {
   const router = useRouter();
+  const primaryPoster = toFastGridPosterUrl(item.posterUrl) || item.posterUrl || item.backdropUrl;
   return (
     <Pressable
       onPress={() =>
@@ -86,8 +109,8 @@ const AnimCard = React.memo(function AnimCard({
         }}
       >
         <SafePosterImage
-          uri={item.posterUrl || item.backdropUrl}
-          fallbackUris={item.backdropUrl ? [item.backdropUrl] : undefined}
+          uri={primaryPoster}
+          fallbackUris={[item.posterUrl, item.backdropUrl].filter(Boolean) as string[]}
           style={StyleSheet.absoluteFill}
           resizeMode="cover"
         />
@@ -164,20 +187,22 @@ export default function AnimationsTabScreen() {
   const { width, height } = useWindowDimensions();
   const tvMode = isTvDevice(width, height);
 
-  const [activeTab, setActiveTab] = useState<AnimTab>(() =>
+  const initialTab: AnimTab =
     params.tab === "series" || params.tab === "animation_series"
       ? "animation_series"
-      : "animation_movies",
-  );
+      : "animation_movies";
+  const initialSeed = useMemo(() => getInitialSeed(initialTab), [initialTab]);
+
+  const [activeTab, setActiveTab] = useState<AnimTab>(initialTab);
   const [searchOpen, setSearchOpen] = useState<boolean>(false);
   const [movieQuery, setMovieQuery] = useState<string>("");
   const [seriesQuery, setSeriesQuery] = useState<string>("");
   const [debouncedQ, setDebouncedQ] = useState<string>("");
 
-  const [items, setItems] = useState<FilmSummary[]>([]);
+  const [items, setItems] = useState<FilmSummary[]>(() => initialSeed?.items || []);
   const [page, setPage] = useState<number>(1);
-  const [totalPages, setTotalPages] = useState<number>(1);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [totalPages, setTotalPages] = useState<number>(() => initialSeed?.totalPages || 25);
+  const [loading, setLoading] = useState<boolean>(() => !initialSeed);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [loadingMore, setLoadingMore] = useState<boolean>(false);
 
@@ -197,7 +222,7 @@ export default function AnimationsTabScreen() {
   useEffect(() => {
     const t = setTimeout(() => {
       setDebouncedQ(currentQuery.trim());
-    }, currentQuery.trim() ? 320 : 0);
+    }, currentQuery.trim() ? 280 : 0);
     return () => clearTimeout(t);
   }, [currentQuery, activeTab]);
 
@@ -210,15 +235,71 @@ export default function AnimationsTabScreen() {
   const posterH = Math.round(cardW * 1.46);
   const rowStride = posterH + 56;
 
+  // Hydrate disk caches for both tabs on mount & prefetch their posters immediately
+  useEffect(() => {
+    void Promise.all([
+      loadDiskAnimPage("animation_movies"),
+      loadDiskAnimPage("animation_series"),
+    ]).then(([mDisk, sDisk]) => {
+      if (mDisk?.items?.length) prefetchAnimPosterBatch(mDisk.items, 18);
+      if (sDisk?.items?.length) prefetchAnimPosterBatch(sDisk.items, 15);
+    });
+  }, []);
+
   const loadPage = useCallback(
-    async (targetPage: number, opts?: { replace?: boolean; isRefresh?: boolean }) => {
+    async (
+      targetPage: number,
+      opts?: { replace?: boolean; isRefresh?: boolean; forceNetwork?: boolean },
+    ) => {
       const myReqId = ++reqIdRef.current;
+      const otherTab: AnimTab =
+        activeTab === "animation_movies" ? "animation_series" : "animation_movies";
+
+      if (targetPage === 1 && !opts?.forceNetwork) {
+        const memHit = getMemoryAnimPage(activeTab, 1, debouncedQ);
+        if (memHit && memHit.items.length > 0) {
+          setItems(memHit.items);
+          setPage(memHit.page);
+          setTotalPages(memHit.totalPages);
+          setLoading(false);
+          setRefreshing(false);
+          prefetchAnimPosterBatch(memHit.items, 24);
+          if (!debouncedQ) void prefetchAnimTabPage(otherTab);
+          return;
+        }
+      }
+
+      let hasVisibleData = false;
+      if (targetPage === 1 && !debouncedQ && !opts?.forceNetwork) {
+        const diskHit = await loadDiskAnimPage(activeTab);
+        if (myReqId !== reqIdRef.current) return;
+        if (diskHit && diskHit.items.length > 0) {
+          hasVisibleData = true;
+          setItems(diskHit.items);
+          setPage(1);
+          setTotalPages(diskHit.totalPages);
+          setLoading(false);
+          prefetchAnimPosterBatch(diskHit.items, 24);
+        } else {
+          const homeSeed = getHomeSeedAnimItems(activeTab);
+          if (homeSeed.length > 0) {
+            hasVisibleData = true;
+            setItems(homeSeed);
+            setPage(1);
+            setTotalPages(25);
+            setLoading(false);
+            prefetchAnimPosterBatch(homeSeed, 16);
+          }
+        }
+      }
+
       if (targetPage === 1) {
         if (opts?.isRefresh) setRefreshing(true);
-        else setLoading(true);
+        else if (!hasVisibleData) setLoading(true);
       } else {
         setLoadingMore(true);
       }
+
       try {
         const res = await fetchFilmBrowse({
           category: activeTab,
@@ -227,24 +308,40 @@ export default function AnimationsTabScreen() {
           page: targetPage,
         });
         if (myReqId !== reqIdRef.current) return;
-        const incoming = res.results || [];
+        const incoming = (res.results || []).map(normalizeAnimGridSummary);
+        const nextTotalPages = res.totalPages || 1;
         setPage(res.page || targetPage);
-        setTotalPages(res.totalPages || 1);
-        setItems((prev) => {
-          if (targetPage === 1 || opts?.replace) return incoming;
-          const seen = new Set(prev.map((x) => `${x.tmdbType}:${x.id}`));
-          const merged = [...prev];
-          for (const it of incoming) {
-            const k = `${it.tmdbType}:${it.id}`;
-            if (!seen.has(k)) {
-              seen.add(k);
-              merged.push(it);
-            }
+        setTotalPages(nextTotalPages);
+
+        if (targetPage === 1 || opts?.replace) {
+          if (incoming.length > 0 || !hasVisibleData) {
+            setItems(incoming);
           }
-          return merged;
-        });
+          if (incoming.length > 0) {
+            setMemoryAnimPage(activeTab, 1, debouncedQ, incoming, nextTotalPages);
+            prefetchAnimPosterBatch(incoming, 24);
+          }
+        } else {
+          setItems((prev) => {
+            const seen = new Set(prev.map((x) => `${x.tmdbType}:${x.id}`));
+            const merged = [...prev];
+            for (const it of incoming) {
+              const k = `${it.tmdbType}:${it.id}`;
+              if (!seen.has(k)) {
+                seen.add(k);
+                merged.push(it);
+              }
+            }
+            return merged;
+          });
+          prefetchAnimPosterBatch(incoming, 18);
+        }
+
+        if (targetPage === 1 && !debouncedQ) {
+          void prefetchAnimTabPage(otherTab);
+        }
       } catch {
-        if (myReqId === reqIdRef.current && targetPage === 1) {
+        if (myReqId === reqIdRef.current && targetPage === 1 && !hasVisibleData) {
           setItems([]);
         }
       } finally {
@@ -284,9 +381,20 @@ export default function AnimationsTabScreen() {
   }, [setCurrentQuery]);
 
   const handleSwitchTab = useCallback((nextTab: AnimTab) => {
+    if (nextTab === activeTab) return;
+    const seed = getInitialSeed(nextTab);
+    if (seed && seed.items.length > 0) {
+      setItems(seed.items);
+      setPage(1);
+      setTotalPages(seed.totalPages);
+      setLoading(false);
+      prefetchAnimPosterBatch(seed.items, 20);
+    } else {
+      setLoading(true);
+    }
     setActiveTab(nextTab);
     listRef.current?.scrollToOffset({ offset: 0, animated: false });
-  }, []);
+  }, [activeTab]);
 
   const topPad = Platform.OS === "web" ? 16 : Math.max(insets.top, Platform.OS === "android" ? 28 : 44);
   const tabMeta = TAB_CONFIG[activeTab];
@@ -461,7 +569,7 @@ export default function AnimationsTabScreen() {
       </View>
 
       {/* ── Clean Poster Grid ── */}
-      {loading ? (
+      {loading && items.length === 0 ? (
         <View style={styles.centerBox}>
           <ActivityIndicator size="large" color={colors.accent} />
           <Text
@@ -497,9 +605,9 @@ export default function AnimationsTabScreen() {
           numColumns={gridColumns}
           keyExtractor={(item) => `${activeTab}-${item.tmdbType}-${item.id}`}
           removeClippedSubviews={false}
-          initialNumToRender={12}
-          maxToRenderPerBatch={12}
-          windowSize={7}
+          initialNumToRender={15}
+          maxToRenderPerBatch={15}
+          windowSize={9}
           getItemLayout={(_, index) => ({
             length: rowStride,
             offset: rowStride * index,
@@ -518,12 +626,12 @@ export default function AnimationsTabScreen() {
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
-              onRefresh={() => void loadPage(1, { replace: true, isRefresh: true })}
+              onRefresh={() => void loadPage(1, { replace: true, isRefresh: true, forceNetwork: true })}
               tintColor={colors.accent}
               colors={[colors.accent]}
             />
           }
-          onEndReachedThreshold={0.5}
+          onEndReachedThreshold={0.6}
           onEndReached={() => {
             if (!loadingMore && !loading && !debouncedQ && page < totalPages) {
               void loadPage(page + 1);
