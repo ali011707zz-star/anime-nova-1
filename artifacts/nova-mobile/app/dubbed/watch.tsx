@@ -417,7 +417,7 @@ export default function DubbedWatchScreen() {
     signal: AbortSignal,
     mode: "api" | "direct" = "api",
     overrideEpisodeId?: string,
-  ): Promise<{ url: string; contentType: "hls" | "progressive"; rawUrl: string; servers?: any[]; headers?: Record<string, string>; deliveryMode?: string } | null> => {
+  ): Promise<{ url: string; proxyUrl?: string; contentType: "hls" | "progressive"; rawUrl: string; servers?: any[]; headers?: Record<string, string>; deliveryMode?: string } | null> => {
     const BASE = getBaseUrl();
     const prov = provider || "sp";
     let targetEpId = overrideEpisodeId || effectiveEpisodeId;
