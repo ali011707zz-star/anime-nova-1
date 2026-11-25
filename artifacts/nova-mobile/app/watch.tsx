@@ -1515,7 +1515,13 @@ export default function WatchScreen() {
     const run = async () => {
       try {
         if (!awSeries) throw new Error("missing_aw_series");
-        const allowed = await ensureWatchAccess();
+        const [allowed, response] = await Promise.all([
+          ensureWatchAccess(),
+          fetch(
+            withDirectStreamParams(`${getBaseUrl()}/api/aw-dubbed/watch-src?series=${encodeURIComponent(awSeries)}&ep=${epNum}`),
+            { signal: controller.signal, headers: getDirectRequestHeaders() },
+          ),
+        ]);
         if (!active || controller.signal.aborted) return;
         if (!allowed) {
           setAvailabilityError(true);
@@ -1523,11 +1529,6 @@ export default function WatchScreen() {
           return;
         }
         setWatchUnlocked(true);
-
-        const response = await fetch(
-          withDirectStreamParams(`${getBaseUrl()}/api/aw-dubbed/watch-src?series=${encodeURIComponent(awSeries)}&ep=${epNum}`),
-          { signal: controller.signal, headers: getDirectRequestHeaders() },
-        );
         if (!response.ok) throw new Error(`aw_sources_${response.status}`);
         const data = await response.json();
         if (!active || controller.signal.aborted) return;
@@ -2179,6 +2180,10 @@ export default function WatchScreen() {
     /* مواقع محمية (Cloudflare/Turnstile) — حاول استخراج رابط الفيديو الحقيقي
        عبر WebView مخفي (IP الجهاز السكني) قبل عرض بطاقة "يحتاج تطبيق أصلي" */
     if (needsHiddenResolve(src)) { setScreen("resolving"); return; }
+    if (Platform.OS !== "web") {
+      setScreen("picker");
+      return;
+    }
     setScreen("embed");
   }, [globalSubUrl]); // eslint-disable-line
 
@@ -2201,6 +2206,11 @@ export default function WatchScreen() {
 
   const handleHiddenFailed = useCallback(() => {
     setResolveFailed(true);
+    if (Platform.OS !== "web") {
+      setPlayingSrc(null);
+      setScreen("picker");
+      return;
+    }
     setScreen("embed");
   }, []);
 
@@ -3403,19 +3413,16 @@ export default function WatchScreen() {
         </View>
       );
     }
-    // Native: no WebView — show info card
+    // Native: never show broken "needs native app" card — fail cleanly back to picker
     return (
       <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 16 }}>
         <Pressable onPress={handleBack} focusable={tvMode} style={({ focused }) => [d.playerBackBtn, { position: "absolute", top: topPad + 4, right: 12 }, tvMode && tvFocusStyle(focused)]}>
           <Ionicons name="arrow-back" size={18} color="#fff" style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
-        <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
-          <Ionicons name="tv-outline" size={36} color="rgba(139,92,246,0.7)" />
-        </View>
-        <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: 16, textAlign: "center" }}>هذا المصدر يحتاج التطبيق الأصلي</Text>
-        <Pressable onPress={() => { saveProgress(); setScreen("picker"); }} focusable={tvMode}
-          style={({ focused }) => [tvMode && tvFocusStyle(focused)]}>
-          <Text style={{ color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular", fontSize: 13 }}>العودة للمصادر</Text>
+        <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: 16, textAlign: "center" }}>تعذّر تشغيل هذا السيرفر، اختر سيرفراً آخر</Text>
+        <Pressable onPress={() => { saveProgress(); setPlayingSrc(null); setScreen("picker"); }} focusable={tvMode}
+          style={({ focused }) => [{ paddingHorizontal: 18, paddingVertical: 10, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.2)" }, tvMode && tvFocusStyle(focused)]}>
+          <Text style={{ color: "#fff", fontFamily: "Cairo_600SemiBold", fontSize: 13 }}>العودة للمصادر</Text>
         </Pressable>
       </View>
     );

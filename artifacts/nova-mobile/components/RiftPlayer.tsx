@@ -132,13 +132,13 @@ function logPlaybackStage(url: string | undefined, stage: string, detail = ""): 
   console.info(`[playback-trace] id=${trace} component=player stage=${stage}${safeDetail}`);
 }
 
-function getPlaybackBufferOptions(animePlayback: boolean): BufferOptions {
-  /* Generous 40s forward buffer and waitsToMinimizeStalling: true prevents stream drops
-     and micro-stuttering across all catalogs (Anime, Spacetoon, Cartoon/Carateen). */
+function getPlaybackBufferOptions(_animePlayback: boolean): BufferOptions {
+  /* Balanced 16s forward buffer with low 0.65s startup/seek threshold so initial
+     playback and progress-bar seeks resume quickly without long stalls. */
   return {
-    preferredForwardBufferDuration: 40,
+    preferredForwardBufferDuration: 16,
     waitsToMinimizeStalling: true,
-    minBufferForPlayback: 2.5,
+    minBufferForPlayback: 0.65,
   };
 }
 
@@ -2394,9 +2394,9 @@ function ExpoRiftPlayer({
       const seekPlayer = player as typeof player & {
         seekTo?: (seconds: number, toleranceBefore?: number, toleranceAfter?: number) => void;
       };
-      if (animePlayback && typeof seekPlayer.seekTo === "function") {
+      if (typeof seekPlayer.seekTo === "function") {
         try {
-          seekPlayer.seekTo(target, 0.5, 0.5);
+          seekPlayer.seekTo(target, 2.5, 2.5);
         } catch {
           player.currentTime = target;
         }

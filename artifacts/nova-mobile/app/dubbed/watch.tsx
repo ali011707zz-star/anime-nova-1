@@ -156,6 +156,10 @@ export default function DubbedWatchScreen() {
   const lastDurationRef = useRef(0);
   const savedOnExitRef = useRef(false);
   const preloadedMediaRef = useRef<{ url: string; contentType: "hls" | "progressive"; rawUrl?: string; serverId?: string; headers?: Record<string, string>; deliveryMode?: string; pendingClientExtract?: ClientExtractDescriptor } | null>(null);
+  const preloadingPromiseRef = useRef<{
+    serverId?: string;
+    promise: Promise<{ url: string; contentType: "hls" | "progressive"; rawUrl: string; serverId?: string; headers?: Record<string, string>; deliveryMode?: string; pendingClientExtract?: ClientExtractDescriptor } | null>;
+  } | null>(null);
 
   const onToggleOrientation = useWatchPlayerOrientation(screen === "player" && sources.length > 0, tvMode);
 
@@ -716,6 +720,7 @@ export default function DubbedWatchScreen() {
     const ctrl = new AbortController();
     checkCtrlRef.current = ctrl;
     preloadedMediaRef.current = null;
+    preloadingPromiseRef.current = null;
     setError(null);
     setCheckingAvailability(true);
 
@@ -770,11 +775,16 @@ export default function DubbedWatchScreen() {
               setSlots(dynamicSlots);
               setCheckingAvailability(false);
               const firstSrvId = dynamicSlots[0]?.serverId;
-              void resolveAzMedia(ctrl.signal, firstSrvId).then((resolved) => {
+              const azPromise = resolveAzMedia(ctrl.signal, firstSrvId).then((resolved) => {
                 if (resolved && !ctrl.signal.aborted && mountedRef.current) {
                   preloadedMediaRef.current = resolved;
                 }
+                if (preloadingPromiseRef.current?.promise === azPromise) {
+                  preloadingPromiseRef.current = null;
+                }
+                return resolved;
               });
+              preloadingPromiseRef.current = { serverId: firstSrvId, promise: azPromise };
               return;
             }
           }
@@ -813,6 +823,7 @@ export default function DubbedWatchScreen() {
         const wUrl = await ensureSd2WatchUrl(ctrl.signal);
         if (ctrl.signal.aborted || !mountedRef.current) return;
         if (wUrl) {
+          let sd2FirstSrvId: string | undefined;
           const srvRes = await fetch(`${BASE}/api/dubbed/sd2/servers?watchUrl=${encodeURIComponent(wUrl)}`, { signal: ctrl.signal });
           if (srvRes.ok && !ctrl.signal.aborted && mountedRef.current) {
             const srvJson = await srvRes.json();
@@ -833,17 +844,23 @@ export default function DubbedWatchScreen() {
                   serverId: String(srv.id),
                 };
               });
+              sd2FirstSrvId = dynamicSlots[0]?.serverId;
               setSlots(dynamicSlots);
               setCheckingAvailability(false);
             }
           }
           setSlots((prev) => prev.map((s) => ({ ...s, state: "available" })));
           setCheckingAvailability(false);
-          void resolveSd2Media(ctrl.signal).then((resolved) => {
+          const sd2Promise = resolveSd2Media(ctrl.signal, sd2FirstSrvId).then((resolved) => {
             if (resolved && !ctrl.signal.aborted && mountedRef.current) {
               preloadedMediaRef.current = resolved;
             }
+            if (preloadingPromiseRef.current?.promise === sd2Promise) {
+              preloadingPromiseRef.current = null;
+            }
+            return resolved;
           });
+          preloadingPromiseRef.current = { serverId: sd2FirstSrvId, promise: sd2Promise };
           return;
         }
       } catch (e: any) {
@@ -1073,6 +1090,10 @@ export default function DubbedWatchScreen() {
           pendingClientExtract: preloadedMediaRef.current.pendingClientExtract,
         };
       }
+      if (!bypassCache && preloadingPromiseRef.current && (!serverId || !preloadingPromiseRef.current.serverId || serverId === preloadingPromiseRef.current.serverId)) {
+        const inFlight = await preloadingPromiseRef.current.promise.catch(() => null);
+        if (inFlight && !signal.aborted) return inFlight;
+      }
       const resolved = await resolveAzMedia(signal, serverId);
       if (resolved) {
         if (!serverId || serverId === resolved.serverId) {
@@ -1097,6 +1118,10 @@ export default function DubbedWatchScreen() {
           deliveryMode: preloadedMediaRef.current.deliveryMode,
           pendingClientExtract: preloadedMediaRef.current.pendingClientExtract,
         };
+      }
+      if (!bypassCache && !preferMp4 && preloadingPromiseRef.current && (!serverId || !preloadingPromiseRef.current.serverId || serverId === preloadingPromiseRef.current.serverId)) {
+        const inFlight = await preloadingPromiseRef.current.promise.catch(() => null);
+        if (inFlight && !signal.aborted) return inFlight;
       }
       const resolved = await resolveSd2Media(signal, serverId, preferMp4);
       if (resolved) {
@@ -1193,9 +1218,13 @@ export default function DubbedWatchScreen() {
     };
     const fetchArabicToonsDirect = async (): Promise<{ url: string; contentType: "hls" | "progressive"; rawUrl: string; headers?: Record<string, string>; deliveryMode?: string } | null> => {
       if (!targetEpUrl) return null;
+      const directCtrl = new AbortController();
+      const directTimer = setTimeout(() => directCtrl.abort(), 3500);
+      const onOuterAbort = () => directCtrl.abort();
+      signal.addEventListener("abort", onOuterAbort);
       try {
         const pageR = await fetch(targetEpUrl, {
-          signal,
+          signal: directCtrl.signal,
           headers: {
             "User-Agent": MOBILE_DIRECT_UA,
             Referer: "https://www.arabic-toons.com/",
@@ -1237,6 +1266,9 @@ export default function DubbedWatchScreen() {
         };
       } catch {
         return null;
+      } finally {
+        clearTimeout(directTimer);
+        signal.removeEventListener("abort", onOuterAbort);
       }
     };
     if (!isCarateenSource && targetEpUrl) {
@@ -1273,7 +1305,13 @@ export default function DubbedWatchScreen() {
   const handlePickSlot = useCallback(async (slot: DubbedServerSlot) => {
     if (tvMode && Date.now() - pickerOpenedAtRef.current < 750) return;
     if (slot.state === "fetching") return;
-    checkCtrlRef.current?.abort();
+    const isReusingPreload = Boolean(
+      preloadingPromiseRef.current &&
+      (!slot.serverId || !preloadingPromiseRef.current.serverId || slot.serverId === preloadingPromiseRef.current.serverId)
+    );
+    if (!isReusingPreload) {
+      checkCtrlRef.current?.abort();
+    }
     ctrlRef.current?.abort();
     const ctrl = new AbortController();
     ctrlRef.current = ctrl;

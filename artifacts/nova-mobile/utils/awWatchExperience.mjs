@@ -27,6 +27,17 @@ export function normalizeAwWatchSources(rows, baseUrl) {
     const quality = String(row?.quality || "720p").trim() || "720p";
     const serverName = String(row?.name || row?.server || "").trim();
     if (!rawUrl || !serverName) return [];
+    const lowerName = serverName.toLowerCase();
+    const lowerUrl = rawUrl.toLowerCase();
+    if (
+      lowerName === "st" ||
+      lowerName.includes("streamtape") ||
+      lowerUrl.includes("streamtape.com") ||
+      lowerUrl.includes("streamtape.to") ||
+      lowerUrl.includes("streamtape.net")
+    ) {
+      return [];
+    }
 
     try {
       const url = new URL(rawUrl, base);

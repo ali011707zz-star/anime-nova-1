@@ -386,18 +386,42 @@ const SNIFF_SCRIPT = `
         if (isVideoUrl(entries[i].name)) { report(entries[i].name); break; }
       }
     } catch (e) {}
-  }, 500);
+  }, 250);
+  setTimeout(function () {
+    if (reported) return;
+    try {
+      if (scanVoeJsonScripts()) return;
+      scanPackedScripts();
+      triggerAutoPlay();
+    } catch (e) {}
+  }, 120);
 
   true;
 })();
 `;
 
-export function HiddenResolverWebView({ pageUrl, refererOverride, timeoutMs = 22000, onResolved, onFailed }: Props) {
+function resolveInitialEmbedUrl(rawUrl: string, referer?: string): string {
+  const m = rawUrl.match(/^https?:\/\/(?:www\.)?voe\.sx\/e\/([a-z0-9_-]+)/i);
+  if (m?.[1]) {
+    if (referer) {
+      try {
+        const refOrigin = new URL(referer).origin;
+        if (!/voe\.sx$/i.test(new URL(referer).hostname)) {
+          return `${refOrigin}/e/${m[1]}`;
+        }
+      } catch {}
+    }
+    return `https://caseyseemavoid.com/e/${m[1]}`;
+  }
+  return rawUrl;
+}
+
+export function HiddenResolverWebView({ pageUrl, refererOverride, timeoutMs = 12000, onResolved, onFailed }: Props) {
   const doneRef       = useRef(false);
   const followedRef   = useRef(false);
   const webRef        = useRef<WebView>(null);
   // currentUrl يتغيّر عند متابعة iframe وسيط — يُعيد تحميل WebView للصفحة الداخلية
-  const [currentUrl, setCurrentUrl] = React.useState(pageUrl);
+  const [currentUrl, setCurrentUrl] = React.useState(() => resolveInitialEmbedUrl(pageUrl, refererOverride));
 
   const finish = useCallback((fn: () => void) => {
     if (doneRef.current) return;

@@ -68,25 +68,27 @@ export function getDeliveryBadge(url: string | null | undefined, deliveryModeHin
 const VOE_MIRROR_FALLBACKS = ["https://caseyseemavoid.com"];
 
 function buildEmbedCandidates(embedUrl: string, referer: string): string[] {
-  const candidates: string[] = [embedUrl];
   const voeMatch = embedUrl.match(/^https?:\/\/(?:www\.)?voe\.sx\/e\/([a-z0-9_-]+)/i);
   if (voeMatch?.[1]) {
     const voeId = voeMatch[1];
+    const ordered: string[] = [];
     try {
       if (referer) {
         const refOrigin = new URL(referer).origin;
         if (!/voe\.sx$/i.test(new URL(referer).hostname)) {
           const mirrorUrl = `${refOrigin}/e/${voeId}`;
-          if (!candidates.includes(mirrorUrl)) candidates.push(mirrorUrl);
+          if (!ordered.includes(mirrorUrl)) ordered.push(mirrorUrl);
         }
       }
     } catch { /* ignore invalid referer */ }
     for (const mirrorOrigin of VOE_MIRROR_FALLBACKS) {
       const mirrorUrl = `${mirrorOrigin}/e/${voeId}`;
-      if (!candidates.includes(mirrorUrl)) candidates.push(mirrorUrl);
+      if (!ordered.includes(mirrorUrl)) ordered.push(mirrorUrl);
     }
+    if (!ordered.includes(embedUrl)) ordered.push(embedUrl);
+    return ordered;
   }
-  return candidates;
+  return [embedUrl];
 }
 
 /**
@@ -204,7 +206,7 @@ export async function resolveMediaFireDirectOnPhone(
   if (!key) return null;
 
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 8000);
+  const timer = setTimeout(() => ctrl.abort(), 6500);
   const onOuterAbort = () => ctrl.abort();
   signal?.addEventListener("abort", onOuterAbort);
 
@@ -375,7 +377,7 @@ export async function resolveAd2OnPhone(
   if (!anilistId || anilistId <= 0 || !epNum || epNum <= 0) return null;
 
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 9000);
+  const timer = setTimeout(() => ctrl.abort(), 6000);
   const onOuterAbort = () => ctrl.abort();
   signal?.addEventListener("abort", onOuterAbort);
 
