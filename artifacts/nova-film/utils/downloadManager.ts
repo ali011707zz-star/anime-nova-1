@@ -232,7 +232,12 @@ export async function isDownloaded(
 }
 
 export async function deleteDownload(item: DownloadItem): Promise<void> {
-  try { await FileSystem.deleteAsync(item.localPath, { idempotent: true }); } catch {}
+  if (item.localPath.endsWith("/index.m3u8")) {
+    const dir = item.localPath.slice(0, -"/index.m3u8".length);
+    try { await FileSystem.deleteAsync(dir, { idempotent: true }); } catch {}
+  } else {
+    try { await FileSystem.deleteAsync(item.localPath, { idempotent: true }); } catch {}
+  }
   if (item.subtitleLocalPath) {
     try { await FileSystem.deleteAsync(item.subtitleLocalPath, { idempotent: true }); } catch {}
   }
@@ -253,6 +258,9 @@ function localFileUri(path: string): string {
 export async function saveDownloadToGallery(item: DownloadItem): Promise<DownloadItem> {
   if (Platform.OS === "web") {
     throw new Error("حفظ الفيديو في معرض الجهاز متاح على الهاتف فقط.");
+  }
+  if (item.localPath.endsWith(".m3u8")) {
+    throw new Error("هذا التنزيل محفوظ للمشاهدة المباشرة داخل قسم تنزيلاتي بدون إنترنت.");
   }
   if (item.galleryAssetId) return item;
 
@@ -901,7 +909,7 @@ async function attachSubtitleSidecar(entry: RuntimeDownload): Promise<void> {
 
     /* Keep one canonical extension so the current native player can attach
        the sidecar without adding a second subtitle engine. */
-    const subtitlePath = `${entry.localPath.slice(0, -4)}.vtt`;
+    const subtitlePath = entry.localPath.endsWith(".m3u8") ? `${entry.localPath.slice(0, -5)}.vtt` : `${entry.localPath.slice(0, -4)}.vtt`;
     await FileSystem.writeAsStringAsync(subtitlePath, vtt);
 
     const items = await getDownloads();
@@ -918,15 +926,15 @@ async function attachSubtitleSidecar(entry: RuntimeDownload): Promise<void> {
   }
 }
 
-async function saveCompleted(entry: RuntimeDownload): Promise<void> {
-  let fileSize = 0;
+async function saveCompleted(entry: RuntimeDownload, overrideBytes?: number): Promise<void> {
+  let fileSize = overrideBytes && overrideBytes > 0 ? overrideBytes : 0;
   const targetPath = entry.localPath;
   const strippedPath = targetPath.startsWith("file://") ? targetPath.slice(7) : targetPath;
   let info = await FileSystem.getInfoAsync(targetPath, { size: true }).catch(() => null);
   if (!info?.exists) {
     info = await FileSystem.getInfoAsync(strippedPath, { size: true }).catch(() => null);
   }
-  if (info?.exists) fileSize = (info as { size?: number }).size ?? 0;
+  if (fileSize <= 0 && info?.exists) fileSize = (info as { size?: number }).size ?? 0;
 
   if (fileSize <= 0) {
     // Retry shortly in case the OS file handle is still being finalized
@@ -1072,6 +1080,199 @@ async function runDownload(entry: RuntimeDownload): Promise<void> {
   }
 }
 
+function isDirectHlsUrl(url: string): boolean {
+  const low = String(url || "").toLowerCase();
+  if (low.includes("/api/film/download-mp4")) return false;
+  return (
+    low.includes(".m3u8") ||
+    low.includes("master.txt") ||
+    low.includes("/hls/") ||
+    low.includes("/hls_mps/") ||
+    low.includes("ex.divhard.com/api/media.php")
+  );
+}
+
+function hlsDirFor(params: StartDownloadParams): string {
+  const site = safePathSegment(params.site || "source").toLowerCase();
+  const quality = variantKey(params.quality);
+  return `${DOWNLOADS_ROOT}${safePathSegment(params.title)}/${site}/${params.ep}-${quality}-hls/`;
+}
+
+function directCdnHeaders(params: StartDownloadParams): Record<string, string> {
+  const raw = params.headers || {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (v && !/^(host|content-length)$/i.test(k)) out[k] = v;
+  }
+  if (!out["User-Agent"] && !out["user-agent"]) {
+    out["User-Agent"] = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36";
+  }
+  return out;
+}
+
+async function fetchTextDirect(url: string, headers: Record<string, string>): Promise<string> {
+  const res = await fetch(url, { headers });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.text();
+}
+
+async function runDirectHlsDownload(entry: RuntimeDownload, cancelledRef: { current: boolean }): Promise<void> {
+  const hlsDir = entry.localPath.endsWith("/index.m3u8")
+    ? entry.localPath.slice(0, -"index.m3u8".length)
+    : hlsDirFor(entry.params);
+  entry.localPath = `${hlsDir}index.m3u8`;
+  entry.pauseSupported = false;
+  const headers = directCdnHeaders(entry.params);
+
+  await FileSystem.makeDirectoryAsync(hlsDir, { intermediates: true });
+
+  // 1) Fetch manifest directly on user's phone (0% VPS bandwidth!)
+  let playlistUrl = entry.params.url;
+  let playlistText = await fetchTextDirect(playlistUrl, headers);
+  if (cancelledRef.current || !active.has(entry.id)) return;
+
+  // 2) If master playlist, pick best quality variant automatically
+  if (playlistText.includes("#EXT-X-STREAM-INF")) {
+    const lines = playlistText.replace(/\r/g, "").split("\n");
+    let bestUri = "";
+    let bestBw = -1;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (line.startsWith("#EXT-X-STREAM-INF:")) {
+        const bwM = line.match(/BANDWIDTH=(\d+)/i);
+        const bw = bwM ? Number(bwM[1]) : 0;
+        let nextLine = "";
+        for (let j = i + 1; j < lines.length; j++) {
+          const cand = lines[j].trim();
+          if (cand && !cand.startsWith("#")) {
+            nextLine = cand;
+            break;
+          }
+        }
+        if (nextLine && bw >= bestBw) {
+          bestBw = bw;
+          bestUri = nextLine;
+        }
+      }
+    }
+    if (bestUri) {
+      playlistUrl = resolvePlaylistUrl(bestUri, playlistUrl);
+      playlistText = await fetchTextDirect(playlistUrl, headers);
+      if (cancelledRef.current || !active.has(entry.id)) return;
+    }
+  }
+
+  // 3) Parse segments, optional AES-128 key, and optional EXT-X-MAP init segment
+  const rawLines = playlistText.replace(/\r/g, "").split("\n");
+  type SegTask = { remoteUrl: string; localName: string; lineIdx: number };
+  const segTasks: SegTask[] = [];
+  const outLines: string[] = [...rawLines];
+  let keyIdx = 0;
+  let mapIdx = 0;
+
+  for (let i = 0; i < rawLines.length; i++) {
+    const trimmed = rawLines[i].trim();
+    if (!trimmed) continue;
+
+    if (trimmed.startsWith("#EXT-X-KEY:") && /URI="([^"]+)"/i.test(trimmed)) {
+      const m = trimmed.match(/URI="([^"]+)"/i);
+      if (m && m[1]) {
+        const keyRemote = resolvePlaylistUrl(m[1], playlistUrl);
+        const keyLocal = `key_${keyIdx++}.bin`;
+        const keyDl = await FileSystem.downloadAsync(keyRemote, `${hlsDir}${keyLocal}`, { headers });
+        if (keyDl.status >= 200 && keyDl.status < 300) {
+          outLines[i] = trimmed.replace(/URI="([^"]+)"/i, `URI="${keyLocal}"`);
+        }
+      }
+      continue;
+    }
+
+    if (trimmed.startsWith("#EXT-X-MAP:") && /URI="([^"]+)"/i.test(trimmed)) {
+      const m = trimmed.match(/URI="([^"]+)"/i);
+      if (m && m[1]) {
+        const mapRemote = resolvePlaylistUrl(m[1], playlistUrl);
+        const mapLocal = `init_${mapIdx++}.mp4`;
+        const mapDl = await FileSystem.downloadAsync(mapRemote, `${hlsDir}${mapLocal}`, { headers });
+        if (mapDl.status >= 200 && mapDl.status < 300) {
+          outLines[i] = trimmed.replace(/URI="([^"]+)"/i, `URI="${mapLocal}"`);
+        }
+      }
+      continue;
+    }
+
+    if (trimmed.startsWith("#")) continue;
+
+    const segName = `seg_${String(segTasks.length).padStart(5, "0")}.ts`;
+    segTasks.push({
+      remoteUrl: resolvePlaylistUrl(trimmed, playlistUrl),
+      localName: segName,
+      lineIdx: i,
+    });
+    outLines[i] = segName;
+  }
+
+  if (segTasks.length === 0) {
+    throw new Error("لم يتم العثور على مقاطع فيديو صالحة في هذا السيرفر.");
+  }
+
+  // 4) Download segments directly in parallel batches of 5 (fast + phone-safe!)
+  const CONCURRENCY = 5;
+  let completedSegs = 0;
+  let totalBytes = 0;
+  let nextCursor = 0;
+
+  const downloadOneSeg = async (task: SegTask): Promise<void> => {
+    const dest = `${hlsDir}${task.localName}`;
+    let lastErr: unknown = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (cancelledRef.current || !active.has(entry.id)) return;
+      try {
+        const res = await FileSystem.downloadAsync(task.remoteUrl, dest, { headers });
+        if (res.status >= 200 && res.status < 300) {
+          const info = await FileSystem.getInfoAsync(dest, { size: true }).catch(() => null);
+          const sz = info?.exists ? ((info as { size?: number }).size ?? 0) : 0;
+          if (sz > 512) {
+            totalBytes += sz;
+            completedSegs += 1;
+            entry.bytesWritten = totalBytes;
+            entry.totalBytes = Math.round((totalBytes / Math.max(1, completedSegs)) * segTasks.length);
+            entry.progress = Math.min(0.99, completedSegs / segTasks.length);
+            notifyProgressListeners();
+            updateDownloadNotification(entry);
+            return;
+          }
+        }
+        lastErr = new Error(`HTTP ${res.status}`);
+      } catch (e) {
+        lastErr = e;
+      }
+      await wait(450 * (attempt + 1));
+    }
+    throw lastErr || new Error("فشل تنزيل مقطع من الفيديو");
+  };
+
+  const workers = Array.from({ length: Math.min(CONCURRENCY, segTasks.length) }, async () => {
+    while (true) {
+      if (cancelledRef.current || !active.has(entry.id)) return;
+      const idx = nextCursor++;
+      if (idx >= segTasks.length) return;
+      await downloadOneSeg(segTasks[idx]);
+    }
+  });
+
+  await Promise.all(workers);
+  if (cancelledRef.current || !active.has(entry.id)) return;
+
+  // 5) Write local offline index.m3u8 manifest
+  const finalManifest = outLines.join("\n") + (outLines[outLines.length - 1]?.includes("#EXT-X-ENDLIST") ? "\n" : "\n#EXT-X-ENDLIST\n");
+  await FileSystem.writeAsStringAsync(entry.localPath, finalManifest);
+
+  await saveCompleted(entry, totalBytes);
+  active.delete(entry.id);
+  notifyListeners();
+  completeNotification(entry, false);
+}
+
 function enqueueDownload(
   params: StartDownloadParams,
   resumeState?: ResumeState,
@@ -1081,6 +1282,9 @@ function enqueueDownload(
   const id = makeDownloadId(params.animeId, params.ep, params.site, params.quality);
   cancelActiveDownload(id);
 
+  const isHlsDirect = isDirectHlsUrl(params.url);
+  const cancelledRef = { current: false };
+  const resolvedLocalPath = localPath ?? (isHlsDirect ? `${hlsDirFor(params)}index.m3u8` : localPathFor(params));
   const entry: RuntimeDownload = {
     id,
     animeId: params.animeId,
@@ -1094,24 +1298,43 @@ function enqueueDownload(
     totalBytes: 0,
     retryCount: 0,
     status: autoStart ? "downloading" : "paused",
-    pauseSupported: true,
+    pauseSupported: !isHlsDirect,
     params,
-    localPath: localPath ?? localPathFor(params),
+    localPath: resolvedLocalPath,
     resumeState,
     notificationAt: 0,
     cancelFn: () => {
+      cancelledRef.current = true;
       if (entry.nativePollTimer) clearTimeout(entry.nativePollTimer);
       if (entry.nativeJobId != null) {
         void removeNativeDownload(entry.id);
       }
       entry.resumable?.cancelAsync().catch(() => {});
-      FileSystem.deleteAsync(entry.localPath, { idempotent: true }).catch(() => {});
-      FileSystem.deleteAsync(`${entry.localPath.slice(0, -4)}.vtt`, { idempotent: true }).catch(() => {});
+      if (entry.localPath.endsWith("/index.m3u8")) {
+        const dir = entry.localPath.slice(0, -"/index.m3u8".length);
+        FileSystem.deleteAsync(dir, { idempotent: true }).catch(() => {});
+      } else {
+        FileSystem.deleteAsync(entry.localPath, { idempotent: true }).catch(() => {});
+        FileSystem.deleteAsync(`${entry.localPath.slice(0, -4)}.vtt`, { idempotent: true }).catch(() => {});
+      }
     },
   };
   active.set(id, entry);
   notifyListeners();
   if (!autoStart) return;
+  if (isHlsDirect) {
+    void configureNotifications()
+      .catch(() => {})
+      .then(() => runDirectHlsDownload(entry, cancelledRef))
+      .catch((err) => {
+        if (!active.has(id) || cancelledRef.current) return;
+        entry.status = "error";
+        entry.errorMessage = err instanceof Error ? err.message : "تعذر التنزيل المباشر من هذا السيرفر.";
+        notifyListeners();
+        completeNotification(entry, true);
+      });
+    return;
+  }
   if (Platform.OS === "android" && isNativeDownloadAvailable()) {
     void configureNotifications()
       .then(() => beginNativeDownload(entry))

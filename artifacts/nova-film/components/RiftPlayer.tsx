@@ -406,13 +406,14 @@ function parseVTT(text: string): SubCue[] {
     const local  = parseVTTTime(tsMapM[2].trim());
     tsOffset = Math.max(0, mpegts - local);
   }
-  const blocks = text.split(/\n\n+/);
+  const normalizedText = text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const blocks = normalizedText.split(/\n\n+/);
   for (const block of blocks) {
     const lines = block.trim().split("\n");
     let ti = 0;
     if (ti < lines.length && !lines[ti].includes("-->")) ti++;
     if (ti >= lines.length) continue;
-    const m = lines[ti].match(/(\d[\d:.]*)\s*-->\s*(\d[\d:.]*)/);
+    const m = lines[ti].match(/(\d[\d:.,]*)\s*-->\s*(\d[\d:.,]*)/);
     if (!m) continue;
     const start = Math.max(0, parseVTTTime(m[1]) - tsOffset);
     const end   = Math.max(0, parseVTTTime(m[2]) - tsOffset);

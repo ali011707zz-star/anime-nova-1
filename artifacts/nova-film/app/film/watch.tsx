@@ -460,11 +460,13 @@ export default function FilmWatchScreen() {
         site: src.site || `film-${idx + 1}`,
         subtitleUrl: isHardsub
           ? undefined
-          : src.subtitleUrl
-            ? src.subtitleUrl.startsWith("http")
-              ? src.subtitleUrl
-              : `${getBaseUrl()}${src.subtitleUrl}`
-            : arSubTrackUrl,
+          : arSubTrackUrl
+            ? arSubTrackUrl
+            : src.subtitleUrl && !/rezesubs\.com/i.test(src.subtitleUrl)
+              ? src.subtitleUrl.startsWith("http")
+                ? src.subtitleUrl
+                : `${getBaseUrl()}${src.subtitleUrl}`
+              : undefined,
         isArabic: isHardsub ? true : arSubIsNativeArabic,
         hardsubbed: isHardsub,
         headers: src.headers,
@@ -551,10 +553,8 @@ export default function FilmWatchScreen() {
           playUrl.includes("master.txt");
         const siteLower = String(src.site || "").toLowerCase();
         const isHardsub = Boolean(src.hardsubbed) || siteLower === "vidhls" || siteLower === "vidhls-alt";
-        const base = getBaseUrl();
-        const downloadUrl = isHls
-          ? `${base}/api/film/download-mp4?site=${encodeURIComponent(siteTag)}&url=${encodeURIComponent(playUrl)}`
-          : playUrl;
+        // Direct client-side download straight from CDN on the user's phone (0% VPS bandwidth!)
+        const downloadUrl = playUrl;
         await startGlobalDownload({
           animeId: filmId,
           ep: currentEpNum,
@@ -595,7 +595,8 @@ export default function FilmWatchScreen() {
     const baseList = sessionPlaySources.length > 0 ? sessionPlaySources : orderedPlaySources;
     if (!arSubTrackUrl) return baseList;
     return baseList.map((ps) => {
-      if (ps.hardsubbed || ps.subtitleUrl) return ps;
+      if (ps.hardsubbed) return ps;
+      if (ps.subtitleUrl && !/rezesubs\.com/i.test(ps.subtitleUrl) && ps.subtitleUrl.includes("/api/film/sub-vtt")) return ps;
       return { ...ps, subtitleUrl: arSubTrackUrl, isArabic: arSubIsNativeArabic };
     });
   }, [sessionPlaySources, orderedPlaySources, arSubTrackUrl, arSubIsNativeArabic]);
@@ -1053,7 +1054,7 @@ export default function FilmWatchScreen() {
           })}
 
           {/* ── Direct Download Servers Section (matching Anime NOVA downloadSection) ── */}
-          {sources.some((s) => !s.clientSideOnly) && (
+          {sources.length > 0 && (
             <View
               style={[
                 d.downloadSection,
@@ -1108,7 +1109,7 @@ export default function FilmWatchScreen() {
                         { color: "#94a3b8", fontSize: 10, fontFamily: "Cairo_600SemiBold" },
                       ]}
                     >
-                      تحميل مباشر سريع بالخلفية مع دعم المشاهدة بدون إنترنت
+                      تحميل مباشر من جهازك بدون المرور بالخادم · يعمل بدون إنترنت
                     </Text>
                   </View>
                 </View>
@@ -1124,7 +1125,7 @@ export default function FilmWatchScreen() {
                   }}
                 >
                   <Text style={{ color: "#22d3ee", fontSize: 10, fontFamily: "Cairo_700Bold" }}>
-                    {sources.filter((s) => !s.clientSideOnly).length} سيرفر
+                    {sources.length} سيرفر
                   </Text>
                 </View>
               </View>
@@ -1141,7 +1142,7 @@ export default function FilmWatchScreen() {
                   },
                 ]}
               >
-                {sources.filter((s) => !s.clientSideOnly).map((src, idx, arr) => {
+                {sources.map((src, idx, arr) => {
                   const qk = normalizeQualityBucket(src);
                   const tag = serverShortTag(src, idx);
                   const stateKey = `${tag}:${qk}`;

@@ -111,7 +111,9 @@ export default function TabLayout() {
       <Tabs.Screen
         name="animations"
         options={{
-          href: null,
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon name={focused ? "sparkles" : "sparkles-outline"} label="أنميشن" color={color} focused={focused} tvMode={tvMode} iconSize={iconSize} fontSize={labelSize} />
+          ),
         }}
       />
       <Tabs.Screen

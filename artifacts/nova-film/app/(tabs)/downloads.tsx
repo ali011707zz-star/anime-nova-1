@@ -415,11 +415,14 @@ function toFileUri(path: string): string {
 }
 
 function LocalPlayer({ item, onClose }: { item: DownloadItem; onClose: () => void }) {
+  const isOfflineHls = item.localPath.toLowerCase().endsWith(".m3u8");
   const src: PlayerSource = {
     url: toFileUri(item.localPath),
     label: `${item.quality} · ${item.site}`,
     quality: (item.quality as any) || "720p HD",
+    contentType: isOfflineHls ? "hls" : "progressive",
     subtitleUrl: item.subtitleLocalPath ? toFileUri(item.subtitleLocalPath) : undefined,
+    isArabic: true,
   };
   return (
     <RiftPlayer
