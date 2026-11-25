@@ -64,7 +64,7 @@ import {
 
 /* ── Types ── */
 type Quality    = "1080p FHD" | "720p HD" | "480p SD" | "360p SD";
-type Screen     = "loading" | "picker" | "native" | "embed" | "resolving";
+type Screen     = "picker" | "native" | "embed";
 type AvailabilityQuality = "1080p" | "720p" | "480p" | "360p";
 
 /**
@@ -1179,6 +1179,8 @@ export default function WatchScreen() {
   const onToggleOrientation = useWatchPlayerOrientation(screen === "native" || screen === "embed", tvMode);
   const [sources,     setSources]     = useState<Src[]>([]);
   const [playingSrc,  setPlayingSrc]  = useState<Src | null>(null);
+  const [resolvingSrc, setResolvingSrc] = useState<Src | null>(null);
+  const activeSlotKeyRef = useRef<string | null>(null);
   const [resumeTime,  setResumeTime]  = useState(0);
   const [resolveFailed, setResolveFailed] = useState(false);
   const [globalSubUrl, setGlobalSubUrl] = useState<string | undefined>();
@@ -2094,6 +2096,12 @@ export default function WatchScreen() {
   }
 
   /* ── Play a source ── */
+  const markActiveSlotStatus = useCallback((status: "idle" | "fetching" | "ready" | "failed") => {
+    const key = activeSlotKeyRef.current;
+    if (!key) return;
+    setSlotStatus(prev => (prev[key] === status ? prev : { ...prev, [key]: status }));
+  }, []);
+
   const playSrc = useCallback((src: Src) => {
     const subtitleUrl = subtitlesDisabledForSite(src.site)
       ? undefined
@@ -2116,11 +2124,13 @@ export default function WatchScreen() {
         ...src.clientExtract,
         referer: src.clientExtract.referer || src.headers?.Referer || "",
       };
-      setScreen("loading");
+      markActiveSlotStatus("fetching");
       void (async () => {
         const extracted = await extractDirectStreamOnPhone(descriptor);
         if (!isMountedRef.current) return;
         if (extracted?.url) {
+          setResolvingSrc(null);
+          markActiveSlotStatus("ready");
           setPlayingSrc({
             ...src,
             directUrl: extracted.url,
@@ -2134,8 +2144,9 @@ export default function WatchScreen() {
           });
           setScreen("native");
         } else {
-          setPlayingSrc({ ...src, clientExtract: descriptor, subtitleUrl });
-          setScreen("resolving");
+          const hiddenTarget = { ...src, clientExtract: descriptor, subtitleUrl };
+          setPlayingSrc(hiddenTarget);
+          setResolvingSrc(hiddenTarget);
         }
       })();
       return;
@@ -2145,11 +2156,13 @@ export default function WatchScreen() {
       initialPlayUrl.includes("/api/aw-dubbed/mf-stream") ||
       /https?:\/\/download\d*\.mediafire\.com\//i.test(initialPlayUrl);
     if (isDirectStreamActive() && isMediaFirePlayUrl) {
-      setScreen("loading");
+      markActiveSlotStatus("fetching");
       void (async () => {
         const mfDirect = await resolveMediaFireDirectOnPhone(initialPlayUrl, getBaseUrl());
         if (!isMountedRef.current) return;
         if (mfDirect?.url) {
+          setResolvingSrc(null);
+          markActiveSlotStatus("ready");
           setPlayingSrc({
             ...src,
             directUrl: mfDirect.url,
@@ -2160,8 +2173,11 @@ export default function WatchScreen() {
             deliveryMode: "client-extract",
             subtitleUrl,
           });
+          setScreen("native");
         } else if (/https?:\/\/download\d*\.mediafire\.com\//i.test(initialPlayUrl)) {
           const proxied = `${getBaseUrl()}/api/anime/video-proxy?url=${encodeURIComponent(initialPlayUrl)}&ref=${encodeURIComponent("https://www.mediafire.com/")}`;
+          setResolvingSrc(null);
+          markActiveSlotStatus("ready");
           setPlayingSrc({
             ...src,
             directUrl: proxied,
@@ -2171,54 +2187,77 @@ export default function WatchScreen() {
             deliveryMode: "vps-proxy",
             subtitleUrl,
           });
+          setScreen("native");
+        } else {
+          setResolvingSrc(null);
+          markActiveSlotStatus("ready");
+          setScreen("native");
         }
-        setScreen("native");
       })();
       return;
     }
-    if (isDirectPlayable(src)) { setScreen("native"); return; }
-    /* مواقع محمية (Cloudflare/Turnstile) — حاول استخراج رابط الفيديو الحقيقي
-       عبر WebView مخفي (IP الجهاز السكني) قبل عرض بطاقة "يحتاج تطبيق أصلي" */
-    if (needsHiddenResolve(src)) { setScreen("resolving"); return; }
+    if (isDirectPlayable(src)) {
+      setResolvingSrc(null);
+      markActiveSlotStatus("ready");
+      setScreen("native");
+      return;
+    }
+    /* مواقع محمية — استخراج صامت عبر WebView مخفي داخل المنتقي دون شاشات تحميل منبثقة */
+    if (needsHiddenResolve(src)) {
+      markActiveSlotStatus("fetching");
+      const hiddenTarget = { ...src, subtitleUrl };
+      setPlayingSrc(hiddenTarget);
+      setResolvingSrc(hiddenTarget);
+      return;
+    }
+    setResolvingSrc(null);
+    markActiveSlotStatus("failed");
     setPlayingSrc(null);
     setScreen("picker");
-  }, [globalSubUrl]); // eslint-disable-line
+  }, [globalSubUrl, markActiveSlotStatus]); // eslint-disable-line
 
   /* ── نتيجة استخراج WebView المخفي ── */
   const handleHiddenResolved = useCallback((stream: ResolvedStream) => {
-    if (!playingSrc) return;
+    const baseSrc = resolvingSrc || playingSrc;
+    setResolvingSrc(null);
+    if (!baseSrc) return;
     const resolved: Src = {
-      ...playingSrc,
+      ...baseSrc,
       directUrl: stream.url,
       url: stream.url,
       isEmbed: false,
-      headers: stream.headers || playingSrc.headers,
+      headers: stream.headers || baseSrc.headers,
       directType: stream.type,
       deliveryMode: "client-extract",
       clientExtract: undefined,
     };
+    markActiveSlotStatus("ready");
     setPlayingSrc(resolved);
     setScreen("native");
-  }, [playingSrc]);
+  }, [playingSrc, resolvingSrc, markActiveSlotStatus]);
 
   const handleHiddenFailed = useCallback(() => {
+    setResolvingSrc(null);
     setResolveFailed(true);
     if (Platform.OS !== "web") {
+      markActiveSlotStatus("failed");
       setPlayingSrc(null);
       setScreen("picker");
       return;
     }
     setScreen("embed");
-  }, []);
+  }, [markActiveSlotStatus]);
 
   /* ── جلب مصدر واحد عند ضغط المستخدم على زر المصدر ── */
   const handlePickSite = useCallback(async (site: string, preferredQuality?: QualityKey, excludeKeys: string[] = [], skipQualityParam = false) => {
     if (tvMode && excludeKeys.length === 0 && Date.now() - pickerOpenedAtRef.current < 180) {
       return;
     }
+    setResolvingSrc(null);
     if (isAwDubbed) {
       if (!preferredQuality) return;
       const slotKey = pickerSlotKey(site, preferredQuality);
+      activeSlotKeyRef.current = slotKey;
       setSlotStatus(prev => ({ ...prev, [slotKey]: "fetching" }));
       try {
         let selected = sources.find(source =>
@@ -2259,7 +2298,6 @@ export default function WatchScreen() {
         }
         awFailedKeysRef.current.clear();
         if (selected.awPickerKey) awFailedKeysRef.current.add(selected.awPickerKey);
-        setSlotStatus(prev => ({ ...prev, [slotKey]: "ready" }));
         playSrc(selected);
       } catch {
         setSlotStatus(prev => ({ ...prev, [slotKey]: "failed" }));
@@ -2276,6 +2314,7 @@ export default function WatchScreen() {
     /* أظهر استجابة اللمس فوراً. فحص صلاحية المشاهدة/الإعلان قد يستغرق
        ثواني، ولا ينبغي أن يبدو الزر ميتاً أثناء انتظاره. */
     const fetchKey = preferredQuality ? `${site}::${preferredQuality}` : site;
+    activeSlotKeyRef.current = preferredQuality ? pickerSlotKey(site, preferredQuality) : null;
     if (preferredQuality) {
       setSlotStatus(prev => ({ ...prev, [pickerSlotKey(site, preferredQuality)]: "fetching" }));
     }
@@ -3045,7 +3084,7 @@ export default function WatchScreen() {
   const handleBack = useCallback(() => {
     /* الخروج من المشغل يرجع أولاً إلى منتقي المصادر حتى لو دخل المستخدم
        من بطاقة أحدث الحلقات. */
-    if (screen === "native" || screen === "embed" || screen === "resolving") {
+    if (screen === "native" || screen === "embed") {
       saveProgress();
       setScreen("picker");
       return;
@@ -3298,38 +3337,7 @@ export default function WatchScreen() {
   /* ── loading: صحيح عندما يكون أي موقع قيد الجلب (مرجع للمستقبل) ── */
   const _loading = Object.values(slotStatus).some(s => s === "fetching"); void _loading;
 
-  /* ══════════════ LOADING SCREEN ══════════════ */
-  if (screen === "loading") {
-    return (
-      <View style={{ flex: 1, backgroundColor: colors.background }}>
-        {coverUrl ? <Image source={{ uri: coverUrl }} style={[StyleSheet.absoluteFill, { opacity: 0.13 }]} blurRadius={Platform.OS === "ios" ? 28 : 10} resizeMode="cover" /> : null}
-        <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colors.background, opacity: 0.92 }]} />
-        <Pressable onPress={handleBack} focusable={tvMode} style={({ focused }) => [d.ldBackBtn, { top: topPad + 4 }, tvMode && tvFocusStyle(focused)]}>
-          <Ionicons name="arrow-back" size={20} color={colors.textPrimary} style={{ transform: [{ scaleX: -1 }] }} />
-        </Pressable>
-        <View style={d.ldContent}>
-          <Text style={d.ldPrayer}>اللهم صلِّ وسلِّم على نبينا محمد ﷺ</Text>
-          <View style={d.ldPosterWrap}>
-            {coverUrl ? (
-              <Image source={{ uri: coverUrl }} style={d.ldPoster} resizeMode="contain" />
-            ) : (
-              <View style={[d.ldPoster, { backgroundColor: colors.surface, alignItems: "center", justifyContent: "center" }]}>
-                <Ionicons name="film" size={36} color={colors.accent} />
-              </View>
-            )}
-          </View>
-          {displayTitle ? (
-            <Text style={{ fontSize: 16, fontFamily: "Cairo_700Bold", color: colors.textPrimary, textAlign: "center", paddingHorizontal: 12 }} numberOfLines={2}>{displayTitle}</Text>
-          ) : null}
-          <View style={d.ldEpBadge}><Ionicons name="tv" size={10} color={colors.accent} /><Text style={d.ldEpText}>الحلقة {epNum}{arEpTitle ? ` · ${arEpTitle}` : ""}</Text></View>
-          <View style={{ alignItems: "center", gap: 10 }}>
-            <SpinRing />
-            <Text style={{ fontSize: 13, fontFamily: "Cairo_400Regular", color: colors.textSecondary, textAlign: "center" }}>⏳ جاري تجهيز الحلقة، قد يستغرق بضع ثوانٍ.</Text>
-          </View>
-        </View>
-      </View>
-    );
-  }
+
 
   /* ══════════════ RIFT PLAYER ══════════════ */
   if (screen === "native" && playerSources.length > 0 && playingSrc) {
@@ -3365,30 +3373,7 @@ export default function WatchScreen() {
     );
   }
 
-  /* ══════════════ RESOLVING (WebView مخفي — لا يُعرض للمستخدم) ══════════════ */
-  if (screen === "resolving" && playingSrc) {
-    const resolveUrl2 = getPlayUrl(playingSrc);
-    return (
-      <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 14 }}>
-        <Pressable onPress={handleBack} focusable={tvMode} style={({ focused }) => [d.playerBackBtn, { position: "absolute", top: topPad + 4, right: 12 }, tvMode && tvFocusStyle(focused)]}>
-          <Ionicons name="arrow-back" size={18} color="#fff" style={{ transform: [{ scaleX: -1 }] }} />
-        </Pressable>
-        <SpinRing />
-        <Text style={{ fontSize: 13, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.45)", textAlign: "center" }}>
-          ⏳ جاري تجهيز المصدر…
-        </Text>
-        {/* WebView مخفي 100% — يزور الصفحة المحمية خلفياً ثم يُستبدل تلقائياً بالمشغّل الداخلي */}
-        {(playingSrc.clientExtract?.embedUrl || resolveUrl2) ? (
-          <HiddenResolverWebView
-            pageUrl={playingSrc.clientExtract?.embedUrl || resolveUrl2}
-            refererOverride={playingSrc.clientExtract?.referer}
-            onResolved={handleHiddenResolved}
-            onFailed={handleHiddenFailed}
-          />
-        ) : null}
-      </View>
-    );
-  }
+
 
   /* ══════════════ EMBED (WebView) ══════════════ */
   if (screen === "embed" && playingSrc) {
@@ -4083,6 +4068,16 @@ export default function WatchScreen() {
           }}
         />
       )}
+      {resolvingSrc && (resolvingSrc.clientExtract?.embedUrl || getPlayUrl(resolvingSrc)) ? (
+        <View style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" }}>
+          <HiddenResolverWebView
+            pageUrl={resolvingSrc.clientExtract?.embedUrl || getPlayUrl(resolvingSrc)}
+            refererOverride={resolvingSrc.clientExtract?.referer}
+            onResolved={handleHiddenResolved}
+            onFailed={handleHiddenFailed}
+          />
+        </View>
+      ) : null}
     </View>
   );
 }
