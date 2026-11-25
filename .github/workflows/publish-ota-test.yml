@@ -354,7 +354,7 @@ jobs:
                 # Insert include right before the first "location /" inside server block(s) with proxy_pass
                 new_txt, count = re.subn(
                     r"(?m)^([ \t]*location\s+/\s*\{)",
-                    include_line + "\n\n\1",
+                    lambda m: include_line + "\n\n" + m.group(1),
                     orig_txt,
                 )
                 if count == 0:
