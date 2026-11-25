@@ -2180,11 +2180,8 @@ export default function WatchScreen() {
     /* مواقع محمية (Cloudflare/Turnstile) — حاول استخراج رابط الفيديو الحقيقي
        عبر WebView مخفي (IP الجهاز السكني) قبل عرض بطاقة "يحتاج تطبيق أصلي" */
     if (needsHiddenResolve(src)) { setScreen("resolving"); return; }
-    if (Platform.OS !== "web") {
-      setScreen("picker");
-      return;
-    }
-    setScreen("embed");
+    setPlayingSrc(null);
+    setScreen("picker");
   }, [globalSubUrl]); // eslint-disable-line
 
   /* ── نتيجة استخراج WebView المخفي ── */
