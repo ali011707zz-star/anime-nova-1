@@ -600,10 +600,6 @@ export default function AnimationWatchScreen() {
     } finally {
       clearTimeout(clientTimeout);
       setLoading(false);
-      setSources(prev => {
-        if (prev.length === 0) 
-        return prev;
-      });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tmdbId, type, ep, season, titleStr, animSrcCacheKey]);

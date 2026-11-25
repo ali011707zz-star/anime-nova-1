@@ -2,7 +2,7 @@ name: 🤖 بناء APK أندرويد
 
 on:
   push:
-    branches: [main, test/v1.0.11]
+    branches: [main]
   workflow_dispatch:
     inputs:
       backend_domain:
