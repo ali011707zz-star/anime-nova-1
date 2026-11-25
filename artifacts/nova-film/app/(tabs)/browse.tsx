@@ -19,7 +19,17 @@ import { AnimeFilterSheet, type AnimeFilterOption } from "@/components/AnimeFilt
 import { SafePosterImage } from "@/components/SafePosterImage";
 import type { ThemePalette } from "@/constants/colors";
 import { useColors } from "@/hooks/useColors";
-import { fetchFilmBrowse } from "@/utils/filmApi";
+import {
+  fetchFilmBrowse,
+  getHomeSeedBrowseItems,
+  getMemoryBrowsePage,
+  loadDiskBrowsePage,
+  normalizeAnimGridSummary,
+  prefetchAnimPosterBatch,
+  prefetchBrowseCategoryPage,
+  setMemoryBrowsePage,
+  toFastGridPosterUrl,
+} from "@/utils/filmApi";
 import { type FilmSummary } from "@/utils/filmCatalog";
 import { isTvDevice, TvPressable as Pressable, usePhoneScale } from "@/utils/tv";
 import { tvFocusStyle } from "@/utils/tvFocus";
@@ -104,8 +114,17 @@ const FORMAT_AR: Record<string, string> = {
   animation_series: "مسلسلات أنميشن",
   animation: "أنميشن",
 };
-const BROWSE_PAGE_CACHE = new Map<string, { items: FilmSummary[]; page: number; totalPages: number; totalResults: number; ts: number }>();
-const BROWSE_CACHE_TTL = 4 * 60_000;
+function getBrowseInitialSeed(category: string): { items: FilmSummary[]; totalPages: number; totalResults: number } | null {
+  const mem = getMemoryBrowsePage(category, "الكل", "popularity", "", 1);
+  if (mem && mem.items.length > 0) {
+    return { items: mem.items, totalPages: mem.totalPages, totalResults: mem.totalResults };
+  }
+  const home = getHomeSeedBrowseItems(category);
+  if (home.length > 0) {
+    return { items: home, totalPages: 25, totalResults: 500 };
+  }
+  return null;
+}
 
 function useBrowseTheme() {
   const colors = useColors();
@@ -213,8 +232,13 @@ const FilmBrowseCard = React.memo(function FilmBrowseCard({
       ]}
     >
       <View style={[g.cardWrap, tvMode && g.tvCardWrap, { width: "100%", height: "100%", aspectRatio: undefined }]}>
-        {film.posterUrl ? (
-          <SafePosterImage uri={film.posterUrl} style={g.cardImg} resizeMode="cover" />
+        {film.posterUrl || film.backdropUrl ? (
+          <SafePosterImage
+            uri={toFastGridPosterUrl(film.posterUrl) || film.posterUrl || film.backdropUrl}
+            fallbackUris={[film.posterUrl, film.backdropUrl].filter(Boolean) as string[]}
+            style={g.cardImg}
+            resizeMode="cover"
+          />
         ) : (
           <View style={[g.cardImg, g.cardNoImg]} />
         )}
@@ -290,11 +314,17 @@ export default function BrowseScreen() {
   const [status, setStatus] = useState<string>("");
   const [year, setYear] = useState<string>(() => String(params.year || ""));
 
-  const [items, setItems] = useState<FilmSummary[]>([]);
+  const initialBrowseSeed = useMemo(() => {
+    const initCat = String(params.category || params.type || "all");
+    return !params.genre && !params.year && (!params.sort || params.sort === "popularity")
+      ? getBrowseInitialSeed(VALID_FORMATS.has(initCat) ? initCat : "all")
+      : null;
+  }, []);
+  const [items, setItems] = useState<FilmSummary[]>(() => initialBrowseSeed?.items || []);
   const [page, setPage] = useState<number>(1);
-  const [totalPages, setTotalPages] = useState<number>(1);
-  const [totalResults, setTotalResults] = useState<number>(0);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [totalPages, setTotalPages] = useState<number>(() => initialBrowseSeed?.totalPages || 1);
+  const [totalResults, setTotalResults] = useState<number>(() => initialBrowseSeed?.totalResults || 0);
+  const [loading, setLoading] = useState<boolean>(() => !initialBrowseSeed);
   const [loadingMore, setLoadingMore] = useState<boolean>(false);
 
   const listRef = useRef<FlatList<FilmSummary>>(null);
@@ -343,57 +373,139 @@ export default function BrowseScreen() {
     [router],
   );
 
+  useEffect(() => {
+    void Promise.allSettled([
+      loadDiskBrowsePage("all"),
+      loadDiskBrowsePage("movie"),
+      loadDiskBrowsePage("series"),
+      loadDiskBrowsePage("arabic_movies"),
+      loadDiskBrowsePage("arabic_series"),
+      loadDiskBrowsePage("turkish_series"),
+      loadDiskBrowsePage("indian_movies"),
+      loadDiskBrowsePage("asian"),
+    ]);
+  }, []);
+
   const loadPage = useCallback(
     async (targetPage: number, replace: boolean) => {
       const myReqId = ++reqIdRef.current;
-      const cacheKey = `${format || "all"}|${activeGenre || "الكل"}|${sort || "popularity"}|${effectiveYear || ""}|p${targetPage}`;
+      const cat = format || "all";
+      const gName = activeGenre || "الكل";
+      const sVal = sort || "popularity";
+      const yVal = effectiveYear || "";
+
       if (replace) {
-        const hit = BROWSE_PAGE_CACHE.get(cacheKey);
-        if (hit && Date.now() - hit.ts < BROWSE_CACHE_TTL && hit.items.length > 0) {
-          setItems(hit.items);
-          setPage(hit.page);
-          setTotalPages(hit.totalPages);
-          setTotalResults(hit.totalResults);
+        const memHit = getMemoryBrowsePage(cat, gName, sVal, yVal, targetPage);
+        if (memHit && memHit.items.length > 0) {
+          setItems(memHit.items);
+          setPage(memHit.page);
+          setTotalPages(memHit.totalPages);
+          setTotalResults(memHit.totalResults);
           setLoading(false);
           setLoadingMore(false);
+          prefetchAnimPosterBatch(memHit.items, 24);
+          if (memHit.page < memHit.totalPages) {
+            void prefetchBrowseCategoryPage(cat, gName, sVal, yVal, memHit.page + 1);
+          }
           return;
         }
-        setLoading(true);
+      } else {
+        const nextMem = getMemoryBrowsePage(cat, gName, sVal, yVal, targetPage);
+        if (nextMem && nextMem.items.length > 0) {
+          setPage(nextMem.page);
+          setTotalPages(nextMem.totalPages);
+          setTotalResults(nextMem.totalResults);
+          setItems((prev) => {
+            const seen = new Set(prev.map((x) => `${x.tmdbType}:${x.id}`));
+            const merged = [...prev];
+            for (const item of nextMem.items) {
+              const k = `${item.tmdbType}:${item.id}`;
+              if (!seen.has(k)) {
+                seen.add(k);
+                merged.push(item);
+              }
+            }
+            return merged;
+          });
+          setLoadingMore(false);
+          prefetchAnimPosterBatch(nextMem.items, 18);
+          if (nextMem.page < nextMem.totalPages) {
+            void prefetchBrowseCategoryPage(cat, gName, sVal, yVal, nextMem.page + 1);
+          }
+          return;
+        }
+      }
+
+      let hasVisibleData = false;
+      if (replace && targetPage === 1 && gName === "الكل" && sVal === "popularity" && !yVal) {
+        const diskHit = await loadDiskBrowsePage(cat);
+        if (myReqId !== reqIdRef.current) return;
+        if (diskHit && diskHit.items.length > 0) {
+          hasVisibleData = true;
+          setItems(diskHit.items);
+          setPage(1);
+          setTotalPages(diskHit.totalPages);
+          setTotalResults(diskHit.totalResults);
+          setLoading(false);
+          prefetchAnimPosterBatch(diskHit.items, 24);
+        } else {
+          const homeSeed = getHomeSeedBrowseItems(cat);
+          if (homeSeed.length > 0) {
+            hasVisibleData = true;
+            setItems(homeSeed);
+            setPage(1);
+            setTotalPages(25);
+            setTotalResults(500);
+            setLoading(false);
+            prefetchAnimPosterBatch(homeSeed, 18);
+          }
+        }
+      }
+
+      if (replace) {
+        if (!hasVisibleData) setLoading(true);
       } else {
         setLoadingMore(true);
       }
+
       try {
         const res = await fetchFilmBrowse({
-          category: (format || "all") as any,
-          genre: activeGenre || "الكل",
-          sort: (sort || "popularity") as any,
-          year: effectiveYear ? Number(effectiveYear) : undefined,
+          category: cat as any,
+          genre: gName,
+          sort: sVal as any,
+          year: yVal ? Number(yVal) : undefined,
           page: targetPage,
         });
         if (myReqId !== reqIdRef.current) return;
+        const normalized = (res.results || []).map(normalizeAnimGridSummary);
         setPage(res.page);
         setTotalPages(res.totalPages);
-        setTotalResults(res.totalResults || res.results.length);
+        setTotalResults(res.totalResults || normalized.length);
+        if (normalized.length > 0) {
+          setMemoryBrowsePage(
+            cat,
+            gName,
+            sVal,
+            yVal,
+            res.page || targetPage,
+            normalized,
+            res.totalPages,
+            res.totalResults || normalized.length,
+          );
+          prefetchAnimPosterBatch(normalized, 24);
+          if ((res.page || targetPage) < res.totalPages) {
+            void prefetchBrowseCategoryPage(cat, gName, sVal, yVal, (res.page || targetPage) + 1);
+          }
+        }
         if (replace) {
-          setItems(res.results);
-          if (res.results.length > 0) {
-            if (BROWSE_PAGE_CACHE.size > 40) {
-              const oldest = BROWSE_PAGE_CACHE.keys().next().value;
-              if (oldest) BROWSE_PAGE_CACHE.delete(oldest);
-            }
-            BROWSE_PAGE_CACHE.set(cacheKey, {
-              items: res.results,
-              page: res.page,
-              totalPages: res.totalPages,
-              totalResults: res.totalResults || res.results.length,
-              ts: Date.now(),
-            });
+          if (normalized.length > 0 || !hasVisibleData) {
+            setItems(normalized);
           }
         } else {
           setItems((prev) => {
             const seen = new Set(prev.map((x) => `${x.tmdbType}:${x.id}`));
             const merged = [...prev];
-            for (const item of res.results) {
+            for (const item of normalized) {
               const k = `${item.tmdbType}:${item.id}`;
               if (!seen.has(k)) {
                 seen.add(k);
@@ -404,7 +516,7 @@ export default function BrowseScreen() {
           });
         }
       } catch {
-        if (myReqId === reqIdRef.current && replace) setItems([]);
+        if (myReqId === reqIdRef.current && replace && !hasVisibleData) setItems([]);
       } finally {
         if (myReqId === reqIdRef.current) {
           setLoading(false);
@@ -689,13 +801,13 @@ export default function BrowseScreen() {
               columnWrapperStyle={{ gap: 10, marginBottom: 10 }}
               showsVerticalScrollIndicator={false}
               overScrollMode="never"
-              initialNumToRender={12}
-              maxToRenderPerBatch={12}
-              updateCellsBatchingPeriod={30}
+              initialNumToRender={15}
+              maxToRenderPerBatch={15}
+              updateCellsBatchingPeriod={25}
               windowSize={9}
               getItemLayout={getItemLayout}
               removeClippedSubviews={false}
-              onEndReachedThreshold={0.45}
+              onEndReachedThreshold={0.7}
               onEndReached={() => {
                 if (!loading && !loadingMore && page < totalPages) {
                   void loadPage(page + 1, false);

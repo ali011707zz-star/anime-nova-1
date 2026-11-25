@@ -669,11 +669,220 @@ export function scheduleBackgroundAnimWarm(): void {
   _warmStarted = true;
   setTimeout(() => {
     void (async () => {
-      await Promise.allSettled([loadDiskAnimPage("animation_movies"), loadDiskAnimPage("animation_series")]);
-      const m = await prefetchAnimTabPage("animation_movies");
-      if (m) prefetchAnimPosterBatch(m, 12);
-      const s = await prefetchAnimTabPage("animation_series");
-      if (s) prefetchAnimPosterBatch(s, 12);
+      await Promise.allSettled([
+        loadDiskAnimPage("animation_movies"),
+        loadDiskAnimPage("animation_series"),
+        loadDiskBrowsePage("all"),
+        loadDiskBrowsePage("movie"),
+        loadDiskBrowsePage("series"),
+      ]);
+      await Promise.allSettled([
+        prefetchAnimTabPage("animation_movies"),
+        prefetchAnimTabPage("animation_series"),
+        prefetchBrowseCategoryPage("movie", "الكل", "popularity", "", 1),
+        prefetchBrowseCategoryPage("series", "الكل", "popularity", "", 1),
+        prefetchBrowseCategoryPage("all", "الكل", "popularity", "", 1),
+      ]);
     })();
   }, 650);
+}
+
+
+type BrowseMemEntry = {
+  items: FilmSummary[];
+  page: number;
+  totalPages: number;
+  totalResults: number;
+  ts: number;
+};
+
+const BROWSE_MEM_CACHE = new Map<string, BrowseMemEntry>();
+const BROWSE_MEM_TTL_MS = 10 * 60_000;
+
+export function browseCacheKey(
+  category = "all",
+  genre = "الكل",
+  sort = "popularity",
+  year = "",
+  page = 1,
+): string {
+  return `${category || "all"}|${genre || "الكل"}|${sort || "popularity"}|${year || ""}|p${page}`;
+}
+
+export function getMemoryBrowsePage(
+  category = "all",
+  genre = "الكل",
+  sort = "popularity",
+  year = "",
+  page = 1,
+): BrowseMemEntry | null {
+  const key = browseCacheKey(category, genre, sort, year, page);
+  const hit = BROWSE_MEM_CACHE.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.ts > BROWSE_MEM_TTL_MS) {
+    BROWSE_MEM_CACHE.delete(key);
+    return null;
+  }
+  BROWSE_MEM_CACHE.delete(key);
+  BROWSE_MEM_CACHE.set(key, hit);
+  return hit;
+}
+
+export function setMemoryBrowsePage(
+  category: string,
+  genre: string,
+  sort: string,
+  year: string,
+  page: number,
+  items: FilmSummary[],
+  totalPages: number,
+  totalResults: number,
+): void {
+  const normalized = items.map(normalizeAnimGridSummary);
+  const key = browseCacheKey(category, genre, sort, year, page);
+  if (BROWSE_MEM_CACHE.size >= 80) {
+    const oldest = BROWSE_MEM_CACHE.keys().next().value;
+    if (oldest) BROWSE_MEM_CACHE.delete(oldest);
+  }
+  BROWSE_MEM_CACHE.set(key, {
+    items: normalized,
+    page,
+    totalPages,
+    totalResults,
+    ts: Date.now(),
+  });
+  if (
+    page === 1 &&
+    (!genre || genre === "الكل") &&
+    (!sort || sort === "popularity") &&
+    !year &&
+    normalized.length > 0
+  ) {
+    AsyncStorage.setItem(
+      `nova_film_browse_p1_${category || "all"}_v1`,
+      JSON.stringify({
+        items: normalized.slice(0, 24),
+        totalPages,
+        totalResults,
+      }),
+    ).catch(() => {});
+  }
+}
+
+export async function loadDiskBrowsePage(category = "all"): Promise<BrowseMemEntry | null> {
+  const mem = getMemoryBrowsePage(category, "الكل", "popularity", "", 1);
+  if (mem) return mem;
+  try {
+    const raw = await AsyncStorage.getItem(`nova_film_browse_p1_${category || "all"}_v1`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const items = Array.isArray(parsed?.items)
+      ? parsed.items.map(normalizeAnimGridSummary).filter((x: FilmSummary) => x && x.id)
+      : [];
+    if (items.length === 0) return null;
+    const entry: BrowseMemEntry = {
+      items,
+      page: 1,
+      totalPages: Number(parsed?.totalPages || 25),
+      totalResults: Number(parsed?.totalResults || items.length),
+      ts: Date.now() - (BROWSE_MEM_TTL_MS - 60_000),
+    };
+    BROWSE_MEM_CACHE.set(browseCacheKey(category, "الكل", "popularity", "", 1), entry);
+    return entry;
+  } catch {
+    return null;
+  }
+}
+
+export function getHomeSeedBrowseItems(category = "all"): FilmSummary[] {
+  const home = _memHomeFeed;
+  if (!home) return [];
+  let list: FilmSummary[] = [];
+  switch (category) {
+    case "movie":
+    case "foreign_movies":
+      list = [...(home.trendingMovies || []), ...(home.latestMovies || [])];
+      break;
+    case "series":
+    case "foreign_series":
+      list = [...(home.popularSeries || []), ...(home.latestSeries || [])];
+      break;
+    case "top_rated":
+      list = home.topRated || [];
+      break;
+    case "asian":
+    case "asian_movies":
+      list = home.asianMovies || [];
+      break;
+    case "asian_series":
+      list = home.asianSeries || [];
+      break;
+    case "animation_movies":
+      list = home.animationMovies || [];
+      break;
+    case "animation_series":
+      list = home.animationSeries || [];
+      break;
+    case "animation":
+      list = [...(home.animationMovies || []), ...(home.animationSeries || [])];
+      break;
+    case "all": {
+      const m = home.trendingMovies || [];
+      const s = home.popularSeries || [];
+      for (let i = 0; i < Math.max(m.length, s.length); i++) {
+        if (m[i]) list.push(m[i]);
+        if (s[i]) list.push(s[i]);
+      }
+      break;
+    }
+    default:
+      list = [];
+  }
+  const seen = new Set<string>();
+  const out: FilmSummary[] = [];
+  for (const it of list) {
+    const k = `${it.tmdbType}:${it.id}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(normalizeAnimGridSummary(it));
+  }
+  return out.slice(0, 24);
+}
+
+export async function prefetchBrowseCategoryPage(
+  category: string,
+  genre = "الكل",
+  sort = "popularity",
+  year = "",
+  page = 1,
+): Promise<FilmSummary[] | null> {
+  const existing = getMemoryBrowsePage(category, genre, sort, year, page);
+  if (existing && existing.items.length > 0) {
+    prefetchAnimPosterBatch(existing.items, 12);
+    return existing.items;
+  }
+  try {
+    const res = await fetchFilmBrowse({
+      category,
+      genre,
+      sort,
+      year: year ? Number(year) : undefined,
+      page,
+    });
+    if (res.results.length > 0) {
+      setMemoryBrowsePage(
+        category,
+        genre,
+        sort,
+        year,
+        page,
+        res.results,
+        res.totalPages || 25,
+        res.totalResults || res.results.length,
+      );
+      prefetchAnimPosterBatch(res.results, 12);
+      return res.results;
+    }
+  } catch {}
+  return null;
 }
