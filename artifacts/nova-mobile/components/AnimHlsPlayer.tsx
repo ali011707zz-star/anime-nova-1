@@ -15,6 +15,7 @@ import { StatusBar } from "expo-status-bar";
 /* ── Types ── */
 export interface AnimHlsSource {
   url: string;
+  proxyUrl?: string;
   label: string;
   quality: "1080p FHD" | "720p HD" | "360p SD";
   headers?: Record<string, string>;
@@ -48,6 +49,7 @@ const buildHtml = (
   const srcJson = JSON.stringify(
     sources.map((s) => ({
       url: s.url,
+      proxyUrl: s.proxyUrl || "",
       label: s.label,
       quality: s.quality,
       referer: s.headers?.Referer || s.headers?.referer || "",
@@ -360,6 +362,9 @@ var retryCount   = 0;
 var loadTimeout  = null;
 var initPosDone  = false;
 var hasStarted   = false;
+var pendingSwitchSeek = 0;
+var stallCheckPos = -1;
+var stallCheckAt  = 0;
 var gesture      = null;
 var swipeTimeout = null;
 
@@ -478,11 +483,18 @@ function makeRefLoader(ref) {
 }
 
 /* ── Load source ── */
+function isDirectPrimarySrc(src) {
+  return !!(src && src.proxyUrl && src.proxyUrl !== src.url && !src.usedProxyFallback);
+}
+
 function loadSrc(idx, seekTo) {
   srcIdx = idx;
   retryCount = 0;
-  initPosDone = false;
+  pendingSwitchSeek = (seekTo && seekTo > 0.5) ? seekTo : 0;
+  initPosDone = pendingSwitchSeek > 0.5;
   hasStarted = false;
+  stallCheckPos = -1;
+  stallCheckAt = 0;
   showSpinner(true);
   hideErr();
   buildSrcList();
@@ -492,15 +504,16 @@ function loadSrc(idx, seekTo) {
 
   var url = src.url;
   var ref = src.referer || '';
+  var directPrimary = isDirectPrimarySrc(src);
 
   if (hls) { hls.destroy(); hls = null; }
 
-  // Start load timeout
+  // Start fast 3.5s load timeout when direct has dormant server proxy ready
   clearTimeout(loadTimeout);
   loadTimeout = setTimeout(function() {
     loadTimeout = null;
     handleErr('timeout loading source');
-  }, 25000);
+  }, directPrimary ? 3500 : 25000);
 
   function doLoad() {
     if (/\\.mp4(\\?|$|#)/i.test(url) || (url.indexOf('.mp4') !== -1 && url.indexOf('.m3u8') === -1)) {
@@ -527,7 +540,9 @@ function loadSrc(idx, seekTo) {
       });
       hls.on(Hls.Events.ERROR, function(ev, data) {
         if (data.fatal) {
-          if (data.type === Hls.ErrorTypes.NETWORK_ERROR && retryCount < 2) {
+          if (directPrimary && !hasStarted) {
+            handleErr(data.type + ':' + data.details);
+          } else if (data.type === Hls.ErrorTypes.NETWORK_ERROR && retryCount < 2) {
             retryCount++;
             setTimeout(function() { try { hls.startLoad(); } catch(e) {} }, 1000);
           } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR && retryCount < 2) {
@@ -547,11 +562,15 @@ function loadSrc(idx, seekTo) {
     }
   }
 
-  if (seekTo && seekTo > 5) {
+  if (seekTo && seekTo > 0.5) {
     doLoad();
     setTimeout(function() {
-      if (!initPosDone) { initPosDone = true; v.currentTime = seekTo; }
-    }, 3000);
+      if (pendingSwitchSeek > 0.5 && v.readyState >= 1) {
+        var t = pendingSwitchSeek;
+        pendingSwitchSeek = 0;
+        v.currentTime = t;
+      }
+    }, 1500);
   } else {
     doLoad();
   }
@@ -563,6 +582,17 @@ function loadSrc(idx, seekTo) {
 /* ── Error handling ── */
 function handleErr(msg) {
   clearTimeout(loadTimeout);
+  var curSrc = SOURCES[srcIdx];
+  if (isDirectPrimarySrc(curSrc)) {
+    var resumeAt = v && Number.isFinite(v.currentTime) && v.currentTime > 0.5
+      ? v.currentTime
+      : (pendingSwitchSeek > 0.5 ? pendingSwitchSeek : 0);
+    curSrc.usedProxyFallback = true;
+    curSrc.url = curSrc.proxyUrl;
+    curSrc.referer = '';
+    loadSrc(srcIdx, resumeAt);
+    return;
+  }
   post({ k: 'err', msg: msg });
   // Try next source automatically
   var next = srcIdx + 1;
@@ -573,6 +603,22 @@ function handleErr(msg) {
     showErr('فشلت جميع المصادر');
   }
 }
+
+setInterval(function() {
+  var curSrc = SOURCES[srcIdx];
+  if (!isDirectPrimarySrc(curSrc) || !hasStarted || v.paused || seekDrag) {
+    stallCheckAt = 0;
+    return;
+  }
+  var cur = v.currentTime || 0;
+  if (cur > stallCheckPos + 0.1) {
+    stallCheckPos = cur;
+    stallCheckAt = Date.now();
+  } else if (stallCheckAt > 0 && Date.now() - stallCheckAt > 8000) {
+    stallCheckAt = 0;
+    handleErr('direct_stall');
+  }
+}, 1000);
 
 function retryNext() {
   var next = srcIdx + 1;
@@ -597,7 +643,10 @@ function switchSrc(idx) {
 v.addEventListener('loadedmetadata', function() {
   dur = v.duration;
   durEl.textContent = fmt(dur);
-  if (!initPosDone && INIT_POS > 5) { initPosDone = true; v.currentTime = INIT_POS; }
+  if (pendingSwitchSeek > 0.5) {
+    v.currentTime = pendingSwitchSeek;
+    pendingSwitchSeek = 0;
+  } else if (!initPosDone && INIT_POS > 5) { initPosDone = true; v.currentTime = INIT_POS; }
   clearTimeout(loadTimeout);
   showSpinner(false);
   if (loadBg) { loadBg.style.display = 'none'; loadBg = null; }

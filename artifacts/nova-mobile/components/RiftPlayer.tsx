@@ -28,6 +28,12 @@ import {
   resolveSkipTimes,
   validateSkipInterval,
 } from "@/lib/skipTimes.mjs";
+import {
+  applyProxyPromotion,
+  resolveHybridLoadTimeoutMs,
+  resolveHybridStallTimings,
+  type ProxyFallbackDescriptor,
+} from "@/utils/hybridStreamLogic.mjs";
 
 const { width: W, height: H } = Dimensions.get("window");
 const PLAYER_CONTROL_ICON = "rgba(255,255,255,0.90)";
@@ -57,6 +63,8 @@ export type PlayerSource = {
   /** أوقات تخطي المقدمة/النهاية التي أعادها مزود المصدر نفسه. */
   skipIntro?: { start: number; end: number };
   skipOutro?: { start: number; end: number };
+  /** مسار خادم احتياطي صامت (لا يُستدعى إلا عند فشل أو بطء البث المباشر) */
+  proxyFallback?: ProxyFallbackDescriptor;
 };
 
 type SeekRecoveryState = {
@@ -503,21 +511,37 @@ function ExpoRiftPlayer({
     return () => subscription.remove();
   }, [onBack]);
 
-  /* ─── Source ─── */
+  /* ─── Source + Hybrid silent proxy promotion state ─── */
+  const [promotedProxyByOrigUrl, setPromotedProxyByOrigUrl] = useState<Record<string, ProxyFallbackDescriptor>>({});
+  const promotedProxyRef = useRef<Record<string, ProxyFallbackDescriptor>>({});
   const playableSources = useMemo(() => {
     const seen = new Set<string>();
-    return sources.filter(source => {
-      const url = source?.url?.trim();
-      if (!isValidPlayerSourceUrl(url) || seen.has(url)) return false;
-      seen.add(url);
-      return true;
-    });
-  }, [sources]);
+    const out: PlayerSource[] = [];
+    for (const rawSource of sources) {
+      const origUrl = rawSource?.url?.trim();
+      if (!isValidPlayerSourceUrl(origUrl)) continue;
+      const promoted = promotedProxyByOrigUrl[origUrl];
+      const effectiveSource = promoted && rawSource.proxyFallback?.url === promoted.url
+        ? applyProxyPromotion({ ...rawSource, url: origUrl }, promoted)
+        : rawSource;
+      const effectiveUrl = effectiveSource?.url?.trim();
+      if (!isValidPlayerSourceUrl(effectiveUrl) || seen.has(effectiveUrl)) continue;
+      seen.add(effectiveUrl);
+      out.push(effectiveSource);
+    }
+    return out;
+  }, [sources, promotedProxyByOrigUrl]);
   const safeInitialIndex = Math.min(
     Math.max(initialSourceIndex, 0),
     Math.max(playableSources.length - 1, 0),
   );
   const [srcIdx, setSrcIdx]         = useState(safeInitialIndex);
+  const srcIdxRef                   = useRef(safeInitialIndex);
+  useEffect(() => { srcIdxRef.current = srcIdx; }, [srcIdx]);
+  const rawSourcesRef               = useRef(sources);
+  useEffect(() => { rawSourcesRef.current = sources; }, [sources]);
+  const playableSourcesRef          = useRef(playableSources);
+  useEffect(() => { playableSourcesRef.current = playableSources; }, [playableSources]);
   const currentSrc                  = playableSources[srcIdx];
   const playbackTraceStateRef = useRef({
     url: "",
@@ -542,7 +566,13 @@ function ExpoRiftPlayer({
       rebufferCount: 0,
     };
     logPlaybackStage(url, "source_assigned");
-  }, [currentSrc?.url]);
+    if (!currentSrc?.proxyFallback?.url) return;
+    const directAssignGuard = setTimeout(() => {
+      if (!aliveRef.current || playbackTraceStateRef.current.url !== url || playbackTraceStateRef.current.playingLogged) return;
+      trySilentProxyFallbackRef.current("assign_timeout");
+    }, 3500);
+    return () => clearTimeout(directAssignGuard);
+  }, [currentSrc?.url, currentSrc?.proxyFallback?.url]);
   const isLocalPlayback = playableSources.length > 0
     && playableSources.every(source => /^(?:file|content):\/\//i.test(source.url));
   const subtitlesDisabled = subtitlesDisabledForSite(currentSrc?.site);
@@ -1179,6 +1209,57 @@ function ExpoRiftPlayer({
     }, 30_000);
   }, []);
 
+  const trySilentProxyFallback = useCallback((reason: string): boolean => {
+    if (!aliveRef.current) return false;
+    const activeIdx = srcIdxRef.current;
+    const activeSrc = playableSourcesRef.current[activeIdx];
+    const fallback = activeSrc?.proxyFallback;
+    if (!activeSrc?.url || !fallback?.url || !isValidPlayerSourceUrl(fallback.url)) return false;
+    const origUrl = activeSrc.url.trim();
+    if (promotedProxyRef.current[origUrl]?.url === fallback.url) return false;
+
+    if (loadTimeoutRef.current) { clearTimeout(loadTimeoutRef.current); loadTimeoutRef.current = null; }
+    if (waitForSrcTimerRef.current) { clearTimeout(waitForSrcTimerRef.current); waitForSrcTimerRef.current = null; }
+    if (manualSeekErrorTimeoutRef.current) { clearTimeout(manualSeekErrorTimeoutRef.current); manualSeekErrorTimeoutRef.current = null; }
+    if (seekRecoveryTimerRef.current) { clearTimeout(seekRecoveryTimerRef.current); seekRecoveryTimerRef.current = null; }
+    if (replayTimeoutRef.current) { clearTimeout(replayTimeoutRef.current); replayTimeoutRef.current = null; }
+    if (replaceSafetyTimerRef.current) { clearTimeout(replaceSafetyTimerRef.current); replaceSafetyTimerRef.current = null; }
+    seekRecoveryRef.current = null;
+    replaceInFlightRef.current = false;
+    pendingSwitchIdxRef.current = null;
+    switchGenerationRef.current += 1;
+
+    let nativePos = 0;
+    try { nativePos = Number(player.currentTime); } catch {}
+    const pendingTarget = pendingRestoreRef.current?.target || 0;
+    const preservePos = pendingTarget > 0.5
+      ? pendingTarget
+      : (Number.isFinite(nativePos) && nativePos > 0.5
+        ? nativePos
+        : (positionRef.current > 0.5 ? positionRef.current : (initialPosition && initialPosition > 3 ? initialPosition : 0)));
+    pendingRestoreRef.current = null;
+    pendingSeekRef.current = null;
+    switchPosRef.current = Number.isFinite(preservePos) ? Math.max(0, preservePos) : 0;
+    resumedRef.current = false;
+    stallRef.current = { lastPos: -1, lastAt: 0 };
+    stallNudgeTriedRef.current = false;
+    consecutiveErrorsRef.current = 0;
+    terminalErrorRef.current = false;
+    setError(false);
+    setIsAutoCycling(false);
+    setIsWaitingForSources(false);
+    setBuffering(true);
+
+    logPlaybackStage(fallback.url, "hybrid_proxy_takeover", `reason=${reason} pos=${Math.floor(switchPosRef.current)}`);
+    const nextMap = { ...promotedProxyRef.current, [origUrl]: fallback };
+    promotedProxyRef.current = nextMap;
+    setPromotedProxyByOrigUrl(nextMap);
+    setSourceReloadNonce(value => value + 1);
+    return true;
+  }, [initialPosition, logPlaybackStage, player]);
+  const trySilentProxyFallbackRef = useRef(trySilentProxyFallback);
+  useEffect(() => { trySilentProxyFallbackRef.current = trySilentProxyFallback; }, [trySilentProxyFallback]);
+
   /* ─── Player events ───
      myGen: يُلتقط جيل التبديل الحالي لحظة تسجيل هذا الـ effect (بعد أي switchSource
      سابق زاد switchGenerationRef). أي حدث يصل من native player بعد أن بدأ تبديل
@@ -1231,15 +1312,15 @@ function ExpoRiftPlayer({
             `elapsed_ms=${Date.now() - playbackTraceStateRef.current.assignedAt}`,
           );
         }
-        /* Anime CDNs can deliver a first segment slowly. Allow 25s for startup,
-           and 40s for a rebuffer; the 25s + 12s stall recovery remains the
-           earlier guard for a player that claims to be playing but makes no progress. */
-        const loadTimeoutMs = animePlayback
-          ? (traceState.playingLogged ? 40_000 : 25_000)
-          : 18_000;
+        const activeHasProxyFallback = Boolean(playableSourcesRef.current[srcIdxRef.current]?.proxyFallback?.url);
+        const loadTimeoutMs = resolveHybridLoadTimeoutMs({
+          hasProxyFallback: activeHasProxyFallback,
+          hasStartedPlayback: traceState.playingLogged,
+          animePlayback,
+        });
         /* Repeated native loading notifications must not keep extending the
-           Anime deadline indefinitely. Other player modes keep their prior behavior. */
-        if (!animePlayback || !loadTimeoutRef.current) {
+           deadline indefinitely when animePlayback or hybrid direct probe is active. */
+        if ((!animePlayback && !activeHasProxyFallback) || !loadTimeoutRef.current) {
           if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
           loadTimeoutRef.current = setTimeout(() => {
             loadTimeoutRef.current = null;
@@ -1249,8 +1330,11 @@ function ExpoRiftPlayer({
               "load_timeout",
               `timeout_ms=${loadTimeoutMs}`,
             );
+            if (trySilentProxyFallbackRef.current("load_timeout")) {
+              return;
+            }
             console.warn(
-              `[RiftPlayer] ⏱ timeout (${Math.round(loadTimeoutMs / 1000)}s) — ${playableSources[srcIdx]?.label || "?"}`,
+              `[RiftPlayer] ⏱ timeout (${Math.round(loadTimeoutMs / 1000)}s) — ${playableSourcesRef.current[srcIdxRef.current]?.label || "?"}`,
             );
             setError(true);
             setBuffering(false);
@@ -1346,6 +1430,9 @@ function ExpoRiftPlayer({
           } catch {}
         }
         else if (e.status === "error") {
+          if (!playbackTraceStateRef.current.playingLogged && trySilentProxyFallbackRef.current("startup_error")) {
+            return;
+          }
           const manualSeek = pendingSeekRef.current;
           if (
             manualSeek &&
@@ -1370,6 +1457,9 @@ function ExpoRiftPlayer({
                   }
                   pendingSeekRef.current = null;
                   setPostSeekPct(null);
+                  if (trySilentProxyFallbackRef.current("seek_error")) {
+                    return;
+                  }
                   setError(true);
                   setBuffering(false);
                 }
@@ -1404,6 +1494,9 @@ function ExpoRiftPlayer({
               replayTimeoutRef.current = null;
             }
             seekRecoveryRef.current = null;
+          }
+          if (trySilentProxyFallbackRef.current("player_error")) {
+            return;
           }
           setError(true);
           setBuffering(false);
@@ -1552,11 +1645,13 @@ function ExpoRiftPlayer({
 
   /* ─── Progress polling ─── */
   useEffect(() => {
-    // Some signed CDN segments take 17+ seconds to arrive. Do not switch away
-    // from a healthy source while that request is still within its normal range.
-    const STALL_TIMEOUT_MS = 25_000;
-    const STALL_RECOVERY_TIMEOUT_MS = 12_000;
+    // Some signed CDN segments take 17+ seconds to arrive on final proxy.
+    // On direct playback with a dormant proxyFallback, switch silently much sooner.
     const id = setInterval(() => {
+      const { stallTimeoutMs: STALL_TIMEOUT_MS, stallRecoveryMs: STALL_RECOVERY_TIMEOUT_MS } =
+        resolveHybridStallTimings({
+          hasProxyFallback: Boolean(playableSourcesRef.current[srcIdxRef.current]?.proxyFallback?.url),
+        });
       if (AppState.currentState && AppState.currentState !== "active") {
         stallRef.current = { lastPos: positionRef.current, lastAt: 0 };
         return;
@@ -1691,9 +1786,12 @@ function ExpoRiftPlayer({
                 if (!animePlayback || animePlaybackIntentRef.current) player.play();
               } catch {}
             } else {
-              console.warn(`[RiftPlayer] 🔴 stall persists after nudge — switching source`);
               stallRef.current = { lastPos: -1, lastAt: 0 };
               stallNudgeTriedRef.current = false;
+              if (trySilentProxyFallbackRef.current("stall_persists")) {
+                return;
+              }
+              console.warn(`[RiftPlayer] 🔴 stall persists after nudge — switching source`);
               setError(true);
               setBuffering(false);
             }
@@ -2717,9 +2815,11 @@ function ExpoRiftPlayer({
       /* Keep the Anime replacement lock beyond its maximum loading deadline;
          releasing it sooner can start a second native replace while the first
          source is still loading. */
-      const replaceSafetyTimeoutMs = animePlayback
-        ? (playbackTraceStateRef.current.playingLogged ? 45_000 : 30_000)
-        : 10_000;
+      const replaceSafetyTimeoutMs = nextSrc.proxyFallback?.url
+        ? 12_000
+        : animePlayback
+          ? (playbackTraceStateRef.current.playingLogged ? 45_000 : 30_000)
+          : 10_000;
       replaceSafetyTimerRef.current = setTimeout(() => {
         replaceSafetyTimerRef.current = null;
         replaceInFlightRef.current = false;
@@ -2737,6 +2837,14 @@ function ExpoRiftPlayer({
         player.replace(toExpoVideoSource(nextSrc) as any);
       } catch (e) {
         console.warn("[RiftPlayer] player.replace() رمى استثناء:", e);
+        if (replaceSafetyTimerRef.current) {
+          clearTimeout(replaceSafetyTimerRef.current);
+          replaceSafetyTimerRef.current = null;
+        }
+        replaceInFlightRef.current = false;
+        if (trySilentProxyFallbackRef.current("replace_throw")) {
+          return;
+        }
         setError(true);
         setBuffering(false);
         if (replaceSafetyTimerRef.current) {

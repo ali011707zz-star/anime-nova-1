@@ -18,6 +18,7 @@ import { useWatchPlayerOrientation } from "@/utils/watchOrientation";
 import { getWatchContentId, useApp } from "@/context/AppContext";
 import { getStardimaProgressKey } from "@/utils/stardimaProgress";
 import { startMobileWatchAnalytics } from "@/utils/analytics";
+import { buildHybridPlayerSource } from "@/utils/hybridStreamLogic.mjs";
 
 type CatalogEpisode = {
   id: string | number;
@@ -377,14 +378,15 @@ export default function StardimaPlayerScreen() {
       const resolvedQuality = String(data.quality || requestedQuality || "").trim();
       setServerName(resolvedServerName);
       setSelectedQuality(resolvedQuality);
-      setDirectSource([{
+      setDirectSource([buildHybridPlayerSource({
         url: directUrl.href,
         label: resolvedQuality ? `${resolvedServerName} · ${resolvedQuality}` : resolvedServerName,
         ...(resolvedQuality ? { quality: resolvedQuality } : {}),
         contentType: data.type === "hls" ? "hls" : "progressive",
         site: "stardima_catalog",
+        baseUrl: getBaseUrl(),
         ...(Object.keys(headers).length ? { headers } : {}),
-      }]);
+      })]);
       setLoadError("");
     } catch (error: any) {
       if (!signal.aborted) {

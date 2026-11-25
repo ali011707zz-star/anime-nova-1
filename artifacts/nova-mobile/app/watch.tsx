@@ -61,6 +61,10 @@ import {
   hasAwEpisode,
   normalizeAwWatchSources,
 } from "@/utils/awWatchExperience.mjs";
+import {
+  buildHybridPlayerSource,
+  isOwnVpsProxyUrl,
+} from "@/utils/hybridStreamLogic.mjs";
 
 /* ── Types ── */
 type Quality    = "1080p FHD" | "720p HD" | "480p SD" | "360p SD";
@@ -113,6 +117,8 @@ interface Src {
   headers?: Record<string, string>;
   deliveryMode?: string;
   clientExtract?: ClientExtractDescriptor;
+  /** مسار الخادم الاحتياطي الصامت للمصدر نفسه عند فشل البث المباشر */
+  proxyFallbackUrl?: string;
 }
 
 const SUBTITLE_DISABLED_SITES = new Set([
@@ -302,6 +308,15 @@ function isMobilePlayable(s: Src): boolean {
   return isDirectPlayable(s) || (Boolean(s.isEmbed) && isValidSourceUrl(getPlayUrl(s)));
 }
 function getPlayUrl(s: Src): string {
+  /* In v1.0.11+ hybrid mode, always prefer an unencrypted direct external CDN URL first
+     when available so VPS video bandwidth stays 0% unless silent proxyFallback takes over. */
+  if (isDirectStreamActive()) {
+    const directCandidate = [s.directUrl, s.url].find(
+      (value): value is string =>
+        typeof value === "string" && /^https?:\/\//i.test(value.trim()) && !isOwnVpsProxyUrl(value),
+    );
+    if (directCandidate) return directCandidate;
+  }
   /* Mobile responses may contain an encrypted directUrl plus an unencrypted
      /api/... URL in `url`. Prefer the readable proxy URL or the player receives
      the ciphertext and silently fails. */
@@ -2131,6 +2146,7 @@ export default function WatchScreen() {
         if (extracted?.url) {
           setResolvingSrc(null);
           markActiveSlotStatus("ready");
+          const prevProxy = [src.proxyFallbackUrl, src.rawUrl, src.url, src.directUrl].find((u) => isOwnVpsProxyUrl(u));
           setPlayingSrc({
             ...src,
             directUrl: extracted.url,
@@ -2140,6 +2156,7 @@ export default function WatchScreen() {
             isEmbed: false,
             deliveryMode: "client-extract",
             clientExtract: undefined,
+            proxyFallbackUrl: prevProxy ? resolveUrl(prevProxy, getBaseUrl()) : undefined,
             subtitleUrl,
           });
           setScreen("native");
@@ -2163,6 +2180,7 @@ export default function WatchScreen() {
         if (mfDirect?.url) {
           setResolvingSrc(null);
           markActiveSlotStatus("ready");
+          const prevMfProxy = [src.proxyFallbackUrl, initialPlayUrl, src.rawUrl, src.url].find((u) => isOwnVpsProxyUrl(u));
           setPlayingSrc({
             ...src,
             directUrl: mfDirect.url,
@@ -2171,6 +2189,7 @@ export default function WatchScreen() {
             headers: mfDirect.headers,
             isEmbed: false,
             deliveryMode: "client-extract",
+            proxyFallbackUrl: prevMfProxy ? resolveUrl(prevMfProxy, getBaseUrl()) : undefined,
             subtitleUrl,
           });
           setScreen("native");
@@ -2221,6 +2240,7 @@ export default function WatchScreen() {
     const baseSrc = resolvingSrc || playingSrc;
     setResolvingSrc(null);
     if (!baseSrc) return;
+    const prevProxy = [baseSrc.proxyFallbackUrl, baseSrc.rawUrl, baseSrc.url, baseSrc.directUrl].find((u) => isOwnVpsProxyUrl(u));
     const resolved: Src = {
       ...baseSrc,
       directUrl: stream.url,
@@ -2230,6 +2250,7 @@ export default function WatchScreen() {
       directType: stream.type,
       deliveryMode: "client-extract",
       clientExtract: undefined,
+      proxyFallbackUrl: prevProxy ? resolveUrl(prevProxy, getBaseUrl()) : undefined,
     };
     markActiveSlotStatus("ready");
     setPlayingSrc(resolved);
@@ -3264,8 +3285,8 @@ export default function WatchScreen() {
     );
   }, [availableSlots, isAwDubbed]);
 
-  /* ── مرّر المصدر الذي اختاره المستخدم فقط إلى المشغّل.
-     لا نضمّ بقية المصادر هنا، حتى لا يحوّل auto-advance فشل المصدر إلى KW/MP. ── */
+  /* ── مرّر المصدر الذي اختاره المستخدم فقط إلى المشغّل، مع إرفاق مسار خادم
+     احتياطي صامت (proxyFallback) يتدخّل فورياً عند فشل أو بطء البث المباشر. ── */
   const playerSources = useMemo((): PlayerSource[] => {
     if (screen !== "native" || !playingSrc) return [];
     const base = getBaseUrl();
@@ -3276,34 +3297,43 @@ export default function WatchScreen() {
     const isDirectExternal =
       isDirectStreamActive() &&
       /^https?:\/\//i.test(rawUrl) &&
-      !rawUrl.includes("/api/anime/hls-proxy") &&
-      !rawUrl.includes("/api/anime/video-proxy") &&
-      !rawUrl.includes("/api/aw-dubbed/mf-stream");
-    const proxyUrl = (isAwDubbed || isDirectExternal)
+      !isOwnVpsProxyUrl(rawUrl);
+    const resolvedPrimary = isDirectExternal
       ? resolveUrl(rawUrl, base)
-      : ensureVpsProxy(rawUrl, headers, base, playingSrc.directType === "hls");
-    const url = isDirectExternal
-      ? proxyUrl
-      : withPlaybackTrace(proxyUrl, `${playbackTraceId}-0`, base);
-    if (!url) return [];
+      : withPlaybackTrace(
+          isAwDubbed
+            ? resolveUrl(rawUrl, base)
+            : ensureVpsProxy(rawUrl, headers, base, playingSrc.directType === "hls"),
+          `${playbackTraceId}-0`,
+          base,
+        );
+    if (!resolvedPrimary) return [];
+    const existingProxyCandidate =
+      [playingSrc.proxyFallbackUrl, playingSrc.rawUrl, playingSrc.url]
+        .map((u) => (u ? resolveUrl(u, base) : ""))
+        .find((u) => Boolean(u) && (isOwnVpsProxyUrl(u) || u.includes("directsegs=1"))) || undefined;
     const site = playingSrc.site || "";
     const isArabic = isAwDubbed || ARABIC_PLAYBACK_SITES.has(site);
     const deliveryTag = isDirectStreamActive()
-      ? ` · ${getDeliveryBadge(url, playingSrc.deliveryMode).badgeLabel}`
+      ? ` · ${getDeliveryBadge(resolvedPrimary, playingSrc.deliveryMode).badgeLabel}`
       : "";
     const contentType: PlayerSource["contentType"] =
-      playingSrc.directType === "hls" || /\.m3u8(?:[?#]|$)/i.test(url)
+      playingSrc.directType === "hls" || /\.m3u8(?:[?#]|$)/i.test(resolvedPrimary)
         ? "hls"
-        : (playingSrc.directType === "mp4" || isAwDubbed || url.includes("pixeldrain.com/api/file/"))
+        : (playingSrc.directType === "mp4" || isAwDubbed || resolvedPrimary.includes("pixeldrain.com/api/file/"))
           ? "progressive"
           : undefined;
-    const effectiveHeaders =
-      headers ||
-      (url.includes("pixeldrain.com/api/file/") ? { "User-Agent": MOBILE_DIRECT_UA } : undefined);
-    return [{
-      url,
+    const effectiveHeaders = isOwnVpsProxyUrl(resolvedPrimary)
+      ? undefined
+      : (headers || (resolvedPrimary.includes("pixeldrain.com/api/file/") ? { "User-Agent": MOBILE_DIRECT_UA } : undefined));
+    return [buildHybridPlayerSource({
+      url: resolvedPrimary,
+      existingProxyUrl: existingProxyCandidate,
       contentType,
       headers: effectiveHeaders,
+      referer: headers?.Referer || headers?.referer,
+      baseUrl: base,
+      deliveryMode: playingSrc.deliveryMode,
       label: (isAwDubbed
         ? `سيرفر · ${playingSrc.name || "AW"}`
         : `سيرفر · ${getSiteTag(site)}`) + deliveryTag,
@@ -3318,7 +3348,7 @@ export default function WatchScreen() {
       wantsSmartSub: !isArabic,
       skipIntro: playingSrc.skipIntro || episodeSkipTimes.intro,
       skipOutro: playingSrc.skipOutro || episodeSkipTimes.outro,
-    }];
+    })];
   }, [screen, playingSrc, globalSubUrl, playbackTraceId, isAwDubbed, episodeSkipTimes]);
 
 

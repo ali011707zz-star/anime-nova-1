@@ -18,6 +18,7 @@ import { startMobileWatchAnalytics } from "@/utils/analytics";
 import { ensureWatchAccess } from "@/utils/adPolicy";
 import { RewardedAdPrompt } from "@/components/RewardedAdPrompt";
 import { useWatchPlayerOrientation } from "@/utils/watchOrientation";
+import { buildHybridPlayerSource, buildVpsProxyFallbackUrl, isOwnVpsProxyUrl } from "@/utils/hybridStreamLogic.mjs";
 
 const { width: W, height: H } = Dimensions.get("window");
 
@@ -692,11 +693,19 @@ export default function AnimationWatchScreen() {
     setResolvingSrc(null);
     setBusySrcKey(null);
     if (!baseSrc) return;
+    const base = getBaseUrl();
+    const preservedProxy = buildVpsProxyFallbackUrl({
+      directUrl: stream.url,
+      existingProxyUrl: resolveUrl(baseSrc.proxyUrl || baseSrc.url, base),
+      referer: stream.headers?.Referer || stream.headers?.referer || baseSrc.headers?.Referer,
+      baseUrl: base,
+      contentType: stream.type,
+    }) || undefined;
     const updated: AnimSrc = {
       ...baseSrc,
       directUrl: stream.url,
       url: stream.url,
-      proxyUrl: undefined,
+      proxyUrl: preservedProxy,
       isEmbed: false,
       headers: stream.headers || baseSrc.headers,
       directType: stream.type,
@@ -765,9 +774,18 @@ export default function AnimationWatchScreen() {
          إذا لم يوجد directUrl نستخدم url الذي قد يكون proxyUrl — سيفشل من VPS IP
          لكن قد ينجح من IP الجهاز (residential). */
       const rawUrl = resolveUrl(s.directUrl || s.url || "", base);
+      const dormantProxy = buildVpsProxyFallbackUrl({
+        directUrl: rawUrl,
+        existingProxyUrl: resolveUrl(s.proxyUrl || s.url, base),
+        referer: s.headers?.Referer || s.headers?.referer,
+        baseUrl: base,
+        contentType: s.directType,
+        site: s.site,
+      }) || undefined;
       const resolvedSubUrl = s.subtitleUrl ? resolveUrl(s.subtitleUrl, base) : activeSubUrl;
       return {
         url: rawUrl,
+        ...(dormantProxy && dormantProxy !== rawUrl ? { proxyUrl: dormantProxy } : {}),
         label: s.label || "مصدر",
         quality: getSrcQuality(s),
         /* headers (Referer/Origin) — AnimHlsPlayer يُضيفها لكل طلب HLS عبر makeFetchLoader */
@@ -789,22 +807,22 @@ export default function AnimationWatchScreen() {
       const resolvedSubUrl = wantsNoSub ? undefined : (s.subtitleUrl
         ? resolveUrl(s.subtitleUrl, base)
         : activeSubUrl);
-      const proxyUrl = s.proxyUrl || s.directUrl || s.url || "";
-      /* directFallback: رابط CDN خام (بدون /api/) يُرسَل من IP الجهاز مع headers */
-      const rawDirect = s.directUrl && !s.directUrl.startsWith("/api/") ? s.directUrl : null;
-      const proxyResolved = resolveUrl(proxyUrl, base);
-      const directResolved = rawDirect ? resolveUrl(rawDirect, base) : null;
-      const hasFallback = directResolved && directResolved !== proxyResolved;
+      const proxyCandidate = resolveUrl(s.proxyUrl || s.url || "", base);
+      const rawDirect = s.directUrl && !isOwnVpsProxyUrl(s.directUrl) ? resolveUrl(s.directUrl, base) : null;
+      const primaryUrl = rawDirect || proxyCandidate;
       const cdnHeaders = s.headers && Object.keys(s.headers).length > 0 ? s.headers : undefined;
-      return {
-        url: proxyResolved,
+      return buildHybridPlayerSource({
+        url: primaryUrl,
+        existingProxyUrl: proxyCandidate && proxyCandidate !== primaryUrl ? proxyCandidate : undefined,
+        headers: isOwnVpsProxyUrl(primaryUrl) ? undefined : cdnHeaders,
+        referer: cdnHeaders?.Referer || cdnHeaders?.referer,
+        baseUrl: base,
+        contentType: s.directType === "mp4" ? "progressive" : (s.directType === "hls" ? "hls" : undefined),
+        site: s.site,
         label: lbl || "مصدر",
         quality: getSrcQuality(s) as PlayerSource["quality"],
         subtitleUrl: resolvedSubUrl,
-        /* لا نمرّر headers للـ proxy — VPS يُضيفها server-side للـ CDN */
-        /* directFallback يحمل headers لأن ExoPlayer يُرسلها مع كل طلب segment */
-        ...(hasFallback ? { directFallback: { url: directResolved!, ...(cdnHeaders ? { headers: cdnHeaders } : {}) } } : {}),
-      };
+      });
     }).filter(s => !!s.url);
   }, [directSrcs, globalArSubUrl, globalEnSubUrl, subLang]);
 

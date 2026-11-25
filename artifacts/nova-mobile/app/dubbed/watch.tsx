@@ -29,6 +29,7 @@ import { useWatchPlayerOrientation } from "@/utils/watchOrientation";
 import { createPlaybackTraceId, withPlaybackTrace } from "@/utils/playbackTrace";
 import { inferDubbedSourceFromKey, parseCarateenEpisodeUrl } from "@/utils/carateenEpisodeRef.mjs";
 import { extractMediaUrlFromHtml } from "@/utils/directStreamModeLogic.mjs";
+import { buildHybridPlayerSource, buildVpsProxyFallbackUrl, isOwnVpsProxyUrl } from "@/utils/hybridStreamLogic.mjs";
 import {
   ActiveDownload,
   formatFileSize,
@@ -155,10 +156,10 @@ export default function DubbedWatchScreen() {
   const lastTimeRef = useRef(0);
   const lastDurationRef = useRef(0);
   const savedOnExitRef = useRef(false);
-  const preloadedMediaRef = useRef<{ url: string; contentType: "hls" | "progressive"; rawUrl?: string; serverId?: string; headers?: Record<string, string>; deliveryMode?: string; pendingClientExtract?: ClientExtractDescriptor } | null>(null);
+  const preloadedMediaRef = useRef<{ url: string; proxyUrl?: string; contentType: "hls" | "progressive"; rawUrl?: string; serverId?: string; headers?: Record<string, string>; deliveryMode?: string; pendingClientExtract?: ClientExtractDescriptor } | null>(null);
   const preloadingPromiseRef = useRef<{
     serverId?: string;
-    promise: Promise<{ url: string; contentType: "hls" | "progressive"; rawUrl: string; serverId?: string; headers?: Record<string, string>; deliveryMode?: string; pendingClientExtract?: ClientExtractDescriptor } | null>;
+    promise: Promise<{ url: string; proxyUrl?: string; contentType: "hls" | "progressive"; rawUrl: string; serverId?: string; headers?: Record<string, string>; deliveryMode?: string; pendingClientExtract?: ClientExtractDescriptor } | null>;
   } | null>(null);
 
   const onToggleOrientation = useWatchPlayerOrientation(screen === "player" && sources.length > 0, tvMode);
@@ -527,9 +528,11 @@ export default function DubbedWatchScreen() {
     // 3. Direct fallback using video_id from episode metadata
     if (targetVideoId) {
       const directHls = `https://pegasus.5387692.xyz/api/${prov === "sp" ? "sp" : "ct"}/hls/${encodeURIComponent(targetVideoId)}/playlist.m3u8`;
+      const proxiedCarateenHls = `${BASE}/api/anime/hls-proxy?url=${encodeURIComponent(directHls)}&ref=${encodeURIComponent("https://carateen.tv/")}`;
       if (isDirectStreamActive()) {
         return {
           url: directHls,
+          proxyUrl: proxiedCarateenHls,
           contentType: "hls",
           rawUrl: directHls,
           headers: {
@@ -999,6 +1002,12 @@ export default function DubbedWatchScreen() {
                   const isHls = /\.m3u8(?:[?#]|$)/i.test(absFound);
                   preloadedMediaRef.current = {
                     url: absFound,
+                    proxyUrl: proxyUrl || (buildVpsProxyFallbackUrl({
+                      directUrl: absFound,
+                      referer: "https://www.arabic-toons.com/",
+                      baseUrl: BASE,
+                      contentType: isHls ? "hls" : "progressive",
+                    }) || undefined),
                     contentType: isHls ? "hls" : "progressive",
                     rawUrl: absFound,
                     headers: { Referer: "https://www.arabic-toons.com/", Origin: "https://www.arabic-toons.com", "User-Agent": MOBILE_DIRECT_UA },
@@ -1074,7 +1083,7 @@ export default function DubbedWatchScreen() {
     bypassCache = false,
     serverId?: string,
     preferMp4 = false,
-  ): Promise<{ url: string; contentType: "hls" | "progressive"; rawUrl: string; headers?: Record<string, string>; deliveryMode?: string; pendingClientExtract?: ClientExtractDescriptor } | null> => {
+  ): Promise<{ url: string; proxyUrl?: string; contentType: "hls" | "progressive"; rawUrl: string; headers?: Record<string, string>; deliveryMode?: string; pendingClientExtract?: ClientExtractDescriptor } | null> => {
     if (isAzSource) {
       if (
         !bypassCache &&
@@ -1083,6 +1092,7 @@ export default function DubbedWatchScreen() {
       ) {
         return {
           url: preloadedMediaRef.current.url,
+          proxyUrl: preloadedMediaRef.current.proxyUrl,
           contentType: preloadedMediaRef.current.contentType,
           rawUrl: preloadedMediaRef.current.rawUrl || preloadedMediaRef.current.url,
           headers: preloadedMediaRef.current.headers,
@@ -1112,6 +1122,7 @@ export default function DubbedWatchScreen() {
       ) {
         return {
           url: preloadedMediaRef.current.url,
+          proxyUrl: preloadedMediaRef.current.proxyUrl,
           contentType: preloadedMediaRef.current.contentType,
           rawUrl: preloadedMediaRef.current.rawUrl || preloadedMediaRef.current.url,
           headers: preloadedMediaRef.current.headers,
@@ -1136,6 +1147,7 @@ export default function DubbedWatchScreen() {
     if (!bypassCache && mode === "api" && preloadedMediaRef.current) {
       return {
           url: preloadedMediaRef.current.url,
+          proxyUrl: preloadedMediaRef.current.proxyUrl,
           contentType: preloadedMediaRef.current.contentType,
           rawUrl: preloadedMediaRef.current.rawUrl || preloadedMediaRef.current.url,
           headers: preloadedMediaRef.current.headers,
@@ -1244,8 +1256,15 @@ export default function DubbedWatchScreen() {
         const isHls = /\.m3u8(?:[?#]|$)/i.test(videoUrl);
         const ref = "https://www.arabic-toons.com/";
         if (isDirectStreamActive()) {
+          const fallbackProxy = buildVpsProxyFallbackUrl({
+            directUrl: videoUrl,
+            referer: ref,
+            baseUrl: BASE,
+            contentType: isHls ? "hls" : "progressive",
+          }) || undefined;
           const resolved = {
             url: videoUrl,
+            proxyUrl: fallbackProxy,
             contentType: (isHls ? "hls" : "progressive") as "hls" | "progressive",
             rawUrl: videoUrl,
             headers: { Referer: ref, Origin: "https://www.arabic-toons.com", "User-Agent": MOBILE_DIRECT_UA },
@@ -1365,17 +1384,21 @@ export default function DubbedWatchScreen() {
     setSlots((prev) =>
       prev.map((s) => (s.key === slot.key ? { ...s, state: "available" } : s)),
     );
+    const base = getBaseUrl();
     const primaryBadge = isDirectStreamActive()
       ? ` · ${getDeliveryBadge(extracted.url, (extracted as any).deliveryMode).badgeLabel}`
       : "";
     setSources([
-      {
+      buildHybridPlayerSource({
         url: extracted.url,
+        existingProxyUrl: (extracted as any).proxyUrl || (isOwnVpsProxyUrl(extracted.rawUrl) ? extracted.rawUrl : undefined),
         contentType: extracted.contentType,
         headers: (extracted as any).headers,
+        baseUrl: base,
+        deliveryMode: (extracted as any).deliveryMode,
         label: slot.label + primaryBadge,
         quality: slot.quality === "2160p" ? "4K UHD" : slot.quality === "1080p" ? "1080p FHD" : slot.quality === "720p" ? "720p HD" : slot.quality.toUpperCase(),
-      },
+      }),
     ]);
     setScreen("player");
 
@@ -1391,13 +1414,16 @@ export default function DubbedWatchScreen() {
               if (prev.some((x) => x.url === altRes.url)) return prev;
               return [
                 ...prev,
-                {
+                buildHybridPlayerSource({
                   url: altRes.url,
+                  existingProxyUrl: (altRes as any).proxyUrl || (isOwnVpsProxyUrl(altRes.rawUrl) ? altRes.rawUrl : undefined),
                   contentType: altRes.contentType,
                   headers: (altRes as any).headers,
+                  baseUrl: base,
+                  deliveryMode: (altRes as any).deliveryMode,
                   label: alt.label + (isDirectStreamActive() ? ` · ${getDeliveryBadge(altRes.url, (altRes as any).deliveryMode).badgeLabel}` : ""),
                   quality: alt.quality === "1080p" ? "1080p FHD" : "720p HD",
-                },
+                }),
               ];
             });
             break;
@@ -1617,13 +1643,16 @@ export default function DubbedWatchScreen() {
         });
       } else if (fresh && fresh.url && mountedRef.current) {
         setSources([
-          {
+          buildHybridPlayerSource({
             url: fresh.url,
+            existingProxyUrl: (fresh as any).proxyUrl || (isOwnVpsProxyUrl(fresh.rawUrl) ? fresh.rawUrl : undefined),
             contentType: fresh.contentType,
             headers: (fresh as any).headers,
+            baseUrl: getBaseUrl(),
+            deliveryMode: (fresh as any).deliveryMode,
             label: candidate?.label || "مدبلج عربي عبر الخادم",
             quality: candidate?.quality === "1080p" ? "1080p FHD" : "720p HD",
-          },
+          }),
         ]);
       } else if (mountedRef.current) {
         setScreen("picker");
@@ -2171,14 +2200,17 @@ export default function DubbedWatchScreen() {
             const badge = isDirectStreamActive()
               ? ` · ${getDeliveryBadge(stream.url, "client-extract").badgeLabel}`
               : "";
+            const contentType = stream.type === "hls" || /\.m3u8(?:[?#]|$)/i.test(stream.url) ? "hls" : "progressive";
             setSources([
-              {
+              buildHybridPlayerSource({
                 url: stream.url,
-                contentType: stream.type === "hls" || /\.m3u8(?:[?#]|$)/i.test(stream.url) ? "hls" : "progressive",
+                contentType,
                 headers: stream.headers,
+                baseUrl: getBaseUrl(),
+                deliveryMode: "client-extract",
                 label: active.slot.label + badge,
                 quality: active.slot.quality === "2160p" ? "4K UHD" : active.slot.quality === "1080p" ? "1080p FHD" : active.slot.quality === "720p" ? "720p HD" : active.slot.quality.toUpperCase(),
-              },
+              }),
             ]);
             setScreen("player");
           }}
