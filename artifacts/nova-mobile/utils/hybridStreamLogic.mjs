@@ -5,10 +5,13 @@
  * at the exact current timestamp if direct playback fails, blocks, or stalls.
  */
 
-export const DIRECT_PROBE_TIMEOUT_MS = 3000;
-export const DIRECT_REBUFFER_TIMEOUT_MS = 10_000;
-export const DIRECT_STALL_TIMEOUT_MS = 8000;
-export const DIRECT_STALL_RECOVERY_MS = 3500;
+export const DIRECT_PROBE_TIMEOUT_MS = 5500;
+export const DIRECT_ASSIGN_GUARD_MS = 7000;
+export const DIRECT_REBUFFER_TIMEOUT_MS = 7000;
+export const DIRECT_STALL_TIMEOUT_MS = 6000;
+export const DIRECT_STALL_RECOVERY_MS = 3000;
+export const DIRECT_REBUFFER_BURST_COUNT = 3;
+export const DIRECT_REBUFFER_BURST_WINDOW_MS = 45_000;
 
 function trimSlash(baseUrl) {
   return String(baseUrl || "").trim().replace(/\/+$/, "");
@@ -208,10 +211,23 @@ export function buildHybridPlayerSource(input) {
 }
 
 /**
+ * Balanced native buffer configuration:
+ * - 32s forward cushion prevents micro-stalls on variable mobile connections.
+ * - 1.8s minBufferForPlayback prevents endless 0.65s rebuffer-stall loops on 1080p.
+ */
+export function getHybridBufferProfile() {
+  return {
+    preferredForwardBufferDuration: 32,
+    waitsToMinimizeStalling: true,
+    minBufferForPlayback: 1.8,
+  };
+}
+
+/**
  * Resolves loading timeout in ms:
- * - Fast 3s startup probe when playing direct with a dormant proxyFallback ready.
- * - Faster 10s rebuffer timeout mid-playback when proxyFallback is still available.
- * - Existing conservative timeouts when already on proxy or no fallback exists.
+ * - 5.5s startup probe when playing direct with a dormant proxyFallback ready.
+ * - 7s rebuffer timeout mid-playback when proxyFallback is still available.
+ * - Conservative timeouts when already on proxy or no fallback exists.
  */
 export function resolveHybridLoadTimeoutMs({
   hasProxyFallback,
@@ -238,6 +254,55 @@ export function resolveHybridStallTimings({ hasProxyFallback }) {
     stallTimeoutMs: 25_000,
     stallRecoveryMs: 12_000,
   };
+}
+
+/**
+ * Assign guard must never abort a direct stream that already reached readyToPlay,
+ * started playing, or is actively seeking to a resume position.
+ */
+export function shouldTriggerAssignGuard({
+  hasProxyFallback,
+  readyLogged,
+  playingLogged,
+  hasPendingSeek,
+}) {
+  if (!hasProxyFallback) return false;
+  if (readyLogged || playingLogged || hasPendingSeek) return false;
+  return true;
+}
+
+/**
+ * When a dormant proxyFallback is available, skip stall-nudge seeks on a throttled
+ * direct stream and promote directly to the server proxy instead of looping.
+ */
+export function shouldSkipStallNudge({ hasProxyFallback }) {
+  return Boolean(hasProxyFallback);
+}
+
+/**
+ * Detects frequent rebuffer bursts (3+ non-seek rebuffers within 45s) on direct
+ * streams so unstable direct CDNs hand over silently to the VPS proxy.
+ */
+export function shouldPromoteOnRebufferBurst({
+  hasProxyFallback,
+  rebufferTimestamps,
+  nowMs,
+  windowMs = DIRECT_REBUFFER_BURST_WINDOW_MS,
+  threshold = DIRECT_REBUFFER_BURST_COUNT,
+}) {
+  if (!hasProxyFallback || !Array.isArray(rebufferTimestamps)) return false;
+  const cutoff = nowMs - windowMs;
+  const recent = rebufferTimestamps.filter((ts) => typeof ts === "number" && ts >= cutoff);
+  return recent.length >= threshold;
+}
+
+/**
+ * Avoids forcing a redundant seek/rebuffer when failover happens in the first 2.5s.
+ */
+export function resolvePreservePosition(posSeconds) {
+  const n = Number(posSeconds);
+  if (!Number.isFinite(n) || n <= 2.5) return 0;
+  return n;
 }
 
 /**

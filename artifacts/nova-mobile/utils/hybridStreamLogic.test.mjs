@@ -1,14 +1,21 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  DIRECT_ASSIGN_GUARD_MS,
   DIRECT_PROBE_TIMEOUT_MS,
   DIRECT_REBUFFER_TIMEOUT_MS,
+  DIRECT_STALL_TIMEOUT_MS,
   applyProxyPromotion,
   buildHybridPlayerSource,
   buildVpsProxyFallbackUrl,
+  getHybridBufferProfile,
   isOwnVpsProxyUrl,
   resolveHybridLoadTimeoutMs,
   resolveHybridStallTimings,
+  resolvePreservePosition,
+  shouldPromoteOnRebufferBurst,
+  shouldSkipStallNudge,
+  shouldTriggerAssignGuard,
   stripDirectSegsFlag,
 } from "./hybridStreamLogic.mjs";
 
@@ -102,7 +109,17 @@ test("buildHybridPlayerSource keeps direct primary and attaches dormant proxyFal
   assert.equal(promoted.label, "سيرفر · KW");
 });
 
-test("hybrid load and stall timeouts tighten fast only when proxyFallback exists", () => {
+test("hybrid buffer and timeout profiles avoid 0.65s stutter loops and 3s false aborts", () => {
+  const buf = getHybridBufferProfile();
+  assert.ok(buf.preferredForwardBufferDuration >= 30);
+  assert.ok(buf.minBufferForPlayback >= 1.5 && buf.minBufferForPlayback <= 2.5);
+  assert.equal(buf.waitsToMinimizeStalling, true);
+
+  assert.equal(DIRECT_PROBE_TIMEOUT_MS, 5500);
+  assert.equal(DIRECT_ASSIGN_GUARD_MS, 7000);
+  assert.equal(DIRECT_REBUFFER_TIMEOUT_MS, 7000);
+  assert.equal(DIRECT_STALL_TIMEOUT_MS, 6000);
+
   assert.equal(
     resolveHybridLoadTimeoutMs({ hasProxyFallback: true, hasStartedPlayback: false, animePlayback: true }),
     DIRECT_PROBE_TIMEOUT_MS,
@@ -115,6 +132,57 @@ test("hybrid load and stall timeouts tighten fast only when proxyFallback exists
     resolveHybridLoadTimeoutMs({ hasProxyFallback: false, hasStartedPlayback: false, animePlayback: true }),
     25_000,
   );
-  assert.equal(resolveHybridStallTimings({ hasProxyFallback: true }).stallTimeoutMs, 8000);
+  assert.equal(resolveHybridStallTimings({ hasProxyFallback: true }).stallTimeoutMs, DIRECT_STALL_TIMEOUT_MS);
   assert.equal(resolveHybridStallTimings({ hasProxyFallback: false }).stallTimeoutMs, 25_000);
+});
+
+test("assign guard, stall nudge bypass, rebuffer burst, and resume threshold behave safely", () => {
+  assert.equal(
+    shouldTriggerAssignGuard({ hasProxyFallback: true, readyLogged: false, playingLogged: false, hasPendingSeek: false }),
+    true,
+  );
+  assert.equal(
+    shouldTriggerAssignGuard({ hasProxyFallback: true, readyLogged: true, playingLogged: false, hasPendingSeek: false }),
+    false,
+  );
+  assert.equal(
+    shouldTriggerAssignGuard({ hasProxyFallback: true, readyLogged: false, playingLogged: false, hasPendingSeek: true }),
+    false,
+  );
+  assert.equal(
+    shouldTriggerAssignGuard({ hasProxyFallback: false, readyLogged: false, playingLogged: false, hasPendingSeek: false }),
+    false,
+  );
+
+  assert.equal(shouldSkipStallNudge({ hasProxyFallback: true }), true);
+  assert.equal(shouldSkipStallNudge({ hasProxyFallback: false }), false);
+
+  assert.equal(
+    shouldPromoteOnRebufferBurst({
+      hasProxyFallback: true,
+      rebufferTimestamps: [1000, 5000, 12_000],
+      nowMs: 20_000,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldPromoteOnRebufferBurst({
+      hasProxyFallback: true,
+      rebufferTimestamps: [1000, 48_000, 52_000],
+      nowMs: 60_000,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldPromoteOnRebufferBurst({
+      hasProxyFallback: false,
+      rebufferTimestamps: [1000, 5000, 12_000],
+      nowMs: 20_000,
+    }),
+    false,
+  );
+
+  assert.equal(resolvePreservePosition(1.4), 0);
+  assert.equal(resolvePreservePosition(2.5), 0);
+  assert.equal(resolvePreservePosition(7.2), 7.2);
 });

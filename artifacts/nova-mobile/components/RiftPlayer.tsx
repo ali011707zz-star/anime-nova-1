@@ -29,9 +29,15 @@ import {
   validateSkipInterval,
 } from "@/lib/skipTimes.mjs";
 import {
+  DIRECT_ASSIGN_GUARD_MS,
   applyProxyPromotion,
+  getHybridBufferProfile,
   resolveHybridLoadTimeoutMs,
   resolveHybridStallTimings,
+  resolvePreservePosition,
+  shouldPromoteOnRebufferBurst,
+  shouldSkipStallNudge,
+  shouldTriggerAssignGuard,
   type ProxyFallbackDescriptor,
 } from "@/utils/hybridStreamLogic.mjs";
 
@@ -141,13 +147,9 @@ function logPlaybackStage(url: string | undefined, stage: string, detail = ""): 
 }
 
 function getPlaybackBufferOptions(_animePlayback: boolean): BufferOptions {
-  /* Balanced 16s forward buffer with low 0.65s startup/seek threshold so initial
-     playback and progress-bar seeks resume quickly without long stalls. */
-  return {
-    preferredForwardBufferDuration: 16,
-    waitsToMinimizeStalling: true,
-    minBufferForPlayback: 0.65,
-  };
+  /* 32s forward buffer + 1.8s playback resume threshold prevents 1080p micro-stall
+     loops while keeping startup fast. */
+  return getHybridBufferProfile();
 }
 
 /** Never pass malformed URLs into the native player.
@@ -543,6 +545,7 @@ function ExpoRiftPlayer({
   const playableSourcesRef          = useRef(playableSources);
   useEffect(() => { playableSourcesRef.current = playableSources; }, [playableSources]);
   const currentSrc                  = playableSources[srcIdx];
+  const rebufferTimestampsRef = useRef<number[]>([]);
   const playbackTraceStateRef = useRef({
     url: "",
     assignedAt: 0,
@@ -555,6 +558,7 @@ function ExpoRiftPlayer({
   });
   useEffect(() => {
     const url = currentSrc?.url || "";
+    rebufferTimestampsRef.current = [];
     playbackTraceStateRef.current = {
       url,
       assignedAt: Date.now(),
@@ -568,9 +572,20 @@ function ExpoRiftPlayer({
     logPlaybackStage(url, "source_assigned");
     if (!currentSrc?.proxyFallback?.url) return;
     const directAssignGuard = setTimeout(() => {
-      if (!aliveRef.current || playbackTraceStateRef.current.url !== url || playbackTraceStateRef.current.playingLogged) return;
+      const state = playbackTraceStateRef.current;
+      if (!aliveRef.current || state.url !== url) return;
+      if (
+        !shouldTriggerAssignGuard({
+          hasProxyFallback: Boolean(playableSourcesRef.current[srcIdxRef.current]?.proxyFallback?.url),
+          readyLogged: state.readyLogged,
+          playingLogged: state.playingLogged,
+          hasPendingSeek: Boolean(seekRecoveryRef.current || pendingSeekRef.current || pendingRestoreRef.current),
+        })
+      ) {
+        return;
+      }
       trySilentProxyFallbackRef.current("assign_timeout");
-    }, 3500);
+    }, DIRECT_ASSIGN_GUARD_MS);
     return () => clearTimeout(directAssignGuard);
   }, [currentSrc?.url, currentSrc?.proxyFallback?.url]);
   const isLocalPlayback = playableSources.length > 0
@@ -1239,8 +1254,9 @@ function ExpoRiftPlayer({
         : (positionRef.current > 0.5 ? positionRef.current : (initialPosition && initialPosition > 3 ? initialPosition : 0)));
     pendingRestoreRef.current = null;
     pendingSeekRef.current = null;
-    switchPosRef.current = Number.isFinite(preservePos) ? Math.max(0, preservePos) : 0;
+    switchPosRef.current = resolvePreservePosition(preservePos);
     resumedRef.current = false;
+    rebufferTimestampsRef.current = [];
     stallRef.current = { lastPos: -1, lastAt: 0 };
     stallNudgeTriedRef.current = false;
     consecutiveErrorsRef.current = 0;
@@ -1294,13 +1310,31 @@ function ExpoRiftPlayer({
         const traceState = playbackTraceStateRef.current;
         const isSeekLoading = !!seekRecoveryRef.current || !!pendingSeekRef.current;
         if (traceState.playingLogged && !isSeekLoading && !traceState.rebufferStartedAt) {
-          traceState.rebufferStartedAt = Date.now();
+          const nowMs = Date.now();
+          traceState.rebufferStartedAt = nowMs;
           traceState.rebufferCount += 1;
           logPlaybackStage(
             traceState.url,
             "rebuffer_start",
             `count=${traceState.rebufferCount}`,
           );
+          const hasProxy = Boolean(playableSourcesRef.current[srcIdxRef.current]?.proxyFallback?.url);
+          if (hasProxy) {
+            rebufferTimestampsRef.current = [
+              ...rebufferTimestampsRef.current.filter((ts) => nowMs - ts <= 45_000),
+              nowMs,
+            ];
+            if (
+              shouldPromoteOnRebufferBurst({
+                hasProxyFallback: hasProxy,
+                rebufferTimestamps: rebufferTimestampsRef.current,
+                nowMs,
+              })
+            ) {
+              trySilentProxyFallbackRef.current("frequent_rebuffer");
+              return;
+            }
+          }
         }
         /* loading الناتج عن تغيير الموضع ليس بداية تحميل مصدر جديد. */
         if (seekRecoveryRef.current) return;
@@ -1518,7 +1552,7 @@ function ExpoRiftPlayer({
          كان يُزيل الحماية من الـ black-screen بينما المشغّل لا يزال في loading.
          الـ timeout يُلغى فقط في: Master cleanup (unmount) أو statusChange نفسه. */
     };
-  }, [player, initialPosition, srcIdx, beginSeekRecovery, animePlayback]); // eslint-disable-line
+  }, [player, initialPosition, srcIdx, sourceReloadNonce, beginSeekRecovery, animePlayback]); // eslint-disable-line
   /* ✅ أُزيل playableSources من deps — كان يُعيد تسجيل الـ listeners عند كل وصول
      مصدر جديد مما يُلغي loadTimeoutRef الجاري ويُعطّل حماية الـ black-screen. */
 
@@ -1773,6 +1807,14 @@ function ExpoRiftPlayer({
             && Date.now() - stallRef.current.lastAt
               > (stallNudgeTriedRef.current ? STALL_RECOVERY_TIMEOUT_MS : STALL_TIMEOUT_MS)
           ) {
+            const hasProxyFallback = Boolean(playableSourcesRef.current[srcIdxRef.current]?.proxyFallback?.url);
+            if (shouldSkipStallNudge({ hasProxyFallback })) {
+              stallRef.current = { lastPos: -1, lastAt: 0 };
+              stallNudgeTriedRef.current = false;
+              if (trySilentProxyFallbackRef.current("direct_stall")) {
+                return;
+              }
+            }
             if (!stallNudgeTriedRef.current) {
               /* محاولة إنعاش أولى بدون إزعاج المستخدم: نفس ما يفعله يدوياً بالتقديم
                  قليلاً — كثيراً ما يكفي لتحرير اختناق مؤقت في HLS proxy. */

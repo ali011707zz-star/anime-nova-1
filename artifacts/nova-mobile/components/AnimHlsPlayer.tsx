@@ -362,9 +362,11 @@ var retryCount   = 0;
 var loadTimeout  = null;
 var initPosDone  = false;
 var hasStarted   = false;
+var hasLoadedMeta = false;
 var pendingSwitchSeek = 0;
 var stallCheckPos = -1;
 var stallCheckAt  = 0;
+var rebufferTimes = [];
 var gesture      = null;
 var swipeTimeout = null;
 
@@ -490,11 +492,13 @@ function isDirectPrimarySrc(src) {
 function loadSrc(idx, seekTo) {
   srcIdx = idx;
   retryCount = 0;
-  pendingSwitchSeek = (seekTo && seekTo > 0.5) ? seekTo : 0;
-  initPosDone = pendingSwitchSeek > 0.5;
+  pendingSwitchSeek = (seekTo && seekTo > 2.5) ? seekTo : 0;
+  initPosDone = pendingSwitchSeek > 2.5;
   hasStarted = false;
+  hasLoadedMeta = false;
   stallCheckPos = -1;
   stallCheckAt = 0;
+  rebufferTimes = [];
   showSpinner(true);
   hideErr();
   buildSrcList();
@@ -508,12 +512,14 @@ function loadSrc(idx, seekTo) {
 
   if (hls) { hls.destroy(); hls = null; }
 
-  // Start fast 3.5s load timeout when direct has dormant server proxy ready
+  // Allow 5.5s for 1080p direct manifest+segment before failing over to VPS proxy
   clearTimeout(loadTimeout);
   loadTimeout = setTimeout(function() {
     loadTimeout = null;
-    handleErr('timeout loading source');
-  }, directPrimary ? 3500 : 25000);
+    if (!hasLoadedMeta && !hasStarted) {
+      handleErr('timeout loading source');
+    }
+  }, directPrimary ? 5500 : 25000);
 
   function doLoad() {
     if (/\\.mp4(\\?|$|#)/i.test(url) || (url.indexOf('.mp4') !== -1 && url.indexOf('.m3u8') === -1)) {
@@ -524,8 +530,9 @@ function loadSrc(idx, seekTo) {
     } else if (typeof Hls !== 'undefined' && Hls.isSupported()) {
       var cfg = {
         enableWorker: false,
-        maxBufferLength: 30,
+        maxBufferLength: 32,
         maxMaxBufferLength: 60,
+        backBufferLength: 30,
         startLevel: -1,
         fragLoadingTimeOut: 20000,
         manifestLoadingTimeOut: 15000,
@@ -584,9 +591,10 @@ function handleErr(msg) {
   clearTimeout(loadTimeout);
   var curSrc = SOURCES[srcIdx];
   if (isDirectPrimarySrc(curSrc)) {
-    var resumeAt = v && Number.isFinite(v.currentTime) && v.currentTime > 0.5
+    var rawResume = v && Number.isFinite(v.currentTime) && v.currentTime > 2.5
       ? v.currentTime
-      : (pendingSwitchSeek > 0.5 ? pendingSwitchSeek : 0);
+      : (pendingSwitchSeek > 2.5 ? pendingSwitchSeek : 0);
+    var resumeAt = rawResume > 2.5 ? rawResume : 0;
     curSrc.usedProxyFallback = true;
     curSrc.url = curSrc.proxyUrl;
     curSrc.referer = '';
@@ -614,7 +622,7 @@ setInterval(function() {
   if (cur > stallCheckPos + 0.1) {
     stallCheckPos = cur;
     stallCheckAt = Date.now();
-  } else if (stallCheckAt > 0 && Date.now() - stallCheckAt > 8000) {
+  } else if (stallCheckAt > 0 && Date.now() - stallCheckAt > 6000) {
     stallCheckAt = 0;
     handleErr('direct_stall');
   }
@@ -641,6 +649,7 @@ function switchSrc(idx) {
 
 /* ── Video events ── */
 v.addEventListener('loadedmetadata', function() {
+  hasLoadedMeta = true;
   dur = v.duration;
   durEl.textContent = fmt(dur);
   if (pendingSwitchSeek > 0.5) {
@@ -672,7 +681,20 @@ v.addEventListener('timeupdate', function() {
   post({ k: 't', t: ct, d: dur });
 });
 
-v.addEventListener('waiting', function() { showSpinner(true); post({ k: 'buf', v: true }); });
+v.addEventListener('waiting', function() {
+  showSpinner(true);
+  post({ k: 'buf', v: true });
+  var curSrc = SOURCES[srcIdx];
+  if (isDirectPrimarySrc(curSrc) && hasStarted) {
+    var now = Date.now();
+    rebufferTimes = rebufferTimes.filter(function(t) { return now - t <= 45000; });
+    rebufferTimes.push(now);
+    if (rebufferTimes.length >= 3) {
+      rebufferTimes = [];
+      handleErr('frequent_rebuffer');
+    }
+  }
+});
 v.addEventListener('canplay', function() { showSpinner(false); post({ k: 'buf', v: false }); });
 v.addEventListener('playing', function() {
   showSpinner(false);
