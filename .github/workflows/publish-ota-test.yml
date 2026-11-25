@@ -346,8 +346,11 @@ jobs:
             with open(snippet_path, "w", encoding="utf-8") as f:
                 f.write(snippet_body)
 
+            # Clean any stale backup files accidentally placed in sites-enabled
+            for stale in glob.glob("/etc/nginx/sites-enabled/*.bak-ota1011"):
+                os.remove(stale)
             include_line = "    include /etc/nginx/snippets/nova-ota-1011.conf;"
-            backup_path = target_path + ".bak-ota1011"
+            backup_path = "/tmp/anime-nova.nginx.bak-ota1011"
 
             if include_line not in orig_txt:
                 shutil.copy2(target_path, backup_path)
