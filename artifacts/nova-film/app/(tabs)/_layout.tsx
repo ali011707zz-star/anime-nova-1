@@ -112,7 +112,7 @@ export default function TabLayout() {
         name="animations"
         options={{
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon name={focused ? "sparkles" : "sparkles-outline"} label="أنميشن" color={color} focused={focused} tvMode={tvMode} iconSize={iconSize} fontSize={labelSize} />
+            <TabIcon name={focused ? "color-palette" : "color-palette-outline"} label="أنميشن" color={color} focused={focused} tvMode={tvMode} iconSize={iconSize} fontSize={labelSize} />
           ),
         }}
       />

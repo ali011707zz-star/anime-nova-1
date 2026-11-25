@@ -1,11 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
-  I18nManager,
   Platform,
   RefreshControl,
   StyleSheet,
@@ -26,43 +24,36 @@ import { tvFocusStyle } from "@/utils/tvFocus";
 
 type AnimTab = "animation_movies" | "animation_series";
 
-const ROW_RTL = I18nManager.isRTL ? ("row" as const) : ("row-reverse" as const);
-
 const TAB_CONFIG: Record<
   AnimTab,
-  { label: string; color: string; placeholder: string; badge: string; icon: keyof typeof Ionicons.glyphMap }
+  { label: string; subtitle: string; placeholder: string }
 > = {
   animation_movies: {
     label: "أفلام أنميشن",
-    color: "#8B5CF6",
+    subtitle: "أفلام الرسوم المتحركة العالمية",
     placeholder: "ابحث في أفلام الأنميشن...",
-    badge: "فيلم",
-    icon: "film-outline",
   },
   animation_series: {
     label: "مسلسلات أنميشن",
-    color: "#06b6d4",
+    subtitle: "مسلسلات الكرتون والأنميشن العالمية",
     placeholder: "ابحث في مسلسلات الأنميشن...",
-    badge: "مسلسل",
-    icon: "tv-outline",
   },
 };
 
 const AnimCard = React.memo(function AnimCard({
   item,
   cardW,
-  cardH,
+  posterH,
   colors,
   tvMode,
 }: {
   item: FilmSummary;
   cardW: number;
-  cardH: number;
+  posterH: number;
   colors: ThemePalette;
   tvMode: boolean;
 }) {
   const router = useRouter();
-  const isTv = item.tmdbType === "tv";
   return (
     <Pressable
       onPress={() =>
@@ -75,79 +66,49 @@ const AnimCard = React.memo(function AnimCard({
       style={({ pressed, focused }) => [
         {
           width: cardW,
-          height: cardH,
-          borderRadius: 12,
-          overflow: "hidden",
-          backgroundColor: colors.card,
-          borderWidth: 1,
-          borderColor: colors.border,
-          opacity: pressed ? 0.85 : 1,
+          opacity: pressed ? 0.82 : 1,
         },
         tvMode && tvFocusStyle(focused),
       ]}
     >
-      <SafePosterImage
-        uri={item.posterUrl || item.backdropUrl}
-        fallbackUris={item.backdropUrl ? [item.backdropUrl] : undefined}
-        style={StyleSheet.absoluteFill}
-        resizeMode="cover"
-      />
-      <LinearGradient
-        colors={["transparent", "rgba(0,0,0,0.22)", "rgba(0,0,0,0.92)"]}
-        locations={[0.42, 0.68, 1]}
-        style={StyleSheet.absoluteFill}
-        pointerEvents="none"
-      />
-      {/* Top badges */}
       <View
         style={{
-          position: "absolute",
-          top: 6,
-          left: 6,
-          right: 6,
-          flexDirection: ROW_RTL,
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 4,
+          width: cardW,
+          height: posterH,
+          borderRadius: 12,
+          overflow: "hidden",
+          backgroundColor: colors.surfaceElevated,
+          borderWidth: 1,
+          borderColor: colors.border,
         }}
-        pointerEvents="none"
       >
-        <View
-          style={{
-            paddingHorizontal: 6,
-            paddingVertical: 2,
-            borderRadius: 6,
-            backgroundColor: isTv ? "rgba(6, 182, 212, 0.88)" : "rgba(139, 92, 246, 0.88)",
-          }}
-        >
-          <Text
-            style={{
-              color: "#ffffff",
-              fontSize: 9,
-              fontFamily: "Cairo_700Bold",
-              includeFontPadding: false,
-            }}
-          >
-            {isTv ? "مسلسل" : "فيلم"}
-          </Text>
-        </View>
+        <SafePosterImage
+          uri={item.posterUrl || item.backdropUrl}
+          fallbackUris={item.backdropUrl ? [item.backdropUrl] : undefined}
+          style={StyleSheet.absoluteFill}
+          resizeMode="cover"
+        />
         {item.imdbRating ? (
           <View
             style={{
+              position: "absolute",
+              top: 6,
+              left: 6,
               flexDirection: "row",
               alignItems: "center",
-              gap: 2,
-              paddingHorizontal: 5,
-              paddingVertical: 2,
-              borderRadius: 6,
-              backgroundColor: "rgba(0, 0, 0, 0.72)",
+              gap: 3,
+              paddingHorizontal: 6,
+              paddingVertical: 2.5,
+              borderRadius: 7,
+              backgroundColor: "rgba(0, 0, 0, 0.74)",
             }}
+            pointerEvents="none"
           >
-            <Ionicons name="star" size={9} color="#FACC15" />
+            <Ionicons name="star" size={9.5} color="#FBBF24" />
             <Text
               style={{
-                color: "#FEF08A",
-                fontSize: 9.5,
+                color: "#FFFFFF",
+                fontSize: 10,
                 fontFamily: "Cairo_700Bold",
                 includeFontPadding: false,
               }}
@@ -158,48 +119,35 @@ const AnimCard = React.memo(function AnimCard({
         ) : null}
       </View>
 
-      {/* Bottom title */}
-      <View
+      <Text
+        numberOfLines={2}
         style={{
-          position: "absolute",
-          bottom: 0,
-          left: 0,
-          right: 0,
-          paddingHorizontal: 7,
-          paddingBottom: 7,
-          paddingTop: 14,
+          marginTop: 5,
+          color: colors.textPrimary,
+          fontSize: 11.5,
+          lineHeight: 16,
+          fontFamily: "Cairo_700Bold",
+          textAlign: "right",
+          includeFontPadding: false,
         }}
-        pointerEvents="none"
       >
+        {item.titleAr || item.titleEn}
+      </Text>
+      {item.year ? (
         <Text
-          numberOfLines={2}
+          numberOfLines={1}
           style={{
-            color: "#ffffff",
-            fontSize: 11.5,
-            lineHeight: 16,
-            fontFamily: "Cairo_700Bold",
+            marginTop: 1,
+            color: colors.textMuted,
+            fontSize: 10,
+            fontFamily: "Cairo_600SemiBold",
             textAlign: "right",
             includeFontPadding: false,
           }}
         >
-          {item.titleAr || item.titleEn}
+          {item.year}
         </Text>
-        {item.year ? (
-          <Text
-            numberOfLines={1}
-            style={{
-              color: "rgba(255,255,255,0.68)",
-              fontSize: 9.5,
-              fontFamily: "Cairo_600SemiBold",
-              textAlign: "right",
-              marginTop: 1,
-              includeFontPadding: false,
-            }}
-          >
-            {item.year}
-          </Text>
-        ) : null}
-      </View>
+      ) : null}
     </Pressable>
   );
 });
@@ -256,8 +204,8 @@ export default function AnimationsTabScreen() {
     () => Math.max(88, Math.floor((gridWidth - 10 * (gridColumns - 1)) / gridColumns)),
     [gridWidth, gridColumns],
   );
-  const cardH = Math.round(cardW * 1.44);
-  const rowStride = cardH + 10;
+  const posterH = Math.round(cardW * 1.46);
+  const rowStride = posterH + 56;
 
   const loadPage = useCallback(
     async (targetPage: number, opts?: { replace?: boolean; isRefresh?: boolean }) => {
@@ -342,197 +290,155 @@ export default function AnimationsTabScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
-      {/* ── Top Header: Back arrow TOP-RIGHT, Title center-right, Search button TOP-LEFT ── */}
+      {/* ── Sleek Surface Header (deterministic LTR coordinates: Search TOP-LEFT, Title + Back TOP-RIGHT) ── */}
       <View
         style={[
-          styles.header,
+          styles.headerSurface,
           {
+            backgroundColor: colors.surface,
             borderBottomColor: colors.border,
-            paddingHorizontal: 14,
-            flexDirection: "row",
           },
         ]}
       >
-        {/* Top-Left: Search button for the active tab */}
-        <Pressable
-          onPress={handleToggleSearch}
-          focusable={tvMode}
-          accessibilityRole="button"
-          accessibilityLabel={`بحث في ${tabMeta.label}`}
-          style={({ pressed, focused }) => [
-            styles.iconBtn,
-            {
-              backgroundColor: searchOpen ? `${tabMeta.color}26` : colors.card,
-              borderColor: searchOpen ? `${tabMeta.color}88` : colors.border,
-              opacity: pressed ? 0.78 : 1,
-            },
-            tvMode && tvFocusStyle(focused),
-          ]}
-        >
-          <Ionicons
-            name={searchOpen ? "close" : "search"}
-            size={Math.round(19 * phoneScale)}
-            color={searchOpen ? tabMeta.color : colors.textPrimary}
-          />
-        </Pressable>
+        <View style={styles.headerRow}>
+          {/* TOP-LEFT: Single Search Button for active tab */}
+          <Pressable
+            onPress={handleToggleSearch}
+            focusable={tvMode}
+            accessibilityRole="button"
+            accessibilityLabel={`بحث في ${tabMeta.label}`}
+            style={({ pressed, focused }) => [
+              styles.iconBtn,
+              {
+                backgroundColor: searchOpen ? colors.accentSurface : colors.input,
+                borderColor: searchOpen ? colors.accentBorder : colors.border,
+                opacity: pressed ? 0.78 : 1,
+              },
+              tvMode && tvFocusStyle(focused),
+            ]}
+          >
+            <Ionicons
+              name={searchOpen ? "close" : "search"}
+              size={Math.round(18 * phoneScale)}
+              color={searchOpen ? colors.accent : colors.textPrimary}
+            />
+          </Pressable>
 
-        {/* Center/Right: Section Title */}
-        <View style={{ flex: 1, alignItems: "flex-end", paddingHorizontal: 10 }}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          {/* CENTER-RIGHT: Title + Subtitle */}
+          <View style={{ flex: 1, alignItems: "flex-end", paddingHorizontal: 10 }}>
             <Text
               style={{
                 color: colors.textPrimary,
-                fontSize: Math.round(18 * phoneScale),
+                fontSize: Math.round(17 * phoneScale),
                 fontFamily: "Cairo_800ExtraBold",
                 includeFontPadding: false,
+                textAlign: "right",
               }}
             >
               أنميشن
             </Text>
-            <Ionicons name="sparkles" size={16} color={tabMeta.color} />
-          </View>
-          <Text
-            style={{
-              color: colors.textSecondary,
-              fontSize: Math.round(10.5 * phoneScale),
-              fontFamily: "Cairo_600SemiBold",
-              includeFontPadding: false,
-            }}
-          >
-            {tabMeta.label} · بوسترات ومكتبة عالمية رسمية
-          </Text>
-        </View>
-
-        {/* Top-Right: Back Arrow */}
-        <Pressable
-          onPress={handleBack}
-          focusable={tvMode}
-          accessibilityRole="button"
-          accessibilityLabel="رجوع"
-          style={({ pressed, focused }) => [
-            styles.iconBtn,
-            {
-              backgroundColor: colors.card,
-              borderColor: colors.border,
-              opacity: pressed ? 0.78 : 1,
-            },
-            tvMode && tvFocusStyle(focused),
-          ]}
-        >
-          <Ionicons
-            name="chevron-forward"
-            size={Math.round(21 * phoneScale)}
-            color={colors.textPrimary}
-          />
-        </Pressable>
-      </View>
-
-      {/* ── Top Switcher Buttons: أفلام أنميشن | مسلسلات أنميشن + per-tab quick search button ── */}
-      <View style={[styles.tabRow, { paddingHorizontal: 14, flexDirection: ROW_RTL }]}>
-        {(["animation_movies", "animation_series"] as AnimTab[]).map((tabKey) => {
-          const cfg = TAB_CONFIG[tabKey];
-          const isActive = activeTab === tabKey;
-          return (
-            <View
-              key={tabKey}
+            <Text
+              numberOfLines={1}
               style={{
-                flex: 1,
-                flexDirection: ROW_RTL,
-                alignItems: "center",
-                borderRadius: 13,
-                borderWidth: 1.2,
-                backgroundColor: isActive ? `${cfg.color}22` : colors.card,
-                borderColor: isActive ? `${cfg.color}99` : colors.border,
-                overflow: "hidden",
+                color: colors.textMuted,
+                fontSize: Math.round(11 * phoneScale),
+                fontFamily: "Cairo_600SemiBold",
+                includeFontPadding: false,
+                textAlign: "right",
               }}
             >
+              {tabMeta.subtitle}
+            </Text>
+          </View>
+
+          {/* FAR TOP-RIGHT: Back Arrow (exact match with all NOVA FILM screens) */}
+          <Pressable
+            onPress={handleBack}
+            focusable={tvMode}
+            accessibilityRole="button"
+            accessibilityLabel="رجوع"
+            style={({ pressed, focused }) => [
+              styles.iconBtn,
+              {
+                backgroundColor: colors.input,
+                borderColor: colors.border,
+                opacity: pressed ? 0.78 : 1,
+              },
+              tvMode && tvFocusStyle(focused),
+            ]}
+          >
+            <Ionicons
+              name="chevron-forward"
+              size={Math.round(20 * phoneScale)}
+              color={colors.textPrimary}
+            />
+          </Pressable>
+        </View>
+
+        {/* ── Clean Text-Only Segmented Switcher: أفلام أنميشن | مسلسلات أنميشن ── */}
+        <View
+          style={[
+            styles.segmentedBar,
+            {
+              backgroundColor: colors.input,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          {(["animation_movies", "animation_series"] as AnimTab[]).map((tabKey) => {
+            const cfg = TAB_CONFIG[tabKey];
+            const isActive = activeTab === tabKey;
+            return (
               <Pressable
+                key={tabKey}
                 onPress={() => handleSwitchTab(tabKey)}
                 focusable={tvMode}
                 style={({ pressed, focused }) => [
-                  {
-                    flex: 1,
-                    flexDirection: ROW_RTL,
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 6,
-                    paddingVertical: 9,
-                    paddingHorizontal: 8,
-                    opacity: pressed ? 0.8 : 1,
-                  },
+                  styles.segmentBtn,
+                  isActive && { backgroundColor: colors.primary },
+                  { opacity: pressed ? 0.85 : 1 },
                   tvMode && tvFocusStyle(focused),
                 ]}
               >
-                <Ionicons
-                  name={cfg.icon}
-                  size={15}
-                  color={isActive ? cfg.color : colors.textSecondary}
-                />
                 <Text
                   numberOfLines={1}
                   style={{
-                    color: isActive ? cfg.color : colors.textSecondary,
-                    fontSize: Math.round(12.5 * phoneScale),
+                    color: isActive ? "#FFFFFF" : colors.textSecondary,
+                    fontSize: Math.round(13 * phoneScale),
                     fontFamily: "Cairo_700Bold",
                     includeFontPadding: false,
+                    textAlign: "center",
                   }}
                 >
                   {cfg.label}
                 </Text>
               </Pressable>
-              {/* Per-tab Search button */}
-              <Pressable
-                onPress={() => {
-                  if (activeTab !== tabKey) setActiveTab(tabKey);
-                  setSearchOpen(true);
-                  setTimeout(() => inputRef.current?.focus(), 80);
-                }}
-                focusable={tvMode}
-                accessibilityRole="button"
-                accessibilityLabel={`بحث في ${cfg.label}`}
-                style={({ pressed, focused }) => [
-                  {
-                    paddingHorizontal: 10,
-                    paddingVertical: 9,
-                    borderLeftWidth: I18nManager.isRTL ? 0 : 1,
-                    borderRightWidth: I18nManager.isRTL ? 1 : 0,
-                    borderColor: isActive ? `${cfg.color}44` : colors.border,
-                    opacity: pressed ? 0.75 : 1,
-                  },
-                  tvMode && tvFocusStyle(focused),
-                ]}
-              >
-                <Ionicons
-                  name="search-outline"
-                  size={15}
-                  color={isActive ? cfg.color : colors.textSecondary}
-                />
-              </Pressable>
-            </View>
-          );
-        })}
-      </View>
+            );
+          })}
+        </View>
 
-      {/* ── Scoped Inline Search Bar ── */}
-      {searchOpen && (
-        <View style={{ paddingHorizontal: 14, paddingBottom: 10 }}>
+        {/* ── Scoped Search Input (opens from top-left Search button) ── */}
+        {searchOpen && (
           <View
             style={[
               styles.searchBox,
               {
-                backgroundColor: colors.card,
-                borderColor: `${tabMeta.color}77`,
-                flexDirection: ROW_RTL,
+                backgroundColor: colors.input,
+                borderColor: colors.accentBorder,
               },
             ]}
           >
-            <Ionicons name="search" size={17} color={tabMeta.color} />
+            {currentQuery.length > 0 ? (
+              <Pressable onPress={() => setCurrentQuery("")} hitSlop={8}>
+                <Ionicons name="close-circle" size={18} color={colors.textMuted} />
+              </Pressable>
+            ) : null}
             <TextInput
               ref={inputRef}
               value={currentQuery}
               onChangeText={setCurrentQuery}
               placeholder={tabMeta.placeholder}
-              placeholderTextColor={colors.textSecondary}
+              placeholderTextColor={colors.textMuted}
               returnKeyType="search"
               style={{
                 flex: 1,
@@ -544,22 +450,18 @@ export default function AnimationsTabScreen() {
                 includeFontPadding: false,
               }}
             />
-            {currentQuery.length > 0 ? (
-              <Pressable onPress={() => setCurrentQuery("")} hitSlop={8}>
-                <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
-              </Pressable>
-            ) : null}
+            <Ionicons name="search" size={16} color={colors.accent} />
           </View>
-        </View>
-      )}
+        )}
+      </View>
 
-      {/* ── Grid Content ── */}
+      {/* ── Clean Poster Grid ── */}
       {loading ? (
         <View style={styles.centerBox}>
-          <ActivityIndicator size="large" color={tabMeta.color} />
+          <ActivityIndicator size="large" color={colors.accent} />
           <Text
             style={{
-              color: colors.textSecondary,
+              color: colors.textMuted,
               fontFamily: "Cairo_600SemiBold",
               fontSize: 13,
               marginTop: 10,
@@ -570,7 +472,7 @@ export default function AnimationsTabScreen() {
         </View>
       ) : items.length === 0 ? (
         <View style={styles.centerBox}>
-          <Ionicons name="film-outline" size={42} color={colors.textSecondary} />
+          <Ionicons name="film-outline" size={42} color={colors.textMuted} />
           <Text
             style={{
               color: colors.textPrimary,
@@ -600,20 +502,20 @@ export default function AnimationsTabScreen() {
           })}
           contentContainerStyle={{
             paddingHorizontal: 12,
-            paddingTop: 6,
+            paddingTop: 12,
             paddingBottom: Math.max(insets.bottom + 84, 100),
           }}
           columnWrapperStyle={{
             gap: 10,
-            marginBottom: 10,
+            marginBottom: 14,
             justifyContent: "flex-start",
           }}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
               onRefresh={() => void loadPage(1, { replace: true, isRefresh: true })}
-              tintColor={tabMeta.color}
-              colors={[tabMeta.color]}
+              tintColor={colors.accent}
+              colors={[colors.accent]}
             />
           }
           onEndReachedThreshold={0.5}
@@ -625,7 +527,7 @@ export default function AnimationsTabScreen() {
           ListFooterComponent={
             loadingMore ? (
               <View style={{ paddingVertical: 18, alignItems: "center" }}>
-                <ActivityIndicator size="small" color={tabMeta.color} />
+                <ActivityIndicator size="small" color={colors.accent} />
               </View>
             ) : null
           }
@@ -633,7 +535,7 @@ export default function AnimationsTabScreen() {
             <AnimCard
               item={item}
               cardW={cardW}
-              cardH={cardH}
+              posterH={posterH}
               colors={colors}
               tvMode={tvMode}
             />
@@ -646,32 +548,52 @@ export default function AnimationsTabScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: {
-    alignItems: "center",
-    justifyContent: "space-between",
+  headerSurface: {
+    paddingHorizontal: 14,
+    paddingTop: 8,
     paddingBottom: 10,
     borderBottomWidth: 1,
+    gap: 10,
+  },
+  headerRow: {
+    flexDirection: "row",
+    direction: "ltr",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
   iconBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
+    width: 36,
+    height: 36,
+    borderRadius: 11,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
   },
-  tabRow: {
-    gap: 8,
-    paddingTop: 10,
-    paddingBottom: 10,
+  segmentedBar: {
+    flexDirection: "row",
+    direction: "rtl",
     alignItems: "center",
+    padding: 3,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 4,
+  },
+  segmentBtn: {
+    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
   },
   searchBox: {
+    flexDirection: "row",
+    direction: "ltr",
     alignItems: "center",
     gap: 8,
     paddingHorizontal: 12,
     borderRadius: 12,
-    borderWidth: 1.2,
+    borderWidth: 1,
   },
   centerBox: {
     flex: 1,
