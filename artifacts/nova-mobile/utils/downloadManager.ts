@@ -17,7 +17,11 @@ import Constants from "expo-constants";
 import { recordSuccessfulDownload } from "./adPolicy";
 import { getAuthToken, getDownloadToken } from "./secureApi";
 import { getBaseUrl } from "./baseUrl";
-import { openSequentialPartWriter, type SequentialPartWriter } from "./nextFileBridge.mjs";
+import {
+  openSequentialPartWriter,
+  readFileHeadBytes,
+  type SequentialPartWriter,
+} from "./nextFileBridge.mjs";
 import { isFirstPartyVpsUrl } from "./hybridStreamLogic.mjs";
 import {
   buildHlsManifestCandidates,
@@ -27,11 +31,20 @@ import {
 } from "./hlsDownloaderLogic.mjs";
 import {
   canReconcileNativeRecordWithoutCancel,
+  isDubbedStreamProxyUrl,
   isHlsDownloadCandidate,
   pickQueuedEntriesToStart,
+  prepareDownloadRequestUrl,
   shouldFinalizeNativeDownload,
   shouldUseNativeDownloadManager,
 } from "./downloadRoutingLogic.mjs";
+import {
+  MIN_VALID_VIDEO_BYTES,
+  detectHlsContainerExtension,
+  replaceVideoExtension,
+  stripFakeImagePrefixFromTsSegment,
+  validateCompletedMediaFile,
+} from "./downloadIntegrityLogic.mjs";
 import {
   enqueueNativeDownload,
   forgetNativeDownload,
@@ -274,10 +287,10 @@ export async function isDownloaded(
   try {
     const uri = localFileUri(item.localPath);
     const info = await FileSystem.getInfoAsync(uri, { size: true });
-    if (info.exists && ((info as { size?: number }).size ?? 0) > 0) return item;
+    if (info.exists && ((info as { size?: number }).size ?? 0) >= MIN_VALID_VIDEO_BYTES) return item;
     if (uri !== item.localPath) {
       const altInfo = await FileSystem.getInfoAsync(item.localPath, { size: true });
-      if (altInfo.exists && ((altInfo as { size?: number }).size ?? 0) > 0) return item;
+      if (altInfo.exists && ((altInfo as { size?: number }).size ?? 0) >= MIN_VALID_VIDEO_BYTES) return item;
     }
   } catch {
     // Treat an unreadable file exactly like a missing file.
@@ -486,6 +499,7 @@ async function dismissDownloadNotification(id: string): Promise<void> {
 
 function updateDownloadNotification(entry: RuntimeDownload, force = false): void {
   if (Platform.OS === "web") return;
+  if (entry.nativeJobId != null) return;
   const now = Date.now();
   if (!force && now - entry.notificationAt < 800) return;
   entry.notificationAt = now;
@@ -530,6 +544,7 @@ function updateDownloadNotification(entry: RuntimeDownload, force = false): void
 
 function completeNotification(entry: RuntimeDownload, error = false): void {
   if (Platform.OS === "web") return;
+  if (entry.nativeJobId != null && !error) return;
   void (async () => {
     await dismissDownloadNotification(entry.id);
     if (await configureNotifications()) {
@@ -656,6 +671,7 @@ function requestHeaders(
   params: StartDownloadParams,
   targetUrl: string = params.url,
   extraHeaders?: Record<string, string>,
+  isResuming = false,
 ): Record<string, string> {
   const isFirstParty = isFirstPartyVpsUrl(targetUrl, getBaseUrl());
   if (!isFirstParty) {
@@ -672,6 +688,19 @@ function requestHeaders(
       cleanHeaders["Accept"] = "video/mp4,video/*;q=0.9,*/*;q=0.1";
     }
     return cleanHeaders;
+  }
+
+  // Cartoon Dubbed 1 (/api/dubbed/stream -> stream.foupix.com) aborts with HTTP/2 INTERNAL_ERROR
+  // when VPS multiRangeStreamer opens 14 parallel connections (triggered by dl=1, X-Download-Token,
+  // missing Range header, or NovaAnime UA). Route it through the resilient single-stream proxy instead.
+  if (isDubbedStreamProxyUrl(targetUrl)) {
+    const headers: Record<string, string> = {
+      "User-Agent": DIRECT_CDN_UA,
+      "Accept": "video/mp4,video/*;q=0.9,*/*;q=0.1",
+    };
+    if (params.authToken) headers["X-App-Token"] = params.authToken;
+    if (!isResuming) headers["Range"] = "bytes=0-";
+    return headers;
   }
 
   const sourceHeaders = Object.fromEntries(
@@ -821,13 +850,15 @@ async function pollNativeDownload(entry: RuntimeDownload): Promise<void> {
       const existingSize = await readDiskFileSize(entry.localPath);
       if (existingSize > 512 * 1024 && (entry.totalBytes <= 0 || existingSize >= entry.totalBytes * 0.99)) {
         stopProgressTicker(entry);
-        await saveCompleted(entry);
-        active.delete(entry.id);
-        entry.nativePollTimer = undefined;
-        await forgetNativeDownload(entry.id);
-        completeNotification(entry);
-        notifyListeners();
-        return;
+        try {
+          await saveCompleted(entry);
+          active.delete(entry.id);
+          entry.nativePollTimer = undefined;
+          await forgetNativeDownload(entry.id);
+          completeNotification(entry);
+          notifyListeners();
+          return;
+        } catch {}
       }
       entry.nativePollTimer = undefined;
       entry.status = "error";
@@ -868,7 +899,17 @@ async function pollNativeDownload(entry: RuntimeDownload): Promise<void> {
     ) {
       stopProgressTicker(entry);
       entry.status = "downloading";
-      await saveCompleted(entry);
+      try {
+        await saveCompleted(entry);
+      } catch (err) {
+        entry.status = "error";
+        entry.errorMessage = err instanceof Error && err.message ? err.message : "الملف المحمّل تالف أو غير مكتمل.";
+        entry.nativePollTimer = undefined;
+        await forgetNativeDownload(entry.id);
+        completeNotification(entry, true);
+        notifyListeners();
+        return;
+      }
       active.delete(entry.id);
       entry.nativePollTimer = undefined;
       await forgetNativeDownload(entry.id);
@@ -1033,19 +1074,29 @@ async function attachSubtitleSidecar(entry: RuntimeDownload): Promise<void> {
 }
 
 async function saveCompleted(entry: RuntimeDownload): Promise<void> {
-  let fileSize = await readDiskFileSize(entry.localPath);
-  if (fileSize <= 0) {
+  const normalizedLocalPath = localFileUri(entry.localPath);
+  let fileSize = await readDiskFileSize(normalizedLocalPath);
+  if (fileSize < MIN_VALID_VIDEO_BYTES) {
     await wait(600);
-    fileSize = await readDiskFileSize(entry.localPath);
-  }
-  if (fileSize <= 0) {
-    fileSize = Math.max(1024, entry.bytesWritten || entry.totalBytes || 1024);
+    fileSize = await readDiskFileSize(normalizedLocalPath);
   }
 
-  const normalizedLocalPath = localFileUri(entry.localPath);
+  const headBytes = readFileHeadBytes(normalizedLocalPath, 512);
+  const expectedBytes = entry.hlsDirect ? 0 : Math.max(0, entry.totalBytes || 0);
+  const validation = validateCompletedMediaFile({
+    fileSize,
+    expectedTotalBytes: expectedBytes,
+    headBytes,
+  });
+
+  if (!validation.ok) {
+    await FileSystem.deleteAsync(normalizedLocalPath, { idempotent: true }).catch(() => {});
+    throw new Error(validation.messageAr);
+  }
+
   entry.localPath = normalizedLocalPath;
   entry.bytesWritten = fileSize;
-  entry.totalBytes = Math.max(entry.totalBytes, fileSize);
+  entry.totalBytes = fileSize;
   entry.progress = 1;
   entry.queued = false;
   notifyListeners();
@@ -1070,18 +1121,15 @@ async function saveCompleted(entry: RuntimeDownload): Promise<void> {
 
 function estimateActiveProgress(entry: RuntimeDownload): number {
   if (entry.segmentsTotal && entry.segmentsTotal > 0) {
-    return Math.max(0.02, Math.min((entry.segmentsDone || 0) / entry.segmentsTotal, 0.99));
+    if (!entry.segmentsDone) return 0;
+    return Math.max(0.01, Math.min(entry.segmentsDone / entry.segmentsTotal, 0.99));
   }
   if (entry.totalBytes > 0) {
-    return Math.max(0.02, Math.min(entry.bytesWritten / entry.totalBytes, 1));
+    if (entry.bytesWritten <= 0) return 0;
+    return Math.max(0.01, Math.min(entry.bytesWritten / entry.totalBytes, 1));
   }
-  if (entry.bytesWritten > 0) {
-    const byBytes = 1 - 0.82 * Math.exp(-entry.bytesWritten / (28 * 1024 * 1024));
-    return Math.max(0.18, Math.min(0.94, byBytes));
-  }
-  const elapsedSec = Math.max(0, (Date.now() - entry.startedAt) / 1000);
-  const preparing = 0.03 + 0.35 * (1 - Math.exp(-elapsedSec / 18));
-  return Math.max(0.03, Math.min(0.38, preparing));
+  // Never fabricate a fake percentage (e.g. 25%) before real bytes or totalBytes arrive.
+  return 0;
 }
 
 function stopProgressTicker(entry: RuntimeDownload): void {
@@ -1094,9 +1142,6 @@ function stopProgressTicker(entry: RuntimeDownload): void {
 function startProgressTicker(entry: RuntimeDownload): void {
   stopProgressTicker(entry);
   if (!entry.startedAt) entry.startedAt = Date.now();
-  if (entry.progress <= 0) {
-    entry.progress = 0.03;
-  }
   entry.progressTicker = setInterval(() => {
     if (!active.has(entry.id) || entry.status !== "downloading" || entry.queued) {
       stopProgressTicker(entry);
@@ -1247,9 +1292,11 @@ async function downloadHlsDirectToPhone(
       notifyListeners();
       updateDownloadNotification(entry, true);
 
+      let firstMediaBytes: Uint8Array | null = null;
       if (media.initUri) {
         const initHdrs = requestHeaders(entry.params, media.initUri, candidate.headers);
         const initBytes = await fetchBinaryWithRetry(media.initUri, initHdrs, ctrl.signal);
+        firstMediaBytes = initBytes.subarray(0, Math.min(512, initBytes.byteLength));
         handle.writeBytes(initBytes);
         entry.bytesWritten += initBytes.byteLength;
       }
@@ -1266,6 +1313,9 @@ async function downloadHlsDirectToPhone(
         while (handle && buffered.has(nextWriteIdx)) {
           const bytes = buffered.get(nextWriteIdx)!;
           buffered.delete(nextWriteIdx);
+          if (!firstMediaBytes && bytes.byteLength > 0) {
+            firstMediaBytes = bytes.subarray(0, Math.min(512, bytes.byteLength));
+          }
           handle.writeBytes(bytes);
           writeBytesTotal += bytes.byteLength;
           nextWriteIdx += 1;
@@ -1289,15 +1339,16 @@ async function downloadHlsDirectToPhone(
 
           const seg = media.segments[idx];
           const segHdrs = requestHeaders(entry.params, seg.uri, candidate.headers);
-          const segBytes = await fetchBinaryWithRetry(seg.uri, segHdrs, ctrl.signal);
+          const rawSegBytes = await fetchBinaryWithRetry(seg.uri, segHdrs, ctrl.signal);
           if (ctrl.signal.aborted) break;
+          const segBytes = media.initUri ? rawSegBytes : stripFakeImagePrefixFromTsSegment(rawSegBytes);
           buffered.set(idx, segBytes);
           finishedChunks += 1;
           flushOrdered();
 
           entry.segmentsDone = finishedChunks;
           entry.bytesWritten = writeBytesTotal + Array.from(buffered.values()).reduce((s, a) => s + a.byteLength, 0);
-          if (finishedChunks >= 3 && finishedChunks < total) {
+          if (finishedChunks >= 1 && finishedChunks < total) {
             entry.totalBytes = Math.max(
               entry.bytesWritten,
               Math.round((entry.bytesWritten / finishedChunks) * total),
@@ -1305,7 +1356,7 @@ async function downloadHlsDirectToPhone(
           } else if (finishedChunks >= total) {
             entry.totalBytes = entry.bytesWritten;
           }
-          entry.progress = Math.max(0.03, Math.min(finishedChunks / total, 0.99));
+          entry.progress = Math.max(0.01, Math.min(finishedChunks / total, 0.99));
           notifyProgressListeners();
           updateDownloadNotification(entry);
         }
@@ -1338,9 +1389,16 @@ async function downloadHlsDirectToPhone(
       try { handle.close(); } catch {}
       handle = null;
 
+      // Save MPEG-TS HLS concatenations with .ts extension (and fMP4 with .mp4) so Android Media3 plays them cleanly
+      const targetExt = detectHlsContainerExtension(firstMediaBytes, Boolean(media.initUri));
+      const targetFinalUri = replaceVideoExtension(finalUri, targetExt);
+
       await FileSystem.deleteAsync(finalUri, { idempotent: true }).catch(() => {});
-      await FileSystem.moveAsync({ from: partUri, to: finalUri });
-      entry.localPath = finalUri;
+      if (targetFinalUri !== finalUri) {
+        await FileSystem.deleteAsync(targetFinalUri, { idempotent: true }).catch(() => {});
+      }
+      await FileSystem.moveAsync({ from: partUri, to: targetFinalUri });
+      entry.localPath = targetFinalUri;
       entry.totalBytes = entry.bytesWritten;
       entry.hlsAbortController = undefined;
       await saveCompleted(entry);
@@ -1372,11 +1430,12 @@ function makeResumable(
   resumeState?: ResumeState,
 ): FileSystem.DownloadResumable {
   const state = resumeState;
+  const isResuming = Boolean(state?.resumeData);
   const options: DownloadOptions = {
     ...(state?.options ?? {
       sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
     }),
-    headers: requestHeaders(entry.params),
+    headers: requestHeaders(entry.params, state?.url ?? entry.params.url, undefined, isResuming),
   };
   return FileSystem.createDownloadResumable(
     state?.url ?? entry.params.url,
@@ -1393,7 +1452,7 @@ function makeResumable(
           url: entry.params.url,
           fileUri: localFileUri(entry.localPath),
           options: {
-            headers: requestHeaders(entry.params),
+            headers: requestHeaders(entry.params, entry.params.url, undefined, true),
             sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
           },
           resumeData: String(entry.bytesWritten),
@@ -1544,18 +1603,7 @@ function dispatchQueuedDownloads(): void {
 }
 
 function withFastDownloadParam(rawUrl: string): string {
-  if (!rawUrl) return rawUrl;
-  try {
-    const parsed = new URL(rawUrl);
-    if (
-      parsed.pathname.includes("/api/anime/video-proxy") ||
-      parsed.pathname.includes("/api/dubbed/stream")
-    ) {
-      parsed.searchParams.set("dl", "1");
-      return parsed.toString();
-    }
-  } catch {}
-  return rawUrl;
+  return prepareDownloadRequestUrl(rawUrl);
 }
 
 function enqueueDownload(

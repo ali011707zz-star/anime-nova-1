@@ -5,6 +5,8 @@ import {
   isHlsDownloadCandidate,
   pickQueuedEntriesToStart,
   shouldFinalizeNativeDownload,
+  isDubbedStreamProxyUrl,
+  prepareDownloadRequestUrl,
   shouldUseNativeDownloadManager,
 } from "./downloadRoutingLogic.mjs";
 
@@ -137,4 +139,16 @@ test("pickQueuedEntriesToStart enforces maxConcurrent=2", () => {
   ];
   const picked = pickQueuedEntriesToStart(entries, 2);
   assert.deepEqual(picked.map((x) => x.id), ["2"]);
+});
+
+test("prepareDownloadRequestUrl strips dl=1 from /api/dubbed/stream but keeps dl=1 on /api/anime/video-proxy", () => {
+  const dubbedUrl = "https://animenovaa.duckdns.org/api/dubbed/stream?url=https%3A%2F%2Fstream.foupix.com%2Fep.mp4&dl=1&dlToken=abc";
+  assert.equal(isDubbedStreamProxyUrl(dubbedUrl), true);
+  const cleaned = prepareDownloadRequestUrl(dubbedUrl);
+  assert.equal(cleaned.includes("dl=1"), false);
+  assert.equal(cleaned.includes("dlToken"), false);
+
+  const vpUrl = "https://animenovaa.duckdns.org/api/anime/video-proxy?url=https%3A%2F%2Fcdn.example%2Fv.mp4";
+  assert.equal(isDubbedStreamProxyUrl(vpUrl), false);
+  assert.equal(prepareDownloadRequestUrl(vpUrl).includes("dl=1"), true);
 });

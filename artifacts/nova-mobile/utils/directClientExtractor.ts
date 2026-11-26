@@ -10,6 +10,14 @@ import {
   extractSingleHopRedirect,
   isDirectStreamVersion,
 } from "./directStreamModeLogic.mjs";
+import {
+  AD1_BASE_URL,
+  buildAnime4upEpisodeCandidates,
+  extractAnime4upEpisodeMeta,
+  extractAnime4upEpisodeUrlFromSeriesHtml,
+  extractAnime4upSeriesUrlFromSearchHtml,
+  selectPreferredAd1Mirrors,
+} from "./ad1ResolverLogic.mjs";
 
 export const MOBILE_DIRECT_UA =
   "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
@@ -32,6 +40,16 @@ export interface ExtractedPhoneStream {
 export interface MediaFireDirectResult {
   url: string;
   headers: Record<string, string>;
+}
+
+export interface Ad1PhoneResolvedSource {
+  name: string;
+  label: string;
+  url: string;
+  directType: "hls" | "mp4";
+  quality: string;
+  headers: Record<string, string>;
+  clientExtract?: ClientExtractDescriptor;
 }
 
 export interface Ad2PhoneResolvedSource {
@@ -416,6 +434,324 @@ export async function resolveAd2OnPhone(
     return {
       primary: valid[0],
       fallbacks: valid.slice(1),
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", onOuterAbort);
+  }
+}
+
+
+const MEGAMAX_FALLBACK_INERTIA_VERSION = "51ce445f4bd9c3ec0b59998cbcc2cb40";
+
+async function fetchTextSafe(
+  url: string,
+  headers: Record<string, string>,
+  signal: AbortSignal,
+  timeoutMs = 5500,
+): Promise<string | null> {
+  const localCtrl = new AbortController();
+  const onOuter = () => localCtrl.abort();
+  signal.addEventListener("abort", onOuter);
+  const tid = setTimeout(() => localCtrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      headers,
+      redirect: "follow",
+      signal: localCtrl.signal,
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+    if (!html || /just a moment|cf-browser-verification|challenges\.cloudflare\.com/i.test(html.slice(0, 1500))) {
+      return null;
+    }
+    return html;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(tid);
+    signal.removeEventListener("abort", onOuter);
+  }
+}
+
+async function resolveA4slWatchLink(
+  epUrl: string,
+  episodeId: string,
+  watchId: string,
+  signal: AbortSignal,
+): Promise<string | null> {
+  const localCtrl = new AbortController();
+  const onOuter = () => localCtrl.abort();
+  signal.addEventListener("abort", onOuter);
+  const tid = setTimeout(() => localCtrl.abort(), 5000);
+  try {
+    const endpoint = new URL(epUrl);
+    endpoint.hash = "";
+    endpoint.searchParams.set("a4sl_media", "1");
+    const body = `ep=${encodeURIComponent(episodeId)}&kind=watch&id=${encodeURIComponent(watchId)}`;
+    const res = await fetch(endpoint.toString(), {
+      method: "POST",
+      headers: {
+        "User-Agent": MOBILE_DIRECT_UA,
+        Accept: "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
+        Referer: epUrl,
+        Origin: AD1_BASE_URL,
+      },
+      body,
+      signal: localCtrl.signal,
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as { play?: string };
+    const play = String(json?.play || "").trim();
+    return /^https?:\/\//i.test(play) ? play : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(tid);
+    signal.removeEventListener("abort", onOuter);
+  }
+}
+
+async function resolveMegaMaxMirrorsOnPhone(
+  megaUrl: string,
+  referer: string,
+  preferredQuality: string | undefined,
+  forDownload: boolean,
+  signal: AbortSignal,
+): Promise<Ad1PhoneResolvedSource[]> {
+  const match = megaUrl.match(/^https?:\/\/([^/]+)\/(?:iframe|e)\/([^/?#]+)/i);
+  if (!match?.[1] || !match?.[2]) return [];
+  const host = match[1];
+  const fileId = match[2];
+  const iframeUrl = `https://${host}/iframe/${fileId}`;
+
+  const localCtrl = new AbortController();
+  const onOuter = () => localCtrl.abort();
+  signal.addEventListener("abort", onOuter);
+  const tid = setTimeout(() => localCtrl.abort(), 8000);
+  try {
+    const pageRes = await fetch(iframeUrl, {
+      method: "GET",
+      headers: {
+        "User-Agent": MOBILE_DIRECT_UA,
+        Referer: referer || `${AD1_BASE_URL}/`,
+        Accept: "text/html,application/xhtml+xml,*/*;q=0.8",
+      },
+      redirect: "follow",
+      signal: localCtrl.signal,
+    });
+    if (!pageRes.ok) return [];
+    const pageHtml = await pageRes.text();
+    const version =
+      pageHtml.match(/"version"\s*:\s*"([a-f0-9]{20,})"/)?.[1] ||
+      MEGAMAX_FALLBACK_INERTIA_VERSION;
+    const setCookie = pageRes.headers.get("set-cookie") || "";
+    const cookieHeader = setCookie
+      .split(/,(?=\s*[A-Za-z0-9_.-]+=)/)
+      .map((part) => part.split(";")[0]?.trim())
+      .filter(Boolean)
+      .join("; ");
+
+    const inertiaRes = await fetch(iframeUrl, {
+      method: "GET",
+      headers: {
+        "User-Agent": MOBILE_DIRECT_UA,
+        "X-Inertia": "true",
+        "X-Inertia-Version": version,
+        "X-Inertia-Partial-Data": "streams",
+        "X-Inertia-Partial-Component": "files/mirror/video",
+        Referer: iframeUrl,
+        Accept: "application/json, text/plain, */*",
+        ...(cookieHeader ? { Cookie: cookieHeader } : {}),
+      },
+      signal: localCtrl.signal,
+    });
+    if (!inertiaRes.ok) return [];
+    const data = (await inertiaRes.json()) as {
+      props?: { streams?: { status?: string; data?: unknown[] } };
+    };
+    const streamsData = data?.props?.streams?.data;
+    if (data?.props?.streams?.status !== "success" || !Array.isArray(streamsData) || !streamsData.length) {
+      return [];
+    }
+
+    const mirrors = selectPreferredAd1Mirrors(streamsData, preferredQuality, forDownload);
+    if (!mirrors.length) return [];
+
+    // Try fast direct HTTP extraction on the top 2 mirrors first so playback/download can start instantly;
+    // keep the remaining ranked mirrors as clientExtract descriptors (for extractDirectStreamOnPhone + HiddenResolverWebView).
+    const resolved: Ad1PhoneResolvedSource[] = [];
+    for (let i = 0; i < Math.min(mirrors.length, 6); i += 1) {
+      const m = mirrors[i]!;
+      const descriptor: ClientExtractDescriptor = {
+        embedUrl: m.embedUrl,
+        referer: iframeUrl,
+        hostKind: m.hostKind,
+      };
+      if (i < 2 && !localCtrl.signal.aborted) {
+        const fast = await extractDirectStreamOnPhone(descriptor, localCtrl.signal, 3500).catch(() => null);
+        if (fast?.url) {
+          resolved.push({
+            name: `أنمي فور أب (مدمج) · ${m.quality}`,
+            label: `AD 1 (${m.quality})`,
+            url: fast.url,
+            directType: fast.type,
+            quality: m.quality,
+            headers: fast.headers,
+          });
+          continue;
+        }
+      }
+      resolved.push({
+        name: `أنمي فور أب (مدمج) · ${m.quality}`,
+        label: `AD 1 (${m.quality})`,
+        url: m.embedUrl,
+        directType: "hls",
+        quality: m.quality,
+        headers: {
+          "User-Agent": MOBILE_DIRECT_UA,
+          Referer: iframeUrl,
+        },
+        clientExtract: descriptor,
+      });
+    }
+    return resolved;
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(tid);
+    signal.removeEventListener("abort", onOuter);
+  }
+}
+
+/**
+ * Direct phone-side resolver for AD 1 (Anime4Up Arabic Hardsub).
+ * Supports Anime4Up's new A4SL 1.2 opaque data-watch POST protocol and MegaMax
+ * Inertia mirror extraction directly from the user's phone (0% VPS load).
+ */
+export async function resolveAd1OnPhone(opts: {
+  title?: string | null;
+  english?: string | null;
+  epNum: number;
+  preferredQuality?: string;
+  forDownload?: boolean;
+  signal?: AbortSignal;
+}): Promise<{ primary: Ad1PhoneResolvedSource; fallbacks: Ad1PhoneResolvedSource[] } | null> {
+  const { title, english, epNum, preferredQuality, forDownload = false, signal } = opts;
+  if (!epNum || epNum <= 0) return null;
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 13_000);
+  const onOuterAbort = () => ctrl.abort();
+  signal?.addEventListener("abort", onOuterAbort);
+
+  const pageHeaders = {
+    "User-Agent": MOBILE_DIRECT_UA,
+    Referer: `${AD1_BASE_URL}/`,
+    Accept: "text/html,application/xhtml+xml,*/*;q=0.8",
+  };
+
+  try {
+    let epUrl: string | null = null;
+    let epHtml: string | null = null;
+
+    // Step 1: Fast direct episode slug attempts in parallel
+    const directCandidates = buildAnime4upEpisodeCandidates({ title, english, epNum });
+    if (directCandidates.length > 0) {
+      const results = await Promise.all(
+        directCandidates.map(async (u) => {
+          const html = await fetchTextSafe(u, pageHeaders, ctrl.signal, 4200);
+          if (!html) return null;
+          const meta = extractAnime4upEpisodeMeta(html);
+          if (!meta.servers.length) return null;
+          return { url: u, html };
+        }),
+      );
+      const hit = results.find(Boolean);
+      if (hit) {
+        epUrl = hit.url;
+        epHtml = hit.html;
+      }
+    }
+
+    // Step 2: Fallback search on Anime4Up if direct slug did not match
+    if (!epHtml && !ctrl.signal.aborted) {
+      const queries = [english, title].filter((q): q is string => Boolean(q && q.trim()));
+      for (const q of queries) {
+        if (ctrl.signal.aborted) break;
+        const searchUrl = `${AD1_BASE_URL}/?search_param=animes&s=${encodeURIComponent(q.trim())}`;
+        const searchHtml = await fetchTextSafe(searchUrl, pageHeaders, ctrl.signal, 4500);
+        if (!searchHtml) continue;
+        const seriesUrl = extractAnime4upSeriesUrlFromSearchHtml(searchHtml, title, english);
+        if (!seriesUrl) continue;
+        const seriesHtml = await fetchTextSafe(seriesUrl, pageHeaders, ctrl.signal, 4500);
+        if (!seriesHtml) continue;
+        const foundEpUrl = extractAnime4upEpisodeUrlFromSeriesHtml(seriesHtml, epNum);
+        if (!foundEpUrl) continue;
+        const foundHtml = await fetchTextSafe(foundEpUrl, pageHeaders, ctrl.signal, 4500);
+        if (foundHtml) {
+          epUrl = foundEpUrl;
+          epHtml = foundHtml;
+          break;
+        }
+      }
+    }
+
+    if (!epUrl || !epHtml || ctrl.signal.aborted) return null;
+
+    const meta = extractAnime4upEpisodeMeta(epHtml);
+    if (!meta.servers.length) return null;
+
+    const collected: Ad1PhoneResolvedSource[] = [];
+
+    for (const server of meta.servers.slice(0, 4)) {
+      if (ctrl.signal.aborted) break;
+      let embedUrl: string | null = server.isDirectUrl ? server.watchValue : null;
+      if (!embedUrl && meta.episodeId) {
+        embedUrl = await resolveA4slWatchLink(epUrl, meta.episodeId, server.watchValue, ctrl.signal);
+      }
+      if (!embedUrl) continue;
+
+      if (/(?:megamax\.me|share4max\.com)\/(?:iframe|e)\//i.test(embedUrl)) {
+        const megaSources = await resolveMegaMaxMirrorsOnPhone(
+          embedUrl,
+          epUrl,
+          preferredQuality,
+          forDownload,
+          ctrl.signal,
+        );
+        if (megaSources.length > 0) {
+          collected.push(...megaSources);
+          break;
+        }
+      } else if (!/mp4upload|mega\.nz|mega\.co\.nz/i.test(embedUrl)) {
+        collected.push({
+          name: `أنمي فور أب (مدمج) · ${server.label}`,
+          label: `AD 1 (${server.label})`,
+          url: embedUrl,
+          directType: "hls",
+          quality: preferredQuality || "1080p",
+          headers: {
+            "User-Agent": MOBILE_DIRECT_UA,
+            Referer: epUrl,
+          },
+          clientExtract: {
+            embedUrl,
+            referer: epUrl,
+            hostKind: /ok\.ru/i.test(embedUrl) ? "okru" : "standard",
+          },
+        });
+      }
+    }
+
+    if (!collected.length) return null;
+    return {
+      primary: collected[0]!,
+      fallbacks: collected.slice(1),
     };
   } catch {
     return null;

@@ -11,3 +11,23 @@ export function openSequentialPartWriter(partUri) {
     close: () => handle.close(),
   };
 }
+
+export function readFileHeadBytes(fileUri, maxBytes = 512) {
+  if (!File || !fileUri) return null;
+  let handle = null;
+  try {
+    const file = new File(fileUri);
+    if (!file.exists) return null;
+    handle = file.open();
+    if (typeof handle.readBytes === "function") {
+      return handle.readBytes(maxBytes);
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    if (handle) {
+      try { handle.close(); } catch {}
+    }
+  }
+}

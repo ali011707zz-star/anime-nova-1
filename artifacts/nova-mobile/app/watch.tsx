@@ -18,9 +18,11 @@ import {
   getDirectRequestHeaders,
   isDirectStreamActive,
   MOBILE_DIRECT_UA,
+  resolveAd1OnPhone,
   resolveAd2OnPhone,
   resolveMediaFireDirectOnPhone,
   withDirectStreamParams,
+  type Ad1PhoneResolvedSource,
   type Ad2PhoneResolvedSource,
   type ClientExtractDescriptor,
 } from "@/utils/directClientExtractor";
@@ -37,8 +39,10 @@ import {
   startGlobalDownload,
   subscribeActiveDownloads,
   getActiveDownloadsSnapshot,
+  getDownloads,
   cancelActiveDownload,
 } from "@/utils/downloadManager";
+import { reconcileDownloadButtonStates } from "@/utils/downloadIntegrityLogic.mjs";
 import { openIsolatedPlayer } from "@/lib/isolatedPlayer";
 import { DownloadMethodModal } from "@/components/DownloadMethodModal";
 import {
@@ -1218,6 +1222,7 @@ export default function WatchScreen() {
   const [pendingAdmSlot, setPendingAdmSlot] = useState<{ site: string; quality: QualityKey; tag: string } | null>(null);
   /* حالات التنزيل لكل موقع وجودة (site:quality) */
   const [downloadStates,   setDownloadStates]   = useState<Record<string, "idle" | "downloading" | "done" | "error">>({});
+  const startingDlKeysRef = useRef<Set<string>>(new Set());
   const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
   /* صفوف يجري جلبها خصيصاً للتنزيل (بدون فتح المشغّل) */
   const [dlFetchingSites,  setDlFetchingSites]  = useState<Set<string>>(new Set());
@@ -2510,7 +2515,7 @@ export default function WatchScreen() {
         if (!dataLines.length) return;
         let payload: any;
         try { payload = JSON.parse(dataLines.join("\n")); } catch { return; }
-        if (eventName === "done") {
+        if (eventName === "done" || eventName === "error") {
           streamDoneSeen = true;
           playback.streamOpen = false;
           return;
@@ -2583,6 +2588,40 @@ export default function WatchScreen() {
           "primary",
         );
       }
+      if (!receivedCandidate && Platform.OS !== "web" && site === "anime4up2_hard" && !currentSiteCtrl.signal.aborted && isMountedRef.current) {
+        const ad1Phone = await resolveAd1OnPhone({
+          title: titleStr,
+          english: englishStr,
+          epNum,
+          preferredQuality,
+          forDownload: false,
+          signal: currentSiteCtrl.signal,
+        });
+        if (ad1Phone?.primary?.url && isMountedRef.current && progressivePlaybackRef.current === playback) {
+          const toAd1Src = (item: Ad1PhoneResolvedSource, idx: number): Src => ({
+            site: "anime4up2_hard",
+            name: item.name,
+            label: item.label,
+            quality: preferredQuality || item.quality,
+            url: item.url,
+            directUrl: item.url,
+            rawUrl: item.url,
+            directType: item.directType,
+            isEmbed: false,
+            deliveryMode: item.clientExtract ? "client-extract" : "direct",
+            headers: item.headers,
+            clientExtract: item.clientExtract,
+            candidateKey: `ad1-phone-${idx}-${item.quality}`,
+          });
+          const primarySrc = toAd1Src(ad1Phone.primary, 0);
+          ad1Phone.fallbacks.forEach((fb, i) => {
+            const fbSrc = toAd1Src(fb, i + 1);
+            playback.fallbackSources.push(fbSrc);
+            setSources(prev => prev.some(item => item.candidateKey === fbSrc.candidateKey) ? prev : [...prev, fbSrc]);
+          });
+          acceptPlayableCandidate(primarySrc, primarySrc.candidateKey!, "primary");
+        }
+      }
       if (!receivedCandidate && isDirectStreamActive() && site === "anime4up2" && !currentSiteCtrl.signal.aborted && isMountedRef.current) {
         const ad2Phone = await resolveAd2OnPhone(Number(sourceAnimeId || anime || 0), epNum, currentSiteCtrl.signal);
         if (ad2Phone?.primary?.url && isMountedRef.current && progressivePlaybackRef.current === playback) {
@@ -2637,17 +2676,15 @@ export default function WatchScreen() {
         `[playback-trace] id=${lookupTraceId} component=source stage=stream_error site=${lookupSiteTag} elapsed_ms=${Date.now() - lookupStartedAt} reason=${siteCtrl?.signal.aborted ? "aborted" : error instanceof Error ? error.name : "unknown"}`,
       );
       if (siteCtrl?.signal.aborted) {
-        if (isMountedRef.current && progressivePlaybackRef.current === playback) {
+        if (isMountedRef.current) {
           fetchedSitesRef.current.delete(fetchKey);
           markQualityFailed();
         }
         return;
       }
       if (!receivedCandidate && !playback.retryPending && isMountedRef.current) {
-        if (progressivePlaybackRef.current === playback) {
-          markQualityFailed();
-          fetchedSitesRef.current.delete(fetchKey);
-        }
+        markQualityFailed();
+        fetchedSitesRef.current.delete(fetchKey);
       }
     } finally {
       /* نضمن مسح الـ timeout دائماً — حتى عند abort أو خطأ */
@@ -2687,6 +2724,7 @@ export default function WatchScreen() {
     const animeIdNum = isAwDubbed
       ? Math.abs(Array.from(awSeries || titleStr).reduce((acc, ch) => ((acc << 5) - acc) + ch.charCodeAt(0), 0)) || 900001
       : (parseInt(anime || "0", 10) || 0);
+    let cancelled = false;
     const sync = () => {
       const snapshot = getActiveDownloadsSnapshot();
       /* خريطة: site:quality → ActiveDownload للحلقة الحالية فقط */
@@ -2695,20 +2733,13 @@ export default function WatchScreen() {
           .filter(d => d.animeId === animeIdNum && d.ep === epNum)
           .map(d => [`${d.site}:${downloadQualityKey(d.quality)}`, d])
       );
-      setDownloadStates(prev => {
-        const next = { ...prev };
-        /* downloading → done: إذا اختفى من الـ snapshot (اكتمل بنجاح) */
-        for (const k of Object.keys(next)) {
-          if (next[k] === "downloading" && !activeForEp.has(k)) {
-            next[k] = "done";
-          }
-        }
-        /* حدِّث من الـ snapshot الحالي */
-        for (const [stateKey, d] of activeForEp) {
-          next[stateKey] = d.status === "error" ? "error" : "downloading";
-        }
-        return next;
-      });
+      const activeStatusByKey: Record<string, string> = {};
+      for (const [stateKey, d] of activeForEp) {
+        activeStatusByKey[stateKey] = d.status;
+      }
+      for (const pendingKey of startingDlKeysRef.current) {
+        if (!activeStatusByKey[pendingKey]) activeStatusByKey[pendingKey] = "downloading";
+      }
       setDownloadProgress(prev => {
         const next = { ...prev };
         for (const [stateKey, d] of activeForEp) {
@@ -2716,9 +2747,29 @@ export default function WatchScreen() {
         }
         return next;
       });
+      getDownloads().then((list) => {
+        if (cancelled) return;
+        const completedKeys = new Set<string>();
+        for (const item of list) {
+          if (item.animeId === animeIdNum && item.ep === epNum) {
+            completedKeys.add(`${item.site}:${downloadQualityKey(item.quality)}`);
+          }
+        }
+        setDownloadStates(prev =>
+          reconcileDownloadButtonStates({
+            prevStates: prev,
+            activeStatusByKey,
+            completedKeys,
+          }) as Record<string, "idle" | "downloading" | "done" | "error">,
+        );
+      }).catch(() => {});
     };
     sync(); // قراءة فورية عند mount
-    return subscribeActiveDownloads(sync);
+    const unsub = subscribeActiveDownloads(sync);
+    return () => {
+      cancelled = true;
+      unsub();
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anime, epNum]);
 
@@ -2853,24 +2904,29 @@ export default function WatchScreen() {
       const numericId = isAwDubbed
         ? Math.abs(Array.from(awSeries || titleStr).reduce((acc, ch) => ((acc << 5) - acc) + ch.charCodeAt(0), 0)) || 900001
         : (parseInt(anime || "0", 10) || 0);
+      startingDlKeysRef.current.add(stateKey);
       if (isMountedRef.current) {
         setDownloadStates(prev => ({ ...prev, [stateKey]: "downloading" }));
         setDownloadProgress(prev => ({ ...prev, [stateKey]: 0 }));
       }
-      await startGlobalDownload({
-        animeId:  numericId,
-        ep:       epNum,
-        title:    displayTitle,
-        cover:    coverUrl,
-        site,
-        quality:  getSrcQuality(best),
-        url:      finalDownloadUrl,
-        authToken: token,
-        downloadToken,
-        headers:  finalHeaders,
-        subtitleUrl,
-        hlsManifestUrl: finalHlsManifestUrl,
-      });
+      try {
+        await startGlobalDownload({
+          animeId:  numericId,
+          ep:       epNum,
+          title:    displayTitle,
+          cover:    coverUrl,
+          site,
+          quality:  getSrcQuality(best),
+          url:      finalDownloadUrl,
+          authToken: token,
+          downloadToken,
+          headers:  finalHeaders,
+          subtitleUrl,
+          hlsManifestUrl: finalHlsManifestUrl,
+        });
+      } finally {
+        startingDlKeysRef.current.delete(stateKey);
+      }
       return true;
     } catch {
       if (isMountedRef.current) {
@@ -3038,6 +3094,35 @@ export default function WatchScreen() {
         }
       }
 
+      if (!newSrcs.length && Platform.OS !== "web" && site === "anime4up2_hard" && !siteCtrl.signal.aborted) {
+        const ad1Phone = await resolveAd1OnPhone({
+          title: titleStr,
+          english: englishStr,
+          epNum,
+          preferredQuality,
+          forDownload: true,
+          signal: siteCtrl.signal,
+        });
+        if (ad1Phone?.primary?.url) {
+          const allItems = [ad1Phone.primary, ...ad1Phone.fallbacks];
+          for (const item of allItems) {
+            newSrcs.push({
+              site: "anime4up2_hard",
+              name: item.name,
+              label: item.label,
+              quality: item.quality,
+              url: item.url,
+              directUrl: item.url,
+              rawUrl: item.url,
+              directType: item.directType,
+              isEmbed: false,
+              deliveryMode: item.clientExtract ? "client-extract" : "direct",
+              headers: item.headers,
+              ...(item.clientExtract ? { clientExtract: item.clientExtract } : {}),
+            });
+          }
+        }
+      }
       if (!newSrcs.length) throw new Error("no direct sources");
 
       fetchedSitesRef.current.add(site);
@@ -3155,22 +3240,27 @@ export default function WatchScreen() {
         finalHlsManifestUrl = isHlsDownload ? (cleanResolved || fallbackProxyUrl) : undefined;
       }
 
+      startingDlKeysRef.current.add(stateKey);
       setDownloadStates(prev => ({ ...prev, [stateKey]: "downloading" }));
       setDownloadProgress(prev => ({ ...prev, [stateKey]: 0 }));
-      await startGlobalDownload({
-        animeId:    parseInt(anime || "0"),
-        ep:         epNum,
-        title:      displayTitle,
-        cover:      coverUrl,
-        site,
-        quality:    getSrcQuality(best),
-        url:        finalDownloadUrl,
-        authToken:  token,
-        downloadToken,
-        headers:    finalHeaders,
-        subtitleUrl,
-        hlsManifestUrl: finalHlsManifestUrl,
-      });
+      try {
+        await startGlobalDownload({
+          animeId:    parseInt(anime || "0"),
+          ep:         epNum,
+          title:      displayTitle,
+          cover:      coverUrl,
+          site,
+          quality:    getSrcQuality(best),
+          url:        finalDownloadUrl,
+          authToken:  token,
+          downloadToken,
+          headers:    finalHeaders,
+          subtitleUrl,
+          hlsManifestUrl: finalHlsManifestUrl,
+        });
+      } finally {
+        startingDlKeysRef.current.delete(stateKey);
+      }
 
     } catch {
       if (isMountedRef.current)

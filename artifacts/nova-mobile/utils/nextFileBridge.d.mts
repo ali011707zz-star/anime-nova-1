@@ -3,4 +3,5 @@ export interface SequentialPartWriter {
   close(): void;
 }
 
-export function openSequentialPartWriter(partUri: string): SequentialPartWriter | null;
+export declare function openSequentialPartWriter(partUri: string): SequentialPartWriter | null;
+export declare function readFileHeadBytes(fileUri: string, maxBytes?: number): Uint8Array | null;

@@ -19,6 +19,7 @@ import {
   withDirectStreamParams,
 } from "@/utils/directClientExtractor";
 import { getBaseUrl } from "@/utils/api";
+import { reconcileDownloadButtonStates } from "@/utils/downloadIntegrityLogic.mjs";
 import { getAuthToken, getDownloadToken } from "@/utils/secureApi";
 import { getWatchContentId, useApp } from "@/context/AppContext";
 import { ensureWatchAccess } from "@/utils/adPolicy";
@@ -1505,9 +1506,11 @@ export default function DubbedWatchScreen() {
   }, [extractPlayableSource, ensureWatchAccess, isSd2Source]);
 
   const [activeEpisodeDownloads, setActiveEpisodeDownloads] = useState<ActiveDownload[]>([]);
+  const startingDlKeysRef = useRef<Set<string>>(new Set());
 
-  /* ── Sync Active & Completed Downloads ── */
+  /* ── Sync Active & Completed Downloads (verified against getDownloads) ── */
   useEffect(() => {
+    let cancelled = false;
     const sync = () => {
       const snapshot = getActiveDownloadsSnapshot();
       const epActive = snapshot.filter(
@@ -1516,18 +1519,15 @@ export default function DubbedWatchScreen() {
       setActiveEpisodeDownloads(epActive);
 
       const activeBySite = new Map(epActive.map((d) => [d.site, d]));
-      setDlStates((prev) => {
-        const next = { ...prev };
-        for (const slot of slots) {
-          const activeDl = activeBySite.get(slot.site);
-          if (activeDl) {
-            next[slot.key] = activeDl.status === "error" ? "error" : "downloading";
-          } else if (next[slot.key] === "downloading") {
-            next[slot.key] = "done";
-          }
+      const activeStatusByKey: Record<string, string> = {};
+      for (const slot of slots) {
+        const activeDl = activeBySite.get(slot.site);
+        if (activeDl) {
+          activeStatusByKey[slot.key] = activeDl.status;
+        } else if (startingDlKeysRef.current.has(slot.key)) {
+          activeStatusByKey[slot.key] = "downloading";
         }
-        return next;
-      });
+      }
       setDlProgress((prev) => {
         const next = { ...prev };
         for (const slot of slots) {
@@ -1539,16 +1539,30 @@ export default function DubbedWatchScreen() {
         return next;
       });
       getDownloads().then((list) => {
+        if (cancelled) return;
+        const completedKeys = new Set<string>();
         for (const slot of slots) {
           const dlId = makeDownloadId(numericAnimeId, episodeNumber, slot.site, slot.quality);
           if (list.some((d) => d.id === dlId)) {
-            setDlStates((p) => ({ ...p, [slot.key]: "done" }));
+            completedKeys.add(slot.key);
           }
         }
+        setDlStates((prev) =>
+          reconcileDownloadButtonStates({
+            prevStates: prev,
+            activeStatusByKey,
+            completedKeys,
+            allKeys: slots.map((s) => s.key),
+          }),
+        );
       }).catch(() => {});
     };
     sync();
-    return subscribeActiveDownloads(sync);
+    const unsub = subscribeActiveDownloads(sync);
+    return () => {
+      cancelled = true;
+      unsub();
+    };
   }, [slots, numericAnimeId, episodeNumber]);
 
   const handleDownloadSlot = useCallback(async (slot: DubbedServerSlot, downloadMode: "internal" | "adm" = "internal") => {
@@ -1709,23 +1723,29 @@ export default function DubbedWatchScreen() {
         hlsManifestUrl = candidateType === "hls" ? candidateRawUrl : undefined;
       }
 
+      startingDlKeysRef.current.add(slot.key);
       setDlStates((p) => ({ ...p, [slot.key]: "downloading" }));
       setDlProgress((p) => ({ ...p, [slot.key]: 0 }));
 
-      await startGlobalDownload({
-        animeId: numericAnimeId,
-        ep: episodeNumber,
-        title: title || "مدبلج",
-        cover: posterUrl,
-        site: slot.site,
-        quality: slot.quality,
-        url: downloadUrl,
-        authToken: authToken ?? undefined,
-        downloadToken: downloadToken ?? undefined,
-        headers: downloadHeaders,
-        hlsManifestUrl,
-      });
+      try {
+        await startGlobalDownload({
+          animeId: numericAnimeId,
+          ep: episodeNumber,
+          title: title || "مدبلج",
+          cover: posterUrl,
+          site: slot.site,
+          quality: slot.quality,
+          url: downloadUrl,
+          authToken: authToken ?? undefined,
+          downloadToken: downloadToken ?? undefined,
+          headers: downloadHeaders,
+          hlsManifestUrl,
+        });
+      } finally {
+        startingDlKeysRef.current.delete(slot.key);
+      }
     } catch {
+      startingDlKeysRef.current.delete(slot.key);
       setDlStates((p) => ({ ...p, [slot.key]: "error" }));
     }
   }, [dlStates, episodeNumber, extractPlayableSource, isAzSource, isCarateenSource, isSd2Source, numericAnimeId, posterUrl, provider, title]);

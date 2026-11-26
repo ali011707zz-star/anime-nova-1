@@ -28,3 +28,5 @@ export function pickQueuedEntriesToStart<T extends {
   queued?: boolean;
   nativeJobId?: number;
 }>(entries: T[], maxConcurrent?: number): T[];
+export function isDubbedStreamProxyUrl(rawUrl: string): boolean;
+export function prepareDownloadRequestUrl(rawUrl: string): string;

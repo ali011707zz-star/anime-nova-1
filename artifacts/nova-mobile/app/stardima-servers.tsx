@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { TvPressable, isTvDevice, tvFocusStyle, useTvMetrics } from "@/utils/tv";
 import { getBaseUrl } from "@/utils/api";
+import { reconcileDownloadButtonStates } from "@/utils/downloadIntegrityLogic.mjs";
 import { getAuthToken, getDownloadToken } from "@/utils/secureApi";
 import { resolveMediaFireDirectOnPhone } from "@/utils/directClientExtractor";
 import { resolveDirectInternalMp4Download } from "@/utils/hybridStreamLogic.mjs";
@@ -259,23 +260,26 @@ export default function StardimaServersScreen() {
     return () => controller.abort();
   }, [loadServers, retryKey]);
 
-  /* ── Sync Active & Completed Downloads ── */
+  /* ── Sync Active & Completed Downloads (verified against getDownloads) ── */
   useEffect(() => {
+    let cancelled = false;
     const sync = () => {
+      const activeStatusByKey: Record<string, string> = {};
+      const allKeys: string[] = [];
       for (const server of servers) {
         const sId = String(server.id || "");
         if (!sId) continue;
+        allKeys.push(sId);
         const siteKey = `stardima_${sId}`;
         const activeDl = getActiveSiteDownload(numericAnimeId, numericEp, siteKey);
         if (activeDl) {
-          setDlStates((p) => ({
-            ...p,
-            [sId]: activeDl.status === "error" ? "error" : "downloading",
-          }));
+          activeStatusByKey[sId] = activeDl.status;
           setDlProgress((p) => ({ ...p, [sId]: Math.round(activeDl.progress * 100) }));
         }
       }
       getDownloads().then((list) => {
+        if (cancelled) return;
+        const completedKeys = new Set<string>();
         for (const server of servers) {
           const sId = String(server.id || "");
           if (!sId) continue;
@@ -283,13 +287,25 @@ export default function StardimaServersScreen() {
           const qualityLabel = String(server.quality || "720p").trim();
           const dlId = makeDownloadId(numericAnimeId, numericEp, siteKey, qualityLabel);
           if (list.some((d) => d.id === dlId)) {
-            setDlStates((p) => ({ ...p, [sId]: "done" }));
+            completedKeys.add(sId);
           }
         }
+        setDlStates((prev) =>
+          reconcileDownloadButtonStates({
+            prevStates: prev,
+            activeStatusByKey,
+            completedKeys,
+            allKeys,
+          }),
+        );
       }).catch(() => {});
     };
     sync();
-    return subscribeActiveDownloads(sync);
+    const unsub = subscribeActiveDownloads(sync);
+    return () => {
+      cancelled = true;
+      unsub();
+    };
   }, [servers, numericAnimeId, numericEp]);
 
   const handleDownloadServer = useCallback(async (server: CatalogServer, downloadMode: "internal" | "adm" = "internal") => {

@@ -137,3 +137,44 @@ export function pickQueuedEntriesToStart(entries, maxConcurrent = 2) {
     .filter((e) => e.status === "downloading" && Boolean(e.queued))
     .slice(0, slotsAvailable);
 }
+
+/**
+ * Detects Cartoon Dubbed 1 (/api/dubbed/stream -> foupix) proxy URLs.
+ * Foupix drops/resets HTTP/2 streams with INTERNAL_ERROR when the VPS opens
+ * 14 concurrent Range workers (triggered by dl=1 / X-Download-Token / missing Range / NovaAnime UA).
+ */
+export function isDubbedStreamProxyUrl(rawUrl) {
+  const clean = String(rawUrl || "").trim();
+  if (!clean) return false;
+  try {
+    const parsed = new URL(clean);
+    return parsed.pathname.includes("/api/dubbed/stream");
+  } catch {
+    return clean.includes("/api/dubbed/stream");
+  }
+}
+
+/**
+ * Normalizes VPS download URLs:
+ * - Adds `dl=1` ONLY for `/api/anime/video-proxy`.
+ * - Explicitly strips `dl`, `download`, and `dlToken` from `/api/dubbed/stream`
+ *   so the VPS serves it over its resilient single-stream proxy instead of flooding foupix.
+ */
+export function prepareDownloadRequestUrl(rawUrl) {
+  const clean = String(rawUrl || "").trim();
+  if (!clean) return clean;
+  try {
+    const parsed = new URL(clean);
+    if (parsed.pathname.includes("/api/dubbed/stream")) {
+      parsed.searchParams.delete("dl");
+      parsed.searchParams.delete("download");
+      parsed.searchParams.delete("dlToken");
+      return parsed.toString();
+    }
+    if (parsed.pathname.includes("/api/anime/video-proxy")) {
+      parsed.searchParams.set("dl", "1");
+      return parsed.toString();
+    }
+  } catch {}
+  return clean;
+}
