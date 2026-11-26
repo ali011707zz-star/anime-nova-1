@@ -101,7 +101,7 @@ function isProgressiveSourceUrl(url: string, contentType?: PlayerSource["content
   if (contentType === "hls") return false;
   const lower = url.toLowerCase();
   return (
-    /\.(?:mp4|m4v|webm|mov)(?:[?#]|$)/i.test(lower) ||
+    /\.(?:mp4|m4v|webm|mov|ts)(?:[?#]|$)/i.test(lower) ||
     lower.includes("/api/dubbed/stream") ||
     lower.includes("/api/aw-dubbed/mf-stream") ||
     lower.includes("/api/anime/video-proxy") ||

@@ -123,6 +123,7 @@ function ActiveDownloadCard({
   const pct = Math.round(item.progress * 100);
   const isPaused = item.status === "paused";
   const isError = item.status === "error";
+  const isQueued = Boolean(item.queued) && item.status === "downloading";
   const canPause = item.pauseSupported !== false;
 
   return (
@@ -162,7 +163,7 @@ function ActiveDownloadCard({
           {/* Percentage badge */}
           <View style={[s.activePctBadge, isError && s.activePctBadgeError]}>
             <Text style={[s.activePctText, isError && { color: colors.destructive }]}>
-           {isError ? "خطأ" : isPaused ? "متوقف" : `${Math.max(1, pct)}%`}
+           {isError ? "خطأ" : isPaused ? "متوقف" : isQueued ? "بالانتظار" : `${Math.max(1, pct)}%`}
             </Text>
           </View>
         </View>
@@ -178,13 +179,17 @@ function ActiveDownloadCard({
 
         <View style={s.activeProgressMeta}>
           <Text style={s.activeStatus}>
-            {item.totalBytes > 0
-              ? `${formatFileSize(item.bytesWritten)} من ${formatFileSize(item.totalBytes)}`
-              : item.bytesWritten > 0
-                ? `تم تنزيل ${formatFileSize(item.bytesWritten)} · جارٍ التنزيل...`
-                : "جارٍ تجهيز وتحويل الحلقة للتنزيل..."}
+            {isQueued
+              ? "في قائمة الانتظار..."
+              : item.totalBytes > 0
+                ? `${formatFileSize(item.bytesWritten)} من ${formatFileSize(item.totalBytes)}`
+                : item.bytesWritten > 0
+                  ? `تم تنزيل ${formatFileSize(item.bytesWritten)} · جارٍ التنزيل...`
+                  : item.hlsDirect
+                    ? `مقطع ${item.segmentsDone || 0} من ${item.segmentsTotal || "?"}`
+                    : "جارٍ تجهيز الحلقة للتنزيل..."}
           </Text>
-          <Text style={s.activeStatus}>{isError ? "لم يكتمل" : `${Math.max(1, pct)}%`}</Text>
+          <Text style={s.activeStatus}>{isError ? "لم يكتمل" : isQueued ? "انتظار" : `${Math.max(1, pct)}%`}</Text>
         </View>
 
         <Text style={[s.activeStatus, isError && { color: colors.destructive }]}>
@@ -192,9 +197,13 @@ function ActiveDownloadCard({
             ? `${item.errorMessage || "فشل التنزيل"} — اضغط × للإغلاق`
               : isPaused
               ? "متوقف مؤقتاً — اضغط ▶ للاستئناف"
-                : canPause
-                  ? "يجري التنزيل في الخلفية..."
-                  : "تنزيل نظامي — يستمر حتى بعد إغلاق التطبيق"}
+                : isQueued
+                  ? "بانتظار اكتمال أحد التنزيلات الحالية..."
+                  : item.hlsDirect
+                    ? "تحميل مباشر على الهاتف بدون تحويل الخادم..."
+                    : canPause
+                      ? "يجري التنزيل في الخلفية..."
+                      : "تنزيل نظامي — يستمر حتى بعد إغلاق التطبيق"}
         </Text>
       </View>
       <DownloadCoverImage

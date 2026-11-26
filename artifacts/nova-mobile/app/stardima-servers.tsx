@@ -387,7 +387,7 @@ export default function StardimaServersScreen() {
       const downloadUrl = directMp4.isDirect && directMp4.url
         ? directMp4.url
         : data.mediaType === "hls" && !rawStreamUrl.includes("/api/anime/download-mp4")
-          ? `${base}/api/anime/download-mp4?url=${encodeURIComponent(rawStreamUrl)}${downloadToken ? `&dlToken=${encodeURIComponent(downloadToken)}` : ""}`
+          ? `${base}/api/anime/download-mp4?site=${encodeURIComponent(siteKey)}&url=${encodeURIComponent(rawStreamUrl)}${downloadToken ? `&dlToken=${encodeURIComponent(downloadToken)}` : ""}`
           : rawStreamUrl;
 
       const qualityLabel = String(server.quality || "720p").trim();

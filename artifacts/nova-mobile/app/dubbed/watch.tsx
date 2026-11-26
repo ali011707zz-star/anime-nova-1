@@ -453,8 +453,9 @@ export default function DubbedWatchScreen() {
       } catch {}
     }
 
-    // 1. Try /api/dubbed/carateen/stream (Available on live server https://animenovaa.duckdns.org)
-    if (targetEpId && showId) {
+    // 1. Try /api/dubbed/carateen/stream (skip for Telegram IDs > 9e9 so watch-src runs immediately)
+    const isTgNumericId = Number(targetEpId) > 9_000_000_000 || Number(showId) > 9_000_000_000;
+    if (targetEpId && showId && !isTgNumericId) {
       try {
         const streamRes = await fetch(
           `${BASE}/api/dubbed/carateen/stream?provider=${encodeURIComponent(prov)}&showId=${encodeURIComponent(showId)}&episodeId=${encodeURIComponent(targetEpId)}`,
@@ -606,8 +607,7 @@ export default function DubbedWatchScreen() {
       const params = new URLSearchParams({ watchUrl: wUrl });
       if (serverId) params.set("serverId", serverId);
       if (preferMp4) params.set("preferMp4", "1");
-      withDirectStreamParams(params);
-      const res = await fetch(`${BASE}/api/dubbed/sd2/watch-src?${params}`, { signal, cache: "no-store", headers: getDirectRequestHeaders() });
+      const res = await fetch(`${BASE}/api/dubbed/sd2/watch-src?${params}`, { signal, cache: "no-store" });
       if (signal.aborted || !res.ok) return null;
       const d = await res.json();
       if (isDirectStreamActive() && d?.clientExtract?.embedUrl) {
@@ -713,8 +713,7 @@ export default function DubbedWatchScreen() {
     try {
       const params = new URLSearchParams({ vid });
       if (serverId) params.set("sourceId", serverId);
-      withDirectStreamParams(params);
-      const res = await fetch(`${BASE}/api/dubbed/animezid/watch-src?${params}`, { signal, cache: "no-store", headers: getDirectRequestHeaders() });
+      const res = await fetch(`${BASE}/api/dubbed/animezid/watch-src?${params}`, { signal, cache: "no-store" });
       if (signal.aborted || !res.ok) return null;
       const d = await res.json();
       if (isDirectStreamActive() && d?.clientExtract?.embedUrl) {
@@ -822,6 +821,7 @@ export default function DubbedWatchScreen() {
         },
       ];
       setSlots(defaultAzSlots);
+      setCheckingAvailability(false);
       try {
         const resolvedVid = await ensureAzEpisodeId(ctrl.signal);
         if (resolvedVid && !ctrl.signal.aborted) {
@@ -894,6 +894,7 @@ export default function DubbedWatchScreen() {
         },
       ];
       setSlots(defaultSd2Slots);
+      setCheckingAvailability(false);
       try {
         const wUrl = await ensureSd2WatchUrl(ctrl.signal);
         if (ctrl.signal.aborted || !mountedRef.current) return;
@@ -995,7 +996,8 @@ export default function DubbedWatchScreen() {
             state: "checking",
           },
         ];
-    setSlots(initialSlots);
+    setSlots(initialSlots.map((s) => ({ ...s, state: "available" })));
+    setCheckingAvailability(false);
 
     const mapBackendServersToSlots = (serverList: any[]): DubbedServerSlot[] =>
       serverList.map((srv, idx) => {
@@ -1023,56 +1025,71 @@ export default function DubbedWatchScreen() {
 
     try {
       if (isCarateenSource) {
-        const resolved = await resolveCarateenMedia(ctrl.signal, "api");
-        if (resolved && !ctrl.signal.aborted && mountedRef.current) {
-          preloadedMediaRef.current = resolved;
-          if (Array.isArray(resolved.servers) && resolved.servers.length > 0) {
-            setSlots(mapBackendServersToSlots(resolved.servers));
-            setCheckingAvailability(false);
-            return;
+        const carPromise = resolveCarateenMedia(ctrl.signal, "api").then((resolved) => {
+          if (resolved && !ctrl.signal.aborted && mountedRef.current) {
+            preloadedMediaRef.current = resolved;
+            if (Array.isArray(resolved.servers) && resolved.servers.length > 0) {
+              setSlots(mapBackendServersToSlots(resolved.servers));
+            }
           }
-        }
+          if (preloadingPromiseRef.current?.promise === carPromise) {
+            preloadingPromiseRef.current = null;
+          }
+          return resolved;
+        });
+        preloadingPromiseRef.current = { serverId: undefined, promise: carPromise };
+        await carPromise;
       } else if (effectiveEpUrl) {
-        const sourceUrl = `${BASE}/api/dubbed/watch-src?epUrl=${encodeURIComponent(effectiveEpUrl)}&trace=${encodeURIComponent(playbackTraceId)}`;
-        const r = await fetch(sourceUrl, { signal: ctrl.signal, cache: "no-store" });
-        if (ctrl.signal.aborted || !mountedRef.current) return;
-        if (r.ok && (r.headers.get("content-type") || "").includes("json")) {
-          const d = await r.json();
-          if (Array.isArray(d?.servers) && d.servers.length > 0) {
-            setSlots(mapBackendServersToSlots(d.servers));
-            setCheckingAvailability(false);
-            return;
+        const atPromise = (async () => {
+          const sourceUrl = `${BASE}/api/dubbed/watch-src?epUrl=${encodeURIComponent(effectiveEpUrl)}&trace=${encodeURIComponent(playbackTraceId)}`;
+          const r = await fetch(sourceUrl, { signal: ctrl.signal, cache: "no-store" });
+          if (ctrl.signal.aborted || !mountedRef.current) return null;
+          if (r.ok && (r.headers.get("content-type") || "").includes("json")) {
+            const d = await r.json();
+            if (Array.isArray(d?.servers) && d.servers.length > 0) {
+              setSlots(mapBackendServersToSlots(d.servers));
+              return null;
+            }
+            const proxyUrl = typeof d.hlsUrl === "string" && d.hlsUrl
+              ? (d.hlsUrl.startsWith("/") ? `${BASE}${d.hlsUrl}` : d.hlsUrl)
+              : null;
+            if (proxyUrl) {
+              const cType = d.type === "hls" ? "hls" : "progressive";
+              const mustUseVps = !isDirectStreamActive() || isFixedVpsPlaybackSource({
+                url: proxyUrl,
+                provider: "arabic-toons",
+                contentType: cType,
+                headers: d.headers,
+                deliveryMode: d.deliveryMode,
+              });
+              const finalUrl = mustUseVps
+                ? withPlaybackTrace(
+                    isOwnVpsProxyUrl(proxyUrl)
+                      ? proxyUrl
+                      : buildVpsProxyUrl({ url: proxyUrl, referer: d.headers?.Referer || "https://www.arabic-toons.com/", baseUrl: BASE, contentType: cType }),
+                    playbackTraceId,
+                    BASE,
+                  )
+                : proxyUrl;
+              const resolved = {
+                url: finalUrl,
+                contentType: cType as "hls" | "progressive",
+                rawUrl: finalUrl,
+                headers: mustUseVps ? undefined : d.headers,
+                deliveryMode: mustUseVps ? (d.deliveryMode || "vps-proxy") : d.deliveryMode,
+              };
+              preloadedMediaRef.current = resolved;
+              return resolved;
+            }
           }
-          const proxyUrl = typeof d.hlsUrl === "string" && d.hlsUrl
-            ? (d.hlsUrl.startsWith("/") ? `${BASE}${d.hlsUrl}` : d.hlsUrl)
-            : null;
-          if (proxyUrl) {
-            const cType = d.type === "hls" ? "hls" : "progressive";
-            const mustUseVps = !isDirectStreamActive() || isFixedVpsPlaybackSource({
-              url: proxyUrl,
-              provider: "arabic-toons",
-              contentType: cType,
-              headers: d.headers,
-              deliveryMode: d.deliveryMode,
-            });
-            const finalUrl = mustUseVps
-              ? withPlaybackTrace(
-                  isOwnVpsProxyUrl(proxyUrl)
-                    ? proxyUrl
-                    : buildVpsProxyUrl({ url: proxyUrl, referer: d.headers?.Referer || "https://www.arabic-toons.com/", baseUrl: BASE, contentType: cType }),
-                  playbackTraceId,
-                  BASE,
-                )
-              : proxyUrl;
-            preloadedMediaRef.current = {
-              url: finalUrl,
-              contentType: cType,
-              rawUrl: finalUrl,
-              headers: mustUseVps ? undefined : d.headers,
-              deliveryMode: mustUseVps ? (d.deliveryMode || "vps-proxy") : d.deliveryMode,
-            };
+          return null;
+        })().finally(() => {
+          if (preloadingPromiseRef.current?.promise === atPromise) {
+            preloadingPromiseRef.current = null;
           }
-        }
+        });
+        preloadingPromiseRef.current = { serverId: undefined, promise: atPromise };
+        await atPromise;
       }
     } catch (e: any) {
       if (e?.name === "AbortError" || !mountedRef.current) return;
@@ -1190,16 +1207,20 @@ export default function DubbedWatchScreen() {
       return null;
     }
 
-    if (!bypassCache && mode === "api" && preloadedMediaRef.current) {
+    if (!bypassCache && !serverId && preloadedMediaRef.current) {
       return {
-          url: preloadedMediaRef.current.url,
-          proxyUrl: preloadedMediaRef.current.proxyUrl,
-          contentType: preloadedMediaRef.current.contentType,
-          rawUrl: preloadedMediaRef.current.rawUrl || preloadedMediaRef.current.url,
-          headers: preloadedMediaRef.current.headers,
-          deliveryMode: preloadedMediaRef.current.deliveryMode,
-          pendingClientExtract: preloadedMediaRef.current.pendingClientExtract,
-        };
+        url: preloadedMediaRef.current.url,
+        proxyUrl: preloadedMediaRef.current.proxyUrl,
+        contentType: preloadedMediaRef.current.contentType,
+        rawUrl: preloadedMediaRef.current.rawUrl || preloadedMediaRef.current.url,
+        headers: preloadedMediaRef.current.headers,
+        deliveryMode: preloadedMediaRef.current.deliveryMode,
+        pendingClientExtract: preloadedMediaRef.current.pendingClientExtract,
+      };
+    }
+    if (!bypassCache && !serverId && preloadingPromiseRef.current) {
+      const inFlight = await preloadingPromiseRef.current.promise.catch(() => null);
+      if (inFlight && !signal.aborted) return inFlight;
     }
 
     if (isCarateenSource) {
@@ -1442,11 +1463,13 @@ export default function DubbedWatchScreen() {
     setSources([{ ...builtPrimary, label: slot.label + primaryBadge }]);
     setScreen("player");
 
-    // Pre-resolve the next backup server in background so RiftPlayer fails over seamlessly if needed
-    const backupSlots = slotsRef.current.filter((s) => s.key !== slot.key && s.serverId).slice(0, 2);
+    // Pre-resolve one backup server quietly after initial stream startup so it never slows buffering
+    const backupSlots = slotsRef.current.filter((s) => s.key !== slot.key && s.serverId).slice(0, 1);
     if (backupSlots.length > 0) {
-      void (async () => {
-        for (const alt of backupSlots) {
+      setTimeout(() => {
+        if (ctrl.signal.aborted || !mountedRef.current) return;
+        void (async () => {
+          for (const alt of backupSlots) {
           if (ctrl.signal.aborted || !mountedRef.current) return;
           const altRes = await extractPlayableSource(alt.mode, ctrl.signal, true, alt.serverId, false);
           if (altRes && altRes.url && !altRes.pendingClientExtract && !ctrl.signal.aborted && mountedRef.current) {
@@ -1476,7 +1499,8 @@ export default function DubbedWatchScreen() {
             break;
           }
         }
-      })();
+        })();
+      }, 3500);
     }
   }, [extractPlayableSource, ensureWatchAccess, isSd2Source]);
 
@@ -1656,10 +1680,26 @@ export default function DubbedWatchScreen() {
           candidateRawUrl.includes("/api/anime/video-proxy") ||
           candidateUrl.includes("/api/dubbed/stream") ||
           candidateUrl.includes("/api/anime/video-proxy");
-        const downloadSite = isSd2Source || isCarateenSource ? (slot.site || "sd2") : "animewitcher";
+        const downloadSite =
+          isSd2Source || isCarateenSource || isAzSource
+            ? (slot.site || "dubbed")
+            : "dubbed";
+        const proxiedHlsManifest =
+          candidateType === "hls"
+            ? (isOwnVpsProxyUrl(candidateRawUrl)
+                ? (candidateRawUrl.startsWith("/") ? `${base}${candidateRawUrl}` : candidateRawUrl)
+                : buildVpsProxyUrl({
+                    url: candidateRawUrl,
+                    referer: candidateHeaders?.Referer || "",
+                    baseUrl: base,
+                    contentType: "hls",
+                    site: slot.site,
+                    deliveryMode: candidateDelivery,
+                  }))
+            : undefined;
         downloadUrl =
-          candidateType === "hls" && !candidateRawUrl.includes("/api/anime/download-mp4")
-            ? `${base}/api/anime/download-mp4?site=${encodeURIComponent(downloadSite)}&url=${encodeURIComponent(candidateRawUrl)}${downloadToken ? `&dlToken=${encodeURIComponent(downloadToken)}` : ""}`
+          candidateType === "hls" && proxiedHlsManifest && !proxiedHlsManifest.includes("/api/anime/download-mp4")
+            ? `${base}/api/anime/download-mp4?site=${encodeURIComponent(downloadSite)}&url=${encodeURIComponent(proxiedHlsManifest)}${downloadToken ? `&dlToken=${encodeURIComponent(downloadToken)}` : ""}`
             : isTgDirectStream
               ? `${candidateRawUrl}${candidateRawUrl.includes("?") ? "&" : "?"}dl=1`
               : isDirectProgressiveProxy
@@ -2095,7 +2135,7 @@ export default function DubbedWatchScreen() {
               ]}
             >
               {group.items.map((slot, idx) => {
-                const isBusy = slot.state === "fetching" || checkingAvailability;
+                const isBusy = slot.state === "fetching";
                 const isFailed = slot.state === "failed";
                 return (
                   <Pressable

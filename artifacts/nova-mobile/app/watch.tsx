@@ -391,7 +391,11 @@ function ensureVpsProxy(
     const isOwnStreamingRoute =
       parsed.origin === baseOrigin &&
       /^\/api\/(?:anime|animation)\//i.test(parsed.pathname);
-    if (isOwnStreamingRoute) return parsed.toString();
+    if (isOwnStreamingRoute) {
+      parsed.searchParams.delete("directSegs");
+      parsed.searchParams.delete("directsegs");
+      return parsed.toString();
+    }
   } catch {}
   const ref = headers?.Referer || headers?.referer || "";
   const isHls = hlsHint || /\.(m3u8)(\?|$)|\/hls\/|\/playlist\//i.test(url);
@@ -2835,14 +2839,15 @@ export default function WatchScreen() {
         finalHeaders = directMp4.headers;
         finalHlsManifestUrl = undefined;
       } else {
+        const cleanResolved = resolveUrl(resolvedUrl, base);
         const fallbackProxyUrl = isAwDubbed
-          ? resolveUrl(resolvedUrl, base)
-          : ensureVpsProxy(resolvedUrl, resolvedHeaders, base, resolvedType === "hls");
-        const isHlsDownload = resolvedType === "hls" || isHlsMediaUrl(fallbackProxyUrl);
+          ? cleanResolved
+          : ensureVpsProxy(cleanResolved, resolvedHeaders, base, resolvedType === "hls");
+        const isHlsDownload = resolvedType === "hls" || isHlsMediaUrl(fallbackProxyUrl) || isHlsMediaUrl(cleanResolved);
         finalDownloadUrl = (DOWNLOAD_SUBTITLE_SITES.has(site) || isHlsDownload)
           ? buildEmbeddedDownloadUrl(site, fallbackProxyUrl, subtitleUrl, base)
           : fallbackProxyUrl;
-        finalHlsManifestUrl = isHlsDownload ? fallbackProxyUrl : undefined;
+        finalHlsManifestUrl = isHlsDownload ? (cleanResolved || fallbackProxyUrl) : undefined;
       }
 
       const numericId = isAwDubbed
@@ -3141,12 +3146,13 @@ export default function WatchScreen() {
         finalHeaders = directMp4.headers;
         finalHlsManifestUrl = undefined;
       } else {
-        const fallbackProxyUrl = ensureVpsProxy(resolvedUrl, resolvedHeaders, base, resolvedType === "hls");
-        const isHlsDownload = resolvedType === "hls" || isHlsMediaUrl(fallbackProxyUrl);
+        const cleanResolved = resolveUrl(resolvedUrl, base);
+        const fallbackProxyUrl = ensureVpsProxy(cleanResolved, resolvedHeaders, base, resolvedType === "hls");
+        const isHlsDownload = resolvedType === "hls" || isHlsMediaUrl(fallbackProxyUrl) || isHlsMediaUrl(cleanResolved);
         finalDownloadUrl = (DOWNLOAD_SUBTITLE_SITES.has(site) || isHlsDownload)
           ? buildEmbeddedDownloadUrl(site, fallbackProxyUrl, subtitleUrl, base)
           : fallbackProxyUrl;
-        finalHlsManifestUrl = isHlsDownload ? fallbackProxyUrl : undefined;
+        finalHlsManifestUrl = isHlsDownload ? (cleanResolved || fallbackProxyUrl) : undefined;
       }
 
       setDownloadStates(prev => ({ ...prev, [stateKey]: "downloading" }));
