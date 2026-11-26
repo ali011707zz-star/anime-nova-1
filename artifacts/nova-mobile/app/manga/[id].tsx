@@ -29,6 +29,7 @@ import { getWatchContentId, useApp } from "@/context/AppContext";
 import { WatchlistStatusModal } from "@/components/WatchlistStatusModal";
 import { getWatchlistStatusMeta, WatchlistStatus } from "@/utils/watchlistStatus";
 import { useColors } from "@/hooks/useColors";
+import { getPrimaryCtaMetrics } from "@/utils/responsiveUiLogic.mjs";
 import { getBaseUrl } from "@/utils/api";
 import { translateMangaGenre } from "@/utils/mangaLocalization";
 import {
@@ -1238,37 +1239,50 @@ export default function MangaDetailScreen() {
 
         {/* ── Primary CTA Bar: قراءة الفصول (opens standalone Chapters Screen) ── */}
         <View style={styles.ctaWrap}>
-          <Pressable
-            onPress={() => setChaptersPageOpen(true)}
-            hasTVPreferredFocus={tvMode}
-            style={[
-              styles.chaptersCtaBtn,
-              { backgroundColor: colors.homeAccent || "#0EA5E9" },
-            ]}
-          >
-            <View style={styles.chaptersCtaRight}>
-              <View style={styles.chaptersCtaIcon}>
-                <Ionicons name="book" size={19} color="#FFFFFF" />
-              </View>
-              <View style={styles.chaptersCtaTextWrap}>
-                <Text style={styles.chaptersCtaTitle}>قراءة الفصول</Text>
-                <Text style={styles.chaptersCtaSub}>
-                  {loading && chaptersAsc.length === 0
-                    ? "جاري تجهيز قائمة الفصول..."
-                    : totalChaptersCount > 0
-                    ? `تصفح جميع الفصول المتوفرة (${totalChaptersCount} فصل)`
-                    : "لم تصدر فصول بعد (قيد الترجمة والرفع)"}
-                </Text>
-              </View>
-            </View>
+          {(() => {
+            const cta = getPrimaryCtaMetrics({ width, tvMode });
+            return (
+              <Pressable
+                onPress={() => setChaptersPageOpen(true)}
+                hasTVPreferredFocus={tvMode}
+                style={[
+                  styles.chaptersCtaBtn,
+                  {
+                    backgroundColor: colors.homeAccent || "#0EA5E9",
+                    minHeight: cta.minHeight,
+                    paddingVertical: cta.paddingVertical,
+                    paddingHorizontal: cta.paddingHorizontal,
+                    borderRadius: cta.borderRadius,
+                    maxWidth: cta.maxWidth,
+                    alignSelf: cta.maxWidth ? "center" : undefined,
+                  },
+                ]}
+              >
+                <View style={[styles.chaptersCtaRight, { gap: cta.gap }]}>
+                  <View style={[styles.chaptersCtaIcon, { width: cta.iconBoxSize, height: cta.iconBoxSize, borderRadius: cta.iconBoxRadius }]}>
+                    <Ionicons name="book" size={cta.iconSize} color="#FFFFFF" />
+                  </View>
+                  <View style={styles.chaptersCtaTextWrap}>
+                    <Text style={[styles.chaptersCtaTitle, { fontSize: cta.titleSize, lineHeight: cta.titleLineHeight }]}>قراءة الفصول</Text>
+                    <Text style={[styles.chaptersCtaSub, { fontSize: cta.subSize, lineHeight: cta.subLineHeight }]} numberOfLines={1}>
+                      {loading && chaptersAsc.length === 0
+                        ? "جاري تجهيز قائمة الفصول..."
+                        : totalChaptersCount > 0
+                        ? `تصفح جميع الفصول المتوفرة (${totalChaptersCount} فصل)`
+                        : "لم تصدر فصول بعد (قيد الترجمة والرفع)"}
+                    </Text>
+                  </View>
+                </View>
 
-            <View style={styles.chaptersCtaPill}>
-              <Text style={styles.chaptersCtaPillText}>
-                {totalChaptersCount > 0 ? `${totalChaptersCount} فصل` : "الفصول"}
-              </Text>
-              <Ionicons name="chevron-back" size={15} color="#FFFFFF" />
-            </View>
-          </Pressable>
+                <View style={[styles.chaptersCtaPill, { paddingHorizontal: cta.pillPadH, paddingVertical: cta.pillPadV, borderRadius: cta.pillRadius }]}>
+                  <Text style={[styles.chaptersCtaPillText, { fontSize: cta.pillTextSize }]}>
+                    {totalChaptersCount > 0 ? `${totalChaptersCount} فصل` : "الفصول"}
+                  </Text>
+                  <Ionicons name="chevron-back" size={13} color="#FFFFFF" />
+                </View>
+              </Pressable>
+            );
+          })()}
         </View>
 
         {/* ── Genres ── */}

@@ -4070,10 +4070,10 @@ export default function WatchScreen() {
                     backgroundColor: colors.card,
                     borderColor: colors.border,
                     borderWidth: 1,
-                    borderRadius: 14,
-                    padding: tvMode ? 6 : 4,
-                    gap: tvMode ? 8 : 6,
-                    marginBottom: 10,
+                    borderRadius: 12,
+                    padding: tvMode ? 5 : 3,
+                    gap: tvMode ? 8 : 5,
+                    marginBottom: 2,
                   }}
                 >
                   <Pressable
@@ -4084,7 +4084,7 @@ export default function WatchScreen() {
                     style={({ focused, pressed }) => [
                       {
                         flex: 1,
-                        minHeight: tvMode ? 48 : 40,
+                        minHeight: tvMode ? 46 : 36,
                         borderRadius: 11,
                         borderWidth: 1,
                         flexDirection: ROW_RTL,
@@ -4119,8 +4119,8 @@ export default function WatchScreen() {
                     style={({ focused, pressed }) => [
                       {
                         flex: 1,
-                        minHeight: tvMode ? 48 : 40,
-                        borderRadius: 11,
+                        minHeight: tvMode ? 46 : 36,
+                        borderRadius: 10,
                         borderWidth: 1,
                         flexDirection: ROW_RTL,
                         alignItems: "center",
@@ -4153,8 +4153,8 @@ export default function WatchScreen() {
                 <>
                   {audioToggleBar}
                   {hasAvailableSlot && !showingAvailabilityHints && !tvMode && (
-                    <View style={[d.availabilityPartialState, { marginBottom: 10 }]}>
-                      <Text style={d.availabilityPartialText}>
+                    <View style={[d.availabilityPartialState, { paddingVertical: 2, marginBottom: 2 }]}>
+                      <Text style={[d.availabilityPartialText, { fontSize: 10.5, lineHeight: 16, textAlign: "center" }]}>
                         التوفر مؤشر أولي وليس تأكيداً للتشغيل. عند الاختيار يُجلب رابط الحلقة المطلوب، وتُجرّب الروابط الاحتياطية عند فشل التشغيل.
                       </Text>
                     </View>
@@ -4181,7 +4181,7 @@ export default function WatchScreen() {
                 if (!slots.length) return null;
                 const dotColor = qk === "1080p" ? "#fbbf24" : qk === "720p" ? "#34d399" : "#94a3b8";
                 return (
-                  <View key={qk} style={{ gap: 8, marginBottom: 12 }}>
+                  <View key={qk} style={{ gap: 6, marginBottom: 8 }}>
                     {/* رأس الجودة — محاذاة لليمين كما في الصورة */}
                     <View style={[d.qPill, tvMode && d.tvQPill, { justifyContent: "flex-end", flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 4 }]}>
                       <Text style={[d.qPillText, tvMode && d.tvQPillText, { color: dotColor, fontSize: 13, fontFamily: "Cairo_700Bold" }]}>
@@ -4233,9 +4233,9 @@ export default function WatchScreen() {
                               tvMode && d.tvWebRow,
                               !tvMode && idx < slots.length - 1 && d.webRowBorder,
                               {
-                                minHeight: tvMode ? 64 : 52,
+                                minHeight: tvMode ? 58 : 48,
                                 paddingHorizontal: tvMode ? 16 : 12,
-                                paddingVertical: tvMode ? 12 : 10,
+                                paddingVertical: tvMode ? 10 : 8,
                                 justifyContent: "space-between",
                                 borderRadius: tvMode ? 12 : 0,
                                 borderWidth: tvMode ? 2.5 : 0,
@@ -4255,9 +4255,9 @@ export default function WatchScreen() {
                               {isFetching ? (
                                 <SpinRing size={tvMode ? 26 : 18} />
                               ) : (
-                                <View style={[d.playBtnGreen, tvMode && d.tvPlayBtn, { backgroundColor: "#10b981", borderRadius: 10, paddingHorizontal: 14, paddingVertical: 6, flexDirection: "row", alignItems: "center", gap: 4 }]}>
-                                  <Ionicons name="play" size={tvMode ? 18 : 11} color="#ffffff" />
-                                  <Text style={[d.playBtnGreenText, tvMode && d.tvActionText, { color: "#ffffff", fontSize: tvMode ? 14 : 12, fontFamily: "Cairo_700Bold" }]}>تشغيل</Text>
+                                <View style={[d.playBtnGreen, tvMode && d.tvPlayBtn, { backgroundColor: "#10b981", borderRadius: 9, paddingHorizontal: tvMode ? 15 : 11, paddingVertical: tvMode ? 7 : 5, flexDirection: "row", alignItems: "center", gap: 4 }]}>
+                                  <Ionicons name="play" size={tvMode ? 16 : 10.5} color="#ffffff" />
+                                  <Text style={[d.playBtnGreenText, tvMode && d.tvActionText, { color: "#ffffff", fontSize: tvMode ? 13.5 : 11.5, fontFamily: "Cairo_700Bold" }]}>تشغيل</Text>
                                 </View>
                               )}
                             </View>
@@ -4399,12 +4399,13 @@ export default function WatchScreen() {
                     style={({ pressed, focused }) => [
                       d.downloadRow,
                       {
-                        minHeight: 58,
-                        paddingHorizontal: 12,
-                        paddingVertical: 10,
+                        minHeight: tvMode ? 60 : 54,
+                        paddingHorizontal: 11,
+                        paddingVertical: 9,
                         flexDirection: "row",
                         alignItems: "center",
                         justifyContent: "space-between",
+                        gap: 10,
                         borderBottomWidth: idx < downloadSlots.length - 1 ? StyleSheet.hairlineWidth : 0,
                         borderBottomColor: "rgba(255,255,255,0.08)",
                         opacity: pressed && canTriggerDl ? 0.78 : 1,
@@ -4412,30 +4413,30 @@ export default function WatchScreen() {
                       tvMode && tvFocusStyle(focused),
                     ]}
                   >
-                    {/* Left: Action / Progress */}
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    {/* Left: Action / Progress (flexShrink: 0 prevents any overlap with server info) */}
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 0 }}>
                       {canTriggerDl && (
                         <View
                           style={[
                             d.downloadAction,
                             {
-                              minWidth: 96,
-                              height: 36,
-                              paddingHorizontal: 14,
-                              borderRadius: 10,
+                              minWidth: tvMode ? 100 : 80,
+                              height: tvMode ? 38 : 33,
+                              paddingHorizontal: tvMode ? 14 : 11,
+                              borderRadius: 9,
                               backgroundColor: dlState === "error" ? "rgba(239, 68, 68, 0.18)" : "#0284c7",
                               borderColor: dlState === "error" ? "rgba(239, 68, 68, 0.45)" : "#38bdf8",
                             },
                           ]}
                         >
-                          {dlFetchingSites.has(stateKey) ? <SpinRing size={16} /> : (
+                          {dlFetchingSites.has(stateKey) ? <SpinRing size={15} /> : (
                             <>
                               <Ionicons
                                 name={dlState === "error" ? "refresh" : "download-outline"}
-                                size={15}
+                                size={14}
                                 color="#ffffff"
                               />
-                              <Text style={[d.downloadActionText, { color: "#ffffff", fontSize: 11 }]}>
+                              <Text style={[d.downloadActionText, { color: "#ffffff", fontSize: tvMode ? 12.5 : 11 }]}>
                                 {dlState === "error" ? "إعادة" : "تنزيل"}
                               </Text>
                             </>
@@ -4443,33 +4444,35 @@ export default function WatchScreen() {
                         </View>
                       )}
                       {dlState === "downloading" && (
-                        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                          <View style={{ minWidth: 94, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, backgroundColor: "rgba(2, 132, 199, 0.18)", borderWidth: 1, borderColor: "rgba(56, 189, 248, 0.35)", alignItems: "center" }}>
-                            <Text style={{ color: "#38bdf8", fontSize: 11, fontFamily: "Cairo_800ExtraBold" }}>
-                              {dlPct}% · جاري التنزيل
+                        <View style={{ flexDirection: "row", alignItems: "center" }}>
+                          <View style={{ minWidth: 84, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 9, backgroundColor: "rgba(2, 132, 199, 0.18)", borderWidth: 1, borderColor: "rgba(56, 189, 248, 0.35)", alignItems: "center" }}>
+                            <Text style={{ color: "#38bdf8", fontSize: 10.5, fontFamily: "Cairo_800ExtraBold" }} numberOfLines={1}>
+                              {dlPct}% · جاري
                             </Text>
                           </View>
                         </View>
                       )}
                       {dlState === "done" && (
-                        <View style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, backgroundColor: "rgba(16, 185, 129, 0.16)", borderWidth: 1, borderColor: "rgba(52, 211, 153, 0.35)" }}>
-                          <Ionicons name="checkmark-circle" size={15} color="#34d399" />
-                          <Text style={{ color: "#34d399", fontSize: 11, fontFamily: "Cairo_700Bold" }}>تم التنزيل</Text>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 9, backgroundColor: "rgba(16, 185, 129, 0.16)", borderWidth: 1, borderColor: "rgba(52, 211, 153, 0.35)" }}>
+                          <Ionicons name="checkmark-circle" size={14} color="#34d399" />
+                          <Text style={{ color: "#34d399", fontSize: 10.5, fontFamily: "Cairo_700Bold" }} numberOfLines={1}>تم التنزيل</Text>
                         </View>
                       )}
                     </View>
 
-                    {/* Right: Server info + Quality badge */}
-                    <View style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 9 }}>
-                      <View style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: 7, backgroundColor: "rgba(255,255,255,0.05)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" }}>
-                        <Text style={{ color: qColor, fontSize: 10, fontFamily: "Cairo_800ExtraBold" }}>
-                          {slot.quality.replace("p", "P")}
-                        </Text>
-                      </View>
-                      <View style={{ alignItems: "flex-end", gap: 3 }}>
-                        <Text style={{ color: "#f8fafc", fontSize: 12.5, fontFamily: "Cairo_700Bold", textAlign: "right" }}>
-                          السيرفر {slot.tag}
-                        </Text>
+                    {/* Right: Server info + Quality badge cleanly stacked (zero overlap on any screen width) */}
+                    <View style={{ flex: 1, minWidth: 0, overflow: "hidden", flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 8 }}>
+                      <View style={{ flex: 1, minWidth: 0, alignItems: "flex-end", gap: 3 }}>
+                        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 6, flexWrap: "nowrap" }}>
+                          <View style={{ paddingHorizontal: 6, paddingVertical: 1.5, borderRadius: 6, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.14)", flexShrink: 0 }}>
+                            <Text style={{ color: qColor, fontSize: 9.5, fontFamily: "Cairo_800ExtraBold" }} maxFontSizeMultiplier={1.15} numberOfLines={1}>
+                              {slot.quality.replace("p", "P")}
+                            </Text>
+                          </View>
+                          <Text style={{ color: "#f8fafc", fontSize: 12.5, fontFamily: "Cairo_700Bold", textAlign: "right", flexShrink: 1 }} numberOfLines={1}>
+                            السيرفر {slot.tag}
+                          </Text>
+                        </View>
                         {!isAwDubbed && (() => {
                           const isExternalSub = EXTERNAL_SUB_DOWNLOAD_SITES.has(slot.site.toLowerCase());
                           const isEngDub = ENGLISH_DUB_SITES.has(slot.site.toLowerCase());
@@ -4492,23 +4495,24 @@ export default function WatchScreen() {
                           return (
                             <View
                               style={{
-                                paddingHorizontal: 7,
+                                paddingHorizontal: 6,
                                 paddingVertical: 1.5,
                                 borderRadius: 6,
                                 borderWidth: 1,
                                 backgroundColor: bBg,
                                 borderColor: bBorder,
+                                maxWidth: "100%",
                               }}
                             >
-                              <Text style={{ color: bColor, fontSize: 9.5, fontFamily: "Cairo_700Bold" }} numberOfLines={1}>
+                              <Text style={{ color: bColor, fontSize: 9.5, fontFamily: "Cairo_700Bold" }} maxFontSizeMultiplier={1.15} numberOfLines={1}>
                                 {bText}
                               </Text>
                             </View>
                           );
                         })()}
                       </View>
-                      <View style={{ width: 32, height: 32, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(6, 182, 212, 0.14)", borderWidth: 1, borderColor: "rgba(6, 182, 212, 0.32)" }}>
-                        <Text style={{ color: "#22d3ee", fontSize: 10, fontFamily: "Cairo_800ExtraBold" }}>{slot.tag}</Text>
+                      <View style={{ width: 30, height: 30, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(6, 182, 212, 0.14)", borderWidth: 1, borderColor: "rgba(6, 182, 212, 0.32)", flexShrink: 0 }}>
+                        <Text style={{ color: "#22d3ee", fontSize: 9.5, fontFamily: "Cairo_800ExtraBold" }} numberOfLines={1}>{slot.tag}</Text>
                       </View>
                     </View>
                   </Pressable>
@@ -4590,19 +4594,19 @@ function createWatchStyles(colors: ThemePalette) {
   tvEpNavText:   { fontSize: 13, lineHeight: 20 },
 
   /* Info card */
-  infoCard:      { flexDirection: ROW_RTL, alignItems: "flex-start", gap: 14, backgroundColor: colors.card, borderRadius: 18, borderWidth: 1, borderColor: colors.border, padding: 14 },
+  infoCard:      { flexDirection: ROW_RTL, alignItems: "center", gap: 11, backgroundColor: colors.card, borderRadius: 15, borderWidth: 1, borderColor: colors.border, padding: 10 },
   tvInfoCard:    { padding: 10, paddingHorizontal: 16, gap: 12, borderRadius: 14 },
-  infoPosterWrap:{ width: 72, height: 102, position: "relative", alignItems: "center", justifyContent: "center" },
+  infoPosterWrap:{ width: 56, height: 80, position: "relative", alignItems: "center", justifyContent: "center" },
   tvInfoPosterWrap: { width: 56, height: 80 },
-  infoPosterGlow:{ position: "absolute", width: 80, height: 110, borderRadius: 20, backgroundColor: colors.accentSurface },
+  infoPosterGlow:{ position: "absolute", width: 62, height: 86, borderRadius: 14, backgroundColor: colors.accentSurface },
   tvInfoPosterGlow: { width: 54, height: 76, borderRadius: 10 },
-  infoPoster:    { width: 72, height: 102, borderRadius: 12, borderWidth: 1, borderColor: colors.accentBorder },
+  infoPoster:    { width: 56, height: 80, borderRadius: 10, borderWidth: 1, borderColor: colors.accentBorder },
   tvInfoPoster: { width: 56, height: 80, borderRadius: 10, borderWidth: 1 },
-  infoMeta:      { flex: 1, gap: 6, paddingTop: 1 },
-  infoTitle:     { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, textAlign: "right", lineHeight: 22 },
+  infoMeta:      { flex: 1, gap: 4, paddingTop: 0 },
+  infoTitle:     { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: colors.textPrimary, textAlign: "right", lineHeight: 20 },
   tvInfoTitle: { fontSize: 16, lineHeight: 22 },
-  infoEpRow:     { flexDirection: ROW_RTL, gap: 8, flexWrap: "wrap" },
-  infoEpBadge:   { flexDirection: ROW_RTL, alignItems: "center", gap: 5, backgroundColor: colors.accentSurface, borderRadius: 8, borderWidth: 1, borderColor: colors.accentBorder, paddingHorizontal: 10, paddingVertical: 5 },
+  infoEpRow:     { flexDirection: ROW_RTL, gap: 6, flexWrap: "wrap" },
+  infoEpBadge:   { flexDirection: ROW_RTL, alignItems: "center", gap: 4, backgroundColor: colors.accentSurface, borderRadius: 8, borderWidth: 1, borderColor: colors.accentBorder, paddingHorizontal: 8, paddingVertical: 3 },
   tvInfoEpBadge: { gap: 6, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 },
   infoEpText:    { fontSize: 11, fontFamily: "Cairo_700Bold", color: colors.accent },
   tvInfoEpText: { fontSize: 14, lineHeight: 21 },
@@ -4627,7 +4631,7 @@ function createWatchStyles(colors: ThemePalette) {
   availabilityEmptyText: { fontSize: 11, fontFamily: "Cairo_400Regular", color: colors.textMuted, textAlign: "center" },
 
   /* Scroll */
-  scrollContent: { padding: 14, paddingBottom: 100, gap: 12 },
+  scrollContent: { paddingHorizontal: 12, paddingTop: 10, paddingBottom: 90, gap: 8 },
   tvScrollContent: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 80, gap: 8 },
 
   /* Tier sections */

@@ -915,9 +915,11 @@ export default function DownloadsScreen() {
               flexDirection: ROW_RTL,
               alignItems: "center",
               justifyContent: "center",
-              gap: 6,
-              paddingVertical: 9,
-              borderRadius: 12,
+              gap: 5,
+              paddingVertical: 8,
+              paddingHorizontal: 8,
+              overflow: "hidden",
+              borderRadius: 11,
               borderWidth: 1,
               backgroundColor: downloadsTab === "anime" ? colors.accent : colors.surface,
               borderColor: downloadsTab === "anime" ? colors.accent : colors.border,
@@ -925,14 +927,19 @@ export default function DownloadsScreen() {
           >
             <Ionicons
               name="film-outline"
-              size={15}
+              size={14}
               color={downloadsTab === "anime" ? colors.buttonText : colors.textSecondary}
             />
             <Text
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.8}
+              maxFontSizeMultiplier={1.15}
               style={{
-                fontSize: 12.5,
+                fontSize: 11.5,
                 fontFamily: "Cairo_700Bold",
                 color: downloadsTab === "anime" ? colors.buttonText : colors.textPrimary,
+                flexShrink: 1,
               }}
             >
               حلقات الأنمي ({downloads.length})
@@ -945,9 +952,11 @@ export default function DownloadsScreen() {
               flexDirection: ROW_RTL,
               alignItems: "center",
               justifyContent: "center",
-              gap: 6,
-              paddingVertical: 9,
-              borderRadius: 12,
+              gap: 5,
+              paddingVertical: 8,
+              paddingHorizontal: 8,
+              overflow: "hidden",
+              borderRadius: 11,
               borderWidth: 1,
               backgroundColor: downloadsTab === "manga" ? colors.accent : colors.surface,
               borderColor: downloadsTab === "manga" ? colors.accent : colors.border,
@@ -955,14 +964,19 @@ export default function DownloadsScreen() {
           >
             <Ionicons
               name="book-outline"
-              size={15}
+              size={14}
               color={downloadsTab === "manga" ? colors.buttonText : colors.textSecondary}
             />
             <Text
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.8}
+              maxFontSizeMultiplier={1.15}
               style={{
-                fontSize: 12.5,
+                fontSize: 11.5,
                 fontFamily: "Cairo_700Bold",
                 color: downloadsTab === "manga" ? colors.buttonText : colors.textPrimary,
+                flexShrink: 1,
               }}
             >
               المانجا والمانهوا ({mangaDownloads.length})
