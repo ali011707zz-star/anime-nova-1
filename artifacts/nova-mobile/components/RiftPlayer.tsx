@@ -764,15 +764,42 @@ function ExpoRiftPlayer({
   const skipOutroDismissed = dismissedSkipRanges.key === skipScopeKey
     && dismissedSkipRanges.outro;
 
-  /* ─── Animated values ─── */
+  const SLIDE_UNLOCK_TRACK_W = 248;
+  const SLIDE_UNLOCK_THUMB_W = 46;
+  const SLIDE_UNLOCK_MAX_TRAVEL = SLIDE_UNLOCK_TRACK_W - SLIDE_UNLOCK_THUMB_W - 8;
+
+  /* ─── Animated values (all interpolations memoized once to avoid native-driver leaks on 4Hz ticks) ─── */
   const entryFadeAnim     = useRef(new Animated.Value(0)).current;
   const entryScaleAnim    = useRef(new Animated.Value(0.985)).current;
   const controlsOpacity   = useRef(new Animated.Value(1)).current;
-  const orientationFade   = useRef(new Animated.Value(1)).current;
+  const controlsScale     = useRef(
+    controlsOpacity.interpolate({ inputRange: [0, 1], outputRange: [0.988, 1] }),
+  ).current;
+  const orientationVeilOpacity = useRef(new Animated.Value(0)).current;
+  const orientationVeilPendingRef = useRef(false);
   const unlockBarOpacity  = useRef(new Animated.Value(0)).current;
   const slideUnlockX      = useRef(new Animated.Value(0)).current;
+  const slideUnlockPromptOpacity = useRef(
+    slideUnlockX.interpolate({
+      inputRange: [-SLIDE_UNLOCK_MAX_TRAVEL * 0.55, 0, SLIDE_UNLOCK_MAX_TRAVEL * 0.55],
+      outputRange: [0, 1, 0],
+      extrapolate: "clamp",
+    }),
+  ).current;
   const dblTapLeft        = useRef(new Animated.Value(0)).current;
+  const dblTapLeftOpacity = useRef(
+    dblTapLeft.interpolate({ inputRange: [0, 0.18, 0.72, 1], outputRange: [0, 0.96, 0.85, 0] }),
+  ).current;
+  const dblTapLeftScale   = useRef(
+    dblTapLeft.interpolate({ inputRange: [0, 0.25, 1], outputRange: [0.84, 1.04, 1.0] }),
+  ).current;
   const dblTapRight       = useRef(new Animated.Value(0)).current;
+  const dblTapRightOpacity = useRef(
+    dblTapRight.interpolate({ inputRange: [0, 0.18, 0.72, 1], outputRange: [0, 0.96, 0.85, 0] }),
+  ).current;
+  const dblTapRightScale  = useRef(
+    dblTapRight.interpolate({ inputRange: [0, 0.25, 1], outputRange: [0.84, 1.04, 1.0] }),
+  ).current;
   const lastLockedTapRef  = useRef(0);
   const seekBurstTargetRef = useRef<number | null>(null);
   const seekBurstDeltaRef  = useRef(0);
@@ -2000,17 +2027,41 @@ function ExpoRiftPlayer({
     setIsFlipped(f => !f);
   }, []);
 
-  /* ─── Portrait / Landscape toggle (smooth cross-fade transition without jarring snap) ─── */
+  /* ─── Portrait / Landscape toggle (lightweight veil synced to real layout dimension update) ─── */
+  const finishOrientationVeil = useCallback(() => {
+    orientationVeilPendingRef.current = false;
+    if (orientationSettleTimerRef.current) {
+      clearTimeout(orientationSettleTimerRef.current);
+      orientationSettleTimerRef.current = null;
+    }
+    orientationVeilOpacity.stopAnimation();
+    Animated.timing(orientationVeilOpacity, {
+      toValue: 0,
+      duration: 185,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [orientationVeilOpacity]);
+
+  useEffect(() => {
+    if (!orientationVeilPendingRef.current) return;
+    const raf = requestAnimationFrame(() => {
+      finishOrientationVeil();
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [screenW, finishOrientationVeil]);
+
   const togglePortrait = useCallback(() => {
     const nextPortrait = !isPortrait;
     if (orientationSettleTimerRef.current) {
       clearTimeout(orientationSettleTimerRef.current);
       orientationSettleTimerRef.current = null;
     }
-    orientationFade.stopAnimation();
-    Animated.timing(orientationFade, {
-      toValue: 0.28,
-      duration: 90,
+    orientationVeilPendingRef.current = true;
+    orientationVeilOpacity.stopAnimation();
+    Animated.timing(orientationVeilOpacity, {
+      toValue: 0.52,
+      duration: 75,
       easing: Easing.out(Easing.quad),
       useNativeDriver: true,
     }).start(() => {
@@ -2026,17 +2077,11 @@ function ExpoRiftPlayer({
           );
         }
         orientationSettleTimerRef.current = setTimeout(() => {
-          orientationSettleTimerRef.current = null;
-          Animated.timing(orientationFade, {
-            toValue: 1,
-            duration: 210,
-            easing: Easing.out(Easing.cubic),
-            useNativeDriver: true,
-          }).start();
-        }, 120);
+          finishOrientationVeil();
+        }, 240);
       });
     });
-  }, [isPortrait, onToggleOrientation, orientationFade, requestOrientation]);
+  }, [isPortrait, onToggleOrientation, orientationVeilOpacity, requestOrientation, finishOrientationVeil]);
 
   /* ─── Screenshot ─── */
   const rootViewRef = useRef<View>(null);
@@ -2355,12 +2400,13 @@ function ExpoRiftPlayer({
     }, 2200);
   }, []);
 
-  const hideControlsSmooth = useCallback((durationMs = 190) => {
+  const hideControlsSmooth = useCallback((durationMs = 175) => {
     if (hideTimer.current) {
       clearTimeout(hideTimer.current);
       hideTimer.current = null;
     }
     showControlsRef.current = false;
+    setShowControls(false);
     controlsOpacity.stopAnimation();
     Animated.timing(controlsOpacity, {
       toValue: 0,
@@ -2369,7 +2415,6 @@ function ExpoRiftPlayer({
       useNativeDriver: true,
     }).start(({ finished }) => {
       if (!finished) return;
-      setShowControls(false);
       if (tvMode) showTvRevealHintBriefly();
     });
   }, [controlsOpacity, showTvRevealHintBriefly, tvMode]);
@@ -3225,9 +3270,23 @@ function ExpoRiftPlayer({
     }, 4200);
   }, [hideUnlockBarSmooth]);
 
-  const SLIDE_UNLOCK_TRACK_W = 248;
-  const SLIDE_UNLOCK_THUMB_W = 46;
-  const SLIDE_UNLOCK_MAX_TRAVEL = SLIDE_UNLOCK_TRACK_W - SLIDE_UNLOCK_THUMB_W - 8;
+  const handleLockScreen = useCallback(() => {
+    if (hideTimer.current) {
+      clearTimeout(hideTimer.current);
+      hideTimer.current = null;
+    }
+    if (unlockTimer.current) {
+      clearTimeout(unlockTimer.current);
+      unlockTimer.current = null;
+    }
+    lastLockedTapRef.current = 0;
+    showControlsRef.current = false;
+    setShowControls(false);
+    setShowUnlock(false);
+    unlockBarOpacity.setValue(0);
+    slideUnlockX.setValue(0);
+    setIsLocked(true);
+  }, [slideUnlockX, unlockBarOpacity]);
 
   const slideUnlockPan = useRef(
     PanResponder.create({
@@ -3393,7 +3452,7 @@ function ExpoRiftPlayer({
         style={[
           StyleSheet.absoluteFill,
           {
-            opacity: Animated.multiply(entryFadeAnim, orientationFade),
+            opacity: entryFadeAnim,
             transform: [{ scale: entryScaleAnim }],
           },
         ]}
@@ -3519,8 +3578,8 @@ function ExpoRiftPlayer({
         <Animated.View
           pointerEvents="none"
           style={[s.rippleLeft, {
-            opacity: dblTapLeft.interpolate({ inputRange: [0, 0.18, 0.72, 1], outputRange: [0, 0.96, 0.85, 0] }),
-            transform: [{ scale: dblTapLeft.interpolate({ inputRange: [0, 0.25, 1], outputRange: [0.84, 1.04, 1.0] }) }],
+            opacity: dblTapLeftOpacity,
+            transform: [{ scale: dblTapLeftScale }],
           }]}
         >
           <View style={s.rippleCircleL} />
@@ -3535,8 +3594,8 @@ function ExpoRiftPlayer({
         <Animated.View
           pointerEvents="none"
           style={[s.rippleRight, {
-            opacity: dblTapRight.interpolate({ inputRange: [0, 0.18, 0.72, 1], outputRange: [0, 0.96, 0.85, 0] }),
-            transform: [{ scale: dblTapRight.interpolate({ inputRange: [0, 0.25, 1], outputRange: [0.84, 1.04, 1.0] }) }],
+            opacity: dblTapRightOpacity,
+            transform: [{ scale: dblTapRightScale }],
           }]}
         >
           <View style={s.rippleCircleR} />
@@ -3607,6 +3666,15 @@ function ExpoRiftPlayer({
       )}
 
 
+      {/* ── Subtle orientation transition veil (never touches VideoView hardware texture) ── */}
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          StyleSheet.absoluteFill,
+          { backgroundColor: "#000", opacity: orientationVeilOpacity, zIndex: 48 },
+        ]}
+      />
+
       {/* ── Lock screen: padlock hidden until double-tap; unlock via horizontal slide ── */}
       {isLocked && tvMode && (
         <Pressable
@@ -3631,11 +3699,7 @@ function ExpoRiftPlayer({
               style={[
                 s.slideUnlockPromptRow,
                 {
-                  opacity: slideUnlockX.interpolate({
-                    inputRange: [-SLIDE_UNLOCK_MAX_TRAVEL * 0.55, 0, SLIDE_UNLOCK_MAX_TRAVEL * 0.55],
-                    outputRange: [0, 1, 0],
-                    extrapolate: "clamp",
-                  }),
+                  opacity: slideUnlockPromptOpacity,
                 },
               ]}
             >
@@ -3757,14 +3821,7 @@ function ExpoRiftPlayer({
             StyleSheet.absoluteFill,
             {
               opacity: controlsOpacity,
-              transform: [
-                {
-                  scale: controlsOpacity.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [0.988, 1],
-                  }),
-                },
-              ],
+              transform: [{ scale: controlsScale }],
               zIndex: 10,
               flexDirection: "column",
             },
@@ -4042,7 +4099,7 @@ function ExpoRiftPlayer({
               {/* يسار: قفل + ملء شاشة — نفس أزرار الهاتف، بحجم TV الحالي */}
              <View style={s.bottomSide}>
                 <View style={s.controlButtonSlot}>
-                  <Pressable onPress={() => setIsLocked(true)} style={[s.ctrlIconBtn, tvMode && s.tvCtrlIconBtn]} hitSlop={10}>
+                  <Pressable onPress={handleLockScreen} style={[s.ctrlIconBtn, tvMode && s.tvCtrlIconBtn]} hitSlop={10}>
                     <Ionicons name="lock-closed-outline" size={16} color="rgba(255,255,255,0.80)" />
                   </Pressable>
                 </View>
@@ -4080,7 +4137,7 @@ function ExpoRiftPlayer({
               ]}>
                 {!isPortrait && (
                   <View style={s.controlButtonSlot}>
-                    <Pressable onPress={() => seek(positionRef.current + 10)} style={[s.seekCtrlBtn, tvMode && s.tvSeekCtrlBtn]} hitSlop={10}>
+                    <Pressable onPress={() => stepSeekBurst(1, { side: "R" })} style={[s.seekCtrlBtn, tvMode && s.tvSeekCtrlBtn]} hitSlop={10}>
                       <Ionicons name="play-forward" size={tvMode ? 24 : 17} color={PLAYER_CONTROL_ICON} />
                     </Pressable>
                     <Text style={[s.controlButtonLabel, { color: PLAYER_CONTROL_LABEL }]}>10</Text>
@@ -4093,7 +4150,7 @@ function ExpoRiftPlayer({
                 </View>
                 {!isPortrait && (
                   <View style={s.controlButtonSlot}>
-                    <Pressable onPress={() => seek(positionRef.current - 10)} style={[s.seekCtrlBtn, tvMode && s.tvSeekCtrlBtn]} hitSlop={10}>
+                    <Pressable onPress={() => stepSeekBurst(-1, { side: "L" })} style={[s.seekCtrlBtn, tvMode && s.tvSeekCtrlBtn]} hitSlop={10}>
                       <Ionicons name="play-back" size={tvMode ? 24 : 17} color={PLAYER_CONTROL_ICON} />
                     </Pressable>
                     <Text style={[s.controlButtonLabel, { color: PLAYER_CONTROL_LABEL }]}>10</Text>
