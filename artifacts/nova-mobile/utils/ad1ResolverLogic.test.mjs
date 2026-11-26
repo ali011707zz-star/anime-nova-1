@@ -68,3 +68,21 @@ test("selectPreferredAd1Mirrors ranks requested quality & reliable mirrors first
   assert.equal(ranked720[0].embedUrl, "https://ok.ru/videoembed/12345");
   assert.equal(ranked720[0].hostKind, "okru");
 });
+
+test("extractAnime4upEpisodeUrlFromSeriesHtml matches random-slug episodes via anchor text", () => {
+  const html = `
+    <div class="episodes-card">
+      <a href="https://w1.anime4up.rest/episode/boku-no-hero-academia-%D8%A7%D9%84%D8%AD%D9%84%D9%82%D8%A9-9mbz5/">مشاهدة وتحميل الآن</a>
+      <a href="https://w1.anime4up.rest/episode/boku-no-hero-academia-%D8%A7%D9%84%D8%AD%D9%84%D9%82%D8%A9-ydjwa/">الحلقة 12</a>
+      <a href="https://w1.anime4up.rest/episode/boku-no-hero-academia-%D8%A7%D9%84%D8%AD%D9%84%D9%82%D8%A9-xywz7/">الحلقة 2</a>
+    </div>
+  `;
+  assert.equal(
+    extractAnime4upEpisodeUrlFromSeriesHtml(html, 2),
+    "https://w1.anime4up.rest/episode/boku-no-hero-academia-%D8%A7%D9%84%D8%AD%D9%84%D9%82%D8%A9-xywz7/",
+  );
+  assert.equal(
+    extractAnime4upEpisodeUrlFromSeriesHtml(html, 12),
+    "https://w1.anime4up.rest/episode/boku-no-hero-academia-%D8%A7%D9%84%D8%AD%D9%84%D9%82%D8%A9-ydjwa/",
+  );
+});

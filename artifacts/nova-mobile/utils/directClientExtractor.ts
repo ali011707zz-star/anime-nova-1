@@ -628,6 +628,132 @@ async function resolveMegaMaxMirrorsOnPhone(
   }
 }
 
+const AD1_EPISODE_CACHE_TTL_MS = 10 * 60_000;
+const ad1EpisodeCache = new Map<string, { epUrl: string; epHtml: string; cachedAt: number }>();
+
+function makeAd1CacheKey(title?: string | null, english?: string | null, epNum?: number): string {
+  const norm = (s?: string | null) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
+  return `${norm(english) || norm(title)}::${norm(title)}::${epNum || 0}`;
+}
+
+async function findAnime4upEpisodeHtmlOnPhone(opts: {
+  title?: string | null;
+  english?: string | null;
+  epNum: number;
+  signal: AbortSignal;
+}): Promise<{ epUrl: string; epHtml: string } | null> {
+  const { title, english, epNum, signal } = opts;
+  if (!epNum || epNum <= 0 || signal.aborted) return null;
+
+  const cacheKey = makeAd1CacheKey(title, english, epNum);
+  const cached = ad1EpisodeCache.get(cacheKey);
+  if (cached && Date.now() - cached.cachedAt < AD1_EPISODE_CACHE_TTL_MS) {
+    return { epUrl: cached.epUrl, epHtml: cached.epHtml };
+  }
+
+  const pageHeaders = {
+    "User-Agent": MOBILE_DIRECT_UA,
+    Referer: `${AD1_BASE_URL}/`,
+    Accept: "text/html,application/xhtml+xml,*/*;q=0.8",
+  };
+
+  const remember = (epUrl: string, epHtml: string) => {
+    if (ad1EpisodeCache.size >= 24) {
+      const oldestKey = ad1EpisodeCache.keys().next().value;
+      if (oldestKey) ad1EpisodeCache.delete(oldestKey);
+    }
+    ad1EpisodeCache.set(cacheKey, { epUrl, epHtml, cachedAt: Date.now() });
+    return { epUrl, epHtml };
+  };
+
+  // Step 1: Fast direct episode slug attempts in parallel
+  const directCandidates = buildAnime4upEpisodeCandidates({ title, english, epNum });
+  if (directCandidates.length > 0) {
+    const results = await Promise.all(
+      directCandidates.map(async (u) => {
+        const html = await fetchTextSafe(u, pageHeaders, signal, 4000);
+        if (!html) return null;
+        const meta = extractAnime4upEpisodeMeta(html);
+        if (!meta.servers.length) return null;
+        return { url: u, html };
+      }),
+    );
+    const hit = results.find(Boolean);
+    if (hit) {
+      return remember(hit.url, hit.html);
+    }
+  }
+
+  // Step 2: Fallback search on Anime4Up if direct slug did not match
+  if (!signal.aborted) {
+    const seenQ = new Set<string>();
+    const queries = [english, title]
+      .map((q) => (q || "").trim())
+      .filter((q) => {
+        const k = q.toLowerCase();
+        if (!k || seenQ.has(k)) return false;
+        seenQ.add(k);
+        return true;
+      });
+    for (const q of queries) {
+      if (signal.aborted) break;
+      const searchUrl = `${AD1_BASE_URL}/?search_param=animes&s=${encodeURIComponent(q)}`;
+      const searchHtml = await fetchTextSafe(searchUrl, pageHeaders, signal, 4200);
+      if (!searchHtml) continue;
+      const seriesUrl = extractAnime4upSeriesUrlFromSearchHtml(searchHtml, title, english);
+      if (!seriesUrl) continue;
+      const seriesHtml = await fetchTextSafe(seriesUrl, pageHeaders, signal, 4200);
+      if (!seriesHtml) continue;
+      const foundEpUrl = extractAnime4upEpisodeUrlFromSeriesHtml(seriesHtml, epNum);
+      if (!foundEpUrl) continue;
+      const foundHtml = await fetchTextSafe(foundEpUrl, pageHeaders, signal, 4200);
+      if (foundHtml) {
+        const meta = extractAnime4upEpisodeMeta(foundHtml);
+        if (meta.servers.length > 0) {
+          return remember(foundEpUrl, foundHtml);
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Lightweight phone-side availability probe for AD 1 (Anime4Up Arabic Hardsub).
+ * Runs in parallel with server availability checks (0% VPS load) and caches the
+ * resolved episode HTML so tapping AD 1 starts playback/download immediately.
+ */
+export async function probeAd1AvailabilityOnPhone(opts: {
+  title?: string | null;
+  english?: string | null;
+  epNum: number;
+  signal?: AbortSignal;
+}): Promise<{ available: true; serverCount: number; epUrl: string } | null> {
+  const { title, english, epNum, signal } = opts;
+  if (!epNum || epNum <= 0 || signal?.aborted) return null;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 8500);
+  const onOuterAbort = () => ctrl.abort();
+  signal?.addEventListener("abort", onOuterAbort);
+  try {
+    const found = await findAnime4upEpisodeHtmlOnPhone({ title, english, epNum, signal: ctrl.signal });
+    if (!found || ctrl.signal.aborted) return null;
+    const meta = extractAnime4upEpisodeMeta(found.epHtml);
+    if (!meta.servers.length) return null;
+    return {
+      available: true,
+      serverCount: meta.servers.length,
+      epUrl: found.epUrl,
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", onOuterAbort);
+  }
+}
+
 /**
  * Direct phone-side resolver for AD 1 (Anime4Up Arabic Hardsub).
  * Supports Anime4Up's new A4SL 1.2 opaque data-watch POST protocol and MegaMax
@@ -649,59 +775,15 @@ export async function resolveAd1OnPhone(opts: {
   const onOuterAbort = () => ctrl.abort();
   signal?.addEventListener("abort", onOuterAbort);
 
-  const pageHeaders = {
-    "User-Agent": MOBILE_DIRECT_UA,
-    Referer: `${AD1_BASE_URL}/`,
-    Accept: "text/html,application/xhtml+xml,*/*;q=0.8",
-  };
-
   try {
-    let epUrl: string | null = null;
-    let epHtml: string | null = null;
-
-    // Step 1: Fast direct episode slug attempts in parallel
-    const directCandidates = buildAnime4upEpisodeCandidates({ title, english, epNum });
-    if (directCandidates.length > 0) {
-      const results = await Promise.all(
-        directCandidates.map(async (u) => {
-          const html = await fetchTextSafe(u, pageHeaders, ctrl.signal, 4200);
-          if (!html) return null;
-          const meta = extractAnime4upEpisodeMeta(html);
-          if (!meta.servers.length) return null;
-          return { url: u, html };
-        }),
-      );
-      const hit = results.find(Boolean);
-      if (hit) {
-        epUrl = hit.url;
-        epHtml = hit.html;
-      }
-    }
-
-    // Step 2: Fallback search on Anime4Up if direct slug did not match
-    if (!epHtml && !ctrl.signal.aborted) {
-      const queries = [english, title].filter((q): q is string => Boolean(q && q.trim()));
-      for (const q of queries) {
-        if (ctrl.signal.aborted) break;
-        const searchUrl = `${AD1_BASE_URL}/?search_param=animes&s=${encodeURIComponent(q.trim())}`;
-        const searchHtml = await fetchTextSafe(searchUrl, pageHeaders, ctrl.signal, 4500);
-        if (!searchHtml) continue;
-        const seriesUrl = extractAnime4upSeriesUrlFromSearchHtml(searchHtml, title, english);
-        if (!seriesUrl) continue;
-        const seriesHtml = await fetchTextSafe(seriesUrl, pageHeaders, ctrl.signal, 4500);
-        if (!seriesHtml) continue;
-        const foundEpUrl = extractAnime4upEpisodeUrlFromSeriesHtml(seriesHtml, epNum);
-        if (!foundEpUrl) continue;
-        const foundHtml = await fetchTextSafe(foundEpUrl, pageHeaders, ctrl.signal, 4500);
-        if (foundHtml) {
-          epUrl = foundEpUrl;
-          epHtml = foundHtml;
-          break;
-        }
-      }
-    }
-
-    if (!epUrl || !epHtml || ctrl.signal.aborted) return null;
+    const found = await findAnime4upEpisodeHtmlOnPhone({
+      title,
+      english,
+      epNum,
+      signal: ctrl.signal,
+    });
+    if (!found || ctrl.signal.aborted) return null;
+    const { epUrl, epHtml } = found;
 
     const meta = extractAnime4upEpisodeMeta(epHtml);
     if (!meta.servers.length) return null;

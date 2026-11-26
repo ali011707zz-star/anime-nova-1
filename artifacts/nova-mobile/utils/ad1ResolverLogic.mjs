@@ -101,21 +101,48 @@ export function extractAnime4upSeriesUrlFromSearchHtml(html, title, english) {
 }
 
 export function extractAnime4upEpisodeUrlFromSeriesHtml(html, epNum) {
-  const src = String(html || "");
-  const ep = Math.floor(Number(epNum));
-  if (!src || !Number.isFinite(ep) || ep <= 0) return null;
+  if (!html || !epNum || epNum <= 0) return null;
+  const epStr = String(epNum);
+  const normalizeHost = (u) => String(u || "").replace(/^https?:\/\/[^/]+/i, AD1_BASE_URL);
 
-  const re = /href=["'](https?:\/\/[^"']*\/episode\/[^"'#?]+\/?)["']/gi;
-  for (const m of src.matchAll(re)) {
-    const raw = m[1].replace(/^https?:\/\/[^/]+/i, AD1_BASE_URL);
+  // Pass 1: Match by anchor text (handles Anime4Up random episode slugs like "...-الحلقة-ydjwa/" with label "الحلقة 12")
+  const anchorRe = /<a\b[^>]*href=["'](https?:\/\/[^"']+\/episode\/[^"']+)["'][^>]*>([\s\S]{0,240}?)<\/a>/gi;
+  const textExactRe = new RegExp(`(?:^|[^0-9])(?:الحلقة|حلقة|episode|ep)?\s*0*${epStr}(?!\d)`, "i");
+  const isSpecialRe = /(?:ova|oav|special|خاصة|الأوفا|فيلم|movie|recap)/i;
+  let anchorFallback = null;
+  let am;
+  while ((am = anchorRe.exec(html)) !== null) {
+    const rawHref = am[1];
+    const cleanText = am[2].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    if (!cleanText || !textExactRe.test(cleanText)) continue;
+    if (!isSpecialRe.test(cleanText)) {
+      return normalizeHost(rawHref);
+    }
+    if (!anchorFallback) anchorFallback = rawHref;
+  }
+  if (anchorFallback) return normalizeHost(anchorFallback);
+
+  // Pass 2: Fallback to URL slug matching
+  const re = /href=["'](https?:\/\/[^"']+\/episode\/[^"']+)["']/gi;
+  const seen = new Set();
+  const candidates = [];
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    const raw = m[1];
+    if (seen.has(raw)) continue;
+    seen.add(raw);
     let decoded = raw;
     try { decoded = decodeURIComponent(raw); } catch {}
-    const numMatch = decoded.match(/(?:الحلقة|episode|ep)[-_\s]*(\d+)/i);
-    if (numMatch && Number(numMatch[1]) === ep) {
-      return raw;
+    const exactArabic = new RegExp(`(?:الحلقة|حلقة|episode|ep)[-_\s]*0*${epStr}(?:[-_/]|$)`, "i");
+    const trailingNum = new RegExp(`[-_]0*${epStr}(?:[-_/]|$)`);
+    if (exactArabic.test(decoded)) {
+      candidates.push({ url: normalizeHost(raw), score: 100 });
+    } else if (trailingNum.test(decoded)) {
+      candidates.push({ url: normalizeHost(raw), score: 50 });
     }
   }
-  return null;
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates[0]?.url || null;
 }
 
 export function normalizeAd1QualityLabel(label) {

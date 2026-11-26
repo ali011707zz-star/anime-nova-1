@@ -18,6 +18,7 @@ import {
   getDirectRequestHeaders,
   isDirectStreamActive,
   MOBILE_DIRECT_UA,
+  probeAd1AvailabilityOnPhone,
   resolveAd1OnPhone,
   resolveAd2OnPhone,
   resolveMediaFireDirectOnPhone,
@@ -1663,6 +1664,36 @@ export default function WatchScreen() {
       console.info(
         `[playback-trace] id=${playbackTraceId} component=availability stage=hint_cache_hit rows=${hintRows}`,
       );
+      if (Platform.OS !== "web" && !cachedHints.anime4up2_hard) {
+        const ad1HintCtrl = new AbortController();
+        let hintCancelled = false;
+        void probeAd1AvailabilityOnPhone({
+          title: titleStr,
+          english: englishStr,
+          epNum,
+          signal: ad1HintCtrl.signal,
+        }).then((probe) => {
+          if (hintCancelled || !probe || !isMountedRef.current) return;
+          const ad1Tiers: Partial<Record<QualityKey, AvailableSlot>> = {
+            "1080p": { serverCount: probe.serverCount, name: "أنمي فور أب (مدمج)", tag: "AD 1", qualityRank: 1080 },
+            "720p": { serverCount: probe.serverCount, name: "أنمي فور أب (مدمج)", tag: "AD 1", qualityRank: 720 },
+            "480p": { serverCount: probe.serverCount, name: "أنمي فور أب (مدمج)", tag: "AD 1", qualityRank: 480 },
+          };
+          const merged = { ...cachedHints, anime4up2_hard: ad1Tiers };
+          setAvailableSlots((curr) => (curr.anime4up2_hard ? curr : { ...curr, anime4up2_hard: ad1Tiers }));
+          setSlotStatus((curr) => ({
+            ...curr,
+            [pickerSlotKey("anime4up2_hard", "1080p")]: curr[pickerSlotKey("anime4up2_hard", "1080p")] || "ready",
+            [pickerSlotKey("anime4up2_hard", "720p")]: curr[pickerSlotKey("anime4up2_hard", "720p")] || "ready",
+            [pickerSlotKey("anime4up2_hard", "480p")]: curr[pickerSlotKey("anime4up2_hard", "480p")] || "ready",
+          }));
+          storeAvailabilityHintRows(availabilityHintKey, merged);
+        }).catch(() => {});
+        return () => {
+          hintCancelled = true;
+          ad1HintCtrl.abort();
+        };
+      }
       return;
     }
     const controller = new AbortController();
@@ -1937,6 +1968,28 @@ export default function WatchScreen() {
       closeReaderSafely();
       controller.abort();
     }, availabilityTimeoutMs);
+    if (Platform.OS !== "web") {
+      void probeAd1AvailabilityOnPhone({
+        title: titleStr,
+        english: englishStr,
+        epNum,
+        signal: controller.signal,
+      }).then((probe) => {
+        if (cancelled || !probe || !isMountedRef.current) return;
+        if (stagedSlots.anime4up2_hard && Object.keys(stagedSlots.anime4up2_hard).length > 0) return;
+        for (const q of ["1080p", "720p", "480p"] as const) {
+          applyRow({
+            site: "anime4up2_hard",
+            quality: q,
+            serverCount: probe.serverCount,
+            name: "أنمي فور أب (مدمج)",
+            tag: "AD 1",
+            qualityRank: q === "1080p" ? 1080 : q === "720p" ? 720 : 480,
+          });
+        }
+        storeAvailabilityHintRows(availabilityHintKey, stagedSlots);
+      }).catch(() => {});
+    }
     void run();
     return () => {
       cancelled = true;
@@ -2476,17 +2529,6 @@ export default function WatchScreen() {
       siteCtrls.current.set(fetchKey, currentSiteCtrl);
       const timeout = Math.max(SITE_TIMEOUT_MS, SITE_TIMEOUT_MAP[site] ?? 0);
       tid = setTimeout(() => currentSiteCtrl.abort(), timeout);
-      console.info(`[playback-trace] id=${lookupTraceId} component=source stage=request site=${lookupSiteTag}`);
-      const res = await secureStreamFetch(`${base}/api/anime/fetch-source?${qs.toString()}`, { signal: currentSiteCtrl.signal });
-      console.info(
-        `[playback-trace] id=${lookupTraceId} component=source stage=response site=${lookupSiteTag} status=${res.status} elapsed_ms=${Date.now() - lookupStartedAt}`,
-      );
-
-      if (!res.ok || !isMountedRef.current || !res.body) throw new Error("progressive fetch failed");
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let eventBuffer = "";
-      const requestedTier = preferredQuality ? PICKER_QUALITY[preferredQuality] : undefined;
 
       const acceptPlayableCandidate = (mapped: Src, candidateKey: string, kind?: string) => {
         receivedCandidate = true;
@@ -2517,6 +2559,57 @@ export default function WatchScreen() {
           playback.fallbackSources.push(mapped);
         }
       };
+
+      // Phone-first direct resolution for AD 1 (Anime4Up A4SL 1.2 + MegaMax Inertia, 0% VPS load)
+      if (Platform.OS !== "web" && site === "anime4up2_hard" && !excludeKeys.length && !currentSiteCtrl.signal.aborted && isMountedRef.current) {
+        const ad1Fast = await resolveAd1OnPhone({
+          title: titleStr,
+          english: englishStr,
+          epNum,
+          preferredQuality,
+          forDownload: false,
+          signal: currentSiteCtrl.signal,
+        });
+        if (ad1Fast?.primary?.url && isMountedRef.current && progressivePlaybackRef.current === playback) {
+          const toAd1Src = (item: Ad1PhoneResolvedSource, idx: number): Src => ({
+            site: "anime4up2_hard",
+            name: item.name,
+            label: item.label,
+            quality: preferredQuality || item.quality,
+            url: item.url,
+            directUrl: item.url,
+            rawUrl: item.url,
+            directType: item.directType,
+            isEmbed: false,
+            deliveryMode: item.clientExtract ? "client-extract" : "direct",
+            headers: item.headers,
+            clientExtract: item.clientExtract,
+            candidateKey: `ad1-phone-${idx}-${item.quality}`,
+          });
+          const primarySrc = toAd1Src(ad1Fast.primary, 0);
+          ad1Fast.fallbacks.forEach((fb, i) => {
+            const fbSrc = toAd1Src(fb, i + 1);
+            playback.fallbackSources.push(fbSrc);
+            setSources(prev => prev.some(item => item.candidateKey === fbSrc.candidateKey) ? prev : [...prev, fbSrc]);
+          });
+          streamDoneSeen = true;
+          playback.streamOpen = false;
+          acceptPlayableCandidate(primarySrc, primarySrc.candidateKey!, "primary");
+          return;
+        }
+      }
+
+      console.info(`[playback-trace] id=${lookupTraceId} component=source stage=request site=${lookupSiteTag}`);
+      const res = await secureStreamFetch(`${base}/api/anime/fetch-source?${qs.toString()}`, { signal: currentSiteCtrl.signal });
+      console.info(
+        `[playback-trace] id=${lookupTraceId} component=source stage=response site=${lookupSiteTag} status=${res.status} elapsed_ms=${Date.now() - lookupStartedAt}`,
+      );
+
+      if (!res.ok || !isMountedRef.current || !res.body) throw new Error("progressive fetch failed");
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let eventBuffer = "";
+      const requestedTier = preferredQuality ? PICKER_QUALITY[preferredQuality] : undefined;
 
       const handleSseBlock = (block: string) => {
         let eventName = "message";
@@ -2989,11 +3082,11 @@ export default function WatchScreen() {
       const cachedBest = (wantedQuality
         ? cachedSiteSrcs.find(s =>
             getSrcQuality(s) === wantedQuality &&
-            (site === "anime4up2_hard" || downloadMode === "adm" ? isDirectMp4Src(s) : isDirectPlayable(s)),
+            (downloadMode === "adm" ? isDirectMp4Src(s) : isDirectPlayable(s)),
           )
-        : undefined) ?? (site === "anime4up2_hard" || downloadMode === "adm"
+        : undefined) ?? (downloadMode === "adm"
         ? cachedSiteSrcs.find(isDirectMp4Src)
-        : cachedSiteSrcs.find(isDirectPlayable));
+        : cachedSiteSrcs.find(isDirectMp4Src) ?? cachedSiteSrcs.find(isDirectPlayable));
       if (cachedBest && isDirectPlayable(cachedBest)) {
         const ok = await handleDownloadSite(site, preferredQuality, downloadMode);
         if (ok) return;
@@ -3020,9 +3113,47 @@ export default function WatchScreen() {
       siteCtrls.current.set(site, siteCtrl);
       const timeout = Math.max(SITE_TIMEOUT_MS, SITE_TIMEOUT_MAP[site] ?? 0);
       tid = setTimeout(() => siteCtrl.abort(), timeout);
-      const res = await secureStreamFetch(`${base}/api/anime/fetch-source?site=${site}&${qs}`, { signal: siteCtrl.signal });
 
-      if (!res.ok || !isMountedRef.current) throw new Error("fetch failed");
+      const fetchSeen = new Set<string>();
+      const newSrcs: Src[] = [];
+      let chosenExact: Src | null = null;
+      let chosenFallback: Src | null = null;
+
+      // Phone-first AD 1 download resolution (0% VPS load, skips broken server AD 1 scraper)
+      if (Platform.OS !== "web" && site === "anime4up2_hard" && !siteCtrl.signal.aborted) {
+        const ad1PhoneFirst = await resolveAd1OnPhone({
+          title: titleStr,
+          english: englishStr,
+          epNum,
+          preferredQuality,
+          forDownload: true,
+          signal: siteCtrl.signal,
+        });
+        if (ad1PhoneFirst?.primary?.url) {
+          for (const item of [ad1PhoneFirst.primary, ...ad1PhoneFirst.fallbacks]) {
+            newSrcs.push({
+              site: "anime4up2_hard",
+              name: item.name,
+              label: item.label,
+              quality: item.quality,
+              url: item.url,
+              directUrl: item.url,
+              rawUrl: item.url,
+              directType: item.directType,
+              isEmbed: false,
+              deliveryMode: item.clientExtract ? "client-extract" : "direct",
+              headers: item.headers,
+              ...(item.clientExtract ? { clientExtract: item.clientExtract } : {}),
+            });
+          }
+        }
+      }
+
+      const res = newSrcs.length > 0
+        ? null
+        : await secureStreamFetch(`${base}/api/anime/fetch-source?site=${site}&${qs}`, { signal: siteCtrl.signal });
+
+      if (res && (!res.ok || !isMountedRef.current)) throw new Error("fetch failed");
 
       const mapAndFilterOne = (s: Src): Src | null => {
         const sourceSite = s.site || site;
@@ -3039,13 +3170,11 @@ export default function WatchScreen() {
         return getPlayUrl(mapped) ? mapped : null;
       };
 
-      const fetchSeen = new Set<string>();
-      const newSrcs: Src[] = [];
-      let chosenExact: Src | null = null;
-      let chosenFallback: Src | null = null;
-      const contentType = (res.headers.get("content-type") || "").toLowerCase();
+      const contentType = res ? (res.headers.get("content-type") || "").toLowerCase() : "";
 
-      if (contentType.includes("text/event-stream") && res.body?.getReader) {
+      if (!res) {
+        // Already resolved directly on phone (e.g. AD 1)
+      } else if (contentType.includes("text/event-stream") && res.body?.getReader) {
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let eventBuffer = "";
