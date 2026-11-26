@@ -58,6 +58,7 @@ import {
   getReaderThemePalette,
   isHorizontalReadingMode,
   isPagedReadingMode,
+  isReadingModeAllowedForWork,
   resolveEffectiveReadingMode,
 } from "@/utils/mangaReaderSettings.mjs";
 import {
@@ -413,12 +414,16 @@ export default function MangaDetailScreen() {
 
   const handleSelectReadingMode = useCallback(
     (mode: ReadingMode) => {
+      const activeSource = manga?.source || inferredSource;
+      if (!isReadingModeAllowedForWork(mode, activeSource, manga?.countryOfOrigin)) {
+        return;
+      }
       setSelectedReadingMode(mode);
       if (mangaModeStorageKey) {
         void saveMangaReadingMode(mangaModeStorageKey, mode);
       }
     },
-    [mangaModeStorageKey]
+    [mangaModeStorageKey, manga?.source, manga?.countryOfOrigin, inferredSource]
   );
 
   const handleResetReaderSettings = useCallback(() => {

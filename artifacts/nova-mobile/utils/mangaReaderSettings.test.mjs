@@ -7,7 +7,10 @@ import {
   getReaderLayoutFamily,
   getReaderThemePalette,
   isHorizontalReadingMode,
+  isManhwaWork,
   isPagedReadingMode,
+  isReadingModeAllowedForWork,
+  READING_MODE_META,
   resolveEffectiveReadingMode,
   sanitizeGlobalReaderSettings,
   sanitizePerMangaReadingModes,
@@ -30,15 +33,49 @@ test("resolveEffectiveReadingMode defaults manhwa/manhua to webtoon and Japanese
   assert.equal(resolveEffectiveReadingMode(undefined, "manga", undefined), "continuous_vertical");
 });
 
-test("resolveEffectiveReadingMode respects explicit per-manga overrides", () => {
+test("resolveEffectiveReadingMode respects explicit per-manga overrides and guards manhwa from paged/horizontal modes", () => {
   assert.equal(resolveEffectiveReadingMode("webtoon", "manga", "JP"), "webtoon");
-  assert.equal(resolveEffectiveReadingMode("rtl", "manhwa", "KR"), "rtl");
+  assert.equal(resolveEffectiveReadingMode("continuous_vertical", "manhwa", "KR"), "continuous_vertical");
+  assert.equal(resolveEffectiveReadingMode("webtoon", "manhwa", "KR"), "webtoon");
+  // Paged / horizontal modes are manga-only: manhwa safely falls back to webtoon
+  assert.equal(resolveEffectiveReadingMode("rtl", "manhwa", "KR"), "webtoon");
+  assert.equal(resolveEffectiveReadingMode("ltr", "manhwa", "KR"), "webtoon");
+  assert.equal(resolveEffectiveReadingMode("vertical", "manga", "KR"), "webtoon");
+  assert.equal(resolveEffectiveReadingMode("continuous_rtl", "manga", "CN"), "webtoon");
+  assert.equal(resolveEffectiveReadingMode("continuous_ltr", "manga", "TW"), "webtoon");
+  // Japanese manga still supports every mode
+  assert.equal(resolveEffectiveReadingMode("rtl", "manga", "JP"), "rtl");
   assert.equal(resolveEffectiveReadingMode("ltr", "manga", "JP"), "ltr");
   assert.equal(resolveEffectiveReadingMode("vertical", "manga", "JP"), "vertical");
   assert.equal(resolveEffectiveReadingMode("continuous_rtl", "manga", "JP"), "continuous_rtl");
   assert.equal(resolveEffectiveReadingMode("continuous_ltr", "manga", "JP"), "continuous_ltr");
   // Unknown mode falls back cleanly to auto-detection
   assert.equal(resolveEffectiveReadingMode("unknown_mode", "manhwa", "KR"), "webtoon");
+});
+
+test("isManhwaWork and isReadingModeAllowedForWork distinguish manhwa/manhua from manga", () => {
+  assert.equal(isManhwaWork("manhwa", undefined), true);
+  assert.equal(isManhwaWork("manga", "KR"), true);
+  assert.equal(isManhwaWork("manga", "cn"), true);
+  assert.equal(isManhwaWork("manga", "TW"), true);
+  assert.equal(isManhwaWork("manga", "JP"), false);
+  assert.equal(isManhwaWork("manga", undefined), false);
+
+  assert.equal(isReadingModeAllowedForWork("default", "manhwa", "KR"), true);
+  assert.equal(isReadingModeAllowedForWork("webtoon", "manhwa", "KR"), true);
+  assert.equal(isReadingModeAllowedForWork("continuous_vertical", "manhwa", "KR"), true);
+  assert.equal(isReadingModeAllowedForWork("rtl", "manhwa", "KR"), false);
+  assert.equal(isReadingModeAllowedForWork("ltr", "manhwa", "KR"), false);
+  assert.equal(isReadingModeAllowedForWork("vertical", "manhwa", "KR"), false);
+  assert.equal(isReadingModeAllowedForWork("continuous_rtl", "manhwa", "KR"), false);
+  assert.equal(isReadingModeAllowedForWork("continuous_ltr", "manhwa", "KR"), false);
+
+  for (const mode of READING_MODES) {
+    assert.equal(isReadingModeAllowedForWork(mode, "manga", "JP"), true);
+  }
+  for (const item of READING_MODE_META) {
+    assert.equal(/[←→]/.test(item.shortDesc), false, "No broken Cairo arrow glyphs in shortDesc");
+  }
 });
 
 test("sanitizeGlobalReaderSettings validates all fields and rejects invalid values", () => {

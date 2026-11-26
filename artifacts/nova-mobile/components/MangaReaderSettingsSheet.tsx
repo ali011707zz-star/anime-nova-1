@@ -25,6 +25,8 @@ import {
   SIDE_PADDING_OPTIONS,
   type SidePaddingPercent,
   getReadingModeLabel,
+  isManhwaWork,
+  isReadingModeAllowedForWork,
   resolveEffectiveReadingMode,
 } from "@/utils/mangaReaderSettings.mjs";
 
@@ -160,6 +162,14 @@ export function MangaReaderSettingsSheet({
     return () => sub.remove();
   }, [visible, onClose]);
 
+  const isManhwa = isManhwaWork(mangaSource, countryOfOrigin);
+  const effectiveSelectedMode: ReadingMode = isReadingModeAllowedForWork(
+    selectedReadingMode,
+    mangaSource,
+    countryOfOrigin,
+  )
+    ? selectedReadingMode
+    : "default";
   const autoResolvedLabel = getReadingModeLabel(
     resolveEffectiveReadingMode("default", mangaSource, countryOfOrigin),
   );
@@ -231,33 +241,66 @@ export function MangaReaderSettingsSheet({
             contentContainerStyle={styles.scrollContent}
             bounces={false}
           >
-            {/* ── Section 1: Per-Manga Reading Mode ── */}
+            {/* ── Section 1: Per-Manga / Per-Manhwa Reading Mode ── */}
             <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionEyebrow}>لهذه المانجا</Text>
+              <Text style={styles.sectionEyebrow}>
+                {isManhwa ? "لهذه المانهوا" : "لهذه المانجا"}
+              </Text>
               <Text style={styles.sectionMangaHint} numberOfLines={1}>
                 {mangaTitle}
               </Text>
             </View>
 
+            {isManhwa && (
+              <View style={styles.manhwaNoticeBanner}>
+                <View style={styles.manhwaNoticeIconWrap}>
+                  <Ionicons
+                    name="information-circle-outline"
+                    size={18}
+                    color={SHEET_TOKENS.accentLight}
+                  />
+                </View>
+                <View style={styles.manhwaNoticeTextCol}>
+                  <Text style={styles.manhwaNoticeTitle}>
+                    وضع المانهوا مفعّل — الأوضاع العمودية فقط متاحة
+                  </Text>
+                  <Text style={styles.manhwaNoticeDesc}>
+                    فصول المانهوا عبارة عن شرائح طولية متصلة، لذلك تم تعطيل أوضاع التقليب المخصصة للمانجا لمنع تصغير وتشويه الصفحات.
+                  </Text>
+                </View>
+              </View>
+            )}
+
             <View style={styles.modeGrid}>
               {READING_MODE_META.map((item) => {
-                const isSelected = selectedReadingMode === item.value;
-                const subtitle =
-                  item.value === "default"
+                const isAllowed = isReadingModeAllowedForWork(
+                  item.value,
+                  mangaSource,
+                  countryOfOrigin,
+                );
+                const isSelected = isAllowed && effectiveSelectedMode === item.value;
+                const subtitle = !isAllowed
+                  ? "مخصص لصفحات المانجا فقط"
+                  : item.value === "default"
                     ? `تلقائي: ${autoResolvedLabel}`
                     : item.shortDesc;
                 return (
                   <Pressable
                     key={item.value}
-                    onPress={() => onSelectReadingMode(item.value as ReadingMode)}
-                    focusable={tvMode}
+                    disabled={!isAllowed}
+                    onPress={() => {
+                      if (!isAllowed) return;
+                      onSelectReadingMode(item.value as ReadingMode);
+                    }}
+                    focusable={tvMode && isAllowed}
                     accessibilityRole="radio"
-                    accessibilityState={{ selected: isSelected }}
+                    accessibilityState={{ selected: isSelected, disabled: !isAllowed }}
                     style={({ pressed, focused }) => [
                       styles.modeTile,
                       isSelected && styles.modeTileActive,
-                      pressed && styles.tilePressed,
-                      tvMode && tvFocusStyle(focused),
+                      !isAllowed && styles.modeTileDisabled,
+                      pressed && isAllowed && styles.tilePressed,
+                      tvMode && isAllowed && tvFocusStyle(focused),
                     ]}
                   >
                     <View style={styles.modeTileTop}>
@@ -265,15 +308,18 @@ export function MangaReaderSettingsSheet({
                         style={[
                           styles.modeIconWrap,
                           isSelected && styles.modeIconWrapActive,
+                          !isAllowed && styles.modeIconWrapDisabled,
                         ]}
                       >
                         <Ionicons
                           name={item.icon as keyof typeof Ionicons.glyphMap}
                           size={17}
                           color={
-                            isSelected
-                              ? SHEET_TOKENS.accentLight
-                              : SHEET_TOKENS.textSecondary
+                            !isAllowed
+                              ? SHEET_TOKENS.textMuted
+                              : isSelected
+                                ? SHEET_TOKENS.accentLight
+                                : SHEET_TOKENS.textSecondary
                           }
                         />
                       </View>
@@ -281,18 +327,30 @@ export function MangaReaderSettingsSheet({
                         <View style={styles.activeCheckDot}>
                           <Ionicons name="checkmark" size={11} color="#09090B" />
                         </View>
+                      ) : !isAllowed ? (
+                        <View style={styles.mangaOnlyBadge}>
+                          <Ionicons name="lock-closed" size={10} color="#9CA3AF" />
+                          <Text style={styles.mangaOnlyBadgeText}>للمانجا فقط</Text>
+                        </View>
                       ) : null}
                     </View>
                     <Text
                       style={[
                         styles.modeLabel,
                         isSelected && styles.modeLabelActive,
+                        !isAllowed && styles.modeLabelDisabled,
                       ]}
                       numberOfLines={1}
                     >
                       {item.label}
                     </Text>
-                    <Text style={styles.modeDesc} numberOfLines={1}>
+                    <Text
+                      style={[
+                        styles.modeDesc,
+                        !isAllowed && styles.modeDescDisabled,
+                      ]}
+                      numberOfLines={1}
+                    >
                       {subtitle}
                     </Text>
                   </Pressable>
@@ -826,9 +884,78 @@ const styles = StyleSheet.create({
     alignItems: ALIGN_RIGHT,
     justifyContent: "space-between",
   },
+  manhwaNoticeBanner: {
+    flexDirection: ROW_RTL,
+    alignItems: "flex-start",
+    gap: 10,
+    backgroundColor: "rgba(245, 158, 11, 0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(251, 191, 36, 0.24)",
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
+  },
+  manhwaNoticeIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 9,
+    backgroundColor: "rgba(245, 158, 11, 0.14)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 1,
+  },
+  manhwaNoticeTextCol: {
+    flex: 1,
+    alignItems: ALIGN_RIGHT,
+  },
+  manhwaNoticeTitle: {
+    color: SHEET_TOKENS.accentLight,
+    fontSize: 12,
+    fontFamily: "Cairo_700Bold",
+    textAlign: "right",
+  },
+  manhwaNoticeDesc: {
+    color: SHEET_TOKENS.textSecondary,
+    fontSize: 11,
+    lineHeight: 17,
+    fontFamily: "Cairo_400Regular",
+    textAlign: "right",
+    marginTop: 2,
+  },
   modeTileActive: {
     backgroundColor: SHEET_TOKENS.accentSurface,
     borderColor: SHEET_TOKENS.accentBorder,
+  },
+  modeTileDisabled: {
+    backgroundColor: "rgba(17, 19, 27, 0.55)",
+    borderColor: "rgba(255, 255, 255, 0.045)",
+    opacity: 0.52,
+  },
+  modeIconWrapDisabled: {
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
+  },
+  mangaOnlyBadge: {
+    flexDirection: ROW_RTL,
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 8,
+    backgroundColor: "rgba(255, 255, 255, 0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+  },
+  mangaOnlyBadgeText: {
+    color: "#9CA3AF",
+    fontSize: 9.5,
+    fontFamily: "Cairo_600SemiBold",
+  },
+  modeLabelDisabled: {
+    color: SHEET_TOKENS.textSecondary,
+  },
+  modeDescDisabled: {
+    color: SHEET_TOKENS.textMuted,
   },
   tilePressed: {
     opacity: 0.82,
