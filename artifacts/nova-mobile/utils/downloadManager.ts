@@ -17,6 +17,7 @@ import Constants from "expo-constants";
 import { recordSuccessfulDownload } from "./adPolicy";
 import { getAuthToken, getDownloadToken } from "./secureApi";
 import { getBaseUrl } from "./baseUrl";
+import { openSequentialPartWriter, type SequentialPartWriter } from "./nextFileBridge.mjs";
 import { isFirstPartyVpsUrl } from "./hybridStreamLogic.mjs";
 import {
   buildHlsManifestCandidates,
@@ -1191,14 +1192,7 @@ async function downloadHlsDirectToPhone(
 ): Promise<"completed" | "interrupted" | "fallback"> {
   if (Platform.OS === "web") return "fallback";
 
-  let NextFileCtor: typeof import("expo-file-system/next").File;
-  try {
-    const mod = await import("expo-file-system/next");
-    if (!mod?.File) return "fallback";
-    NextFileCtor = mod.File;
-  } catch {
-    return "fallback";
-  }
+
 
   const base = getBaseUrl();
   const candidates = buildHlsManifestCandidates({
@@ -1219,7 +1213,7 @@ async function downloadHlsDirectToPhone(
       return "interrupted";
     }
 
-    let handle: ReturnType<import("expo-file-system/next").File["open"]> | null = null;
+    let handle: SequentialPartWriter | null = null;
     try {
       const hdrs = requestHeaders(entry.params, candidate.url, candidate.headers);
       let playlistUrl = candidate.url;
@@ -1240,10 +1234,8 @@ async function downloadHlsDirectToPhone(
 
       await ensureDirectoryFor(finalUri);
       await FileSystem.deleteAsync(partUri, { idempotent: true }).catch(() => {});
-      const outFile = new NextFileCtor(partUri);
-      if (outFile.exists) outFile.delete();
-      outFile.create();
-      handle = outFile.open();
+      handle = openSequentialPartWriter(partUri);
+      if (!handle) return "fallback";
 
       entry.hlsDirect = true;
       entry.pauseSupported = true;
