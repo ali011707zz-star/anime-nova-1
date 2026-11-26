@@ -16,6 +16,8 @@ import { useColors } from "@/hooks/useColors";
 import { TvPressable, isTvDevice, tvFocusStyle, useTvMetrics } from "@/utils/tv";
 import { getBaseUrl } from "@/utils/api";
 import { getAuthToken, getDownloadToken } from "@/utils/secureApi";
+import { resolveMediaFireDirectOnPhone } from "@/utils/directClientExtractor";
+import { resolveDirectInternalMp4Download } from "@/utils/hybridStreamLogic.mjs";
 import { ensureWatchAccess } from "@/utils/adPolicy";
 import { getWatchContentId } from "@/context/AppContext";
 import {
@@ -345,16 +347,49 @@ export default function StardimaServersScreen() {
         return;
       }
 
+      const siteKey = `stardima_${serverId}`;
+      let candidateUrl = rawStreamUrl;
+      let candidateRawUrl = data.rawUrl || data.streamUrl || rawStreamUrl;
+      let candidateHeaders: Record<string, string> | undefined;
+
+      if (data.mediaType !== "hls") {
+        const mfCandidate = [candidateUrl, candidateRawUrl].find(
+          (u): u is string =>
+            typeof u === "string" &&
+            (u.includes("/api/aw-dubbed/mf-stream") ||
+              /https?:\/\/(?:www\.)?mediafire\.com\/(?:file|view|download)\//i.test(u)),
+        );
+        if (mfCandidate) {
+          const mfDirect = await resolveMediaFireDirectOnPhone(mfCandidate, base);
+          if (mfDirect?.url) {
+            candidateUrl = mfDirect.url;
+            candidateRawUrl = mfDirect.url;
+            candidateHeaders = mfDirect.headers;
+          }
+        }
+      }
+
+      const directMp4 = resolveDirectInternalMp4Download({
+        url: candidateUrl,
+        rawUrl: candidateRawUrl,
+        mediaType: data.mediaType,
+        site: siteKey,
+        provider: "stardima",
+        headers: candidateHeaders,
+        baseUrl: base,
+      });
+
       const [authToken, downloadToken] = await Promise.all([
         getAuthToken(),
         getDownloadToken(),
       ]);
 
-      const downloadUrl = data.mediaType === "hls" && !rawStreamUrl.includes("/api/anime/download-mp4")
-        ? `${base}/api/anime/download-mp4?url=${encodeURIComponent(rawStreamUrl)}${downloadToken ? `&dlToken=${encodeURIComponent(downloadToken)}` : ""}`
-        : rawStreamUrl;
+      const downloadUrl = directMp4.isDirect && directMp4.url
+        ? directMp4.url
+        : data.mediaType === "hls" && !rawStreamUrl.includes("/api/anime/download-mp4")
+          ? `${base}/api/anime/download-mp4?url=${encodeURIComponent(rawStreamUrl)}${downloadToken ? `&dlToken=${encodeURIComponent(downloadToken)}` : ""}`
+          : rawStreamUrl;
 
-      const siteKey = `stardima_${serverId}`;
       const qualityLabel = String(server.quality || "720p").trim();
 
       setDlStates((p) => ({ ...p, [serverId]: "downloading" }));
@@ -370,6 +405,8 @@ export default function StardimaServersScreen() {
         url: downloadUrl,
         authToken: authToken ?? undefined,
         downloadToken: downloadToken ?? undefined,
+        headers: directMp4.isDirect ? directMp4.headers : undefined,
+        hlsManifestUrl: data.mediaType === "hls" ? rawStreamUrl : undefined,
       });
     } catch {
       setDlStates((p) => ({ ...p, [serverId]: "error" }));

@@ -13,6 +13,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
 import { recordSuccessfulDownload } from "./adPolicy";
 import { getAuthToken, getDownloadToken } from "./secureApi";
+import { getBaseUrl } from "./baseUrl";
+import { isFirstPartyVpsUrl } from "./hybridStreamLogic.mjs";
 import {
   enqueueNativeDownload,
   forgetNativeDownload,
@@ -33,6 +35,8 @@ const MOBILE_PACKAGE_NAME =
   Constants.expoConfig?.ios?.bundleIdentifier ||
   "com.nova.anime";
 const MOBILE_VERSION = Constants.expoConfig?.version || "1.0.0";
+const DIRECT_CDN_UA =
+  "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
 
 export interface DownloadItem {
   id: string;
@@ -578,32 +582,37 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function requestHeaders(params: StartDownloadParams): Record<string, string> {
+function requestHeaders(params: StartDownloadParams, targetUrl: string = params.url): Record<string, string> {
+  const isFirstParty = isFirstPartyVpsUrl(targetUrl, getBaseUrl());
+  if (!isFirstParty) {
+    const cleanHeaders: Record<string, string> = {};
+    for (const [k, v] of Object.entries(params.headers || {})) {
+      if (v && !/^(host|content-length|x-app-token|x-download-token|x-nova-client|x-nova-package|x-nova-version|authorization)$/i.test(k)) {
+        cleanHeaders[k] = v;
+      }
+    }
+    if (!Object.keys(cleanHeaders).some((k) => k.toLowerCase() === "user-agent")) {
+      cleanHeaders["User-Agent"] = DIRECT_CDN_UA;
+    }
+    if (!Object.keys(cleanHeaders).some((k) => k.toLowerCase() === "accept")) {
+      cleanHeaders["Accept"] = "video/mp4,video/*;q=0.9,*/*;q=0.1";
+    }
+    return cleanHeaders;
+  }
+
   /* Provider Referer/Origin headers are needed when the phone talks directly
-     to a CDN, but they must not be forwarded to Nova's own API routes. The
-     global CORS middleware correctly rejects an API request whose Origin is
-     megaplay/mediafire/etc.; the proxy URL already contains the provider
-     referrer and the VPS supplies it upstream. */
-  const isNovaApiUrl = /\/api\/(?:anime|animation)\//i.test(params.url);
-  const sourceHeaders = isNovaApiUrl
-    ? Object.fromEntries(
-        Object.entries(params.headers || {}).filter(
-          ([key]) => !/^(origin|referer|host|content-length)$/i.test(key),
-        ),
-      )
-    : (params.headers || {});
+     to a CDN, but they must not be forwarded to Nova's own API routes. */
+  const sourceHeaders = Object.fromEntries(
+    Object.entries(params.headers || {}).filter(
+      ([key]) => !/^(origin|referer|host|content-length)$/i.test(key),
+    ),
+  );
   const headers: Record<string, string> = {
     ...sourceHeaders,
-    /* The media routes are behind the same mobile release gate as source
-       fetching. DownloadResumable does not use secureFetch, so it must carry
-       the complete release identity itself or the VPS returns 403 before the
-       proxy sees the request. */
     "X-Nova-Client": MOBILE_CLIENT_ID,
     "X-Nova-Package": MOBILE_PACKAGE_NAME,
     "X-Nova-Version": MOBILE_VERSION,
     "User-Agent": `NovaAnime/${MOBILE_VERSION} (Expo; Mobile)`,
-    /* DownloadResumable may issue Range requests after a background retry.
-       Explicitly advertise byte-range support to the VPS conversion route. */
     "Accept": "video/mp4,video/*;q=0.9,*/*;q=0.1",
   };
   if (params.authToken) headers["X-App-Token"] = params.authToken;
@@ -693,7 +702,7 @@ function subtitleToVtt(url: string, body: string): string {
 async function fetchSubtitleResponse(url: string, params: StartDownloadParams): Promise<string> {
   const response = await fetch(url, {
     headers: {
-      ...requestHeaders(params),
+      ...requestHeaders(params, url),
       Accept: "application/vnd.apple.mpegurl, text/vtt, application/x-subrip, text/plain, */*",
     },
   });

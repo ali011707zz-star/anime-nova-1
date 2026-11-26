@@ -18,7 +18,8 @@ import { useWatchPlayerOrientation } from "@/utils/watchOrientation";
 import { getWatchContentId, useApp } from "@/context/AppContext";
 import { getStardimaProgressKey } from "@/utils/stardimaProgress";
 import { startMobileWatchAnalytics } from "@/utils/analytics";
-import { buildHybridPlayerSource } from "@/utils/hybridStreamLogic.mjs";
+import { isDirectStreamActive, resolveMediaFireDirectOnPhone } from "@/utils/directClientExtractor";
+import { buildDeterministicPlayerSource } from "@/utils/hybridStreamLogic.mjs";
 
 type CatalogEpisode = {
   id: string | number;
@@ -374,18 +375,37 @@ export default function StardimaPlayerScreen() {
           headers[key] = parsed.href;
         }
       }
+      const apiBase = getBaseUrl();
+      let finalPlayUrl = directUrl.href;
+      let finalContentType: "hls" | "progressive" = data.type === "hls" ? "hls" : "progressive";
+      let finalHeaders: Record<string, string> | undefined = Object.keys(headers).length ? headers : undefined;
+
+      if (
+        isDirectStreamActive() &&
+        (finalPlayUrl.includes("/api/aw-dubbed/mf-stream") ||
+          /https?:\/\/(?:www\.)?mediafire\.com\/(?:file|view|download)\//i.test(finalPlayUrl))
+      ) {
+        const mfDirect = await resolveMediaFireDirectOnPhone(finalPlayUrl, apiBase, signal);
+        if (mfDirect?.url) {
+          finalPlayUrl = mfDirect.url;
+          finalContentType = "progressive";
+          finalHeaders = mfDirect.headers;
+        }
+      }
+
       const resolvedServerName = String(data.serverName || params.serverName || "StarDima");
       const resolvedQuality = String(data.quality || requestedQuality || "").trim();
       setServerName(resolvedServerName);
       setSelectedQuality(resolvedQuality);
-      setDirectSource([buildHybridPlayerSource({
-        url: directUrl.href,
+      setDirectSource([buildDeterministicPlayerSource({
+        url: finalPlayUrl,
         label: resolvedQuality ? `${resolvedServerName} · ${resolvedQuality}` : resolvedServerName,
         ...(resolvedQuality ? { quality: resolvedQuality } : {}),
-        contentType: data.type === "hls" ? "hls" : "progressive",
+        contentType: finalContentType,
         site: "stardima_catalog",
-        baseUrl: getBaseUrl(),
-        ...(Object.keys(headers).length ? { headers } : {}),
+        provider: "stardima",
+        baseUrl: apiBase,
+        ...(finalHeaders && Object.keys(finalHeaders).length ? { headers: finalHeaders } : {}),
       })]);
       setLoadError("");
     } catch (error: any) {

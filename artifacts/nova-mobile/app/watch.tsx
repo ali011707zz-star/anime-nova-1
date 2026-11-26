@@ -62,8 +62,11 @@ import {
   normalizeAwWatchSources,
 } from "@/utils/awWatchExperience.mjs";
 import {
-  buildHybridPlayerSource,
+  VPS_ONLY_SITES,
+  buildDeterministicPlayerSource,
+  isFixedVpsPlaybackSource,
   isOwnVpsProxyUrl,
+  resolveDirectInternalMp4Download,
 } from "@/utils/hybridStreamLogic.mjs";
 
 /* ── Types ── */
@@ -308,9 +311,11 @@ function isMobilePlayable(s: Src): boolean {
   return isDirectPlayable(s) || (Boolean(s.isEmbed) && isValidSourceUrl(getPlayUrl(s)));
 }
 function getPlayUrl(s: Src): string {
-  /* In v1.0.11+ hybrid mode, always prefer an unencrypted direct external CDN URL first
-     when available so VPS video bandwidth stays 0% unless silent proxyFallback takes over. */
-  if (isDirectStreamActive()) {
+  const siteKey = String(s.site || "").trim().toLowerCase();
+  const isVpsSite = VPS_ONLY_SITES.has(siteKey) || siteKey.startsWith("nova_tg") || siteKey.startsWith("nova_vip");
+  /* In fixed direct mode, prefer an unencrypted direct external CDN URL on direct-eligible sites
+     so KW/MP/RE/AD2/MediaFire/Pixeldrain play directly from the phone with 0% VPS load. */
+  if (isDirectStreamActive() && !isVpsSite) {
     const directCandidate = [s.directUrl, s.url].find(
       (value): value is string =>
         typeof value === "string" && /^https?:\/\//i.test(value.trim()) && !isOwnVpsProxyUrl(value),
@@ -2146,7 +2151,6 @@ export default function WatchScreen() {
         if (extracted?.url) {
           setResolvingSrc(null);
           markActiveSlotStatus("ready");
-          const prevProxy = [src.proxyFallbackUrl, src.rawUrl, src.url, src.directUrl].find((u) => isOwnVpsProxyUrl(u));
           setPlayingSrc({
             ...src,
             directUrl: extracted.url,
@@ -2156,7 +2160,7 @@ export default function WatchScreen() {
             isEmbed: false,
             deliveryMode: "client-extract",
             clientExtract: undefined,
-            proxyFallbackUrl: prevProxy ? resolveUrl(prevProxy, getBaseUrl()) : undefined,
+            proxyFallbackUrl: undefined,
             subtitleUrl,
           });
           setScreen("native");
@@ -2180,7 +2184,6 @@ export default function WatchScreen() {
         if (mfDirect?.url) {
           setResolvingSrc(null);
           markActiveSlotStatus("ready");
-          const prevMfProxy = [src.proxyFallbackUrl, initialPlayUrl, src.rawUrl, src.url].find((u) => isOwnVpsProxyUrl(u));
           setPlayingSrc({
             ...src,
             directUrl: mfDirect.url,
@@ -2189,7 +2192,7 @@ export default function WatchScreen() {
             headers: mfDirect.headers,
             isEmbed: false,
             deliveryMode: "client-extract",
-            proxyFallbackUrl: prevMfProxy ? resolveUrl(prevMfProxy, getBaseUrl()) : undefined,
+            proxyFallbackUrl: undefined,
             subtitleUrl,
           });
           setScreen("native");
@@ -2240,7 +2243,6 @@ export default function WatchScreen() {
     const baseSrc = resolvingSrc || playingSrc;
     setResolvingSrc(null);
     if (!baseSrc) return;
-    const prevProxy = [baseSrc.proxyFallbackUrl, baseSrc.rawUrl, baseSrc.url, baseSrc.directUrl].find((u) => isOwnVpsProxyUrl(u));
     const resolved: Src = {
       ...baseSrc,
       directUrl: stream.url,
@@ -2250,7 +2252,7 @@ export default function WatchScreen() {
       directType: stream.type,
       deliveryMode: "client-extract",
       clientExtract: undefined,
-      proxyFallbackUrl: prevProxy ? resolveUrl(prevProxy, getBaseUrl()) : undefined,
+      proxyFallbackUrl: undefined,
     };
     markActiveSlotStatus("ready");
     setPlayingSrc(resolved);
@@ -2736,9 +2738,6 @@ export default function WatchScreen() {
       const rawUrl   = getPlayUrl(best);
       const headers  = best.headers || extractProxyHeaders(rawUrl);
       const base     = getBaseUrl();
-      const proxyUrl = isAwDubbed
-        ? resolveUrl(rawUrl, base)
-        : ensureVpsProxy(rawUrl, headers, base, best.directType === "hls");
 
       /* الترجمة الجانبية اختيارية: لا نمنع تنزيل الفيديو إذا لم تتوفر. */
       const subRaw     = (isAwDubbed || subtitlesDisabledForSite(site))
@@ -2776,11 +2775,76 @@ export default function WatchScreen() {
         return true;
       }
 
+      let resolvedUrl = rawUrl;
+      let resolvedDirectUrl = best.directUrl;
+      let resolvedRawUrl = best.rawUrl;
+      let resolvedType = best.directType;
+      let resolvedHeaders = headers;
+      let resolvedDelivery = best.deliveryMode;
+
+      if (best.clientExtract?.embedUrl) {
+        const extracted = await extractDirectStreamOnPhone({
+          ...best.clientExtract,
+          referer: best.clientExtract.referer || resolvedHeaders?.Referer || "",
+        });
+        if (extracted?.url) {
+          resolvedUrl = extracted.url;
+          resolvedDirectUrl = extracted.url;
+          resolvedRawUrl = extracted.url;
+          resolvedType = extracted.type;
+          resolvedHeaders = extracted.headers;
+          resolvedDelivery = "client-extract";
+        }
+      }
+
+      const mfCandidate = [resolvedUrl, resolvedDirectUrl, resolvedRawUrl].find(
+        (u): u is string =>
+          typeof u === "string" &&
+          (u.includes("/api/aw-dubbed/mf-stream") || /https?:\/\/(?:www\.)?mediafire\.com\/(?:file|view|download)\//i.test(u)),
+      );
+      if (mfCandidate) {
+        const mfDirect = await resolveMediaFireDirectOnPhone(mfCandidate, base);
+        if (mfDirect?.url) {
+          resolvedUrl = mfDirect.url;
+          resolvedDirectUrl = mfDirect.url;
+          resolvedRawUrl = mfDirect.url;
+          resolvedType = "mp4";
+          resolvedHeaders = mfDirect.headers;
+          resolvedDelivery = "client-extract";
+        }
+      }
+
+      const directMp4 = resolveDirectInternalMp4Download({
+        url: resolvedUrl,
+        rawUrl: resolvedRawUrl,
+        directUrl: resolvedDirectUrl,
+        directType: resolvedType,
+        site: isAwDubbed ? "animewitcher" : site,
+        deliveryMode: resolvedDelivery,
+        headers: resolvedHeaders,
+        baseUrl: base,
+      });
+
       const [token, downloadToken] = await Promise.all([getAuthToken(), getDownloadToken()]);
-      const isHlsDownload = best.directType === "hls" || isHlsMediaUrl(proxyUrl);
-      const downloadUrl = (DOWNLOAD_SUBTITLE_SITES.has(site) || isHlsDownload)
-        ? buildEmbeddedDownloadUrl(site, proxyUrl, subtitleUrl, base)
-        : proxyUrl;
+      let finalDownloadUrl: string;
+      let finalHeaders: Record<string, string> | undefined = resolvedHeaders;
+      let finalHlsManifestUrl: string | undefined;
+
+      if (directMp4.isDirect && directMp4.url) {
+        finalDownloadUrl = directMp4.url;
+        finalHeaders = directMp4.headers;
+        finalHlsManifestUrl = undefined;
+      } else {
+        const fallbackProxyUrl = isAwDubbed
+          ? resolveUrl(resolvedUrl, base)
+          : ensureVpsProxy(resolvedUrl, resolvedHeaders, base, resolvedType === "hls");
+        const isHlsDownload = resolvedType === "hls" || isHlsMediaUrl(fallbackProxyUrl);
+        finalDownloadUrl = (DOWNLOAD_SUBTITLE_SITES.has(site) || isHlsDownload)
+          ? buildEmbeddedDownloadUrl(site, fallbackProxyUrl, subtitleUrl, base)
+          : fallbackProxyUrl;
+        finalHlsManifestUrl = isHlsDownload ? fallbackProxyUrl : undefined;
+      }
+
       const numericId = isAwDubbed
         ? Math.abs(Array.from(awSeries || titleStr).reduce((acc, ch) => ((acc << 5) - acc) + ch.charCodeAt(0), 0)) || 900001
         : (parseInt(anime || "0", 10) || 0);
@@ -2795,12 +2859,12 @@ export default function WatchScreen() {
         cover:    coverUrl,
         site,
         quality:  getSrcQuality(best),
-        url:      downloadUrl,
+        url:      finalDownloadUrl,
         authToken: token,
         downloadToken,
-        headers,
+        headers:  finalHeaders,
         subtitleUrl,
-        hlsManifestUrl: isHlsDownload ? proxyUrl : undefined,
+        hlsManifestUrl: finalHlsManifestUrl,
       });
       return true;
     } catch {
@@ -2985,7 +3049,6 @@ export default function WatchScreen() {
 
       const rawUrl    = getPlayUrl(best);
       const hdrs      = best.headers || extractProxyHeaders(rawUrl);
-      const proxyUrl  = ensureVpsProxy(rawUrl, hdrs, base, best.directType === "hls");
       const subRaw    = subtitlesDisabledForSite(site) ? undefined : (best.subtitleUrl || globalSubUrl);
       const subtitleCandidate = subRaw;
       const subtitleUrl = normalizeProviderSubtitleUrl(site, subtitleCandidate, base);
@@ -3018,11 +3081,74 @@ export default function WatchScreen() {
         return;
       }
 
+      let resolvedUrl = rawUrl;
+      let resolvedDirectUrl = best.directUrl;
+      let resolvedRawUrl = best.rawUrl;
+      let resolvedType = best.directType;
+      let resolvedHeaders = hdrs;
+      let resolvedDelivery = best.deliveryMode;
+
+      if (best.clientExtract?.embedUrl) {
+        const extracted = await extractDirectStreamOnPhone({
+          ...best.clientExtract,
+          referer: best.clientExtract.referer || resolvedHeaders?.Referer || "",
+        });
+        if (extracted?.url) {
+          resolvedUrl = extracted.url;
+          resolvedDirectUrl = extracted.url;
+          resolvedRawUrl = extracted.url;
+          resolvedType = extracted.type;
+          resolvedHeaders = extracted.headers;
+          resolvedDelivery = "client-extract";
+        }
+      }
+
+      const mfCandidate = [resolvedUrl, resolvedDirectUrl, resolvedRawUrl].find(
+        (u): u is string =>
+          typeof u === "string" &&
+          (u.includes("/api/aw-dubbed/mf-stream") || /https?:\/\/(?:www\.)?mediafire\.com\/(?:file|view|download)\//i.test(u)),
+      );
+      if (mfCandidate) {
+        const mfDirect = await resolveMediaFireDirectOnPhone(mfCandidate, base);
+        if (mfDirect?.url) {
+          resolvedUrl = mfDirect.url;
+          resolvedDirectUrl = mfDirect.url;
+          resolvedRawUrl = mfDirect.url;
+          resolvedType = "mp4";
+          resolvedHeaders = mfDirect.headers;
+          resolvedDelivery = "client-extract";
+        }
+      }
+
+      const directMp4 = resolveDirectInternalMp4Download({
+        url: resolvedUrl,
+        rawUrl: resolvedRawUrl,
+        directUrl: resolvedDirectUrl,
+        directType: resolvedType,
+        site,
+        deliveryMode: resolvedDelivery,
+        headers: resolvedHeaders,
+        baseUrl: base,
+      });
+
       const [token, downloadToken] = await Promise.all([getAuthToken(), getDownloadToken()]);
-      const isHlsDownload = best.directType === "hls" || isHlsMediaUrl(proxyUrl);
-      const downloadUrl = (DOWNLOAD_SUBTITLE_SITES.has(site) || isHlsDownload)
-        ? buildEmbeddedDownloadUrl(site, proxyUrl, subtitleUrl, base)
-        : proxyUrl;
+      let finalDownloadUrl: string;
+      let finalHeaders: Record<string, string> | undefined = resolvedHeaders;
+      let finalHlsManifestUrl: string | undefined;
+
+      if (directMp4.isDirect && directMp4.url) {
+        finalDownloadUrl = directMp4.url;
+        finalHeaders = directMp4.headers;
+        finalHlsManifestUrl = undefined;
+      } else {
+        const fallbackProxyUrl = ensureVpsProxy(resolvedUrl, resolvedHeaders, base, resolvedType === "hls");
+        const isHlsDownload = resolvedType === "hls" || isHlsMediaUrl(fallbackProxyUrl);
+        finalDownloadUrl = (DOWNLOAD_SUBTITLE_SITES.has(site) || isHlsDownload)
+          ? buildEmbeddedDownloadUrl(site, fallbackProxyUrl, subtitleUrl, base)
+          : fallbackProxyUrl;
+        finalHlsManifestUrl = isHlsDownload ? fallbackProxyUrl : undefined;
+      }
+
       setDownloadStates(prev => ({ ...prev, [stateKey]: "downloading" }));
       setDownloadProgress(prev => ({ ...prev, [stateKey]: 0 }));
       await startGlobalDownload({
@@ -3032,12 +3158,12 @@ export default function WatchScreen() {
         cover:      coverUrl,
         site,
         quality:    getSrcQuality(best),
-        url:        downloadUrl,
+        url:        finalDownloadUrl,
         authToken:  token,
         downloadToken,
-        headers:    hdrs,
+        headers:    finalHeaders,
         subtitleUrl,
-        hlsManifestUrl: isHlsDownload ? proxyUrl : undefined,
+        hlsManifestUrl: finalHlsManifestUrl,
       });
 
     } catch {
@@ -3285,55 +3411,52 @@ export default function WatchScreen() {
     );
   }, [availableSlots, isAwDubbed]);
 
-  /* ── مرّر المصدر الذي اختاره المستخدم فقط إلى المشغّل، مع إرفاق مسار خادم
-     احتياطي صامت (proxyFallback) يتدخّل فورياً عند فشل أو بطء البث المباشر. ── */
+  /* ── التوجيه الثابت: المصادر المباشرة تذهب 100% من الهاتف، والمصادر المحمية
+     (SA / NOVA VIP / روابط الخادم) تمر عبر الخادم مباشرة من البداية بدون أي فحص أو تبديل مؤقت. ── */
   const playerSources = useMemo((): PlayerSource[] => {
     if (screen !== "native" || !playingSrc) return [];
     const base = getBaseUrl();
     const rawUrl = getPlayUrl(playingSrc);
     if (!rawUrl) return [];
-    /* headers: استخدم ما أعاده الخادم أولاً، ثم استخرجها من رابط الـ proxy. */
+    const site = playingSrc.site || "";
     const headers = playingSrc.headers || extractProxyHeaders(rawUrl);
-    const isDirectExternal =
-      isDirectStreamActive() &&
-      /^https?:\/\//i.test(rawUrl) &&
-      !isOwnVpsProxyUrl(rawUrl);
-    const resolvedPrimary = isDirectExternal
-      ? resolveUrl(rawUrl, base)
-      : withPlaybackTrace(
+    const contentType: PlayerSource["contentType"] =
+      playingSrc.directType === "hls" || /\.m3u8(?:[?#]|$)/i.test(rawUrl)
+        ? "hls"
+        : (playingSrc.directType === "mp4" || isAwDubbed || rawUrl.includes("pixeldrain.com/api/file/"))
+          ? "progressive"
+          : undefined;
+    const mustUseVps = !isDirectStreamActive() || isFixedVpsPlaybackSource({
+      url: rawUrl,
+      site,
+      deliveryMode: playingSrc.deliveryMode,
+      contentType,
+      headers,
+    });
+    const resolvedPrimary = mustUseVps
+      ? withPlaybackTrace(
           isAwDubbed
             ? resolveUrl(rawUrl, base)
-            : ensureVpsProxy(rawUrl, headers, base, playingSrc.directType === "hls"),
+            : ensureVpsProxy(rawUrl, headers, base, contentType === "hls"),
           `${playbackTraceId}-0`,
           base,
-        );
+        )
+      : resolveUrl(rawUrl, base);
     if (!resolvedPrimary) return [];
-    const existingProxyCandidate =
-      [playingSrc.proxyFallbackUrl, playingSrc.rawUrl, playingSrc.url]
-        .map((u) => (u ? resolveUrl(u, base) : ""))
-        .find((u) => Boolean(u) && (isOwnVpsProxyUrl(u) || u.includes("directsegs=1"))) || undefined;
-    const site = playingSrc.site || "";
     const isArabic = isAwDubbed || ARABIC_PLAYBACK_SITES.has(site);
     const deliveryTag = isDirectStreamActive()
       ? ` · ${getDeliveryBadge(resolvedPrimary, playingSrc.deliveryMode).badgeLabel}`
       : "";
-    const contentType: PlayerSource["contentType"] =
-      playingSrc.directType === "hls" || /\.m3u8(?:[?#]|$)/i.test(resolvedPrimary)
-        ? "hls"
-        : (playingSrc.directType === "mp4" || isAwDubbed || resolvedPrimary.includes("pixeldrain.com/api/file/"))
-          ? "progressive"
-          : undefined;
-    const effectiveHeaders = isOwnVpsProxyUrl(resolvedPrimary)
+    const effectiveHeaders = (mustUseVps || isOwnVpsProxyUrl(resolvedPrimary))
       ? undefined
       : (headers || (resolvedPrimary.includes("pixeldrain.com/api/file/") ? { "User-Agent": MOBILE_DIRECT_UA } : undefined));
-    return [buildHybridPlayerSource({
+    return [buildDeterministicPlayerSource({
       url: resolvedPrimary,
-      existingProxyUrl: existingProxyCandidate,
       contentType,
       headers: effectiveHeaders,
       referer: headers?.Referer || headers?.referer,
       baseUrl: base,
-      deliveryMode: playingSrc.deliveryMode,
+      deliveryMode: mustUseVps ? (playingSrc.deliveryMode || "vps-proxy") : playingSrc.deliveryMode,
       label: (isAwDubbed
         ? `سيرفر · ${playingSrc.name || "AW"}`
         : `سيرفر · ${getSiteTag(site)}`) + deliveryTag,
