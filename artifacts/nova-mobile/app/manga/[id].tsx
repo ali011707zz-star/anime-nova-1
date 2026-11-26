@@ -15,6 +15,7 @@ import {
   Modal,
   Platform,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
@@ -42,7 +43,36 @@ import {
 } from "@/utils/mangaDownloadManager";
 import { getYoutubeEmbedUrl, getYoutubeReferer } from "@/utils/youtube";
 import { YoutubeTrailerModal } from "@/components/YoutubeTrailerModal";
+import {
+  MangaPageInfoSheet,
+  MangaReaderSettingsSheet,
+  type LongPressPagePayload,
+} from "@/components/MangaReaderSettingsSheet";
 import { TvPressable as Pressable, tvFocusStyle, useTvListFocusScroll, useTvMetrics } from "@/utils/tv";
+import { queueOrientationLock } from "@/utils/watchOrientation";
+import {
+  DEFAULT_GLOBAL_READER_SETTINGS,
+  type MangaReaderGlobalSettings,
+  type ReadingMode,
+  getReaderLayoutFamily,
+  getReaderThemePalette,
+  isHorizontalReadingMode,
+  isPagedReadingMode,
+  resolveEffectiveReadingMode,
+} from "@/utils/mangaReaderSettings.mjs";
+import {
+  loadGlobalReaderSettings,
+  loadMangaReadingMode,
+  saveGlobalReaderSettings,
+  saveMangaReadingMode,
+} from "@/utils/mangaReaderStorage";
+import {
+  buildApplyReaderSettingsScript,
+  buildMangaReaderHtml,
+  buildReloadReaderPageScript,
+  buildScrollReaderScript,
+  buildThemedTextReaderHtml,
+} from "@/utils/mangaReaderHtml.mjs";
 
 const IS_RTL = I18nManager.isRTL;
 const ROW_RTL = (IS_RTL ? "row" : "row-reverse") as "row" | "row-reverse";
@@ -74,10 +104,33 @@ function formatArabicChapterDate(raw?: string | null): string {
 const OfflinePageImage = React.memo(function OfflinePageImage({
   uri,
   screenWidth,
+  screenHeight,
+  backgroundColor,
+  sidePadding,
+  cropBorders,
+  isPaged,
+  isContinuousGap,
+  pageIndex,
+  totalPages,
+  longPressEnabled,
+  onTapCenter,
+  onLongPressPage,
 }: {
   uri: string;
   screenWidth: number;
+  screenHeight: number;
+  backgroundColor: string;
+  sidePadding: number;
+  cropBorders: boolean;
+  isPaged: boolean;
+  isContinuousGap: boolean;
+  pageIndex: number;
+  totalPages: number;
+  longPressEnabled: boolean;
+  onTapCenter: () => void;
+  onLongPressPage: (payload: LongPressPagePayload) => void;
 }) {
+  const [dims, setDims] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
   const [ratio, setRatio] = useState(1.42);
   useEffect(() => {
     let active = true;
@@ -85,6 +138,7 @@ const OfflinePageImage = React.memo(function OfflinePageImage({
       uri,
       (w, h) => {
         if (active && w > 0 && h > 0) {
+          setDims({ w, h });
           setRatio(Math.min(Math.max(h / w, 0.35), 8));
         }
       },
@@ -95,16 +149,53 @@ const OfflinePageImage = React.memo(function OfflinePageImage({
     };
   }, [uri]);
 
+  const horizontalInset = Math.round((screenWidth * sidePadding) / 100);
+  const contentWidth = Math.max(120, screenWidth - horizontalInset * 2);
+  const imgHeight = isPaged ? screenHeight : Math.round(contentWidth * ratio);
+
   return (
-    <Image
-      source={{ uri }}
-      style={{ width: screenWidth, height: Math.round(screenWidth * ratio), backgroundColor: "#050507" }}
-      resizeMode="contain"
-      fadeDuration={0}
-    />
+    <Pressable
+      onPress={onTapCenter}
+      onLongPress={
+        longPressEnabled
+          ? () =>
+              onLongPressPage({
+                page: pageIndex + 1,
+                total: totalPages,
+                url: uri,
+                naturalWidth: dims.w,
+                naturalHeight: dims.h,
+                loaded: dims.w > 0,
+                isOffline: true,
+              })
+          : undefined
+      }
+      delayLongPress={480}
+      style={{
+        width: screenWidth,
+        height: isPaged ? screenHeight : undefined,
+        paddingHorizontal: horizontalInset,
+        marginBottom: !isPaged && isContinuousGap ? 14 : 0,
+        backgroundColor,
+        alignItems: "center",
+        justifyContent: "center",
+        overflow: "hidden",
+      }}
+    >
+      <Image
+        source={{ uri }}
+        style={{
+          width: contentWidth,
+          height: imgHeight,
+          backgroundColor,
+          transform: cropBorders ? [{ scale: 1.055 }] : undefined,
+        }}
+        resizeMode="contain"
+        fadeDuration={0}
+      />
+    </Pressable>
   );
 });
-
 
 type MangaChapter = {
   id: string;
@@ -198,337 +289,6 @@ function formatChapterNumber(ch: MangaChapter): string {
   return String(ch.number ?? "");
 }
 
-function buildWebtoonReaderHtml(
-  pages: MangaPageData[],
-  chapterLabel: string,
-  nextChapterLabel: string | null,
-  apiBase: string = getBaseUrl()
-): string {
-  const pagesJson = JSON.stringify(pages.map((p) => p.url));
-  const safeChapterLabel = String(chapterLabel || "الفصل")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-  const safeNextLabel = nextChapterLabel
-    ? String(nextChapterLabel).replace(/</g, "&lt;").replace(/>/g, "&gt;")
-    : "";
-
-  return `<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <style>
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-      -webkit-tap-highlight-color: transparent;
-      user-select: none;
-      -webkit-user-select: none;
-      touch-action: pan-y;
-    }
-    html, body {
-      width: 100%;
-      max-width: 100%;
-      min-height: 100%;
-      background-color: #050507;
-      color: #f4f4f5;
-      font-family: system-ui, -apple-system, sans-serif;
-      overflow-x: hidden;
-      overflow-y: auto;
-      -webkit-overflow-scrolling: touch;
-    }
-    #reader-container {
-      width: 100%;
-      max-width: 100%;
-      margin: 0 auto;
-      display: flex;
-      flex-direction: column;
-      align-items: stretch;
-      background-color: #050507;
-      overflow-x: hidden;
-    }
-    .page-slot {
-      width: 100%;
-      max-width: 100%;
-      position: relative;
-      background-color: #09090d;
-      line-height: 0;
-      font-size: 0;
-      margin: 0;
-      padding: 0;
-      overflow: hidden;
-    }
-    .page-slot.loading {
-      min-height: 300px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 10px;
-      border-bottom: 1px solid rgba(255,255,255,0.04);
-    }
-    .spinner {
-      width: 28px;
-      height: 28px;
-      border: 3px solid rgba(245, 158, 11, 0.22);
-      border-top-color: #F59E0B;
-      border-radius: 50%;
-      animation: spin 0.75s linear infinite;
-    }
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-    .page-status {
-      font-size: 12px;
-      line-height: 1.4;
-      color: #a1a1aa;
-      font-weight: 600;
-    }
-    .page-img {
-      width: 100% !important;
-      max-width: 100% !important;
-      height: auto !important;
-      display: block !important;
-      margin: 0 !important;
-      padding: 0 !important;
-      border: 0 !important;
-      image-rendering: -webkit-optimize-contrast;
-    }
-    .retry-btn {
-      margin-top: 6px;
-      padding: 8px 16px;
-      border-radius: 10px;
-      border: 0;
-      background: #F59E0B;
-      color: #09090B;
-      font-weight: 700;
-      font-size: 12px;
-      line-height: 1.4;
-    }
-    .end-footer {
-      width: 100%;
-      padding: 36px 18px 46px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 12px;
-      background: #09090d;
-      border-top: 1px solid rgba(255,255,255,0.08);
-      text-align: center;
-    }
-    .end-badge {
-      color: #FBBF24;
-      font-size: 15px;
-      font-weight: 700;
-    }
-    .next-btn {
-      padding: 12px 22px;
-      border-radius: 14px;
-      border: 0;
-      background: #F59E0B;
-      color: #09090B;
-      font-weight: 800;
-      font-size: 14px;
-      box-shadow: 0 6px 18px rgba(245, 158, 11, 0.28);
-    }
-  </style>
-</head>
-<body>
-  <div id="reader-container"></div>
-  <div class="end-footer">
-    <div class="end-badge">✓ نهاية ${safeChapterLabel}</div>
-    ${
-      safeNextLabel
-        ? `<button class="next-btn" onclick="goNextChapter()">الانتقال إلى الفصل التالي (${safeNextLabel}) ←</button>`
-        : ""
-    }
-  </div>
-  <script>
-    const pages = ${pagesJson};
-    const container = document.getElementById("reader-container");
-
-    function goNextChapter() {
-      if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
-        window.ReactNativeWebView.postMessage("NEXT_CHAPTER");
-      }
-    }
-
-    pages.forEach((rawUrl, index) => {
-      const url = String(rawUrl || "").replace("://tempsolo.mangalik.net/", "://leksolo.mangalik.net/");
-      const slot = document.createElement("div");
-      slot.className = "page-slot loading";
-
-      const spinner = document.createElement("div");
-      spinner.className = "spinner";
-      const status = document.createElement("div");
-      status.className = "page-status";
-      status.textContent = "صفحة " + (index + 1) + " من " + pages.length;
-
-      slot.appendChild(spinner);
-      slot.appendChild(status);
-
-      const img = document.createElement("img");
-      img.className = "page-img";
-      img.decoding = "async";
-      img.loading = index < 4 ? "eager" : "lazy";
-      if (url.indexOf("mangatek.com") !== -1) {
-        img.referrerPolicy = "no-referrer";
-      }
-      img.style.display = "none";
-
-      let retries = 0;
-      function loadImg(cacheBust, useProxy) {
-        const base = useProxy && url.indexOf("/api/manga/image-proxy") === -1 && url.indexOf("/api/manga/img-proxy") === -1
-          ? "${apiBase}/api/manga/image-proxy?url=" + encodeURIComponent(url)
-          : url;
-        img.src = cacheBust
-          ? base + (base.indexOf("?") !== -1 ? "&" : "?") + "retry=" + cacheBust
-          : base;
-      }
-
-      img.onload = function () {
-        slot.className = "page-slot";
-        spinner.remove();
-        status.remove();
-        img.style.display = "block";
-      };
-
-      img.onerror = function () {
-        if (retries < 2) {
-          retries++;
-          setTimeout(() => loadImg(retries + "_" + Date.now(), retries >= 1), 350 * retries);
-          return;
-        }
-        spinner.style.display = "none";
-        status.textContent = "تعذر تحميل الصفحة " + (index + 1);
-        let btn = slot.querySelector(".retry-btn");
-        if (!btn) {
-          btn = document.createElement("button");
-          btn.className = "retry-btn";
-          btn.textContent = "إعادة المحاولة";
-          btn.onclick = function (ev) {
-            ev.stopPropagation();
-            retries = 0;
-            spinner.style.display = "block";
-            status.textContent = "جاري إعادة تحميل الصفحة " + (index + 1) + "...";
-            btn.remove();
-            loadImg("manual_" + Date.now());
-          };
-          slot.appendChild(btn);
-        }
-      };
-
-      slot.appendChild(img);
-      container.appendChild(slot);
-      loadImg("");
-    });
-  </script>
-</body>
-</html>`;
-}
-
-function buildTextReaderHtml(
-  contentHtml: string,
-  chapterLabel: string,
-  nextChapterLabel: string | null
-): string {
-  const safeChapterLabel = String(chapterLabel || "الفصل")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-  const safeNextLabel = nextChapterLabel
-    ? String(nextChapterLabel).replace(/</g, "&lt;").replace(/>/g, "&gt;")
-    : "";
-
-  return `<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <style>
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-      -webkit-tap-highlight-color: transparent;
-    }
-    html, body {
-      width: 100%;
-      min-height: 100%;
-      background-color: #050507;
-      color: #e4e4e7;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Cairo", sans-serif;
-      overflow-x: hidden;
-      overflow-y: auto;
-      -webkit-overflow-scrolling: touch;
-      padding: 24px 18px 80px 18px;
-    }
-    .novel-header {
-      text-align: center;
-      padding: 16px 0 20px 0;
-      border-bottom: 1px solid rgba(255,255,255,0.1);
-      margin-bottom: 24px;
-    }
-    .novel-title {
-      font-size: 20px;
-      font-weight: 700;
-      color: #FBBF24;
-      line-height: 1.4;
-    }
-    .novel-body {
-      font-size: 18px;
-      line-height: 2.2;
-      color: #e4e4e7;
-      letter-spacing: 0.2px;
-      word-break: break-word;
-    }
-    .novel-body p {
-      margin-bottom: 20px;
-      text-indent: 14px;
-    }
-    .novel-body img {
-      max-width: 100%;
-      height: auto;
-      border-radius: 8px;
-      margin: 16px 0;
-      display: block;
-    }
-    .next-btn-wrap {
-      margin-top: 40px;
-      padding-top: 24px;
-      border-top: 1px solid rgba(255,255,255,0.1);
-      text-align: center;
-    }
-    .next-btn {
-      display: inline-block;
-      background: #F59E0B;
-      color: #09090B;
-      font-weight: 700;
-      font-size: 15px;
-      padding: 12px 28px;
-      border-radius: 12px;
-      cursor: pointer;
-    }
-  </style>
-</head>
-<body>
-  <div class="novel-header">
-    <div class="novel-title">${safeChapterLabel}</div>
-  </div>
-  <div class="novel-body">
-    ${contentHtml}
-  </div>
-  ${safeNextLabel ? `
-  <div class="next-btn-wrap">
-    <div class="next-btn" onclick="window.ReactNativeWebView && window.ReactNativeWebView.postMessage('NEXT_CHAPTER')">
-      الانتقال إلى فصل ${safeNextLabel} ←
-    </div>
-  </div>` : ''}
-</body>
-</html>`;
-}
-
 export default function MangaDetailScreen() {
   const params = useLocalSearchParams<{
     id: string;
@@ -544,7 +304,7 @@ export default function MangaDetailScreen() {
   const router = useRouter();
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const { isFavorite, setFavoriteStatus, removeFavorite, getFavoriteStatus } = useApp();
 
   const decodedId = useMemo(() => {
@@ -596,24 +356,131 @@ export default function MangaDetailScreen() {
   const chaptersFlatListRef = useRef<FlatList<MangaChapter>>(null);
   const { scrollToFocusedIndex: scrollChapterIntoView } = useTvListFocusScroll(chaptersFlatListRef, 0.35);
 
-  // Lock Trailer Modal to Horizontal / Landscape orientation automatically
+  // Mobile Manga/Manhwa Reader Settings state (global + per-manga mode)
+  const [readerSettings, setReaderSettings] = useState<MangaReaderGlobalSettings>(() => ({
+    ...DEFAULT_GLOBAL_READER_SETTINGS,
+  }));
+  const [selectedReadingMode, setSelectedReadingMode] = useState<ReadingMode>("default");
+  const [readerSettingsOpen, setReaderSettingsOpen] = useState(false);
+  const [readerChromeVisible, setReaderChromeVisible] = useState(true);
+  const [readerCurrentPage, setReaderCurrentPage] = useState(1);
+  const [longPressPageInfo, setLongPressPageInfo] = useState<LongPressPagePayload | null>(null);
+  const readerSettingsRef = useRef(readerSettings);
+  readerSettingsRef.current = readerSettings;
+  const readerCurrentPageRef = useRef(1);
+  readerCurrentPageRef.current = readerCurrentPage;
+
+  const mangaModeStorageKey = manga?.id || decodedId;
+
   useEffect(() => {
-    if (Platform.OS === "web") return;
-    if (showTrailer) {
-      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT).catch(
-        () => {}
-      );
-    } else {
-      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
-    }
+    let active = true;
+    loadGlobalReaderSettings()
+      .then((loaded) => {
+        if (active) setReaderSettings(loaded);
+      })
+      .catch(() => {});
     return () => {
-      if (showTrailer) {
-        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(
-          () => {}
-        );
-      }
+      active = false;
     };
-  }, [showTrailer]);
+  }, []);
+
+  useEffect(() => {
+    if (!mangaModeStorageKey) return;
+    let active = true;
+    loadMangaReadingMode(mangaModeStorageKey)
+      .then((mode) => {
+        if (active) setSelectedReadingMode(mode);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [mangaModeStorageKey]);
+
+  const handleUpdateReaderSettings = useCallback(
+    (patch: Partial<MangaReaderGlobalSettings>) => {
+      setReaderSettings((prev) => {
+        const next = { ...prev, ...patch };
+        if (patch.fullscreen === false) {
+          setReaderChromeVisible(true);
+        }
+        void saveGlobalReaderSettings(next);
+        return next;
+      });
+    },
+    []
+  );
+
+  const handleSelectReadingMode = useCallback(
+    (mode: ReadingMode) => {
+      setSelectedReadingMode(mode);
+      if (mangaModeStorageKey) {
+        void saveMangaReadingMode(mangaModeStorageKey, mode);
+      }
+    },
+    [mangaModeStorageKey]
+  );
+
+  const handleResetReaderSettings = useCallback(() => {
+    const defaults = { ...DEFAULT_GLOBAL_READER_SETTINGS };
+    setReaderSettings(defaults);
+    setSelectedReadingMode("default");
+    setReaderChromeVisible(true);
+    void saveGlobalReaderSettings(defaults);
+    if (mangaModeStorageKey) {
+      void saveMangaReadingMode(mangaModeStorageKey, "default");
+    }
+  }, [mangaModeStorageKey]);
+
+  // Coordinated screen orientation owner for Trailer Modal & Manga Reader (ANR-safe queue)
+  useEffect(() => {
+    if (Platform.OS === "web" || tvMode) return;
+    let cancelled = false;
+
+    if (showTrailer) {
+      queueOrientationLock(ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT);
+    } else if (readerOpen) {
+      const rot = readerSettings.rotation;
+      if (rot === "free") {
+        queueOrientationLock(ScreenOrientation.OrientationLock.DEFAULT);
+      } else if (rot === "portrait") {
+        queueOrientationLock(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+      } else if (rot === "landscape") {
+        queueOrientationLock(ScreenOrientation.OrientationLock.LANDSCAPE);
+      } else if (rot === "locked") {
+        ScreenOrientation.getOrientationAsync()
+          .then((current) => {
+            if (cancelled) return;
+            const isLand =
+              current === ScreenOrientation.Orientation.LANDSCAPE_LEFT ||
+              current === ScreenOrientation.Orientation.LANDSCAPE_RIGHT;
+            queueOrientationLock(
+              isLand
+                ? ScreenOrientation.OrientationLock.LANDSCAPE
+                : ScreenOrientation.OrientationLock.PORTRAIT_UP
+            );
+          })
+          .catch(() => {
+            if (!cancelled) {
+              queueOrientationLock(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+            }
+          });
+      }
+    } else {
+      queueOrientationLock(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [showTrailer, readerOpen, readerSettings.rotation, tvMode]);
+
+  useEffect(() => {
+    if (Platform.OS === "web" || tvMode) return;
+    return () => {
+      queueOrientationLock(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+    };
+  }, [tvMode]);
 
   // Load saved favorite characters
   useEffect(() => {
@@ -663,6 +530,14 @@ export default function MangaDetailScreen() {
   useEffect(() => {
     if (Platform.OS !== "android") return;
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (longPressPageInfo) {
+        setLongPressPageInfo(null);
+        return true;
+      }
+      if (readerSettingsOpen) {
+        setReaderSettingsOpen(false);
+        return true;
+      }
       if (chapterPickerVisible) {
         setChapterPickerVisible(false);
         return true;
@@ -678,7 +553,7 @@ export default function MangaDetailScreen() {
       return false;
     });
     return () => sub.remove();
-  }, [chapterPickerVisible, readerOpen, chaptersPageOpen]);
+  }, [longPressPageInfo, readerSettingsOpen, chapterPickerVisible, readerOpen, chaptersPageOpen]);
 
   const fetchDetail = useCallback(async () => {
     if (!decodedId) {
@@ -831,6 +706,9 @@ export default function MangaDetailScreen() {
   const openChapterInApp = useCallback(
     (chapter: MangaChapter) => {
       setActiveChapter(chapter);
+      setReaderCurrentPage(1);
+      setLongPressPageInfo(null);
+      setReaderChromeVisible(true);
       setReaderOpen(true);
       void loadChapterPages(chapter);
     },
@@ -978,6 +856,83 @@ export default function MangaDetailScreen() {
     "";
   const banner = manga?.bannerImage || manga?.banner || cover;
   const currentSource = manga?.source || inferredSource;
+
+  const effectiveReadingMode = useMemo(
+    () =>
+      resolveEffectiveReadingMode(
+        selectedReadingMode,
+        currentSource,
+        manga?.countryOfOrigin
+      ),
+    [selectedReadingMode, currentSource, manga?.countryOfOrigin]
+  );
+  const readerTheme = useMemo(
+    () => getReaderThemePalette(readerSettings.background),
+    [readerSettings.background]
+  );
+  const readerLayoutFamily = useMemo(
+    () => getReaderLayoutFamily(effectiveReadingMode),
+    [effectiveReadingMode]
+  );
+  const offlineIsPaged = isPagedReadingMode(effectiveReadingMode);
+  const offlineIsHorizontal = isHorizontalReadingMode(effectiveReadingMode);
+
+  // Build WebView HTML only when chapter or layout family changes; live settings apply via injectJavaScript
+  const readerWebViewHtml = useMemo(() => {
+    if (chapterContentType === "text") {
+      return buildThemedTextReaderHtml({
+        contentHtml: chapterTextHtml,
+        chapterLabel: activeChapter
+          ? activeChapter.title || `الفصل ${formatChapterNumber(activeChapter)}`
+          : "الفصل",
+        nextChapterLabel: nextChapter ? formatChapterNumber(nextChapter) : null,
+        settings: readerSettingsRef.current,
+      });
+    }
+    return buildMangaReaderHtml({
+      pages: chapterPages,
+      chapterLabel: activeChapter
+        ? `الفصل ${formatChapterNumber(activeChapter)}`
+        : "الفصل",
+      nextChapterLabel: nextChapter ? formatChapterNumber(nextChapter) : null,
+      apiBase: getBaseUrl(),
+      settings: readerSettingsRef.current,
+      effectiveMode: effectiveReadingMode,
+      initialPage: readerCurrentPageRef.current,
+    });
+  }, [
+    activeChapter,
+    chapterContentType,
+    chapterPages,
+    chapterTextHtml,
+    nextChapter,
+    readerLayoutFamily,
+    chapterContentType === "text" ? readerSettings.background : null,
+    chapterContentType === "text" ? readerSettings.sidePadding : null,
+  ]);
+
+  useEffect(() => {
+    if (!readerOpen || readingOffline || chapterContentType !== "images") return;
+    if (!readerWebViewRef.current) return;
+    readerWebViewRef.current.injectJavaScript(
+      buildApplyReaderSettingsScript(readerSettings, effectiveReadingMode)
+    );
+  }, [readerOpen, readingOffline, chapterContentType, readerSettings, effectiveReadingMode]);
+
+  const handleToggleReaderChrome = useCallback(() => {
+    if (!readerSettingsRef.current.fullscreen) return;
+    setReaderChromeVisible((prev) => !prev);
+  }, []);
+
+  const offlineViewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
+  const handleOfflineViewableItemsChanged = useRef(
+    ({ viewableItems }: { viewableItems: Array<{ index: number | null }> }) => {
+      const firstIdx = viewableItems?.[0]?.index;
+      if (typeof firstIdx === "number" && firstIdx >= 0) {
+        setReaderCurrentPage(firstIdx + 1);
+      }
+    }
+  ).current;
   const currentStatus = manga?.status || params.status || "RELEASING";
   const rawScore = manga?.averageScore ?? (params.score ? Number(params.score) : null);
   const score =
@@ -2159,96 +2114,157 @@ export default function MangaDetailScreen() {
         </View>
       </Modal>
 
-      {/* ── Full-Screen Vertical Reader Modal (بحجم الشاشة المناسب 100% بدون زوم) ── */}
+      {/* ── Full-Screen Manga & Webtoon Reader Modal ── */}
       <Modal
         visible={readerOpen}
         animationType="slide"
         presentationStyle="fullScreen"
         onRequestClose={() => setReaderOpen(false)}
       >
-        <View style={[styles.readerScreen, { backgroundColor: "#050507" }]}>
-          <View
-            style={[
-              styles.readerHeader,
-              {
-                paddingTop: insets.top + 8,
-                borderBottomColor: "rgba(255,255,255,0.1)",
-              },
-            ]}
-          >
-            <View style={styles.readerHeaderRight}>
-              <Pressable onPress={() => setReaderOpen(false)} hasTVPreferredFocus={tvMode} style={({ focused }) => [styles.readerBackBtn, tvMode && tvFocusStyle(focused)]}>
-                <Ionicons name="arrow-forward" size={20} color="#fff" />
-              </Pressable>
+        <View style={[styles.readerScreen, { backgroundColor: readerTheme.bg }]}>
+          <StatusBar
+            hidden={readerOpen && readerSettings.fullscreen && !readerChromeVisible}
+            barStyle={readerTheme.isLight ? "dark-content" : "light-content"}
+            animated
+          />
+          {(!readerSettings.fullscreen || readerChromeVisible) && (
+            <View
+              style={[
+                styles.readerHeader,
+                readerSettings.fullscreen && styles.readerHeaderFloating,
+                {
+                  paddingTop: insets.top + 8,
+                  backgroundColor: readerTheme.chromeBg,
+                  borderBottomColor: readerTheme.border,
+                },
+              ]}
+            >
+              <View style={styles.readerHeaderRight}>
+                <Pressable
+                  onPress={() => setReaderOpen(false)}
+                  hasTVPreferredFocus={tvMode}
+                  style={({ focused }) => [
+                    styles.readerBackBtn,
+                    {
+                      backgroundColor: readerTheme.isLight
+                        ? "rgba(17,19,24,0.08)"
+                        : "rgba(255,255,255,0.10)",
+                      borderColor: readerTheme.border,
+                    },
+                    tvMode && tvFocusStyle(focused),
+                  ]}
+                >
+                  <Ionicons name="arrow-forward" size={20} color={readerTheme.text} />
+                </Pressable>
+                <View style={styles.readerTitleCol}>
+                  <Text
+                    style={[styles.readerHeaderTitle, { color: readerTheme.text }]}
+                    numberOfLines={1}
+                  >
+                    {activeChapter
+                      ? activeChapter.title || `الفصل ${formatChapterNumber(activeChapter)}`
+                      : primaryTitle}
+                  </Text>
+                  <Text
+                    style={[styles.readerHeaderSub, { color: readerTheme.muted }]}
+                    numberOfLines={1}
+                  >
+                    {primaryTitle}{" "}
+                    {readingOffline
+                      ? `• بدون إنترنت (${offlineLocalPages.length || 1} صفحة)`
+                      : chapterContentType === "text"
+                        ? "• قراءة نصية"
+                        : chapterPages.length > 0
+                          ? `• ${chapterPages.length} صفحة`
+                          : ""}
+                  </Text>
+                </View>
+              </View>
 
-              <View style={styles.readerTitleCol}>
-                <Text style={styles.readerHeaderTitle} numberOfLines={1}>
-                  {activeChapter
-                    ? activeChapter.title || `الفصل ${formatChapterNumber(activeChapter)}`
-                    : primaryTitle}
-                </Text>
-                <Text style={styles.readerHeaderSub} numberOfLines={1}>
-                  {primaryTitle}{" "}
-                  {readingOffline
-                    ? `• بدون إنترنت (${offlineLocalPages.length || 1} صفحة)`
-                    : chapterContentType === "text"
-                      ? "• قراءة نصية"
-                      : chapterPages.length > 0
-                        ? `• ${chapterPages.length} صفحة`
-                        : ""}
-                </Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                {activeChapter ? (() => {
+                  const isDl = downloadedMap.has(activeChapter.slug);
+                  const actDl = activeDownloadsMap.get(activeChapter.slug);
+                  return (
+                    <Pressable
+                      onPress={() => void handleChapterDownload(activeChapter)}
+                      style={[
+                        styles.qualityPill,
+                        isDl && {
+                          borderColor: "rgba(16,185,129,0.5)",
+                          backgroundColor: "rgba(16,185,129,0.16)",
+                        },
+                      ]}
+                    >
+                      {actDl ? (
+                        <>
+                          <ActivityIndicator size={11} color="#FBBF24" />
+                          <Text style={styles.qualityPillText}>{actDl.progress}%</Text>
+                        </>
+                      ) : (
+                        <>
+                          <Ionicons
+                            name={isDl ? "checkmark-circle" : "download-outline"}
+                            size={13}
+                            color={isDl ? "#34D399" : "#38BDF8"}
+                          />
+                          <Text style={[styles.qualityPillText, isDl && { color: "#34D399" }]}>
+                            {isDl ? "محمّل" : "تحميل"}
+                          </Text>
+                        </>
+                      )}
+                    </Pressable>
+                  );
+                })() : null}
+
+                <Pressable
+                  onPress={() => setChapterPickerVisible(true)}
+                  style={styles.qualityPill}
+                >
+                  <Ionicons name="list" size={13} color="#FBBF24" />
+                  <Text style={styles.qualityPillText}>الفصول</Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={() => setReaderSettingsOpen(true)}
+                  accessibilityLabel="إعدادات القارئ"
+                  focusable={tvMode}
+                  style={({ pressed, focused }) => [
+                    styles.readerSettingsBtn,
+                    {
+                      backgroundColor: readerTheme.isLight
+                        ? "rgba(217,119,6,0.12)"
+                        : "rgba(255,255,255,0.09)",
+                      borderColor: readerTheme.border,
+                    },
+                    pressed && { opacity: 0.78 },
+                    tvMode && tvFocusStyle(focused),
+                  ]}
+                >
+                  <Ionicons
+                    name="options-outline"
+                    size={18}
+                    color={readerTheme.accent}
+                  />
+                </Pressable>
               </View>
             </View>
-
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-              {activeChapter ? (() => {
-                const isDl = downloadedMap.has(activeChapter.slug);
-                const actDl = activeDownloadsMap.get(activeChapter.slug);
-                return (
-                  <Pressable
-                    onPress={() => void handleChapterDownload(activeChapter)}
-                    style={[
-                      styles.qualityPill,
-                      isDl && { borderColor: "rgba(16,185,129,0.5)", backgroundColor: "rgba(16,185,129,0.16)" },
-                    ]}
-                  >
-                    {actDl ? (
-                      <>
-                        <ActivityIndicator size={11} color="#FBBF24" />
-                        <Text style={styles.qualityPillText}>{actDl.progress}%</Text>
-                      </>
-                    ) : (
-                      <>
-                        <Ionicons
-                          name={isDl ? "checkmark-circle" : "download-outline"}
-                          size={13}
-                          color={isDl ? "#34D399" : "#38BDF8"}
-                        />
-                        <Text style={[styles.qualityPillText, isDl && { color: "#34D399" }]}>
-                          {isDl ? "محمّل" : "تحميل"}
-                        </Text>
-                      </>
-                    )}
-                  </Pressable>
-                );
-              })() : null}
-              <Pressable onPress={() => setChapterPickerVisible(true)} style={styles.qualityPill}>
-                <Ionicons name="list" size={13} color="#FBBF24" />
-                <Text style={styles.qualityPillText}>الفصول</Text>
-              </Pressable>
-            </View>
-          </View>
+          )}
 
           {pagesLoading ? (
             <View style={styles.readerCenter}>
-              <ActivityIndicator size="large" color="#F59E0B" />
-              <Text style={styles.readerLoadingText}>جاري تحميل محتوى الفصل...</Text>
+              <ActivityIndicator size="large" color={readerTheme.accent} />
+              <Text style={[styles.readerLoadingText, { color: readerTheme.text }]}>
+                جاري تحميل محتوى الفصل...
+              </Text>
             </View>
           ) : pagesError ? (
             <View style={styles.readerCenter}>
               <View style={styles.readerFallbackBody}>
-                <Ionicons name="alert-circle-outline" size={44} color="#F59E0B" />
-                <Text style={styles.readerErrorTitle}>{pagesError}</Text>
+                <Ionicons name="alert-circle-outline" size={44} color={readerTheme.accent} />
+                <Text style={[styles.readerErrorTitle, { color: readerTheme.text }]}>
+                  {pagesError}
+                </Text>
                 {activeChapter && (
                   <Pressable
                     onPress={() => void loadChapterPages(activeChapter)}
@@ -2262,19 +2278,50 @@ export default function MangaDetailScreen() {
             </View>
           ) : readingOffline && chapterContentType === "images" && offlineLocalPages.length > 0 ? (
             <FlatList
+              key={`offline-${activeChapter?.slug || "ch"}-${readerLayoutFamily}`}
               data={offlineLocalPages}
               keyExtractor={(uri, idx) => `offline-page-${idx}-${uri}`}
-              style={{ flex: 1, backgroundColor: "#050507" }}
-              showsVerticalScrollIndicator={true}
+              horizontal={offlineIsHorizontal}
+              inverted={effectiveReadingMode === "rtl" || effectiveReadingMode === "continuous_rtl"}
+              pagingEnabled={offlineIsPaged}
+              style={{ flex: 1, backgroundColor: readerTheme.bg }}
+              showsVerticalScrollIndicator={!offlineIsHorizontal}
+              showsHorizontalScrollIndicator={offlineIsHorizontal}
               initialNumToRender={4}
               maxToRenderPerBatch={4}
               windowSize={5}
               removeClippedSubviews={false}
-              renderItem={({ item: localUri }) => (
-                <OfflinePageImage uri={localUri} screenWidth={width} />
+              viewabilityConfig={offlineViewabilityConfig}
+              onViewableItemsChanged={handleOfflineViewableItemsChanged}
+              renderItem={({ item: localUri, index }) => (
+                <OfflinePageImage
+                  uri={localUri}
+                  screenWidth={width}
+                  screenHeight={height}
+                  backgroundColor={readerTheme.bg}
+                  sidePadding={readerSettings.sidePadding}
+                  cropBorders={readerSettings.cropBorders}
+                  isPaged={offlineIsPaged}
+                  isContinuousGap={effectiveReadingMode === "continuous_vertical"}
+                  pageIndex={index}
+                  totalPages={offlineLocalPages.length}
+                  longPressEnabled={readerSettings.longPressInfo}
+                  onTapCenter={handleToggleReaderChrome}
+                  onLongPressPage={(payload) => setLongPressPageInfo(payload)}
+                />
               )}
               ListFooterComponent={
-                <View style={{ padding: 28, alignItems: "center", gap: 14, backgroundColor: "#050507" }}>
+                <View
+                  style={{
+                    padding: 28,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 14,
+                    backgroundColor: readerTheme.surface,
+                    minWidth: offlineIsHorizontal ? width : undefined,
+                    minHeight: offlineIsHorizontal ? height : undefined,
+                  }}
+                >
                   <View
                     style={{
                       paddingHorizontal: 14,
@@ -2286,7 +2333,11 @@ export default function MangaDetailScreen() {
                     }}
                   >
                     <Text style={{ color: "#34D399", fontSize: 13, fontFamily: "Cairo_700Bold" }}>
-                      ✓ نهاية {activeChapter ? activeChapter.title || `الفصل ${formatChapterNumber(activeChapter)}` : "الفصل"} (قراءة بدون إنترنت)
+                      ✓ نهاية{" "}
+                      {activeChapter
+                        ? activeChapter.title || `الفصل ${formatChapterNumber(activeChapter)}`
+                        : "الفصل"}{" "}
+                      (قراءة بدون إنترنت)
                     </Text>
                   </View>
                   {nextChapter ? (
@@ -2310,25 +2361,11 @@ export default function MangaDetailScreen() {
           ) : (
             <WebView
               ref={readerWebViewRef}
-              key={`${activeChapter?.slug || "ch"}-${chapterContentType}-${chapterPages.length}-${chapterTextHtml.length}`}
-              style={{ flex: 1, backgroundColor: "#050507" }}
+              key={`${activeChapter?.slug || "ch"}-${chapterContentType}-${chapterPages.length}-${chapterTextHtml.length}-${readerLayoutFamily}-${chapterContentType === "text" ? readerSettings.background : "img"}`}
+              style={{ flex: 1, backgroundColor: readerTheme.bg }}
               originWhitelist={["*"]}
               source={{
-                html:
-                  chapterContentType === "text"
-                    ? buildTextReaderHtml(
-                        chapterTextHtml,
-                        activeChapter
-                          ? activeChapter.title || `الفصل ${formatChapterNumber(activeChapter)}`
-                          : "الفصل",
-                        nextChapter ? formatChapterNumber(nextChapter) : null
-                      )
-                    : buildWebtoonReaderHtml(
-                        chapterPages,
-                        activeChapter ? `الفصل ${formatChapterNumber(activeChapter)}` : "الفصل",
-                        nextChapter ? formatChapterNumber(nextChapter) : null,
-                        getBaseUrl()
-                      ),
+                html: readerWebViewHtml,
                 baseUrl:
                   currentSource === "manhwa"
                     ? "https://azorafly.com/"
@@ -2337,105 +2374,201 @@ export default function MangaDetailScreen() {
               scalesPageToFit={false}
               setBuiltInZoomControls={false}
               setDisplayZoomControls={false}
-              showsVerticalScrollIndicator={true}
-              showsHorizontalScrollIndicator={false}
+              showsVerticalScrollIndicator={!isHorizontalReadingMode(effectiveReadingMode)}
+              showsHorizontalScrollIndicator={isHorizontalReadingMode(effectiveReadingMode)}
               bounces={false}
               overScrollMode="never"
               javaScriptEnabled={true}
               domStorageEnabled={true}
               mixedContentMode="always"
+              onLoadEnd={() => {
+                if (chapterContentType === "images" && readerWebViewRef.current) {
+                  readerWebViewRef.current.injectJavaScript(
+                    buildApplyReaderSettingsScript(readerSettingsRef.current, effectiveReadingMode)
+                  );
+                }
+              }}
               onMessage={(event) => {
-                const msg = String(event?.nativeEvent?.data || "");
-                if (msg === "NEXT_CHAPTER" && nextChapter) {
-                  openChapterInApp(nextChapter);
+                const rawMsg = String(event?.nativeEvent?.data || "");
+                if (rawMsg === "NEXT_CHAPTER") {
+                  if (nextChapter) openChapterInApp(nextChapter);
+                  return;
+                }
+                try {
+                  const parsed = JSON.parse(rawMsg);
+                  if (parsed?.type === "NEXT_CHAPTER" && nextChapter) {
+                    openChapterInApp(nextChapter);
+                  } else if (parsed?.type === "TOGGLE_CHROME") {
+                    handleToggleReaderChrome();
+                  } else if (parsed?.type === "PAGE_CHANGE" && typeof parsed.page === "number") {
+                    setReaderCurrentPage(parsed.page);
+                  } else if (parsed?.type === "PAGE_LONG_PRESS" && readerSettingsRef.current.longPressInfo) {
+                    setLongPressPageInfo({
+                      page: Number(parsed.page) || 1,
+                      total: Number(parsed.total) || chapterPages.length,
+                      url: String(parsed.url || ""),
+                      naturalWidth: Number(parsed.naturalWidth) || 0,
+                      naturalHeight: Number(parsed.naturalHeight) || 0,
+                      loaded: !!parsed.loaded,
+                      isOffline: false,
+                    });
+                  }
+                } catch {
+                  // Ignore non-JSON bridge messages
                 }
               }}
             />
           )}
 
-          <View
-            style={[
-              styles.readerBottomBar,
-              {
-                paddingBottom: Math.max(insets.bottom, 12),
-              },
-            ]}
-          >
-            <Pressable
-              disabled={!prevChapter}
-              focusable={tvMode}
-              onPress={() => {
-                if (prevChapter) openChapterInApp(prevChapter);
-              }}
-              style={({ focused }) => [
-                styles.readerNavBtn,
-                styles.readerPrevBtn,
-                { opacity: prevChapter ? 1 : 0.35 },
-                tvMode && tvFocusStyle(focused),
-              ]}
-            >
-              <Ionicons name="chevron-forward" size={16} color="#fff" />
-              <Text style={[styles.readerNavBtnText, { color: "#fff" }]}>
-                {prevChapter ? `السابق (${formatChapterNumber(prevChapter)})` : "الفصل الأول"}
-              </Text>
-            </Pressable>
-
-            {tvMode && !pagesLoading && !pagesError && (
-              <>
-                <Pressable
-                  focusable={true}
-                  accessibilityLabel="تمرير الصفحة لأعلى"
-                  onPress={() => {
-                    readerWebViewRef.current?.injectJavaScript("window.scrollBy({ top: -540, behavior: \"smooth\" }); true;");
-                  }}
-                  style={({ focused }) => [styles.readerChapterSelectBtn, tvFocusStyle(focused)]}
-                >
-                  <Ionicons name="chevron-up" size={17} color="#FBBF24" />
-                </Pressable>
-                <Pressable
-                  focusable={true}
-                  hasTVPreferredFocus={!nextChapter}
-                  accessibilityLabel="تمرير الصفحة لأسفل"
-                  onPress={() => {
-                    readerWebViewRef.current?.injectJavaScript("window.scrollBy({ top: 540, behavior: \"smooth\" }); true;");
-                  }}
-                  style={({ focused }) => [styles.readerChapterSelectBtn, tvFocusStyle(focused)]}
-                >
-                  <Ionicons name="chevron-down" size={17} color="#FBBF24" />
-                </Pressable>
-              </>
+          {/* Subtle Floating Page Number Indicator */}
+          {readerSettings.showPageNumber &&
+            !pagesLoading &&
+            !pagesError &&
+            chapterContentType === "images" &&
+            (readingOffline ? offlineLocalPages.length : chapterPages.length) > 0 && (
+              <View
+                pointerEvents="none"
+                style={[
+                  styles.pageNumberBadge,
+                  {
+                    bottom:
+                      !readerSettings.fullscreen || readerChromeVisible
+                        ? Math.max(insets.bottom, 12) + 66
+                        : Math.max(insets.bottom, 14) + 8,
+                    backgroundColor: readerTheme.badgeBg,
+                    borderColor: readerTheme.badgeBorder,
+                  },
+                ]}
+              >
+                <Text style={[styles.pageNumberBadgeText, { color: readerTheme.badgeText }]}>
+                  {readerCurrentPage} / {readingOffline ? offlineLocalPages.length : chapterPages.length}
+                </Text>
+              </View>
             )}
 
-            <Pressable
-              focusable={tvMode}
-              onPress={() => setChapterPickerVisible(true)}
-              style={({ focused }) => [styles.readerChapterSelectBtn, tvMode && tvFocusStyle(focused)]}
-            >
-              <Ionicons name="albums-outline" size={15} color="#FBBF24" />
-              <Text style={styles.readerChapterSelectText}>
-                {activeChapter ? `فصل ${formatChapterNumber(activeChapter)}` : "الفصول"}
-              </Text>
-            </Pressable>
-
-            <Pressable
-              disabled={!nextChapter}
-              focusable={tvMode}
-              onPress={() => {
-                if (nextChapter) openChapterInApp(nextChapter);
-              }}
-              style={({ focused }) => [
-                styles.readerNavBtn,
-                styles.readerNextBtn,
-                { opacity: nextChapter ? 1 : 0.35 },
-                tvMode && tvFocusStyle(focused),
+          {(!readerSettings.fullscreen || readerChromeVisible) && (
+            <View
+              style={[
+                styles.readerBottomBar,
+                readerSettings.fullscreen && styles.readerBottomBarFloating,
+                {
+                  paddingBottom: Math.max(insets.bottom, 12),
+                  backgroundColor: readerTheme.chromeBg,
+                  borderTopColor: readerTheme.border,
+                },
               ]}
             >
-              <Text style={[styles.readerNavBtnText, { color: "#09090B" }]}>
-                {nextChapter ? `التالي (${formatChapterNumber(nextChapter)})` : "آخر فصل"}
-              </Text>
-              <Ionicons name="chevron-back" size={16} color="#09090B" />
-            </Pressable>
-          </View>
+              <Pressable
+                disabled={!prevChapter}
+                focusable={tvMode}
+                onPress={() => {
+                  if (prevChapter) openChapterInApp(prevChapter);
+                }}
+                style={({ focused }) => [
+                  styles.readerNavBtn,
+                  styles.readerPrevBtn,
+                  {
+                    opacity: prevChapter ? 1 : 0.35,
+                    backgroundColor: readerTheme.isLight
+                      ? "rgba(17,19,24,0.08)"
+                      : "rgba(255,255,255,0.10)",
+                    borderColor: readerTheme.border,
+                  },
+                  tvMode && tvFocusStyle(focused),
+                ]}
+              >
+                <Ionicons name="chevron-forward" size={16} color={readerTheme.text} />
+                <Text style={[styles.readerNavBtnText, { color: readerTheme.text }]}>
+                  {prevChapter ? `السابق (${formatChapterNumber(prevChapter)})` : "الفصل الأول"}
+                </Text>
+              </Pressable>
+
+              {tvMode && !pagesLoading && !pagesError && (
+                <>
+                  <Pressable
+                    focusable={true}
+                    accessibilityLabel="تمرير الصفحة لأعلى"
+                    onPress={() => {
+                      readerWebViewRef.current?.injectJavaScript(buildScrollReaderScript("up"));
+                    }}
+                    style={({ focused }) => [styles.readerChapterSelectBtn, tvFocusStyle(focused)]}
+                  >
+                    <Ionicons name="chevron-up" size={17} color="#FBBF24" />
+                  </Pressable>
+                  <Pressable
+                    focusable={true}
+                    hasTVPreferredFocus={!nextChapter}
+                    accessibilityLabel="تمرير الصفحة لأسفل"
+                    onPress={() => {
+                      readerWebViewRef.current?.injectJavaScript(buildScrollReaderScript("down"));
+                    }}
+                    style={({ focused }) => [styles.readerChapterSelectBtn, tvFocusStyle(focused)]}
+                  >
+                    <Ionicons name="chevron-down" size={17} color="#FBBF24" />
+                  </Pressable>
+                </>
+              )}
+
+              <Pressable
+                focusable={tvMode}
+                onPress={() => setChapterPickerVisible(true)}
+                style={({ focused }) => [styles.readerChapterSelectBtn, tvMode && tvFocusStyle(focused)]}
+              >
+                <Ionicons name="albums-outline" size={15} color="#FBBF24" />
+                <Text style={styles.readerChapterSelectText}>
+                  {activeChapter ? `فصل ${formatChapterNumber(activeChapter)}` : "الفصول"}
+                </Text>
+              </Pressable>
+
+              <Pressable
+                disabled={!nextChapter}
+                focusable={tvMode}
+                onPress={() => {
+                  if (nextChapter) openChapterInApp(nextChapter);
+                }}
+                style={({ focused }) => [
+                  styles.readerNavBtn,
+                  styles.readerNextBtn,
+                  { opacity: nextChapter ? 1 : 0.35 },
+                  tvMode && tvFocusStyle(focused),
+                ]}
+              >
+                <Text style={[styles.readerNavBtnText, { color: "#09090B" }]}>
+                  {nextChapter ? `التالي (${formatChapterNumber(nextChapter)})` : "آخر فصل"}
+                </Text>
+                <Ionicons name="chevron-back" size={16} color="#09090B" />
+              </Pressable>
+            </View>
+          )}
+
+          {/* Elegant Reader Settings Bottom Sheet (Mobile Only) */}
+          <MangaReaderSettingsSheet
+            visible={readerSettingsOpen}
+            mangaTitle={primaryTitle}
+            mangaSource={currentSource}
+            countryOfOrigin={manga?.countryOfOrigin}
+            selectedReadingMode={selectedReadingMode}
+            effectiveReadingMode={effectiveReadingMode}
+            settings={readerSettings}
+            onSelectReadingMode={handleSelectReadingMode}
+            onUpdateSettings={handleUpdateReaderSettings}
+            onResetDefaults={handleResetReaderSettings}
+            onClose={() => setReaderSettingsOpen(false)}
+          />
+
+          {/* Sleek Long-Press Page Info Sheet */}
+          <MangaPageInfoSheet
+            info={longPressPageInfo}
+            effectiveMode={effectiveReadingMode}
+            color32Bit={readerSettings.color32Bit}
+            onReloadPage={(pageNum) => {
+              readerWebViewRef.current?.injectJavaScript(buildReloadReaderPageScript(pageNum));
+            }}
+            onOpenExternal={(url) => {
+              Linking.openURL(url).catch(() => {});
+            }}
+            onClose={() => setLongPressPageInfo(null)}
+          />
         </View>
       </Modal>
 
@@ -3303,5 +3436,40 @@ const styles = StyleSheet.create({
     color: "#FBBF24",
     fontSize: 12,
     fontFamily: "Cairo_700Bold",
+  },
+  readerSettingsBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  readerHeaderFloating: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+  },
+  readerBottomBarFloating: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+  },
+  pageNumberBadge: {
+    position: "absolute",
+    left: 14,
+    paddingHorizontal: 11,
+    paddingVertical: 4,
+    borderRadius: 10,
+    borderWidth: 1,
+    zIndex: 400,
+    elevation: 10,
+  },
+  pageNumberBadgeText: {
+    fontSize: 11.5,
+    fontFamily: "Cairo_700Bold",
+    letterSpacing: 0.4,
   },
 });
