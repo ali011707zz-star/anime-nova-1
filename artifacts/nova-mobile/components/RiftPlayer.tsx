@@ -18,6 +18,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as FileSystem from "expo-file-system";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch } from "@/utils/secureApi";
 import { isNativeTvRingActive, TvPressable, useTvMetrics } from "@/utils/tv";
@@ -1774,6 +1775,30 @@ function ExpoRiftPlayer({
          يمنع ظهور نص فارغ أو ترجمة قديمة من المصدر السابق */
       setSubOn(false);
       return;
+    }
+
+    /* ── ملف ترجمة محلي (file://) للتشغيل بلا إنترنت 100% ── */
+    if (rawUrl.startsWith("file://")) {
+      let localCancelled = false;
+      setSubOffset(0);
+      subOffsetRef.current = 0;
+      setSubLoading(true);
+      FileSystem.readAsStringAsync(rawUrl)
+        .then((text) => {
+          if (localCancelled) return;
+          const cues = parseVTT(text);
+          setLoadedCues(cues);
+          if (cues.length > 0) setSubOn(true);
+        })
+        .catch(() => {
+          if (!localCancelled) setLoadedCues([]);
+        })
+        .finally(() => {
+          if (!localCancelled && aliveRef.current) setSubLoading(false);
+        });
+      return () => {
+        localCancelled = true;
+      };
     }
 
     /* ── حساب الـ URL الإنجليزي الخام (قبل أي ترجمة) ── */

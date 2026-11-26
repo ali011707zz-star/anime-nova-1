@@ -1025,7 +1025,31 @@ async function attachSubtitleSidecar(entry: RuntimeDownload): Promise<void> {
   try {
     let subtitleUrl = entry.params.subtitleUrl;
     let body = "";
-    if (subtitleUrl) body = await fetchSubtitleResponse(subtitleUrl, entry.params);
+    if (subtitleUrl) {
+      const lowerSub = subtitleUrl.toLowerCase();
+      const alreadyArabicOrTranslated =
+        lowerSub.includes("translate-vtt") ||
+        /_ar\.(?:vtt|srt|ass)(?:[?#]|$)/i.test(lowerSub) ||
+        /[?&]lang=ar(?:&|$)/i.test(lowerSub) ||
+        entry.site === "anime4up2";
+      if (!alreadyArabicOrTranslated) {
+        const base = getBaseUrl();
+        if (base) {
+          const translatedUrl = `${base}/api/anime/translate-vtt?url=${encodeURIComponent(subtitleUrl)}&from=en&to=ar`;
+          try {
+            const translatedBody = await fetchSubtitleResponse(translatedUrl, entry.params);
+            if (translatedBody && translatedBody.includes("timing")) {
+              body = translatedBody;
+            }
+          } catch {
+            /* Fall back to raw subtitle track if translation is unavailable */
+          }
+        }
+      }
+      if (!body) {
+        body = await fetchSubtitleResponse(subtitleUrl, entry.params);
+      }
+    }
     else if (entry.params.hlsManifestUrl) {
       const discovered = await discoverHlsSubtitle(entry.params.hlsManifestUrl, entry.params);
       subtitleUrl = discovered?.url;
@@ -1115,7 +1139,10 @@ async function saveCompleted(entry: RuntimeDownload): Promise<void> {
   };
   const existing = await getDownloads();
   await saveDownloads([...existing.filter((old) => old.id !== entry.id), item]);
-  void attachSubtitleSidecar(entry);
+  await Promise.race([
+    attachSubtitleSidecar(entry).catch(() => {}),
+    wait(10_000),
+  ]);
   void recordSuccessfulDownload(entry.animeId, entry.ep);
 }
 

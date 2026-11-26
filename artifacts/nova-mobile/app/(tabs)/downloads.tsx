@@ -315,7 +315,7 @@ function DownloadCard({
           </View>
           {item.subtitleLocalPath && (
             <View style={[s.badge, { borderColor: colors.success + "40" }]}>
-              <Text style={[s.badgeText, { color: colors.success }]}>ترجمة</Text>
+              <Text style={[s.badgeText, { color: colors.success }]}>ترجمة منفصلة</Text>
             </View>
           )}
         </View>
@@ -470,6 +470,7 @@ function LocalPlayer({
     label: `${item.quality} · ${item.site}`,
     quality: (item.quality as any) || "720p HD",
     subtitleUrl: item.subtitleLocalPath ? toFileUri(item.subtitleLocalPath) : undefined,
+    isArabic: true,
   };
   return (
     <RiftPlayer

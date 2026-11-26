@@ -149,6 +149,15 @@ const ARABIC_PLAYBACK_SITES = new Set([
   "ristoanime", "faselhd_db", "animetime", "sanime", "anifox",
 ]);
 
+/* External-subtitle HLS download servers: video downloads directly on phone,
+   and Arabic subtitles are saved locally as a separate .vtt sidecar for offline playback inside Nova. */
+const EXTERNAL_SUB_DOWNLOAD_SITES = new Set([
+  "anime4up2", // AD 2
+  "kawaii",    // KW
+  "megaplay",  // MP
+  "reflix",    // RE
+]);
+
 /* Playback and download providers are separate product surfaces. */
 const DOWNLOAD_SOURCE_SITES = new Set([
   "nova_tg",        // NOVA VIP (Arabic / Sub)
@@ -160,6 +169,10 @@ const DOWNLOAD_SOURCE_SITES = new Set([
   "sanime",         // SA
   "animeify",       // AF — direct MediaFire/FileMoon sources
   "anifox",         // FX
+  "anime4up2",      // AD 2 — HLS + ترجمة خارجية منفصلة
+  "kawaii",         // KW — HLS/MP4 + ترجمة خارجية منفصلة
+  "megaplay",       // MP — HLS + ترجمة خارجية منفصلة
+  "reflix",         // RE — HLS + ترجمة خارجية منفصلة
 ]);
 
 function subtitlesDisabledForSite(site?: string): boolean {
@@ -3123,6 +3136,27 @@ export default function WatchScreen() {
           }
         }
       }
+      if (!newSrcs.length && Platform.OS !== "web" && site === "anime4up2" && !siteCtrl.signal.aborted) {
+        const ad2Phone = await resolveAd2OnPhone(Number(sourceAnimeId || anime || 0), epNum, siteCtrl.signal);
+        if (ad2Phone?.primary?.url) {
+          for (const item of [ad2Phone.primary, ...ad2Phone.fallbacks]) {
+            newSrcs.push({
+              site: "anime4up2",
+              name: item.name,
+              label: item.label,
+              quality: item.quality,
+              url: item.url,
+              directUrl: item.url,
+              rawUrl: item.url,
+              directType: "hls",
+              isEmbed: false,
+              deliveryMode: "direct",
+              headers: item.headers,
+              subtitleUrl: item.subtitleUrl,
+            });
+          }
+        }
+      }
       if (!newSrcs.length) throw new Error("no direct sources");
 
       fetchedSitesRef.current.add(site);
@@ -3501,6 +3535,9 @@ export default function WatchScreen() {
           quality,
         }))
         .sort((a, b) => {
+          const aExt = EXTERNAL_SUB_DOWNLOAD_SITES.has(a.site) ? 1 : 0;
+          const bExt = EXTERNAL_SUB_DOWNLOAD_SITES.has(b.site) ? 1 : 0;
+          if (aExt !== bExt) return aExt - bExt;
           const order = (STATIC_PICKER[quality] || []).map(item => item.site);
           return order.indexOf(a.site) - order.indexOf(b.site);
         }),
@@ -4186,7 +4223,7 @@ export default function WatchScreen() {
                   <Text style={[d.downloadSubtitle, { color: "#94a3b8", fontSize: 10, fontFamily: "Cairo_600SemiBold" }]}>
                     {isAwDubbed
                       ? "تحميل مباشر سريع للحلقة المدبلجة يعمل في الخلفية"
-                      : "مصادر مخصصة للتحميل السريع بالخلفية: AD · AW · SA · AF · AS"}
+                      : "سيرفرات بترجمة مدمجة وسيرفرات HLS بترجمة خارجية منفصلة"}
                   </Text>
                 </View>
               </View>
@@ -4194,6 +4231,27 @@ export default function WatchScreen() {
                 <Text style={{ color: "#22d3ee", fontSize: 10, fontFamily: "Cairo_700Bold" }}>{downloadSlots.length} سيرفر</Text>
               </View>
             </View>
+            {!isAwDubbed && downloadSlots.some((slot) => EXTERNAL_SUB_DOWNLOAD_SITES.has(slot.site)) && (
+              <View
+                style={{
+                  flexDirection: "row-reverse",
+                  alignItems: "center",
+                  gap: 8,
+                  paddingHorizontal: 10,
+                  paddingVertical: 7,
+                  borderRadius: 10,
+                  marginTop: 8,
+                  backgroundColor: "rgba(245, 158, 11, 0.10)",
+                  borderWidth: 1,
+                  borderColor: "rgba(245, 158, 11, 0.28)",
+                }}
+              >
+                <Ionicons name="information-circle-outline" size={14} color="#fbbf24" />
+                <Text style={{ flex: 1, color: "#fde68a", fontSize: 10, fontFamily: "Cairo_600SemiBold", textAlign: "right", lineHeight: 15 }}>
+                  سيرفرات «ترجمة خارجية منفصلة» تحفظ الترجمة بملف منفصل وتعمل بلا إنترنت داخل مشغّل التطبيق فقط.
+                </Text>
+              </View>
+            )}
             <View style={[d.downloadRows, { backgroundColor: "#070b12", borderRadius: 14, borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", marginTop: 6 }]}>
               {downloadSlots.map((slot, idx) => {
                 const stateKey = `${slot.site}:${slot.quality}`;
@@ -4279,10 +4337,46 @@ export default function WatchScreen() {
                           {slot.quality.replace("p", "P")}
                         </Text>
                       </View>
-                      <View style={{ alignItems: "flex-end" }}>
+                      <View style={{ alignItems: "flex-end", gap: 3 }}>
                         <Text style={{ color: "#f8fafc", fontSize: 12.5, fontFamily: "Cairo_700Bold", textAlign: "right" }}>
                           السيرفر {slot.tag}
                         </Text>
+                        {!isAwDubbed && (() => {
+                          const isExternalSub = EXTERNAL_SUB_DOWNLOAD_SITES.has(slot.site.toLowerCase());
+                          const isEngDub = ENGLISH_DUB_SITES.has(slot.site.toLowerCase());
+                          const bBg = isExternalSub
+                            ? "rgba(245,158,11,0.13)"
+                            : isEngDub
+                              ? "rgba(56,189,248,0.14)"
+                              : "rgba(16,185,129,0.13)";
+                          const bBorder = isExternalSub
+                            ? "rgba(245,158,11,0.34)"
+                            : isEngDub
+                              ? "rgba(56,189,248,0.38)"
+                              : "rgba(16,185,129,0.32)";
+                          const bColor = isExternalSub ? "#fbbf24" : isEngDub ? "#38bdf8" : "#34d399";
+                          const bText = isExternalSub
+                            ? "ترجمة خارجية منفصلة"
+                            : isEngDub
+                              ? "دبلجة إنجليزية · ترجمة منفصلة"
+                              : "ترجمة عربية مدمجة";
+                          return (
+                            <View
+                              style={{
+                                paddingHorizontal: 7,
+                                paddingVertical: 1.5,
+                                borderRadius: 6,
+                                borderWidth: 1,
+                                backgroundColor: bBg,
+                                borderColor: bBorder,
+                              }}
+                            >
+                              <Text style={{ color: bColor, fontSize: 9.5, fontFamily: "Cairo_700Bold" }} numberOfLines={1}>
+                                {bText}
+                              </Text>
+                            </View>
+                          );
+                        })()}
                       </View>
                       <View style={{ width: 32, height: 32, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(6, 182, 212, 0.14)", borderWidth: 1, borderColor: "rgba(6, 182, 212, 0.32)" }}>
                         <Text style={{ color: "#22d3ee", fontSize: 10, fontFamily: "Cairo_800ExtraBold" }}>{slot.tag}</Text>
