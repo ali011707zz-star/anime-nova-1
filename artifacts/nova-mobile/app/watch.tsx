@@ -3157,7 +3157,11 @@ export default function WatchScreen() {
         anilistId={!isAwDubbed && sourceAnimeId ? parseInt(sourceAnimeId) : undefined}
         episodeTitle={isAwDubbed
           ? `${awCurrentSeason.label} · الحلقة ${epNum}`
-          : (arEpTitle ?? (etitle && /[\u0600-\u06FF]/.test(safeDecodeURIComponent(etitle)) ? safeDecodeURIComponent(etitle) : undefined))}
+          : (arEpTitle ?? (() => {
+              const dec = etitle ? safeDecodeURIComponent(etitle).trim() : "";
+              if (!dec || /^(?:episode|ep\.?|الحلقة)\s*\d+$/i.test(dec)) return undefined;
+              return dec;
+            })())}
         initialPosition={resumeTime}
         totalEps={playerTotalEps}
         onBack={onRiftBack}
