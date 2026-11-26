@@ -121,12 +121,12 @@ function ActiveDownloadCard({
 }) {
   const { colors, s } = useDownloadsTheme();
   const { tv: tvMode } = useTvMetrics();
-  const hasRealProgress = item.totalBytes > 0 || (item.segmentsTotal != null && item.segmentsTotal > 0 && (item.segmentsDone || 0) > 0);
-  const isPreparing = !isError && !isPaused && !isQueued && !hasRealProgress && item.bytesWritten <= 0;
-  const pct = hasRealProgress ? Math.round(item.progress * 100) : 0;
   const isPaused = item.status === "paused";
   const isError = item.status === "error";
   const isQueued = Boolean(item.queued) && item.status === "downloading";
+  const hasRealProgress = item.totalBytes > 0 || (item.segmentsTotal != null && item.segmentsTotal > 0 && (item.segmentsDone || 0) > 0);
+  const isPreparing = !isError && !isPaused && !isQueued && !hasRealProgress && item.bytesWritten <= 0;
+  const pct = hasRealProgress ? Math.round(item.progress * 100) : 0;
   const canPause = item.pauseSupported !== false;
 
   return (
