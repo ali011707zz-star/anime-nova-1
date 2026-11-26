@@ -457,7 +457,7 @@ export default function MangaDetailScreen() {
     } else if (readerOpen) {
       const rot = readerSettings.rotation;
       if (rot === "free") {
-        queueOrientationLock(ScreenOrientation.OrientationLock.ALL_BUT_UPSIDE_DOWN, true);
+        queueOrientationLock(ScreenOrientation.OrientationLock.ALL, true);
       } else if (rot === "portrait") {
         queueOrientationLock(ScreenOrientation.OrientationLock.PORTRAIT_UP, true);
       } else if (rot === "landscape") {
