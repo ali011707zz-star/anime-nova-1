@@ -214,7 +214,7 @@ export default function DonghuaWatchScreen() {
   const downloadableStreams = (resolved?.streams || []).filter((st) => st.canDirectDownload);
 
   return (
-    <View style={[s.root, { backgroundColor: colors.bg }]}>
+    <View style={[s.root, { backgroundColor: colors.background }]}>
       {/* Compact Header */}
       <View style={[s.topBar, { paddingTop: topPad }]}>
         <Pressable

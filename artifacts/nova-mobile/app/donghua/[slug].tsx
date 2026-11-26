@@ -123,7 +123,7 @@ export default function DonghuaDetailScreen() {
   }, [detail?.episodes]);
 
   return (
-    <View style={[s.root, { backgroundColor: colors.bg }]}>
+    <View style={[s.root, { backgroundColor: colors.background }]}>
       {/* Top Bar */}
       <View style={[s.topBar, { paddingTop: topPad }]}>
         <Pressable
@@ -209,7 +209,7 @@ export default function DonghuaDetailScreen() {
             ]}
           >
             <View style={s.watchBtnRight}>
-              <View style={[s.watchBtnIcon, { width: cta.iconBoxSize, height: cta.iconBoxSize, borderRadius: cta.iconRadius }]}>
+              <View style={[s.watchBtnIcon, { width: cta.iconBoxSize, height: cta.iconBoxSize, borderRadius: cta.iconBoxRadius }]}>
                 <Ionicons name="play" size={cta.iconSize} color="#fff" />
               </View>
               <View style={s.watchBtnCopy}>
@@ -222,7 +222,7 @@ export default function DonghuaDetailScreen() {
               </View>
             </View>
             <View style={s.watchBtnPill}>
-              <Text style={[s.watchBtnPillText, { fontSize: cta.pillFontSize }]}>
+              <Text style={[s.watchBtnPillText, { fontSize: cta.pillTextSize }]}>
                 الحلقة {firstPlayEp.numberLabel}
               </Text>
             </View>
@@ -337,7 +337,7 @@ function createStyles(colors: ThemePalette) {
       paddingBottom: 10,
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: colors.border,
-      backgroundColor: colors.bg,
+      backgroundColor: colors.background,
     },
     iconBtn: {
       width: 36,
