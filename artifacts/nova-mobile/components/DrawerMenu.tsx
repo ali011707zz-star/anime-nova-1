@@ -48,6 +48,7 @@ const NAV_MAIN: NavItem[] = [
   { icon: "flame",           label: "أحدث الحلقات",          route: "/latest",             color: "#f97316" },
   { icon: "search",          label: "البحث",                 route: "/(tabs)/search",      color: "#6366f1" },
   { icon: "grid",            label: "تصفح الأنمي",           route: "/(tabs)/browse",      color: "#3b82f6" },
+  { icon: "flame",           label: "الدونغهوا",             route: "/(tabs)/browse?tab=donghua", badge: "جديد", color: "#f59e0b" },
   { icon: "layers",          label: "المواسم",                route: "/seasons",            color: "#f59e0b" },
   { icon: "book",            label: "المانجا",                route: "/manga",              color: "#10b981" },
   { icon: "stats-chart",     label: "الإحصائيات العالمية",   route: "/stats",              color: "#0ea5e9" },

@@ -1029,9 +1029,12 @@ async function attachSubtitleSidecar(entry: RuntimeDownload): Promise<void> {
       const lowerSub = subtitleUrl.toLowerCase();
       const alreadyArabicOrTranslated =
         lowerSub.includes("translate-vtt") ||
+        lowerSub.includes("dl.opensubtitles.org") ||
+        lowerSub.includes("dmcdn.net") ||
         /_ar\.(?:vtt|srt|ass)(?:[?#]|$)/i.test(lowerSub) ||
         /[?&]lang=ar(?:&|$)/i.test(lowerSub) ||
-        entry.site === "anime4up2";
+        entry.site === "anime4up2" ||
+        entry.site.startsWith("donghua");
       if (!alreadyArabicOrTranslated) {
         const base = getBaseUrl();
         if (base) {

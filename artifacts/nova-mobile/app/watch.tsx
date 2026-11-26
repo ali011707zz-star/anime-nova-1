@@ -34,6 +34,7 @@ import { isTvDevice, tvFocusStyle, TvFocusGuideView, TvPressable, useTvMetrics }
 const Pressable = TvPressable;
 import { useTvFocusMemory } from "@/utils/tvFocus";
 import { getBaseUrl } from "@/utils/api";
+import { fetchHumanArabicSubtitleFromOpenSubtitles } from "@/utils/openSubtitlesClient";
 import { anilistQuery, EPISODE_COUNT_QUERY } from "@/utils/anilist";
 import { secureFetch, secureStreamFetch, warmAuthToken, getAuthToken, getDownloadToken } from "@/utils/secureApi";
 import {
@@ -565,7 +566,12 @@ function normalizeProviderSubtitleUrl(
   if (!url) return undefined;
   const resolved = resolveUrl(url, base);
   if (!KAWAII_SUBTITLE_SITES.has(site)) return resolved;
-  if (resolved.includes("/api/anime/translate-vtt") || resolved.includes("/api/anime/proxy-text")) {
+  if (
+    resolved.includes("/api/anime/translate-vtt") ||
+    resolved.includes("/api/anime/proxy-text") ||
+    resolved.includes("dl.opensubtitles.org") ||
+    resolved.includes("dmcdn.net")
+  ) {
     return resolved;
   }
   return `${base}/api/anime/proxy-text?url=${encodeURIComponent(resolved)}&ref=${encodeURIComponent("https://kawaiianime.cc/")}`;
@@ -587,6 +593,20 @@ async function fetchArabicSubtitleUrl(
   english: string,
   signal?: AbortSignal,
 ): Promise<string | undefined> {
+  // 1. Priority: Human-translated Arabic subtitle directly from OpenSubtitles on phone (0% VPS load)
+  try {
+    const osMatch = await fetchHumanArabicSubtitleFromOpenSubtitles({
+      title,
+      englishTitle: english,
+      episode: ep,
+      signal,
+    });
+    if (osMatch?.url && osMatch.isHuman) {
+      return osMatch.url;
+    }
+  } catch {
+    /* Fall through to provider/machine translation */
+  }
   try {
     const response = await secureFetch(
       `${base}/api/anime/kawaii-meta?anilistId=${encodeURIComponent(animeId)}&ep=${ep}` +
@@ -2200,7 +2220,7 @@ export default function WatchScreen() {
   const playSrc = useCallback((src: Src) => {
     const subtitleUrl = subtitlesDisabledForSite(src.site)
       ? undefined
-      : normalizeProviderSubtitleUrl(src.site || "", src.subtitleUrl || globalSubUrl, getBaseUrl());
+      : normalizeProviderSubtitleUrl(src.site || "", (globalSubUrl && globalSubUrl.includes("dl.opensubtitles.org") ? globalSubUrl : (src.subtitleUrl || globalSubUrl)), getBaseUrl());
     if (src.skipIntro || src.skipOutro) {
       setEpisodeSkipTimes((prev) => ({
         intro: src.skipIntro || prev.intro,
@@ -2903,7 +2923,7 @@ export default function WatchScreen() {
       /* الترجمة الجانبية اختيارية: لا نمنع تنزيل الفيديو إذا لم تتوفر. */
       const subRaw     = (isAwDubbed || subtitlesDisabledForSite(site))
         ? undefined
-        : (best.subtitleUrl || globalSubUrl);
+        : ((globalSubUrl && globalSubUrl.includes("dl.opensubtitles.org")) ? globalSubUrl : (best.subtitleUrl || globalSubUrl));
       const subtitleCandidate = subRaw;
       const subtitleUrl = normalizeProviderSubtitleUrl(site, subtitleCandidate, base);
 
@@ -3302,7 +3322,7 @@ export default function WatchScreen() {
 
       const rawUrl    = getPlayUrl(best);
       const hdrs      = best.headers || extractProxyHeaders(rawUrl);
-      const subRaw    = subtitlesDisabledForSite(site) ? undefined : (best.subtitleUrl || globalSubUrl);
+      const subRaw    = subtitlesDisabledForSite(site) ? undefined : ((globalSubUrl && globalSubUrl.includes("dl.opensubtitles.org")) ? globalSubUrl : (best.subtitleUrl || globalSubUrl));
       const subtitleCandidate = subRaw;
       const subtitleUrl = normalizeProviderSubtitleUrl(site, subtitleCandidate, base);
       if (downloadMode === "adm") {
@@ -4488,7 +4508,7 @@ export default function WatchScreen() {
                               : "rgba(16,185,129,0.32)";
                           const bColor = isExternalSub ? "#fbbf24" : isEngDub ? "#38bdf8" : "#34d399";
                           const bText = isExternalSub
-                            ? "ترجمة خارجية منفصلة"
+                            ? (globalSubUrl?.includes("dl.opensubtitles.org") ? "ترجمة عربية بشرية (خارجية)" : "ترجمة خارجية منفصلة")
                             : isEngDub
                               ? "دبلجة إنجليزية · ترجمة منفصلة"
                               : "ترجمة عربية مدمجة";

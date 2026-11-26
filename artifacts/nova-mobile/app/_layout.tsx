@@ -178,6 +178,8 @@ function RootLayoutNav() {
         <Stack.Screen name="anime/[id]" options={{ headerShown: false, animation: "slide_from_bottom" }} />
         <Stack.Screen name="manga" options={{ headerShown: false }} />
         <Stack.Screen name="manga/[id]" options={{ headerShown: false, animation: "slide_from_bottom" }} />
+      <Stack.Screen name="donghua/[slug]" options={{ headerShown: false, animation: "slide_from_bottom" }} />
+      <Stack.Screen name="donghua/watch" options={watchScreenOptions} />
         <Stack.Screen name="seasons" options={{ headerShown: false }} />
         <Stack.Screen name="stats" options={{ headerShown: false }} />
         <Stack.Screen name="upcoming" options={{ headerShown: false }} />

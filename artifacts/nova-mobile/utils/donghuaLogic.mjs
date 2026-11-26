@@ -1,0 +1,511 @@
+/**
+ * Pure logic for Donghua direct-on-phone extraction (AnimeXin + AnimeKhor),
+ * direct video host parsers (Ok.ru, Odysee, StreamRuby/Nuvorel, Dailymotion),
+ * OpenSubtitles human Arabic subtitle matching, and universal VTT/SRT/ASS -> WebVTT conversion.
+ *
+ * Zero Node/RN runtime imports so it can be unit-tested cleanly with `node --test`.
+ */
+
+function decodeHtmlEntities(str) {
+  if (!str) return "";
+  return String(str)
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#0*39;|&apos;/g, "'")
+    .replace(/&#8217;|&#x2019;/g, "'")
+    .replace(/&#8211;|&#x2013;/g, "-")
+    .replace(/&#8212;|&#x2014;/g, "—")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function stripTags(html) {
+  return decodeHtmlEntities(String(html || "").replace(/<[^>]+>/g, " "));
+}
+
+function decodeBase64Utf8(b64) {
+  const clean = String(b64 || "").replace(/\s+/g, "");
+  if (!clean) return "";
+  if (typeof globalThis.atob === "function") {
+    try {
+      const bin = globalThis.atob(clean);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      if (typeof TextDecoder !== "undefined") {
+        return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+      }
+      return bin;
+    } catch {
+      // fall through
+    }
+  }
+  if (typeof Buffer !== "undefined") {
+    try {
+      return Buffer.from(clean, "base64").toString("utf8");
+    } catch {
+      return "";
+    }
+  }
+  return "";
+}
+
+function slugFromUrl(url) {
+  const clean = String(url || "").replace(/[?#].*$/, "").replace(/\/+$/, "");
+  const seg = clean.split("/").pop() || "";
+  return seg.toLowerCase();
+}
+
+function normalizeImageUrl(src, baseUrl) {
+  const raw = decodeHtmlEntities(src || "").trim();
+  if (!raw || raw.startsWith("data:")) return "";
+  if (raw.startsWith("//")) return `https:${raw}`;
+  if (/^https?:\/\//i.test(raw)) return raw;
+  try {
+    return new URL(raw, baseUrl).toString();
+  } catch {
+    return raw;
+  }
+}
+
+/**
+ * Parse Animestream-theme catalog/search pages (shared by AnimeXin & AnimeKhor).
+ */
+export function parseDonghuaCatalogHtml(html, source) {
+  const baseUrl = source === "animekhor" ? "https://animekhor.org/" : "https://animexin.dev/";
+  const items = [];
+  const seen = new Set();
+  const articleRe = /<article\b[^>]*class="[^"]*\bbs\b[^"]*"[^>]*>([\s\S]*?)<\/article>/gi;
+  let match;
+
+  while ((match = articleRe.exec(String(html || ""))) !== null) {
+    const block = match[1];
+    const linkMatch = block.match(/<a\b[^>]*href="([^"]+)"[^>]*>/i);
+    if (!linkMatch) continue;
+    const rawUrl = decodeHtmlEntities(linkMatch[1]);
+    if (!rawUrl || seen.has(rawUrl)) continue;
+    // Skip non-series utility links
+    if (/\/(schedule|bookmark|blog|privacy|dmca|contact|how-to-download|help-information|release-date|genres|a-z-lists|watch-history)\/?$/i.test(rawUrl)) {
+      continue;
+    }
+
+    const titleAttr = (block.match(/<a\b[^>]*title="([^"]+)"/i) || [])[1];
+    const h2Title = (block.match(/<h2[^>]*>([\s\S]*?)<\/h2>/i) || [])[1];
+    const ttTitle = (block.match(/<div[^>]*class="[^"]*\btt\b[^"]*"[^>]*>([\s\S]*?)<\/div>/i) || [])[1];
+    const title = decodeHtmlEntities(titleAttr || stripTags(h2Title) || stripTags(ttTitle));
+    if (!title) continue;
+
+    // Pick actual image URL (prefer data-src / data-lazy-src over placeholder)
+    const imgTag = (block.match(/<img\b[^>]*>/i) || [])[0] || "";
+    const imgSrc =
+      (imgTag.match(/\bdata-lazy-src="([^"]+)"/i) || [])[1] ||
+      (imgTag.match(/\bdata-src="([^"]+)"/i) || [])[1] ||
+      (imgTag.match(/\bsrc="([^"]+)"/i) || [])[1] ||
+      "";
+    const poster = normalizeImageUrl(imgSrc, baseUrl);
+    const status = stripTags((block.match(/<span[^>]*class="[^"]*\bepx\b[^"]*"[^>]*>([\s\S]*?)<\/span>/i) || [])[1] || "");
+    const type = stripTags((block.match(/<div[^>]*class="[^"]*\btypez\b[^"]*"[^>]*>([\s\S]*?)<\/div>/i) || [])[1] || "");
+    const slug = slugFromUrl(rawUrl);
+
+    seen.add(rawUrl);
+    items.push({
+      id: `${source}:${slug}`,
+      source,
+      slug,
+      url: rawUrl,
+      title,
+      poster,
+      status: status || "مستمر",
+      type: type || "دونغهوا",
+    });
+  }
+
+  return items;
+}
+
+/**
+ * Parse Animestream-theme series detail page (title, poster, synopsis, genres, episodes).
+ */
+export function parseDonghuaDetailHtml(html, source, pageUrl) {
+  const baseUrl = source === "animekhor" ? "https://animekhor.org/" : "https://animexin.dev/";
+  const text = String(html || "");
+
+  const h1 = stripTags((text.match(/<h1[^>]*class="[^"]*entry-title[^"]*"[^>]*>([\s\S]*?)<\/h1>/i) || [])[1] || "");
+  const ogTitle = decodeHtmlEntities((text.match(/<meta[^>]+property="og:title"[^>]+content="([^"]+)"/i) || [])[1] || "");
+  const title = (h1 || ogTitle).replace(/\s*[-–|]\s*(AnimeXin|AnimeKhor).*$/i, "").trim();
+
+  const thumbBlock = (text.match(/<div[^>]*class="[^"]*\bthumb\b[^"]*"[^>]*>([\s\S]*?)<\/div>/i) || [])[1] || "";
+  const thumbImg = (thumbBlock.match(/<img\b[^>]*>/i) || [])[0] || "";
+  const posterRaw =
+    (thumbImg.match(/\bdata-lazy-src="([^"]+)"/i) || [])[1] ||
+    (thumbImg.match(/\bdata-src="([^"]+)"/i) || [])[1] ||
+    (thumbImg.match(/\bsrc="([^"]+)"/i) || [])[1] ||
+    (text.match(/<meta[^>]+property="og:image"[^>]+content="([^"]+)"/i) || [])[1] ||
+    "";
+  const poster = normalizeImageUrl(posterRaw, baseUrl);
+
+  const synBlock =
+    (text.match(/<div[^>]*class="[^"]*entry-content[^"]*"[^>]*>([\s\S]*?)<\/div>/i) || [])[1] ||
+    (text.match(/<div[^>]*class="[^"]*synp[^"]*"[^>]*>([\s\S]*?)<\/div>/i) || [])[1] ||
+    "";
+  const synopsis = stripTags(synBlock)
+    .replace(/^English\s+/i, "")
+    .replace(/\s*Indonesian\s+[\s\S]*$/i, "")
+    .trim();
+
+  const statusMatch = text.match(/<b>\s*Status:\s*<\/b>\s*([^<]+)/i) || text.match(/Status:\s*<\/span>\s*([^<]+)/i);
+  const status = decodeHtmlEntities(statusMatch ? statusMatch[1] : "");
+
+  const genres = [];
+  const genreBlock = (text.match(/<div[^>]*class="[^"]*\bgenxed\b[^"]*"[^>]*>([\s\S]*?)<\/div>/i) || [])[1] || "";
+  for (const gm of genreBlock.matchAll(/<a[^>]*>([\s\S]*?)<\/a>/gi)) {
+    const g = stripTags(gm[1]);
+    if (g && !genres.includes(g)) genres.push(g);
+  }
+
+  const episodes = [];
+  const seenEpUrls = new Set();
+  const epListBlock = (text.match(/<div[^>]*class="[^"]*\beplister\b[^"]*"[^>]*>([\s\S]*?)<\/ul>/i) || [])[1] || text;
+  const liRe = /<li\b[^>]*>([\s\S]*?)<\/li>/gi;
+  let lm;
+  while ((lm = liRe.exec(epListBlock)) !== null) {
+    const li = lm[1];
+    const hrefMatch = li.match(/<a\b[^>]*href="([^"]+)"/i);
+    if (!hrefMatch) continue;
+    const epUrl = decodeHtmlEntities(hrefMatch[1]);
+    if (!epUrl || seenEpUrls.has(epUrl) || !/episode|ep-|movie/i.test(epUrl)) continue;
+    const numRaw = stripTags((li.match(/<div[^>]*class="[^"]*\bepl-num\b[^"]*"[^>]*>([\s\S]*?)<\/div>/i) || [])[1] || "");
+    const epTitle = stripTags((li.match(/<div[^>]*class="[^"]*\bepl-title\b[^"]*"[^>]*>([\s\S]*?)<\/div>/i) || [])[1] || "");
+    const epDate = stripTags((li.match(/<div[^>]*class="[^"]*\bepl-date\b[^"]*"[^>]*>([\s\S]*?)<\/div>/i) || [])[1] || "");
+    const parsedNum = parseFloat(numRaw.replace(/[^0-9.]/g, "")) || parseFloat((epUrl.match(/episode[-_]?(\d+(?:\.\d+)?)/i) || [])[1] || "0") || (episodes.length + 1);
+
+    seenEpUrls.add(epUrl);
+    episodes.push({
+      number: parsedNum,
+      numberLabel: numRaw || String(parsedNum),
+      title: epTitle || `الحلقة ${parsedNum}`,
+      date: epDate,
+      url: epUrl,
+    });
+  }
+
+  return {
+    id: `${source}:${slugFromUrl(pageUrl)}`,
+    source,
+    slug: slugFromUrl(pageUrl),
+    url: pageUrl,
+    title: title || slugFromUrl(pageUrl),
+    poster,
+    synopsis,
+    status: status || "مستمر",
+    genres,
+    episodes,
+  };
+}
+
+/**
+ * Classify mirror iframe URL & label into direct-on-phone extractor hosts.
+ */
+export function parseDonghuaEpisodeMirrors(html) {
+  const mirrors = [];
+  const seen = new Set();
+  const optRe = /<option\b[^>]*value="([^"]{12,})"[^>]*>([\s\S]*?)<\/option>/gi;
+  let m;
+
+  while ((m = optRe.exec(String(html || ""))) !== null) {
+    const b64 = m[1].trim();
+    const label = stripTags(m[2]);
+    const decoded = decodeBase64Utf8(b64);
+    const srcMatch = decoded.match(/\bsrc=["']([^"']+)["']/i);
+    if (!srcMatch) continue;
+    let embedUrl = decodeHtmlEntities(srcMatch[1]).trim();
+    if (embedUrl.startsWith("//")) embedUrl = `https:${embedUrl}`;
+    if (!/^https?:\/\//i.test(embedUrl) || seen.has(embedUrl)) continue;
+
+    let host = "other";
+    const lowerUrl = embedUrl.toLowerCase();
+    const lowerLabel = label.toLowerCase();
+    if (/dailymotion\.com|dai\.ly/i.test(lowerUrl)) {
+      host = /all\s*sub|multi\s*sub/i.test(lowerLabel) ? "dailymotion_allsub" : "dailymotion";
+    } else if (/ok\.ru|odnoklassniki/i.test(lowerUrl)) {
+      host = "okru";
+    } else if (/odysee\.com/i.test(lowerUrl)) {
+      host = "odysee";
+    } else if (/nuvorel\.top|streamruby|rubyvid|rubystm|vidhide|streamwish/i.test(lowerUrl)) {
+      host = "streamruby";
+    } else if (/rumble\.com/i.test(lowerUrl)) {
+      host = "rumble";
+    }
+
+    // Prefer English/AllSub/MultiSub over Indonesian-only hardsubs
+    const isIndoOnly = /\bindo(?:nesia)?\b/i.test(lowerLabel) && !/\beng(?:lish)?\b|all\s*sub|multi\s*sub/i.test(lowerLabel);
+    const isMultiSub = /all\s*sub|multi\s*sub/i.test(lowerLabel);
+    const isHardsubEng = /\bhardsub\b.*\beng|\beng.*\bhardsub|\b\[english\]/i.test(lowerLabel);
+
+    seen.add(embedUrl);
+    mirrors.push({
+      label,
+      embedUrl,
+      host,
+      isIndoOnly,
+      isMultiSub,
+      isHardsubEng,
+    });
+  }
+
+  return mirrors;
+}
+
+/**
+ * Parse Ok.ru videoembed HTML (`data-options`) into direct HLS + MP4 quality links.
+ */
+export function parseOkRuEmbedHtml(html) {
+  const m = String(html || "").match(/data-options="([^"]+)"/i);
+  if (!m) return { hlsUrl: null, videos: [] };
+  try {
+    const decoded = m[1].replace(/&quot;/g, '"').replace(/&amp;/g, "&");
+    const opts = JSON.parse(decoded);
+    const rawMeta = opts?.flashvars?.metadata;
+    const meta = typeof rawMeta === "string" ? JSON.parse(rawMeta) : rawMeta;
+    if (!meta || typeof meta !== "object") return { hlsUrl: null, videos: [] };
+
+    const hlsUrl = meta.hlsManifestUrl || meta.ondemandHls || null;
+    const qualityMap = {
+      ultra: "2160p",
+      quad: "1440p",
+      full: "1080p",
+      hd: "720p",
+      sd: "480p",
+      low: "360p",
+      lowest: "240p",
+      mobile: "144p",
+    };
+    const videos = Array.isArray(meta.videos)
+      ? meta.videos
+          .filter((v) => v && typeof v.url === "string" && /^https?:\/\//i.test(v.url))
+          .map((v) => ({
+            quality: qualityMap[String(v.name || "").toLowerCase()] || String(v.name || "720p"),
+            url: v.url,
+          }))
+      : [];
+    return { hlsUrl, videos };
+  } catch {
+    return { hlsUrl: null, videos: [] };
+  }
+}
+
+/**
+ * Parse Odysee embed HTML into direct MP4 / HLS stream URL.
+ */
+export function parseOdyseeEmbedHtml(html) {
+  const text = String(html || "");
+  const contentUrl = (text.match(/"contentUrl"\s*:\s*"(https?:[^"]+)"/i) || [])[1];
+  if (contentUrl) return contentUrl.replace(/\\\//g, "/");
+  const direct = (text.match(/https?:\/\/player\.odycdn\.com\/[^\s"'\\]+(?:\.mp4|\.m3u8)[^\s"'\\]*/i) || [])[0];
+  return direct || null;
+}
+
+/**
+ * Parse StreamRuby / Nuvorel embed HTML into master.m3u8 + external subtitle tracks.
+ */
+export function parseStreamRubyEmbedHtml(html) {
+  const text = String(html || "");
+  const m3u8 = (text.match(/https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*/i) || [])[0] || null;
+  const tracks = [];
+  const seen = new Set();
+  for (const tm of text.matchAll(/file\s*:\s*["'](https?:\/\/[^"']+\.(?:vtt|srt)[^"']*)["'][^}]*label\s*:\s*["']([^"']+)["']/gi)) {
+    const url = tm[1];
+    const label = decodeHtmlEntities(tm[2]);
+    if (!seen.has(url)) {
+      seen.add(url);
+      tracks.push({ url, label, isArabic: /arab|عرب|_ar\./i.test(`${label} ${url}`), isEnglish: /eng|_en\./i.test(`${label} ${url}`) });
+    }
+  }
+  return { m3u8, tracks };
+}
+
+/**
+ * Extract Dailymotion video ID from embed URL and parse metadata JSON for Arabic/English SRT & HLS.
+ */
+export function extractDailymotionVideoId(embedUrl) {
+  const u = String(embedUrl || "");
+  const q = u.match(/[?&]video=([a-zA-Z0-9]+)/i);
+  if (q) return q[1];
+  const p = u.match(/\/video\/([a-zA-Z0-9]+)/i);
+  return p ? p[1] : null;
+}
+
+export function parseDailymotionMetadata(json) {
+  if (!json || typeof json !== "object") return { arabicSubUrl: null, englishSubUrl: null, hlsUrl: null };
+  const subs = json.subtitles?.data || {};
+  const arUrls = subs.ar?.urls || subs["ar-SA"]?.urls || subs["ar-EG"]?.urls || [];
+  const enUrls = subs.en?.urls || subs["en-US"]?.urls || subs["en-auto"]?.urls || [];
+  const hlsUrl = json.qualities?.auto?.[0]?.url || null;
+  return {
+    arabicSubUrl: Array.isArray(arUrls) && arUrls[0] ? String(arUrls[0]) : null,
+    englishSubUrl: Array.isArray(enUrls) && enUrls[0] ? String(enUrls[0]) : null,
+    hlsUrl: typeof hlsUrl === "string" ? hlsUrl : null,
+  };
+}
+
+/**
+ * Score & pick the best human Arabic subtitle from OpenSubtitles REST results.
+ * Strips `.gz` from `SubDownloadLink` so React Native fetches plain UTF-8 text directly.
+ */
+export function selectBestOpenSubtitleMatch(results, { title = "", episode = 0, season = 1 } = {}) {
+  if (!Array.isArray(results) || results.length === 0) return null;
+  const epNum = Number(episode) || 0;
+  const seasonNum = Number(season) || 1;
+  const normTitle = String(title || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").trim();
+  const titleWords = normTitle.split(/\s+/).filter((w) => w.length >= 3);
+
+  let best = null;
+  let bestScore = -Infinity;
+
+  for (const item of results) {
+    if (!item || typeof item !== "object") continue;
+    const rawDl = String(item.SubDownloadLink || "").trim();
+    if (!rawDl) continue;
+    const lang = String(item.ISO639 || item.SubLanguageID || item.LanguageName || "").toLowerCase();
+    if (lang && !/^(ar|ara|arabic)$/.test(lang)) continue;
+
+    const fmt = String(item.SubFormat || "").toLowerCase();
+    if (fmt && !["srt", "vtt", "ass", "ssa"].includes(fmt)) continue;
+
+    const fileName = String(item.SubFileName || "");
+    const movieName = String(item.MovieName || "");
+    const hay = `${fileName} ${movieName}`.toLowerCase();
+
+    let score = 0;
+    const isHuman = String(item.SubAutoTranslation || "0") === "0";
+    if (isHuman) score += 120;
+    if (String(item.SubFromTrusted || "0") === "1") score += 35;
+    if (fmt === "srt" || fmt === "vtt") score += 20;
+    else if (fmt === "ass" || fmt === "ssa") score += 12;
+    if (/utf-?8/i.test(String(item.SubEncoding || ""))) score += 15;
+
+    // Avoid unrelated spin-offs (e.g. "Lego One Piece" when looking for "One Piece")
+    if (/\blego\b|\bparody\b|\babridged\b/i.test(hay) && !/\blego\b|\bparody\b|\babridged\b/i.test(normTitle)) {
+      score -= 180;
+    }
+
+    // Title word overlap
+    if (titleWords.length > 0) {
+      let matched = 0;
+      for (const w of titleWords) {
+        if (hay.includes(w)) matched++;
+      }
+      const ratio = matched / titleWords.length;
+      score += Math.round(ratio * 60);
+      if (ratio === 0) score -= 90;
+    }
+
+    // Exact episode number matching
+    if (epNum > 0) {
+      const itemEp = Number(item.SeriesEpisode || 0);
+      const itemSeason = Number(item.SeriesSeason || 0);
+      const pad2 = String(epNum).padStart(2, "0");
+      const epRegex = new RegExp(`(?:s0?${seasonNum}e0?${epNum}|\\bep(?:isode)?\\s*0?${epNum}\\b|\\be0?${epNum}\\b|-\\s*0?${epNum}\\b|\\b${pad2}\\.srt)`, "i");
+      if (itemEp === epNum) {
+        score += 90;
+        if (itemSeason === seasonNum) score += 25;
+      } else if (epRegex.test(hay)) {
+        score += 75;
+      } else if (itemEp > 0 && itemEp !== epNum) {
+        // Wrong episode — skip!
+        continue;
+      } else {
+        score -= 40;
+      }
+    }
+
+    const dlCount = Number(item.SubDownloadsCnt || 0);
+    if (dlCount > 0) score += Math.min(25, Math.log10(dlCount + 1) * 5);
+
+    if (score > bestScore) {
+      bestScore = score;
+      best = {
+        url: rawDl.replace(/\.gz$/i, ""),
+        fileName,
+        movieName,
+        format: fmt || "srt",
+        encoding: String(item.SubEncoding || "UTF-8"),
+        isHuman,
+        isTrusted: String(item.SubFromTrusted || "0") === "1",
+        downloads: dlCount,
+        score,
+      };
+    }
+  }
+
+  // Reject low-confidence mismatches
+  if (!best || best.score < 80) return null;
+  return best;
+}
+
+function assTimeToVtt(t) {
+  // ASS format: H:MM:SS.cc (centiseconds) -> HH:MM:SS.mmm
+  const m = String(t || "").trim().match(/^(\d+):(\d{2}):(\d{2})[.,](\d{1,3})$/);
+  if (!m) return null;
+  const hh = m[1].padStart(2, "0");
+  const mm = m[2];
+  const ss = m[3];
+  const ms = m[4].length === 2 ? `${m[4]}0` : m[4].padEnd(3, "0");
+  return `${hh}:${mm}:${ss}.${ms}`;
+}
+
+/**
+ * Convert WebVTT, SRT (with comma timestamps), or ASS/SSA into standard WebVTT.
+ */
+export function convertSubtitleToVtt(rawText) {
+  const clean = String(rawText || "").replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+  if (!clean) return "";
+
+  // 1. Already WebVTT
+  if (/^WEBVTT\b/i.test(clean)) return `${clean}\n`;
+
+  // 2. ASS / SSA format
+  if (/^\[Script Info\]/im.test(clean) || /^Dialogue:\s*/im.test(clean)) {
+    const cues = [];
+    for (const line of clean.split("\n")) {
+      if (!/^Dialogue:\s*/i.test(line)) continue;
+      // Dialogue: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
+      const body = line.replace(/^Dialogue:\s*/i, "");
+      const parts = body.split(",");
+      if (parts.length < 10) continue;
+      const start = assTimeToVtt(parts[1]);
+      const end = assTimeToVtt(parts[2]);
+      if (!start || !end) continue;
+      const rawContent = parts.slice(9).join(",");
+      const text = rawContent
+        .replace(/\{[^}]*\}/g, "")
+        .replace(/\\N|\\n/g, "\n")
+        .replace(/\\h/g, " ")
+        .trim();
+      if (text) cues.push(`${start} --> ${end}\n${text}`);
+    }
+    return cues.length > 0 ? `WEBVTT\n\n${cues.join("\n\n")}\n` : "";
+  }
+
+  // 3. SRT format (normalize comma timestamps to dot & drop sequence numbers)
+  const normalized = clean.replace(/(\d{1,2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2");
+  if (normalized.includes("-->")) {
+    const blocks = normalized
+      .split(/\n\s*\n/)
+      .map((block) => block.trim())
+      .filter(Boolean)
+      .map((block) => {
+        const lines = block.split("\n");
+        if (lines.length >= 2 && /^\d+$/.test(lines[0].trim()) && lines[1].includes("-->")) {
+          return lines.slice(1).join("\n");
+        }
+        return block;
+      })
+      .filter((block) => block.includes("-->"));
+    if (blocks.length > 0) return `WEBVTT\n\n${blocks.join("\n\n")}\n`;
+  }
+
+  return "";
+}

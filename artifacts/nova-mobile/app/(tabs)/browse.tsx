@@ -11,6 +11,7 @@ import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from
 import { useTvFocusMemory } from "@/utils/tvFocus";
 import { getGridColumnCount } from "@/components/AnimeCard";
 import { AnimeFilterSheet, type AnimeFilterOption } from "@/components/AnimeFilterSheet";
+import { DonghuaBrowsePanel } from "@/components/DonghuaBrowsePanel";
 import { useColors } from "@/hooks/useColors";
 import { getKnownArabicAnimeTitle } from "@/utils/arabicAnimeTitles";
 import type { ThemePalette } from "@/constants/colors";
@@ -329,6 +330,7 @@ export default function BrowseScreen() {
     season?: string;
     year?: string;
     status?: string;
+    tab?: string;
   }>();
   const router = useRouter();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
@@ -348,6 +350,8 @@ export default function BrowseScreen() {
   const routeYear = routeValue(routeParams.year);
   const routeStatus = routeValue(routeParams.status);
 
+  const routeTab = routeValue(routeParams.tab);
+  const [browseSection, setBrowseSection] = useState<"anime" | "donghua">(routeTab === "donghua" ? "donghua" : "anime");
   const [view, setView] = useState<"genres" | "list">("list");
   const [activeGenre, setActiveGenre] = useState(routeValue(routeParams.genre));
   const [activeGenreAr, setActiveGenreAr] = useState(routeValue(routeParams.genreAr));
@@ -387,7 +391,9 @@ export default function BrowseScreen() {
     setYear(/^\d{4}$/.test(routeYear) ? routeYear : "");
     setStatus(["RELEASING", "FINISHED"].includes(routeStatus) ? routeStatus : "");
     setView("list");
-  }, [routeParams.genre, routeParams.genreAr, routeParams.format, routeParams.sort, routeParams.season, routeParams.year, routeParams.status]);
+    if (routeValue(routeParams.tab) === "donghua") setBrowseSection("donghua");
+    else if (routeParams.genre || routeParams.format || routeParams.season || routeParams.year || routeParams.status || routeParams.sort) setBrowseSection("anime");
+  }, [routeParams.genre, routeParams.genreAr, routeParams.format, routeParams.sort, routeParams.season, routeParams.year, routeParams.status, routeParams.tab]);
 
   /* Every genre already has a dedicated, verified unique cover in GENRES_WITH_COVERS */
 
@@ -571,6 +577,86 @@ export default function BrowseScreen() {
           </View>
         </View>
 
+        {/* ── Section Switcher: الأنمي | دونغهوا ── */}
+        <View style={{ flexDirection: ROW_RTL, gap: 8, marginTop: 8 }}>
+          <Pressable
+            focusable={tvMode}
+            onPress={() => setBrowseSection("anime")}
+            style={({ focused }) => [
+              {
+                flex: 1,
+                flexDirection: ROW_RTL,
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 6,
+                paddingVertical: 7,
+                paddingHorizontal: 10,
+                borderRadius: 11,
+                borderWidth: 1,
+                backgroundColor: browseSection === "anime" ? colors.accent : colors.card,
+                borderColor: browseSection === "anime" ? colors.accent : colors.border,
+              },
+              tvMode && tvFocusStyle(focused),
+            ]}
+          >
+            <Ionicons
+              name="sparkles-outline"
+              size={14}
+              color={browseSection === "anime" ? colors.buttonText : colors.textSecondary}
+            />
+            <Text
+              numberOfLines={1}
+              maxFontSizeMultiplier={1.15}
+              style={{
+                fontSize: 12,
+                fontFamily: "Cairo_700Bold",
+                color: browseSection === "anime" ? colors.buttonText : colors.textPrimary,
+              }}
+            >
+              الأنمي
+            </Text>
+          </Pressable>
+          <Pressable
+            focusable={tvMode}
+            onPress={() => setBrowseSection("donghua")}
+            style={({ focused }) => [
+              {
+                flex: 1,
+                flexDirection: ROW_RTL,
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 6,
+                paddingVertical: 7,
+                paddingHorizontal: 10,
+                borderRadius: 11,
+                borderWidth: 1,
+                backgroundColor: browseSection === "donghua" ? "#f59e0b" : colors.card,
+                borderColor: browseSection === "donghua" ? "#f59e0b" : colors.border,
+              },
+              tvMode && tvFocusStyle(focused),
+            ]}
+          >
+            <Ionicons
+              name="flame-outline"
+              size={14}
+              color={browseSection === "donghua" ? "#0b0f19" : colors.textSecondary}
+            />
+            <Text
+              numberOfLines={1}
+              maxFontSizeMultiplier={1.15}
+              style={{
+                fontSize: 12,
+                fontFamily: "Cairo_700Bold",
+                color: browseSection === "donghua" ? "#0b0f19" : colors.textPrimary,
+              }}
+            >
+              دونغهوا
+            </Text>
+          </Pressable>
+        </View>
+
+        {browseSection === "anime" ? (
+        <>
         <Pressable
           focusable={tvMode}
           onPress={() => setFilterVisible(true)}
@@ -604,10 +690,21 @@ export default function BrowseScreen() {
             />
           ))}
         </ScrollView>
+        </>
+        ) : null}
       </View>
 
+      {/* ── Donghua Catalog Section ── */}
+      {browseSection === "donghua" && (
+        <DonghuaBrowsePanel
+          gridColumns={gridColumns}
+          gridWidth={gridWidth}
+          tvMode={tvMode}
+        />
+      )}
+
       {/* ── Genre grid ── */}
-      {view === "genres" && (
+      {browseSection === "anime" && view === "genres" && (
         <FlatList
           data={GENRES_WITH_COVERS}
           style={{ width: gridWidth, alignSelf: "center" }}
@@ -634,7 +731,7 @@ export default function BrowseScreen() {
       )}
 
       {/* ── Anime list ── */}
-      {view === "list" && (
+      {browseSection === "anime" && view === "list" && (
         <>
           {listLoading && filteredItems.length === 0 ? (
             <View style={g.center}>

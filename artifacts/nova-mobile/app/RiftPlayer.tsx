@@ -20,6 +20,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system";
 import { useColors } from "@/hooks/useColors";
 import { getBaseUrl } from "@/utils/api";
+import { convertSubtitleToVtt } from "@/utils/donghuaLogic.mjs";
 import { TvPressable } from "@/utils/tv";
 
 const Pressable = TvPressable;
@@ -237,8 +238,14 @@ async function _fetchStreamedSubtitles(
   return total;
 }
 
-function parseVTT(text: string): SubCue[] {
+function parseVTT(rawText: string): SubCue[] {
   const cues: SubCue[] = [];
+  let text = String(rawText || "").replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  // Convert ASS/SSA or raw SRT (with comma timestamps) to WebVTT before cue parsing
+  if (!/^WEBVTT\b/i.test(text.trim())) {
+    const converted = convertSubtitleToVtt(text);
+    if (converted) text = converted;
+  }
   // ── X-TIMESTAMP-MAP: HLS-native VTT (e.g. Videasy cc.boopigcdn.com) ──
   // Header: X-TIMESTAMP-MAP=MPEGTS:900000,LOCAL:00:00:00.000
   // → offset = 900000/90000 = 10 s → subtract from every cue to fix late-subtitle bug.
@@ -255,7 +262,7 @@ function parseVTT(text: string): SubCue[] {
     let ti = 0;
     if (ti < lines.length && !lines[ti].includes("-->")) ti++;
     if (ti >= lines.length) continue;
-    const m = lines[ti].match(/(\d[\d:.]*)\s*-->\s*(\d[\d:.]*)/);
+    const m = lines[ti].match(/(\d[\d:.,]*)\s*-->\s*(\d[\d:.,]*)/);
     if (!m) continue;
     const start = Math.max(0, parseVTTTime(m[1]) - tsOffset);
     const end   = Math.max(0, parseVTTTime(m[2]) - tsOffset);
