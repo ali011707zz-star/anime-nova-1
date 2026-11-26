@@ -7,6 +7,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   BackHandler,
   FlatList,
   I18nManager,
@@ -397,11 +398,25 @@ export default function MangaDetailScreen() {
     };
   }, [mangaModeStorageKey]);
 
+  const readerChromeOpacity = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    const shouldShow = !readerSettings.fullscreen || readerChromeVisible;
+    readerChromeOpacity.stopAnimation();
+    Animated.timing(readerChromeOpacity, {
+      toValue: shouldShow ? 1 : 0,
+      duration: shouldShow ? 170 : 190,
+      useNativeDriver: true,
+    }).start();
+  }, [readerSettings.fullscreen, readerChromeVisible, readerChromeOpacity]);
+
   const handleUpdateReaderSettings = useCallback(
     (patch: Partial<MangaReaderGlobalSettings>) => {
       setReaderSettings((prev) => {
         const next = { ...prev, ...patch };
-        if (patch.fullscreen === false) {
+        if (patch.fullscreen === true) {
+          setReaderChromeVisible(false);
+        } else if (patch.fullscreen === false) {
           setReaderChromeVisible(true);
         }
         void saveGlobalReaderSettings(next);
@@ -442,27 +457,26 @@ export default function MangaDetailScreen() {
     } else if (readerOpen) {
       const rot = readerSettings.rotation;
       if (rot === "free") {
-        queueOrientationLock(ScreenOrientation.OrientationLock.DEFAULT);
+        queueOrientationLock(ScreenOrientation.OrientationLock.ALL_BUT_UPSIDE_DOWN, true);
       } else if (rot === "portrait") {
-        queueOrientationLock(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+        queueOrientationLock(ScreenOrientation.OrientationLock.PORTRAIT_UP, true);
       } else if (rot === "landscape") {
-        queueOrientationLock(ScreenOrientation.OrientationLock.LANDSCAPE);
+        queueOrientationLock(ScreenOrientation.OrientationLock.LANDSCAPE, true);
       } else if (rot === "locked") {
         ScreenOrientation.getOrientationAsync()
           .then((current) => {
             if (cancelled) return;
-            const isLand =
-              current === ScreenOrientation.Orientation.LANDSCAPE_LEFT ||
-              current === ScreenOrientation.Orientation.LANDSCAPE_RIGHT;
-            queueOrientationLock(
-              isLand
-                ? ScreenOrientation.OrientationLock.LANDSCAPE
-                : ScreenOrientation.OrientationLock.PORTRAIT_UP
-            );
+            if (current === ScreenOrientation.Orientation.LANDSCAPE_LEFT) {
+              queueOrientationLock(ScreenOrientation.OrientationLock.LANDSCAPE_LEFT, true);
+            } else if (current === ScreenOrientation.Orientation.LANDSCAPE_RIGHT) {
+              queueOrientationLock(ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT, true);
+            } else {
+              queueOrientationLock(ScreenOrientation.OrientationLock.PORTRAIT_UP, true);
+            }
           })
           .catch(() => {
             if (!cancelled) {
-              queueOrientationLock(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+              queueOrientationLock(ScreenOrientation.OrientationLock.PORTRAIT_UP, true);
             }
           });
       }
@@ -708,7 +722,7 @@ export default function MangaDetailScreen() {
       setActiveChapter(chapter);
       setReaderCurrentPage(1);
       setLongPressPageInfo(null);
-      setReaderChromeVisible(true);
+      setReaderChromeVisible(!readerSettingsRef.current.fullscreen);
       setReaderOpen(true);
       void loadChapterPages(chapter);
     },
@@ -917,7 +931,7 @@ export default function MangaDetailScreen() {
     readerWebViewRef.current.injectJavaScript(
       buildApplyReaderSettingsScript(readerSettings, effectiveReadingMode)
     );
-  }, [readerOpen, readingOffline, chapterContentType, readerSettings, effectiveReadingMode]);
+  }, [readerOpen, readerSettingsOpen, readingOffline, chapterContentType, readerSettings, effectiveReadingMode]);
 
   const handleToggleReaderChrome = useCallback(() => {
     if (!readerSettingsRef.current.fullscreen) return;
@@ -2119,26 +2133,30 @@ export default function MangaDetailScreen() {
         visible={readerOpen}
         animationType="slide"
         presentationStyle="fullScreen"
+        supportedOrientations={["portrait", "portrait-upside-down", "landscape", "landscape-left", "landscape-right"]}
+        statusBarTranslucent={readerSettings.fullscreen}
         onRequestClose={() => setReaderOpen(false)}
       >
         <View style={[styles.readerScreen, { backgroundColor: readerTheme.bg }]}>
           <StatusBar
             hidden={readerOpen && readerSettings.fullscreen && !readerChromeVisible}
             barStyle={readerTheme.isLight ? "dark-content" : "light-content"}
+            translucent={readerSettings.fullscreen}
             animated
           />
-          {(!readerSettings.fullscreen || readerChromeVisible) && (
-            <View
-              style={[
-                styles.readerHeader,
-                readerSettings.fullscreen && styles.readerHeaderFloating,
-                {
-                  paddingTop: insets.top + 8,
-                  backgroundColor: readerTheme.chromeBg,
-                  borderBottomColor: readerTheme.border,
-                },
-              ]}
-            >
+          <Animated.View
+            pointerEvents={!readerSettings.fullscreen || readerChromeVisible ? "auto" : "none"}
+            style={[
+              styles.readerHeader,
+              readerSettings.fullscreen && styles.readerHeaderFloating,
+              {
+                opacity: readerChromeOpacity,
+                paddingTop: insets.top + 8,
+                backgroundColor: readerTheme.chromeBg,
+                borderBottomColor: readerTheme.border,
+              },
+            ]}
+          >
               <View style={styles.readerHeaderRight}>
                 <Pressable
                   onPress={() => setReaderOpen(false)}
@@ -2248,8 +2266,7 @@ export default function MangaDetailScreen() {
                   />
                 </Pressable>
               </View>
-            </View>
-          )}
+            </Animated.View>
 
           {pagesLoading ? (
             <View style={styles.readerCenter}>
@@ -2446,18 +2463,19 @@ export default function MangaDetailScreen() {
               </View>
             )}
 
-          {(!readerSettings.fullscreen || readerChromeVisible) && (
-            <View
-              style={[
-                styles.readerBottomBar,
-                readerSettings.fullscreen && styles.readerBottomBarFloating,
-                {
-                  paddingBottom: Math.max(insets.bottom, 12),
-                  backgroundColor: readerTheme.chromeBg,
-                  borderTopColor: readerTheme.border,
-                },
-              ]}
-            >
+          <Animated.View
+            pointerEvents={!readerSettings.fullscreen || readerChromeVisible ? "auto" : "none"}
+            style={[
+              styles.readerBottomBar,
+              readerSettings.fullscreen && styles.readerBottomBarFloating,
+              {
+                opacity: readerChromeOpacity,
+                paddingBottom: Math.max(insets.bottom, 12),
+                backgroundColor: readerTheme.chromeBg,
+                borderTopColor: readerTheme.border,
+              },
+            ]}
+          >
               <Pressable
                 disabled={!prevChapter}
                 focusable={tvMode}
@@ -2538,8 +2556,7 @@ export default function MangaDetailScreen() {
                 </Text>
                 <Ionicons name="chevron-back" size={16} color="#09090B" />
               </Pressable>
-            </View>
-          )}
+            </Animated.View>
 
           {/* Elegant Reader Settings Bottom Sheet (Mobile Only) */}
           <MangaReaderSettingsSheet

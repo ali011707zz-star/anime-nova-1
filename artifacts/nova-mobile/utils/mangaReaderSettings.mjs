@@ -71,13 +71,13 @@ export const READING_MODE_META = Object.freeze([
   {
     value: "continuous_rtl",
     label: "أفقي مستمر (RTL)",
-    shortDesc: "تمرير أفقي متصل يمين ← يسار",
+    shortDesc: "تمرير أفقي متصل من اليمين لليسار",
     icon: "return-down-back-outline",
   },
   {
     value: "continuous_ltr",
     label: "أفقي مستمر (LTR)",
-    shortDesc: "تمرير أفقي متصل يسار ← يمين",
+    shortDesc: "تمرير أفقي متصل من اليسار لليمين",
     icon: "return-down-forward-outline",
   },
 ]);

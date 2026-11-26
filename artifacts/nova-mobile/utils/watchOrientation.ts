@@ -48,7 +48,8 @@ function flushOrientationLockQueue(): void {
   })();
 }
 
-export function queueOrientationLock(lock: OrientationLock): void {
+export function queueOrientationLock(lock: OrientationLock, force = false): void {
+  if (force) lastAppliedLock = null;
   pendingLock = lock;
   deferredBackgroundLock = null;
   flushOrientationLockQueue();
