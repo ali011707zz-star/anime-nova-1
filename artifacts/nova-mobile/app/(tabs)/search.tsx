@@ -14,6 +14,7 @@ import { getGridColumnCount } from "@/components/AnimeCard";
 import { AnimeFilterSheet, type AnimeFilterOption } from "@/components/AnimeFilterSheet";
 import { useColors } from "@/hooks/useColors";
 import { getKnownArabicAnimeTitle } from "@/utils/arabicAnimeTitles";
+import { formatMediaTitleHierarchy } from "@/utils/donghuaLogic.mjs";
 import type { ThemePalette } from "@/constants/colors";
 
 const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
@@ -212,7 +213,7 @@ function buildBrowseQuery(sort: string, format: string, status: string, genre: s
   return `query ($page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
     media(type: ANIME, isAdult: false, genre_not_in: ["Hentai","Ecchi"], sort: [${sort || "POPULARITY_DESC"}]${format ? `, format: ${format}` : ""}${status ? `, status: ${status}` : ""}${genre ? `, genre: "${genre}"` : ""}${season ? `, season: ${season}` : ""}${year ? `, startDate_greater: "${Number(year) - 1}-12-31", startDate_lesser: "${Number(year) + 1}-01-01"` : ""}) {
-      id title { romaji english } coverImage { large extraLarge } averageScore episodes format status startDate { year } genres
+      id title { romaji english native } coverImage { large extraLarge } averageScore episodes format status startDate { year } genres
     }
   }
 }`;
@@ -284,22 +285,35 @@ const AnimeCard = React.memo(function AnimeCard({
           </View>
         ) : null}
         {(() => {
-          const enTitle = anime.title?.english || anime.title?.romaji || "";
           const arTitle = anime.title_ar || getKnownArabicAnimeTitle(anime.id, anime.title?.english, anime.title?.romaji);
+          const h = formatMediaTitleHierarchy({
+            english: anime.title?.english,
+            romaji: anime.title?.romaji,
+            native: anime.title?.native,
+            arabic: arTitle,
+          });
           return (
             <View style={s.cardBottom}>
               <Text
-                style={arTitle ? s.cardTitleAr : [s.cardTitle, { writingDirection: "ltr", color: "#fff" }]}
+                style={[s.cardTitle, { writingDirection: "ltr", textAlign: "left", color: "#fff" }]}
                 numberOfLines={2}
               >
-                {arTitle || enTitle}
+                {h.primary}
               </Text>
-              {arTitle && enTitle && arTitle.trim() !== enTitle.trim() ? (
+              {h.arabic ? (
                 <Text
                   numberOfLines={1}
-                  style={[s.cardTitle, { writingDirection: "ltr", textAlign: "right", color: "rgba(255,255,255,0.72)", fontSize: tvMode ? 11 : 8.5, lineHeight: tvMode ? 15 : 12 }]}
+                  style={[s.cardTitleAr, { color: "rgba(255,255,255,0.88)", fontSize: tvMode ? 11.5 : 9.5, lineHeight: tvMode ? 16 : 13 }]}
                 >
-                  {enTitle}
+                  {h.arabic}
+                </Text>
+              ) : null}
+              {h.original ? (
+                <Text
+                  numberOfLines={1}
+                  style={[s.cardTitle, { writingDirection: "ltr", textAlign: "left", color: "rgba(255,255,255,0.65)", fontSize: tvMode ? 10 : 8, lineHeight: tvMode ? 14 : 11 }]}
+                >
+                  {h.original}
                 </Text>
               ) : null}
             </View>

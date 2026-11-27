@@ -35,7 +35,7 @@ const Pressable = TvPressable;
 import { useTvFocusMemory } from "@/utils/tvFocus";
 import { getBaseUrl } from "@/utils/api";
 import { fetchHumanArabicSubtitleFromOpenSubtitles } from "@/utils/openSubtitlesClient";
-import { probeDonghuaAvailabilityOnPhone, resolveDonghuaSiteOnPhone, type DonghuaPhoneResolvedSource } from "@/utils/donghuaClient";
+import { probeDonghuaAvailabilityOnPhone, resolveDonghuaSiteOnPhone, type DonghuaPhoneResolvedSource, type DonghuaSiteKey } from "@/utils/donghuaClient";
 import { isAllowedSlotForDonghua } from "@/utils/donghuaLogic.mjs";
 import { anilistQuery, EPISODE_COUNT_QUERY } from "@/utils/anilist";
 import { secureFetch, secureStreamFetch, warmAuthToken, getAuthToken, getDownloadToken } from "@/utils/secureApi";
@@ -162,6 +162,7 @@ const EXTERNAL_SUB_DOWNLOAD_SITES = new Set([
   "reflix",    // RE
   "donghua_ax", // DX 1
   "donghua_ak", // DX 2
+  "donghua_ds", // DX 3
 ]);
 
 /* Playback and download providers are separate product surfaces. */
@@ -181,6 +182,7 @@ const DOWNLOAD_SOURCE_SITES = new Set([
   "reflix",         // RE — HLS + ترجمة خارجية منفصلة
   "donghua_ax",     // DX 1 — دونغهوا + ترجمة عربية خارجية
   "donghua_ak",     // DX 2 — دونغهوا + ترجمة عربية خارجية
+  "donghua_ds",     // DX 3 — دونغهوا + ترجمة عربية خارجية
 ]);
 
 function subtitlesDisabledForSite(site?: string): boolean {
@@ -201,7 +203,7 @@ const SITE_TAG: Record<string, string> = {
   akwam: "AQ",
   anivexa_animegg: "GG", anivexa_anidbapp: "DB", anivexa_2dhive: "2D",
   anivexa_anibd: "BD", anivexa_senshi: "SE", anivexa_kaa: "KA",
-  donghua_ax: "DX 1", donghua_ak: "DX 2",
+  donghua_ax: "DX 1", donghua_ak: "DX 2", donghua_ds: "DX 3",
 };
 
 /* ── اسم عرض لكل موقع في منتقي المصادر ── */
@@ -665,6 +667,7 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "megaplay_dub",   name: "MegaPlay (إنجليزي)", tag: "MP DUB" },
     { site: "donghua_ax",     name: "DX 1",               tag: "DX 1" },
     { site: "donghua_ak",     name: "DX 2",               tag: "DX 2" },
+    { site: "donghua_ds",     name: "DX 3",               tag: "DX 3" },
   ],
   "720p": [
     { site: "animewitcher",   name: "AnimeWitcher",       tag: "AW" },
@@ -679,6 +682,7 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "megaplay_dub",   name: "MegaPlay (إنجليزي)", tag: "MP DUB" },
     { site: "donghua_ax",     name: "DX 1",               tag: "DX 1" },
     { site: "donghua_ak",     name: "DX 2",               tag: "DX 2" },
+    { site: "donghua_ds",     name: "DX 3",               tag: "DX 3" },
   ],
   "480p": [
     { site: "animewitcher",   name: "AnimeWitcher",       tag: "AW" },
@@ -693,6 +697,7 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "megaplay_dub",   name: "MegaPlay (إنجليزي)", tag: "MP DUB" },
     { site: "donghua_ax",     name: "DX 1",               tag: "DX 1" },
     { site: "donghua_ak",     name: "DX 2",               tag: "DX 2" },
+    { site: "donghua_ds",     name: "DX 3",               tag: "DX 3" },
   ],
   "360p": [
     { site: "animewitcher",   name: "AnimeWitcher",       tag: "AW" },
@@ -1156,7 +1161,9 @@ export default function WatchScreen() {
   const [isDonghuaOrigin, setIsDonghuaOrigin] = useState(false);
   const isDonghuaOriginRef = useRef(false);
   isDonghuaOriginRef.current = isDonghuaOrigin;
+  const [donghuaSynonyms, setDonghuaSynonyms] = useState<string[]>([]);
   const donghuaSynonymsRef = useRef<string[]>([]);
+  donghuaSynonymsRef.current = donghuaSynonyms;
   const [awEpisodeNumbersBySeason, setAwEpisodeNumbersBySeason] =
     useState<Record<string, number[]>>({});
   const [awEpisodesReady, setAwEpisodesReady] = useState(false);
@@ -1187,7 +1194,9 @@ export default function WatchScreen() {
       .then((data) => {
         if (cancelled) return;
         if (Array.isArray(data?.Media?.synonyms)) {
-          donghuaSynonymsRef.current = data.Media.synonyms.filter((x): x is string => typeof x === "string");
+          const syns = data.Media.synonyms.filter((x): x is string => typeof x === "string");
+          donghuaSynonymsRef.current = syns;
+          setDonghuaSynonyms(syns);
         }
         setIsDonghuaOrigin(data?.Media?.countryOfOrigin === "CN");
         if (!alreadyHasTotal) {
@@ -1235,9 +1244,7 @@ export default function WatchScreen() {
       canGoNextEpisode ? epNum + 1 : epNum,
     )
     : totalEpsCount;
-  const displayTitle = isDonghuaOrigin
-    ? (englishStr || titleStr || titleArStr)
-    : (titleArStr || englishStr || titleStr);
+  const displayTitle = englishStr || titleStr || titleArStr;
 
   const analyticsRef = useRef<ReturnType<typeof startMobileWatchAnalytics> | null>(null);
   const analyticsAnimeKey = anime || awSeries || displayTitle;
@@ -1328,52 +1335,46 @@ export default function WatchScreen() {
   }, [isDonghuaOrigin]);
 
   // Check-only Donghua availability probe (same check-first, extract-on-tap lifecycle as Anime!)
+  // Streams each found Donghua server (DX 1, DX 2, DX 3) into the picker immediately as it responds.
   useEffect(() => {
     if (Platform.OS === "web" || isAwDubbed || !isDonghuaOrigin) return;
     const ctrl = new AbortController();
     let cancelled = false;
-    void probeDonghuaAvailabilityOnPhone({
-      title: titleStr,
-      englishTitle: englishStr,
-      synonyms: donghuaSynonymsRef.current,
-      episode: epNum,
-      signal: ctrl.signal,
-    }).then((found) => {
+    const publishDonghuaSite = (site: DonghuaSiteKey) => {
       if (cancelled || !isMountedRef.current) return;
-      const entries: { site: "donghua_ax" | "donghua_ak"; tag: string }[] = [];
-      if (found.donghua_ax) entries.push({ site: "donghua_ax", tag: "DX 1" });
-      if (found.donghua_ak) entries.push({ site: "donghua_ak", tag: "DX 2" });
-      if (entries.length === 0) return;
-
-      setAvailableSlots((curr) => {
-        const next = { ...curr };
-        for (const e of entries) {
-          next[e.site] = {
-            "1080p": { serverCount: 1, name: e.tag, tag: e.tag, qualityRank: 1080 },
-            "720p": { serverCount: 1, name: e.tag, tag: e.tag, qualityRank: 720 },
-            "480p": { serverCount: 1, name: e.tag, tag: e.tag, qualityRank: 480 },
-          };
-        }
-        return next;
-      });
+      const tag = site === "donghua_ax" ? "DX 1" : site === "donghua_ak" ? "DX 2" : "DX 3";
+      setAvailableSlots((curr) => ({
+        ...curr,
+        [site]: {
+          "1080p": { serverCount: 1, name: tag, tag, qualityRank: 1080 },
+          "720p": { serverCount: 1, name: tag, tag, qualityRank: 720 },
+          "480p": { serverCount: 1, name: tag, tag, qualityRank: 480 },
+        },
+      }));
       setSlotStatus((curr) => {
         const next = { ...curr };
-        for (const e of entries) {
-          for (const q of ["1080p", "720p", "480p"] as const) {
-            const k = pickerSlotKey(e.site, q);
-            next[k] = next[k] || "ready";
-          }
+        for (const q of ["1080p", "720p", "480p"] as const) {
+          const k = pickerSlotKey(site, q);
+          next[k] = next[k] || "ready";
         }
         return next;
       });
       setAvailabilityError(false);
       setAvailabilityDone(true);
+    };
+    void probeDonghuaAvailabilityOnPhone({
+      title: titleStr,
+      englishTitle: englishStr,
+      synonyms: donghuaSynonyms,
+      episode: epNum,
+      signal: ctrl.signal,
+      onSourceReady: publishDonghuaSite,
     }).catch(() => {});
     return () => {
       cancelled = true;
       ctrl.abort();
     };
-  }, [isAwDubbed, isDonghuaOrigin, titleStr, englishStr, epNum, availabilityAttempt]);
+  }, [isAwDubbed, isDonghuaOrigin, titleStr, englishStr, donghuaSynonyms, epNum, availabilityAttempt]);
   const [showingAvailabilityHints, setShowingAvailabilityHints] = useState(false);
   const availabilityHintKey = `${makeAvailabilityHintKey(
     sourceAnimeId || anime,
@@ -1777,11 +1778,12 @@ export default function WatchScreen() {
         ...filteredCachedHints,
         ...(curr.donghua_ax ? { donghua_ax: curr.donghua_ax } : {}),
         ...(curr.donghua_ak ? { donghua_ak: curr.donghua_ak } : {}),
+        ...(curr.donghua_ds ? { donghua_ds: curr.donghua_ds } : {}),
       }));
       setSlotStatus((curr) => {
         const next: Record<string, "ready"> = { ...cachedStatus };
         for (const [k, v] of Object.entries(curr)) {
-          if ((k.startsWith("donghua_ax:") || k.startsWith("donghua_ak:")) && v === "ready") {
+          if ((k.startsWith("donghua_ax:") || k.startsWith("donghua_ak:") || k.startsWith("donghua_ds:")) && v === "ready") {
             next[k] = "ready";
           }
         }
@@ -1838,12 +1840,13 @@ export default function WatchScreen() {
       const preserved: typeof curr = {};
       if (curr.donghua_ax) preserved.donghua_ax = curr.donghua_ax;
       if (curr.donghua_ak) preserved.donghua_ak = curr.donghua_ak;
+      if (curr.donghua_ds) preserved.donghua_ds = curr.donghua_ds;
       return preserved;
     });
     setSlotStatus((curr) => {
       const preserved: typeof curr = {};
       for (const [k, v] of Object.entries(curr)) {
-        if ((k.startsWith("donghua_ax:") || k.startsWith("donghua_ak:")) && v === "ready") {
+        if ((k.startsWith("donghua_ax:") || k.startsWith("donghua_ak:") || k.startsWith("donghua_ds:")) && v === "ready") {
           preserved[k] = "ready";
         }
       }
@@ -1934,7 +1937,7 @@ export default function WatchScreen() {
       }
       setAvailableSlots((curr) => {
         const merged: Record<string, Partial<Record<QualityKey, AvailableSlot>>> = { ...filteredStaged };
-        for (const phoneSite of ["donghua_ax", "donghua_ak"] as const) {
+        for (const phoneSite of ["donghua_ax", "donghua_ak", "donghua_ds"] as const) {
           if (curr[phoneSite] && !merged[phoneSite]) {
             merged[phoneSite] = curr[phoneSite];
           }
@@ -1950,7 +1953,7 @@ export default function WatchScreen() {
           }
         }
         for (const [k, v] of Object.entries(curr)) {
-          if ((k.startsWith("donghua_ax:") || k.startsWith("donghua_ak:")) && v === "ready") {
+          if ((k.startsWith("donghua_ax:") || k.startsWith("donghua_ak:") || k.startsWith("donghua_ds:")) && v === "ready") {
             nextStatus[k] = "ready";
           }
         }
@@ -2727,8 +2730,8 @@ export default function WatchScreen() {
         }
       };
 
-      // On-demand direct resolution for Donghua servers (DX 1 / DX 2) — extracted ONLY on tap
-      if (Platform.OS !== "web" && (site === "donghua_ax" || site === "donghua_ak") && !currentSiteCtrl.signal.aborted && isMountedRef.current) {
+      // On-demand direct resolution for Donghua servers (DX 1 / DX 2 / DX 3) — extracted ONLY on tap
+      if (Platform.OS !== "web" && (site === "donghua_ax" || site === "donghua_ak" || site === "donghua_ds") && !currentSiteCtrl.signal.aborted && isMountedRef.current) {
         const resolvedList = await resolveDonghuaSiteOnPhone({
           site,
           title: titleStr,
@@ -2739,7 +2742,7 @@ export default function WatchScreen() {
           signal: currentSiteCtrl.signal,
         });
         if (resolvedList.length > 0 && isMountedRef.current && progressivePlaybackRef.current === playback) {
-          const siteTag = site === "donghua_ax" ? "DX 1" : "DX 2";
+          const siteTag = site === "donghua_ax" ? "DX 1" : site === "donghua_ak" ? "DX 2" : "DX 3";
           const toDonghuaSrc = (item: DonghuaPhoneResolvedSource, idx: number): Src => ({
             site,
             name: siteTag,
@@ -3329,8 +3332,8 @@ export default function WatchScreen() {
       let chosenExact: Src | null = null;
       let chosenFallback: Src | null = null;
 
-      // On-demand direct download resolution for Donghua servers (DX 1 / DX 2)
-      if (Platform.OS !== "web" && (site === "donghua_ax" || site === "donghua_ak") && !siteCtrl.signal.aborted) {
+      // On-demand direct download resolution for Donghua servers (DX 1 / DX 2 / DX 3)
+      if (Platform.OS !== "web" && (site === "donghua_ax" || site === "donghua_ak" || site === "donghua_ds") && !siteCtrl.signal.aborted) {
         const resolvedList = await resolveDonghuaSiteOnPhone({
           site,
           title: titleStr,
@@ -3340,7 +3343,7 @@ export default function WatchScreen() {
           preferredQuality,
           signal: siteCtrl.signal,
         });
-        const siteTag = site === "donghua_ax" ? "DX 1" : "DX 2";
+        const siteTag = site === "donghua_ax" ? "DX 1" : site === "donghua_ak" ? "DX 2" : "DX 3";
         for (const item of resolvedList) {
           newSrcs.push({
             site,
@@ -4171,7 +4174,7 @@ export default function WatchScreen() {
         sources={playerSources}
         initialSourceIndex={0}
         animePlayback={!isAwDubbed}
-        hardsubOverlap={isDonghuaOrigin || playingSrc?.site === "donghua_ax" || playingSrc?.site === "donghua_ak"}
+        hardsubOverlap={isDonghuaOrigin || playingSrc?.site === "donghua_ax" || playingSrc?.site === "donghua_ak" || playingSrc?.site === "donghua_ds"}
         title={displayTitle}
         episode={epNum}
         anilistId={!isAwDubbed && sourceAnimeId ? parseInt(sourceAnimeId) : undefined}
@@ -4580,7 +4583,7 @@ export default function WatchScreen() {
                   {hasAvailableSlot && Q_KEYS.map(qk => {
                 const pickerDefs = STATIC_PICKER[qk] || [];
                 const dynamicSlots = Object.entries(availableSlots)
-                  .filter(([site, tiers]) => !!tiers[qk] && !BLOCKED_SOURCE_SITES.has(site.toLowerCase()) && matchesAudioTab(site))
+                  .filter(([site, tiers]) => !!tiers[qk] && !BLOCKED_SOURCE_SITES.has(site.toLowerCase()) && (!isDonghuaOrigin || isAllowedSlotForDonghua(site)) && matchesAudioTab(site))
                   .map(([site, tiers]) => {
                     const pickerDef = pickerDefs.find(def => def.site === site);
                     return {
@@ -4717,7 +4720,7 @@ export default function WatchScreen() {
                                       : "rgba(245,158,11,0.30)";
                                   const badgeColor = isEngDub ? "#38bdf8" : isHardsub ? "#10b981" : "#f59e0b";
                                   const isHumanSub = Boolean(globalSubUrl?.includes("dl.opensubtitles.org"));
-                                  const isDonghuaSite = slot.site === "donghua_ax" || slot.site === "donghua_ak";
+                                  const isDonghuaSite = slot.site === "donghua_ax" || slot.site === "donghua_ak" || slot.site === "donghua_ds";
                                   const badgeText = isEngDub
                                     ? "دبلجة إنجليزية · ترجمة عربية"
                                     : isHardsub

@@ -8,6 +8,7 @@ import { useColors } from "@/hooks/useColors";
 import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics, responsiveScale } from "@/utils/tv";
 import { getPosterUri, getTvPosterUri } from "@/utils/media";
 import { getKnownArabicAnimeTitle } from "@/utils/arabicAnimeTitles";
+import { formatMediaTitleHierarchy } from "@/utils/donghuaLogic.mjs";
 
 type Props = {
   anime: AnilistMedia;
@@ -63,8 +64,13 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
   const knownAr = getKnownArabicAnimeTitle(anime.id, anime.title?.english, anime.title?.romaji);
   const synonyms = ((anime as any).synonyms as string[] | undefined) || [];
   const arabicTitle = anime.title_ar || knownAr || synonyms.find((s: string) => /[\u0600-\u06FF]/.test(s));
-  const mainTitle = arabicTitle || anime.title.english || anime.title.romaji;
-  const secondaryTitle = arabicTitle && (anime.title.english || anime.title.romaji) !== arabicTitle ? (anime.title.english || anime.title.romaji) : null;
+  const titleHierarchy = formatMediaTitleHierarchy({
+    english: anime.title?.english,
+    romaji: anime.title?.romaji,
+    native: anime.title?.native,
+    arabic: arabicTitle,
+  });
+  const primaryIsArabic = /[\u0600-\u06FF]/.test(titleHierarchy.primary);
   const posterUri = tvMode
     ? getTvPosterUri(anime, anime.id ? `https://img.anili.st/media/${anime.id}` : "")
     : getPosterUri(anime, anime.id ? `https://img.anili.st/media/${anime.id}` : "");
@@ -118,28 +124,45 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
             fontSize: scaleSize(12, 14),
             lineHeight: scaleSize(16, 20),
             color: colors.text,
-            textAlign: arabicTitle ? "right" : "left",
-            writingDirection: arabicTitle ? "rtl" : "ltr",
-            fontFamily: arabicTitle ? "Cairo_700Bold" : undefined,
+            textAlign: primaryIsArabic ? "right" : "left",
+            writingDirection: primaryIsArabic ? "rtl" : "ltr",
+            fontFamily: primaryIsArabic ? "Cairo_700Bold" : undefined,
           },
         ]}
         numberOfLines={2}
       >
-        {mainTitle}
+        {titleHierarchy.primary}
       </Text>
-      {secondaryTitle ? (
+      {titleHierarchy.arabic ? (
         <Text
           style={[
             styles.titleArabic,
             {
               color: colors.mutedForeground,
-              fontSize: scaleSize(9.5, 11.5),
-              lineHeight: scaleSize(13, 16),
+              fontSize: scaleSize(10, 12),
+              lineHeight: scaleSize(14, 17),
+              textAlign: "right",
+              writingDirection: "rtl",
             },
           ]}
           numberOfLines={1}
         >
-          {secondaryTitle}
+          {titleHierarchy.arabic}
+        </Text>
+      ) : null}
+      {titleHierarchy.original ? (
+        <Text
+          style={[
+            styles.titleOriginal,
+            {
+              color: colors.mutedForeground,
+              fontSize: scaleSize(8.5, 10.5),
+              lineHeight: scaleSize(12, 14),
+            },
+          ]}
+          numberOfLines={1}
+        >
+          {titleHierarchy.original}
         </Text>
       ) : null}
       {anime.episodes && (
@@ -174,6 +197,7 @@ const styles = StyleSheet.create({
   },
   progressFill: { height: 3 },
   title: { fontSize: 12, fontWeight: "600", lineHeight: 16, writingDirection: "ltr" },
-  titleArabic: { fontSize: 10, fontFamily: "Cairo_600SemiBold", lineHeight: 14, textAlign: "right", writingDirection: "ltr", opacity: 0.85 },
+  titleArabic: { fontSize: 10, fontFamily: "Cairo_600SemiBold", lineHeight: 14, textAlign: "right", writingDirection: "rtl", opacity: 0.9 },
+  titleOriginal: { fontSize: 8.5, lineHeight: 12, textAlign: "left", writingDirection: "ltr", opacity: 0.65 },
   epCount: { fontSize: 10 },
 });

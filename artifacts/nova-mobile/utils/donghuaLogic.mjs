@@ -52,6 +52,48 @@ function decodeBase64Utf8(b64) {
   return "";
 }
 
+const B64_ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+function decodeBase64Latin1(b64) {
+  const clean = String(b64 || "").replace(/[^A-Za-z0-9+/=]/g, "");
+  if (!clean) return "";
+  if (typeof globalThis.atob === "function") {
+    try {
+      return globalThis.atob(clean);
+    } catch {
+      // fall through
+    }
+  }
+  if (typeof Buffer !== "undefined") {
+    try {
+      return Buffer.from(clean, "base64").toString("latin1");
+    } catch {
+      // fall through
+    }
+  }
+  let out = "";
+  let i = 0;
+  while (i < clean.length) {
+    const e1 = B64_ALPHA.indexOf(clean[i++]);
+    const e2 = B64_ALPHA.indexOf(clean[i++]);
+    const c3 = clean[i++];
+    const c4 = clean[i++];
+    const e3 = c3 === "=" || !c3 ? -1 : B64_ALPHA.indexOf(c3);
+    const e4 = c4 === "=" || !c4 ? -1 : B64_ALPHA.indexOf(c4);
+    if (e1 < 0 || e2 < 0) break;
+    out += String.fromCharCode((e1 << 2) | (e2 >> 4));
+    if (e3 >= 0) out += String.fromCharCode(((e2 & 15) << 4) | (e3 >> 2));
+    if (e4 >= 0) out += String.fromCharCode(((e3 & 3) << 6) | e4);
+  }
+  return out;
+}
+
+function getDonghuaSourceBaseUrl(source) {
+  if (source === "animekhor") return "https://animekhor.org/";
+  if (source === "donghuastream") return "https://donghuastream.org/";
+  return "https://animexin.dev/";
+}
+
 function slugFromUrl(url) {
   const clean = String(url || "").replace(/[?#].*$/, "").replace(/\/+$/, "");
   const seg = clean.split("/").pop() || "";
@@ -74,7 +116,7 @@ function normalizeImageUrl(src, baseUrl) {
  * Parse Animestream-theme catalog/search pages (shared by AnimeXin & AnimeKhor).
  */
 export function parseDonghuaCatalogHtml(html, source) {
-  const baseUrl = source === "animekhor" ? "https://animekhor.org/" : "https://animexin.dev/";
+  const baseUrl = getDonghuaSourceBaseUrl(source);
   const items = [];
   const seen = new Set();
   const articleRe = /<article\b[^>]*class="[^"]*\bbs\b[^"]*"[^>]*>([\s\S]*?)<\/article>/gi;
@@ -129,12 +171,12 @@ export function parseDonghuaCatalogHtml(html, source) {
  * Parse Animestream-theme series detail page (title, poster, synopsis, genres, episodes).
  */
 export function parseDonghuaDetailHtml(html, source, pageUrl) {
-  const baseUrl = source === "animekhor" ? "https://animekhor.org/" : "https://animexin.dev/";
+  const baseUrl = getDonghuaSourceBaseUrl(source);
   const text = String(html || "");
 
   const h1 = stripTags((text.match(/<h1[^>]*class="[^"]*entry-title[^"]*"[^>]*>([\s\S]*?)<\/h1>/i) || [])[1] || "");
   const ogTitle = decodeHtmlEntities((text.match(/<meta[^>]+property="og:title"[^>]+content="([^"]+)"/i) || [])[1] || "");
-  const title = (h1 || ogTitle).replace(/\s*[-–|]\s*(AnimeXin|AnimeKhor).*$/i, "").trim();
+  const title = (h1 || ogTitle).replace(/\s*[-–|]\s*(AnimeXin|AnimeKhor|DonghuaStream).*$/i, "").trim();
 
   const thumbBlock = (text.match(/<div[^>]*class="[^"]*\bthumb\b[^"]*"[^>]*>([\s\S]*?)<\/div>/i) || [])[1] || "";
   const thumbImg = (thumbBlock.match(/<img\b[^>]*>/i) || [])[0] || "";
@@ -179,11 +221,36 @@ export function parseDonghuaDetailHtml(html, source, pageUrl) {
     const numRaw = stripTags((li.match(/<div[^>]*class="[^"]*\bepl-num\b[^"]*"[^>]*>([\s\S]*?)<\/div>/i) || [])[1] || "");
     const epTitle = stripTags((li.match(/<div[^>]*class="[^"]*\bepl-title\b[^"]*"[^>]*>([\s\S]*?)<\/div>/i) || [])[1] || "");
     const epDate = stripTags((li.match(/<div[^>]*class="[^"]*\bepl-date\b[^"]*"[^>]*>([\s\S]*?)<\/div>/i) || [])[1] || "");
-    const parsedNum = parseFloat(numRaw.replace(/[^0-9.]/g, "")) || parseFloat((epUrl.match(/episode[-_]?(\d+(?:\.\d+)?)/i) || [])[1] || "0") || (episodes.length + 1);
+    const rangeMatch =
+      numRaw.match(/(\d+)\s*(?:to|-|–|~)\s*(\d+)/i) ||
+      epUrl.match(/episode[-_]?(\d+)[-_](?:to[-_])?(\d+)/i);
+    let parsedNum = 0;
+    let rangeEnd = undefined;
+    if (rangeMatch) {
+      const startN = parseInt(rangeMatch[1], 10);
+      const endN = parseInt(rangeMatch[2], 10);
+      if (Number.isFinite(startN) && startN > 0) {
+        parsedNum = startN;
+        if (Number.isFinite(endN) && endN > startN && endN - startN <= 10) {
+          rangeEnd = endN;
+        }
+      }
+    }
+    if (!parsedNum) {
+      const firstNum = numRaw.match(/(\d+(?:\.\d+)?)/);
+      const urlNum = epUrl.match(/episode[-_]?(\d+(?:\.\d+)?)/i);
+      parsedNum =
+        (firstNum ? parseFloat(firstNum[1]) : 0) ||
+        (urlNum ? parseFloat(urlNum[1]) : 0) ||
+        (episodes.length + 1);
+    }
+    const isMovie = /\bmovie\b|\bfilm\b/i.test(`${numRaw} ${epTitle} ${epUrl}`);
 
     seenEpUrls.add(epUrl);
     episodes.push({
       number: parsedNum,
+      ...(rangeEnd ? { rangeEnd } : {}),
+      ...(isMovie ? { isMovie: true } : {}),
       numberLabel: numRaw || String(parsedNum),
       title: epTitle || `الحلقة ${parsedNum}`,
       date: epDate,
@@ -231,16 +298,22 @@ export function parseDonghuaEpisodeMirrors(html) {
       host = /all\s*sub|multi\s*sub/i.test(lowerLabel) ? "dailymotion_allsub" : "dailymotion";
     } else if (/ok\.ru|odnoklassniki/i.test(lowerUrl)) {
       host = "okru";
+    } else if (/gdriveplayer\./i.test(lowerUrl)) {
+      host = "gdriveplayer";
     } else if (/odysee\.com/i.test(lowerUrl)) {
       host = "odysee";
-    } else if (/nuvorel\.top|streamruby|rubyvid|rubystm|vidhide|streamwish/i.test(lowerUrl)) {
+    } else if (/nuvorel\.top|streamruby|rubyvid|rubystm/i.test(lowerUrl)) {
       host = "streamruby";
+    } else if (/filelions|vidhide|ahvsh|streamwish|wishfast|dood|d000d|doods|streamplay/i.test(lowerUrl)) {
+      host = "direct_embed";
     } else if (/rumble\.com/i.test(lowerUrl)) {
       host = "rumble";
     }
 
-    // Prefer English/AllSub/MultiSub over Indonesian-only hardsubs
-    const isIndoOnly = /\bindo(?:nesia)?\b/i.test(lowerLabel) && !/\beng(?:lish)?\b|all\s*sub|multi\s*sub/i.test(lowerLabel);
+    // Prefer English/Arabic/AllSub/MultiSub over foreign-only hardsubs (Indonesia, Portuguese, Turkish, Spanish, Italian, etc.)
+    const hasEnOrArOrMulti = /\beng(?:lish)?\b|\barab(?:ic)?\b|all\s*sub|multi\s*sub/i.test(lowerLabel);
+    const hasForeignOnlyLang = /\b(?:indo(?:nesia)?|portugu(?:ese|es)|turkish|spanish|espanol|italian|vietnamese|thai|french|german|russian|malay|tagalog|hindi|khmer|burmese|polish|brazil)\b/i.test(lowerLabel);
+    const isIndoOnly = hasForeignOnlyLang && !hasEnOrArOrMulti;
     const isMultiSub = /all\s*sub|multi\s*sub/i.test(lowerLabel);
     const isHardsubEng = /\bhardsub\b.*\beng|\beng.*\bhardsub|\b\[english\]/i.test(lowerLabel);
 
@@ -324,6 +397,51 @@ export function parseStreamRubyEmbedHtml(html) {
     }
   }
   return { m3u8, tracks };
+}
+
+/**
+ * Decode gdriveplayer.to embed HTML (`var k="...", b=atob("...")` XOR payload)
+ * into a directly playable HLS playlist URL (or MP4 URL).
+ */
+export function parseGdrivePlayerEmbedHtml(html, embedUrl = "https://gdriveplayer.to/") {
+  const text = String(html || "");
+  if (!text) return { hlsUrl: null, mp4Url: null };
+
+  const resolveRel = (raw) => {
+    const clean = String(raw || "").replace(/\\\//g, "/").trim();
+    if (!clean) return null;
+    if (clean.startsWith("//")) return `https:${clean}`;
+    if (/^https?:\/\//i.test(clean)) return clean;
+    try {
+      return new URL(clean, embedUrl).toString();
+    } catch {
+      return null;
+    }
+  };
+
+  let decoded = "";
+  const xorMatch = text.match(/var\s+k\s*=\s*["']([^"']+)["']\s*,\s*b\s*=\s*atob\(["']([^"']+)["']\)/i);
+  if (xorMatch) {
+    const key = xorMatch[1];
+    const bin = decodeBase64Latin1(xorMatch[2]);
+    if (key && bin) {
+      let out = "";
+      for (let i = 0; i < bin.length; i++) {
+        out += String.fromCharCode(bin.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+      }
+      decoded = out;
+    }
+  }
+
+  const hay = decoded || text;
+  const hlsVar = (hay.match(/\bHLS\s*=\s*["']([^"']+)["']/i) || [])[1];
+  const directM3u8 = (hay.match(/https?:\/\/[^\s"'<>\\]+\.m3u8[^\s"'<>\\]*/i) || [])[0];
+  const directMp4 = (hay.match(/https?:\/\/[^\s"'<>\\]+\.mp4[^\s"'<>\\]*/i) || [])[0];
+
+  return {
+    hlsUrl: resolveRel(hlsVar) || resolveRel(directM3u8),
+    mp4Url: resolveRel(directMp4),
+  };
 }
 
 /**
@@ -513,11 +631,26 @@ export function convertSubtitleToVtt(rawText) {
 function normMatchText(s) {
   return String(s || "")
     .toLowerCase()
-    .replace(/\[[^\]]*\]/g, " ")
-    .replace(/\([^)]*\)/g, " ")
+    // Remove only pure metadata tags in brackets/parens, preserving alternate titles like "[Full-Time Magister]"
+    .replace(/[\[(]\s*(?:sub|dub|eng(?:lish)?\s*sub|multi\s*sub|all\s*sub|4k|hd|ona|ova|tv|chinese|donghua|ongoing|completed|new|\d{4})\s*[\])]/gi, " ")
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function splitTitleSegments(rawTitle) {
+  const raw = String(rawTitle || "");
+  const segs = new Set();
+  const full = normMatchText(raw);
+  if (full) segs.add(full);
+  // Extract inner bracket/paren segments (e.g. "Quanzhi Fashi [Full-Time Magister]" -> "quanzhi fashi", "full time magister")
+  for (const m of raw.matchAll(/[\[(]([^\])]+)[\])]/g)) {
+    const inner = normMatchText(m[1]);
+    if (inner.length >= 3) segs.add(inner);
+  }
+  const stripped = normMatchText(raw.replace(/\[[^\]]*\]/g, " ").replace(/\([^)]*\)/g, " "));
+  if (stripped.length >= 3) segs.add(stripped);
+  return [...segs];
 }
 
 function extractSeasonNum(s) {
@@ -606,41 +739,43 @@ export function rankDonghuaCatalogCandidates(items, candidateTitles = []) {
 
   const ranked = [];
   for (const item of items) {
-    const itemNorm = normMatchText(item?.title || "");
-    if (!itemNorm) continue;
+    const itemSegments = splitTitleSegments(item?.title || "");
+    if (itemSegments.length === 0) continue;
     const itemSeason = extractSeasonNum(item?.title || "");
-    const itemTokens = new Set(itemNorm.split(" ").filter((w) => w.length >= 2));
+    const itemMovie = /\bmovie\b|\bfilm\b/i.test(`${item?.title || ""} ${item?.type || ""} ${item?.status || ""}`);
 
     let bestItemScore = -Infinity;
     for (const target of targets) {
-      let score = 0;
-      if (itemNorm === target.norm) {
-        score += 200;
-      } else if (itemNorm.includes(target.norm) || target.norm.includes(itemNorm)) {
-        score += 120;
-      }
-      const targetTokens = target.norm.split(" ").filter((w) => w.length >= 2);
-      if (targetTokens.length > 0) {
-        let hit = 0;
-        for (const w of targetTokens) {
-          if (itemTokens.has(w)) hit++;
-        }
-        const coverage = hit / targetTokens.length;
-        const precision = hit / Math.max(1, itemTokens.size);
-        score += Math.round(coverage * 90 + precision * 35);
-      }
-
-      if (target.season > 0 && itemSeason > 0) {
-        score += target.season === itemSeason ? 45 : -75;
-      } else if (target.season === 0 && itemSeason > 1) {
-        score -= 70;
-      }
-
       const targetMovie = /\bmovie\b|\bfilm\b/i.test(target.raw);
-      const itemMovie = /\bmovie\b|\bfilm\b/i.test(item?.title || "");
-      if (targetMovie !== itemMovie) score -= 200;
+      const targetTokens = target.norm.split(" ").filter((w) => w.length >= 2);
+      for (const itemNorm of itemSegments) {
+        const itemTokens = new Set(itemNorm.split(" ").filter((w) => w.length >= 2));
+        let score = 0;
+        if (itemNorm === target.norm) {
+          score += 200;
+        } else if (itemNorm.includes(target.norm) || target.norm.includes(itemNorm)) {
+          score += 120;
+        }
+        if (targetTokens.length > 0) {
+          let hit = 0;
+          for (const w of targetTokens) {
+            if (itemTokens.has(w)) hit++;
+          }
+          const coverage = hit / targetTokens.length;
+          const precision = hit / Math.max(1, itemTokens.size);
+          score += Math.round(coverage * 90 + precision * 35);
+        }
 
-      if (score > bestItemScore) bestItemScore = score;
+        if (target.season > 0 && itemSeason > 0) {
+          score += target.season === itemSeason ? 45 : -75;
+        } else if (target.season === 0 && itemSeason > 1) {
+          score -= 70;
+        }
+
+        if (targetMovie !== itemMovie) score -= 200;
+
+        if (score > bestItemScore) bestItemScore = score;
+      }
     }
 
     if (bestItemScore >= 75) {
@@ -659,12 +794,29 @@ export function matchDonghuaCatalogItemByTitle(items, candidateTitles = []) {
   return rankDonghuaCatalogCandidates(items, candidateTitles)[0] || null;
 }
 
-export function pickDonghuaEpisodeByNumber(episodes, episodeNumber) {
+export function pickDonghuaEpisodeByNumber(episodes, episodeNumber, opts = {}) {
   if (!Array.isArray(episodes) || episodes.length === 0) return null;
   const target = Math.max(1, Math.floor(Number(episodeNumber) || 1));
-  const exact = episodes.find((e) => Math.floor(Number(e?.number || 0)) === target);
+  const preferMovie = Boolean(opts?.preferMovie);
+  const pool = preferMovie
+    ? episodes
+    : episodes.filter((e) => !e?.isMovie);
+  const searchList = pool.length > 0 ? pool : (preferMovie ? episodes : []);
+  if (searchList.length === 0) {
+    // Only return a single-entry movie if explicitly allowed or if there are no non-movie entries AND target === 1 and caller did not forbid movies
+    if (opts?.rejectMovie) return null;
+    if (target === 1 && episodes.length === 1) return episodes[0];
+    return null;
+  }
+  const exact = searchList.find((e) => Math.floor(Number(e?.number || 0)) === target);
   if (exact) return exact;
-  if (target === 1 && episodes.length === 1) return episodes[0];
+  const inRange = searchList.find((e) => {
+    const start = Math.floor(Number(e?.number || 0));
+    const end = Math.floor(Number(e?.rangeEnd || 0));
+    return start > 0 && end >= start && target >= start && target <= end;
+  });
+  if (inRange) return inRange;
+  if (target === 1 && searchList.length === 1 && (Math.floor(Number(searchList[0]?.number || 0)) <= 1 || searchList[0]?.isMovie)) return searchList[0];
   return null;
 }
 

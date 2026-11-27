@@ -10,6 +10,7 @@ import {
 import { useColors } from "@/hooks/useColors";
 import { TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { getKnownArabicAnimeTitle } from "@/utils/arabicAnimeTitles";
+import { formatMediaTitleHierarchy } from "@/utils/donghuaLogic.mjs";
 
 type Props = {
   items: AnilistMedia[];
@@ -81,8 +82,14 @@ export const HeroSection = React.memo(function HeroSection({
   };
 
   const renderSlideContent = (anime: AnilistMedia, index: number) => {
-    const title = anime.title.english || anime.title.romaji;
     const heroArabic = anime.title_ar || (anime as any).synonyms?.find((v: string) => /[\u0600-\u06FF]/.test(v)) || getKnownArabicAnimeTitle(anime.id, anime.title.english, anime.title.romaji);
+    const heroTitles = formatMediaTitleHierarchy({
+      english: anime.title.english,
+      romaji: anime.title.romaji,
+      native: anime.title.native,
+      arabic: heroArabic,
+    });
+    const title = heroTitles.primary || anime.title.english || anime.title.romaji;
     return (
       <>
         <Image
@@ -172,7 +179,7 @@ export const HeroSection = React.memo(function HeroSection({
               ))}
             </View>
 
-            {/* Title & Arabic Title */}
+            {/* Title Hierarchy: English -> Arabic -> Original */}
             <Text
               pointerEvents="none"
               style={[
@@ -180,28 +187,50 @@ export const HeroSection = React.memo(function HeroSection({
                 {
                   fontSize: Math.round(16.5 * s),
                   lineHeight: Math.round(22 * s),
+                  writingDirection: "ltr",
+                  textAlign: "left",
                 },
               ]}
               numberOfLines={1}
             >
-              {heroArabic || title}
+              {heroTitles.primary}
             </Text>
-            {heroArabic && title && heroArabic.trim() !== title.trim() ? (
+            {heroTitles.arabic ? (
               <Text
                 pointerEvents="none"
                 style={[
                   styles.heroTitleEnglish,
                   {
-                    fontSize: Math.round(11 * s),
-                    lineHeight: Math.round(15 * s),
-                    marginBottom: Math.round(3 * s),
-                    writingDirection: "ltr",
+                    fontSize: Math.round(12 * s),
+                    lineHeight: Math.round(17 * s),
+                    fontFamily: "Cairo_700Bold",
+                    color: "rgba(255,255,255,0.88)",
+                    writingDirection: "rtl",
                     textAlign: "right",
                   },
                 ]}
                 numberOfLines={1}
               >
-                {title}
+                {heroTitles.arabic}
+              </Text>
+            ) : null}
+            {heroTitles.original ? (
+              <Text
+                pointerEvents="none"
+                style={[
+                  styles.heroTitleEnglish,
+                  {
+                    fontSize: Math.round(10 * s),
+                    lineHeight: Math.round(13 * s),
+                    marginBottom: Math.round(2 * s),
+                    color: "rgba(255,255,255,0.62)",
+                    writingDirection: "ltr",
+                    textAlign: "left",
+                  },
+                ]}
+                numberOfLines={1}
+              >
+                {heroTitles.original}
               </Text>
             ) : null}
 
