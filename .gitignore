@@ -93,3 +93,18 @@ artifacts/nova-mobile/.env.production
 # Expo OTA build output
 artifacts/nova-mobile/ota-dist/
 artifacts/nova-film/ota-dist/
+
+# Repo hygiene: prevent backup/staging/duplicate dumps from being committed
+backups/
+.backups/
+.staging/
+.agent-backups/
+.deploy-backups/
+screenshots/
+public/*.apk.bak*
+artifacts/*/static-build/
+*.orig
+*.bak
+*.bak-*
+.env.bak*
+**/__pycache__/
