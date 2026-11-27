@@ -349,7 +349,7 @@ async function searchTmdbCatalog(
   page = 1,
   opts: { animationOnly?: boolean } = {},
 ): Promise<ExternalFilmSummary[]> {
-  const variants = normalizeArabicSearchVariants(rawQuery).slice(0, 2);
+  const variants = normalizeArabicSearchVariants(rawQuery).slice(0, 5);
   if (variants.length === 0) return [];
   const endpoint = typeFilter === "movie" ? "/search/movie" : typeFilter === "tv" ? "/search/tv" : "/search/multi";
   const reqs: Promise<any>[] = [];
@@ -360,6 +360,24 @@ async function searchTmdbCatalog(
     reqs.push(tmdbFetchOptional(`${endpoint}?query=${encodeURIComponent(variants[0])}&page=${page}&include_adult=false`, "en-US"));
   }
   const settled = await Promise.all(reqs);
+  const hasAnyHit = settled.some((d) => Array.isArray(d?.results) && d.results.length > 0);
+  if (!hasAnyHit && page === 1) {
+    // Fuzzy multi-word fallback for Arabic spelling/transliteration variations (e.g. "البيكي بيلاندرز")
+    const baseClean = variants[variants.length - 1] || variants[0];
+    const tokens = baseClean
+      .split(/\s+/)
+      .map((t) => t.replace(/^ال(?=[\u0600-\u06FF]{3,})/, "").trim())
+      .filter((t) => t.length >= 3);
+    if (tokens.length >= 2) {
+      const fbReqs = tokens
+        .slice(0, 2)
+        .map((tok) =>
+          tmdbFetchOptional(`${endpoint}?query=${encodeURIComponent(tok)}&page=1&include_adult=false`, "ar"),
+        );
+      const fbSettled = await Promise.all(fbReqs);
+      settled.push(...fbSettled);
+    }
+  }
   const mapped: ExternalFilmSummary[] = [];
   for (const data of settled) {
     if (!data || !Array.isArray(data.results)) continue;
