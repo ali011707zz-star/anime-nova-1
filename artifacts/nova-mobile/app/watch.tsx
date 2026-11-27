@@ -1198,53 +1198,6 @@ export default function WatchScreen() {
     return () => { cancelled = true; };
   }, [anime, sourceAnimeId, episodes, historyTotalEps, totalEpsParam]);
 
-  // Check-only Donghua availability probe (same check-first, extract-on-tap lifecycle as Anime!)
-  useEffect(() => {
-    if (Platform.OS === "web" || isAwDubbed || !isDonghuaOrigin) return;
-    const ctrl = new AbortController();
-    let cancelled = false;
-    void probeDonghuaAvailabilityOnPhone({
-      title: titleStr,
-      englishTitle: englishStr,
-      synonyms: donghuaSynonymsRef.current,
-      episode: epNum,
-      signal: ctrl.signal,
-    }).then((found) => {
-      if (cancelled || !isMountedRef.current) return;
-      const entries: { site: "donghua_ax" | "donghua_ak"; tag: string }[] = [];
-      if (found.donghua_ax) entries.push({ site: "donghua_ax", tag: "DX 1" });
-      if (found.donghua_ak) entries.push({ site: "donghua_ak", tag: "DX 2" });
-      if (entries.length === 0) return;
-
-      setAvailableSlots((curr) => {
-        const next = { ...curr };
-        for (const e of entries) {
-          next[e.site] = {
-            "1080p": { serverCount: 1, name: e.tag, tag: e.tag, qualityRank: 1080 },
-            "720p": { serverCount: 1, name: e.tag, tag: e.tag, qualityRank: 720 },
-            "480p": { serverCount: 1, name: e.tag, tag: e.tag, qualityRank: 480 },
-          };
-        }
-        return next;
-      });
-      setSlotStatus((curr) => {
-        const next = { ...curr };
-        for (const e of entries) {
-          for (const q of ["1080p", "720p", "480p"] as const) {
-            const k = pickerSlotKey(e.site, q);
-            next[k] = next[k] || "ready";
-          }
-        }
-        return next;
-      });
-      setAvailabilityChecked(true);
-      setAvailabilityChecking(false);
-    }).catch(() => {});
-    return () => {
-      cancelled = true;
-      ctrl.abort();
-    };
-  }, [isAwDubbed, isDonghuaOrigin, titleStr, englishStr, epNum, availabilityAttempt]);
 
   /* لا نسمح بالتالية عندما لا نملك حداً مؤكداً. شاشة الحلقات تمرر العدد
      الكامل، وسجل المشاهدة يستخدم القيمة المحفوظة أو جلب AniList الاحتياطي. */
@@ -1348,6 +1301,54 @@ export default function WatchScreen() {
   const [availabilityDone, setAvailabilityDone] = useState(false);
   const [availabilityError, setAvailabilityError] = useState(false);
   const [availabilityAttempt, setAvailabilityAttempt] = useState(0);
+
+  // Check-only Donghua availability probe (same check-first, extract-on-tap lifecycle as Anime!)
+  useEffect(() => {
+    if (Platform.OS === "web" || isAwDubbed || !isDonghuaOrigin) return;
+    const ctrl = new AbortController();
+    let cancelled = false;
+    void probeDonghuaAvailabilityOnPhone({
+      title: titleStr,
+      englishTitle: englishStr,
+      synonyms: donghuaSynonymsRef.current,
+      episode: epNum,
+      signal: ctrl.signal,
+    }).then((found) => {
+      if (cancelled || !isMountedRef.current) return;
+      const entries: { site: "donghua_ax" | "donghua_ak"; tag: string }[] = [];
+      if (found.donghua_ax) entries.push({ site: "donghua_ax", tag: "DX 1" });
+      if (found.donghua_ak) entries.push({ site: "donghua_ak", tag: "DX 2" });
+      if (entries.length === 0) return;
+
+      setAvailableSlots((curr) => {
+        const next = { ...curr };
+        for (const e of entries) {
+          next[e.site] = {
+            "1080p": { serverCount: 1, name: e.tag, tag: e.tag, qualityRank: 1080 },
+            "720p": { serverCount: 1, name: e.tag, tag: e.tag, qualityRank: 720 },
+            "480p": { serverCount: 1, name: e.tag, tag: e.tag, qualityRank: 480 },
+          };
+        }
+        return next;
+      });
+      setSlotStatus((curr) => {
+        const next = { ...curr };
+        for (const e of entries) {
+          for (const q of ["1080p", "720p", "480p"] as const) {
+            const k = pickerSlotKey(e.site, q);
+            next[k] = next[k] || "ready";
+          }
+        }
+        return next;
+      });
+      setAvailabilityError(false);
+      setAvailabilityDone(true);
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+      ctrl.abort();
+    };
+  }, [isAwDubbed, isDonghuaOrigin, titleStr, englishStr, epNum, availabilityAttempt]);
   const [showingAvailabilityHints, setShowingAvailabilityHints] = useState(false);
   const availabilityHintKey = `${makeAvailabilityHintKey(
     sourceAnimeId || anime,
