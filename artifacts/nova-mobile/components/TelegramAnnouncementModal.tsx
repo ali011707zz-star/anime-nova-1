@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Linking from "expo-linking";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef } from "react";
 import {
   Animated,
   BackHandler,
@@ -46,26 +46,14 @@ interface TelegramAnnouncementModalProps {
  * Keeping `useVideoPlayer` out of the TV render tree avoids initializing
  * hardware MP4 decoders on Android TV startup, making D-pad focus instant.
  */
-function PhoneAnnouncementVideo({
-  visible,
-  muted,
-}: {
-  visible: boolean;
-  muted: boolean;
-}) {
+function PhoneAnnouncementVideo({ visible }: { visible: boolean }) {
   const player = useVideoPlayer(
     require("../assets/jjk-lethal-company-dance.mp4"),
     (instance) => {
       instance.loop = true;
-      instance.muted = muted;
+      instance.muted = false;
     },
   );
-
-  useEffect(() => {
-    try {
-      player.muted = muted;
-    } catch {}
-  }, [player, muted]);
 
   useEffect(() => {
     try {
@@ -93,7 +81,6 @@ export function TelegramAnnouncementModal({
   const isWhiteTheme = theme === "white";
   const { tv: tvMode } = useTvMetrics();
   const openingTelegramRef = useRef(false);
-  const [muted, setMuted] = useState(false);
 
   const cardOpacity = useRef(new Animated.Value(0)).current;
   const cardScale = useRef(new Animated.Value(0.93)).current;
@@ -221,24 +208,6 @@ export function TelegramAnnouncementModal({
               />
             </Pressable>
 
-            {/* Mute / Unmute toggle */}
-            <Pressable
-              accessibilityLabel={muted ? "تشغيل الصوت" : "كتم الصوت"}
-              onPress={() => setMuted((prev) => !prev)}
-              hitSlop={10}
-              style={({ pressed }) => [
-                styles.cornerButton,
-                styles.muteButtonPos,
-                isWhiteTheme ? styles.whiteCornerButton : styles.darkCornerButton,
-                pressed && styles.pressed,
-              ]}
-            >
-              <Ionicons
-                name={muted ? "volume-mute-outline" : "volume-high-outline"}
-                size={17}
-                color={isWhiteTheme ? "#0F172A" : "rgba(255,255,255,0.88)"}
-              />
-            </Pressable>
 
             {/* Compact mini video medallion */}
             <View style={styles.videoMedallionWrap}>
@@ -249,7 +218,7 @@ export function TelegramAnnouncementModal({
                 style={styles.videoGradientRing}
               >
                 <View style={styles.miniVideoFrame}>
-                  <PhoneAnnouncementVideo visible={visible} muted={muted} />
+                  <PhoneAnnouncementVideo visible={visible} />
                 </View>
               </LinearGradient>
 
@@ -444,9 +413,6 @@ const styles = StyleSheet.create({
   },
   closeButtonPos: {
     right: 13,
-  },
-  muteButtonPos: {
-    left: 13,
   },
   whiteCornerButton: {
     backgroundColor: "rgba(255, 255, 255, 0.9)",
