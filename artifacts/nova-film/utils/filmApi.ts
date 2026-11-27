@@ -52,7 +52,7 @@ function resolveAbsUrl(url: string | undefined, base: string): string {
   return `${base}${url.startsWith("/") ? url : `/${url}`}`;
 }
 
-export const FILM_HOME_CACHE_KEY = "nova_film_home_cache_v5";
+export const FILM_HOME_CACHE_KEY = "nova_film_home_cache_v6";
 let _memHomeFeed: FilmHomeFeed | undefined = undefined;
 
 function normalizeHomeFeed(raw: any): FilmHomeFeed {
@@ -630,7 +630,7 @@ export function setMemoryAnimPage(tab: AnimTabKey, page: number, q: string, item
   ANIM_MEM_CACHE.set(key, { items: normalized, page, totalPages, ts: Date.now() });
   if (page === 1 && !q.trim() && normalized.length > 0) {
     AsyncStorage.setItem(
-      `nova_film_anim_p1_${tab}_v1`,
+      `nova_film_anim_p1_${tab}_v2`,
       JSON.stringify({ items: normalized.slice(0, 24), totalPages }),
     ).catch(() => {});
   }
@@ -640,7 +640,7 @@ export async function loadDiskAnimPage(tab: AnimTabKey): Promise<AnimPageCacheEn
   const mem = getMemoryAnimPage(tab, 1, "");
   if (mem) return mem;
   try {
-    const raw = await AsyncStorage.getItem(`nova_film_anim_p1_${tab}_v1`);
+    const raw = await AsyncStorage.getItem(`nova_film_anim_p1_${tab}_v2`);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     const items = Array.isArray(parsed?.items) ? parsed.items.map(normalizeAnimGridSummary).filter((x: FilmSummary) => x && x.id) : [];
@@ -790,7 +790,7 @@ export function setMemoryBrowsePage(
     normalized.length > 0
   ) {
     AsyncStorage.setItem(
-      `nova_film_browse_p1_${category || "all"}_v1`,
+      `nova_film_browse_p1_${category || "all"}_v2`,
       JSON.stringify({
         items: normalized.slice(0, 24),
         totalPages,
@@ -804,7 +804,7 @@ export async function loadDiskBrowsePage(category = "all"): Promise<BrowseMemEnt
   const mem = getMemoryBrowsePage(category, "الكل", "popularity", "", 1);
   if (mem) return mem;
   try {
-    const raw = await AsyncStorage.getItem(`nova_film_browse_p1_${category || "all"}_v1`);
+    const raw = await AsyncStorage.getItem(`nova_film_browse_p1_${category || "all"}_v2`);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     const items = Array.isArray(parsed?.items)

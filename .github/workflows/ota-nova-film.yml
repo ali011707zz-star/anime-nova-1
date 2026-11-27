@@ -143,35 +143,32 @@ jobs:
               git -C "${APP_DIR}" checkout -- artifacts/api-server/src/app.ts artifacts/api-server/src/routes/ota.ts 2>/dev/null || true
             fi
 
+            # Never downgrade main-branch film.ts on VPS; only rebuild if routes are missing or unhealthy
             NEED_REBUILD=0
             if [ ! -f "${APP_DIR}/artifacts/api-server/src/routes/otaFilm.ts" ] || \
-               ! cmp -s "${STAGE}/artifacts/api-server/src/routes/otaFilm.ts" "${APP_DIR}/artifacts/api-server/src/routes/otaFilm.ts"; then
+               [ ! -f "${APP_DIR}/artifacts/api-server/src/routes/film.ts" ]; then
               NEED_REBUILD=1
             fi
-            if [ ! -f "${APP_DIR}/artifacts/api-server/src/routes/film.ts" ] || \
-               ! cmp -s "${STAGE}/artifacts/api-server/src/routes/film.ts" "${APP_DIR}/artifacts/api-server/src/routes/film.ts"; then
-              NEED_REBUILD=1
-            fi
-
             if ! grep -q "otaFilmRouter" "${APP_DIR}/artifacts/api-server/src/app.ts" || \
                ! grep -q "filmRouter" "${APP_DIR}/artifacts/api-server/src/app.ts"; then
               NEED_REBUILD=1
             fi
-
-            if ! curl -sf "http://127.0.0.1:5000/api/ota-film/status" | grep -q '"nova-film"'; then
+            if ! ((curl -sf "http://127.0.0.1:5000/api/ota-film/status" || curl -sf "http://127.0.0.1:8080/api/ota-film/status") || curl -sf "http://127.0.0.1:8080/api/ota-film/status") | grep -q '"nova-film"'; then
               NEED_REBUILD=1
             fi
-            if ! curl -sf "http://127.0.0.1:5000/api/film/config" | grep -q '"nova-film"'; then
+            if ! (curl -sf "http://127.0.0.1:5000/api/film/config" || curl -sf "http://127.0.0.1:8080/api/film/config") | grep -q '"nova-film"'; then
               NEED_REBUILD=1
             fi
 
             if [ "$NEED_REBUILD" -eq 1 ]; then
-              echo "🔄 Patching /api/ota-film and /api/film routes into VPS api-server..."
-              cp "${STAGE}/artifacts/api-server/src/routes/otaFilm.ts" "${APP_DIR}/artifacts/api-server/src/routes/otaFilm.ts"
+              echo "🔄 Patching missing /api/ota-film routes into VPS api-server..."
+              [ -f "${STAGE}/artifacts/api-server/src/routes/otaFilm.ts" ] && cp "${STAGE}/artifacts/api-server/src/routes/otaFilm.ts" "${APP_DIR}/artifacts/api-server/src/routes/otaFilm.ts"
               mkdir -p "${APP_DIR}/artifacts/api-server/src/lib"
-              cp "${STAGE}/artifacts/api-server/src/lib/mediaVault.ts" "${APP_DIR}/artifacts/api-server/src/lib/mediaVault.ts"
-              cp "${STAGE}/artifacts/api-server/src/routes/mediaVault.ts" "${APP_DIR}/artifacts/api-server/src/routes/mediaVault.ts"
-              cp "${STAGE}/artifacts/api-server/src/routes/film.ts" "${APP_DIR}/artifacts/api-server/src/routes/film.ts"
+              [ -f "${STAGE}/artifacts/api-server/src/lib/mediaVault.ts" ] && cp "${STAGE}/artifacts/api-server/src/lib/mediaVault.ts" "${APP_DIR}/artifacts/api-server/src/lib/mediaVault.ts"
+              [ -f "${STAGE}/artifacts/api-server/src/routes/mediaVault.ts" ] && cp "${STAGE}/artifacts/api-server/src/routes/mediaVault.ts" "${APP_DIR}/artifacts/api-server/src/routes/mediaVault.ts"
+              if [ ! -f "${APP_DIR}/artifacts/api-server/src/routes/film.ts" ] && [ -f "${STAGE}/artifacts/api-server/src/routes/film.ts" ]; then
+                cp "${STAGE}/artifacts/api-server/src/routes/film.ts" "${APP_DIR}/artifacts/api-server/src/routes/film.ts"
+              fi
               python3 - "${APP_DIR}/artifacts/api-server/src/app.ts" <<'PY'
             import pathlib, sys
             p = pathlib.Path(sys.argv[1])
