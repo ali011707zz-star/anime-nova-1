@@ -4,18 +4,37 @@ import { LinearGradient } from "expo-linear-gradient";
 import * as Linking from "expo-linking";
 import React, { useCallback, useEffect, useRef } from "react";
 import {
+  Animated,
   BackHandler,
+  Easing,
   Modal,
   StyleSheet,
   Text,
   View,
-  useWindowDimensions,
 } from "react-native";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "../utils/tv";
+import { tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "../utils/tv";
 import { useColors } from "../hooks/useColors";
 import { useApp } from "../context/AppContext";
 
 const TELEGRAM_URL = "https://t.me/Anime_NOVA_0";
+
+const CHANNEL_PERKS = [
+  {
+    icon: "flash-outline" as const,
+    color: "#38BDF8",
+    text: "تحديثات فورية وإشعارات الحلقات الجديدة",
+  },
+  {
+    icon: "sparkles-outline" as const,
+    color: "#C084FC",
+    text: "طلبات الأنمي والدونغهوا والمدبلج",
+  },
+  {
+    icon: "shield-checkmark-outline" as const,
+    color: "#34D399",
+    text: "دعم سريع ومتابعة حالة السيرفرات",
+  },
+] as const;
 
 interface TelegramAnnouncementModalProps {
   visible: boolean;
@@ -57,12 +76,34 @@ export function TelegramAnnouncementModal({
   visible,
   onClose,
 }: TelegramAnnouncementModalProps) {
-  const { width, height } = useWindowDimensions();
   const colors = useColors();
   const { theme } = useApp();
   const isWhiteTheme = theme === "white";
   const { tv: tvMode } = useTvMetrics();
   const openingTelegramRef = useRef(false);
+
+  const cardOpacity = useRef(new Animated.Value(0)).current;
+  const cardScale = useRef(new Animated.Value(0.93)).current;
+
+  useEffect(() => {
+    if (!visible) return;
+    cardOpacity.setValue(0);
+    cardScale.setValue(0.93);
+    Animated.parallel([
+      Animated.timing(cardOpacity, {
+        toValue: 1,
+        duration: 240,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(cardScale, {
+        toValue: 1,
+        duration: 280,
+        easing: Easing.out(Easing.back(1.15)),
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [cardOpacity, cardScale, visible]);
 
   useEffect(() => {
     if (!visible) return;
@@ -88,100 +129,199 @@ export function TelegramAnnouncementModal({
 
   if (!visible || tvMode) return null;
 
+  const cardBg = isWhiteTheme ? "#FFFFFF" : "#120F1D";
+  const cardBorder = isWhiteTheme
+    ? "rgba(148, 163, 184, 0.35)"
+    : "rgba(56, 189, 248, 0.22)";
+  const headerGradient: [string, string, string] = isWhiteTheme
+    ? ["#E0F2FE", "#EEF2FF", "#FFFFFF"]
+    : ["#0A1B30", "#13102B", "#120F1D"];
+  const perksBoxBg = isWhiteTheme
+    ? "rgba(241, 245, 249, 0.85)"
+    : "rgba(255, 255, 255, 0.04)";
+  const perksBoxBorder = isWhiteTheme
+    ? "rgba(203, 213, 225, 0.7)"
+    : "rgba(255, 255, 255, 0.08)";
+
   return (
     <Modal
       visible={visible}
       transparent
-      animationType={tvMode ? "none" : "fade"}
+      animationType="fade"
       onRequestClose={onClose}
       statusBarTranslucent
     >
-      <View style={[styles.backdrop, { backgroundColor: colors.overlay }, tvMode && styles.tvBackdrop]}>
-        <View
+      <View
+        style={[
+          styles.backdrop,
+          { backgroundColor: colors.overlay || "rgba(4, 3, 10, 0.82)" },
+        ]}
+      >
+        <Animated.View
           style={[
             styles.card,
-            { backgroundColor: colors.surface, borderColor: colors.border },
-            tvMode && styles.tvCard,
+            {
+              backgroundColor: cardBg,
+              borderColor: cardBorder,
+              opacity: cardOpacity,
+              transform: [{ scale: cardScale }],
+            },
           ]}
           accessibilityViewIsModal
         >
-          <Pressable
-            key={`telegram-close-${visible ? "open" : "closed"}`}
-            accessibilityLabel="إغلاق"
-            testID="telegram-announcement-close"
-            onPress={onClose}
-            focusable={tvMode}
-            hasTVPreferredFocus={false}
-            hitSlop={tvMode ? 14 : 8}
-            style={({ pressed, focused }) => [
-              styles.closeButton,
-              isWhiteTheme ? styles.whiteCloseButton : styles.darkCloseButton,
-              tvMode && (isWhiteTheme ? styles.tvWhiteCloseButton : styles.tvCloseButton),
-              tvMode && tvFocusStyle(focused),
-              pressed && styles.pressed,
-            ]}
+          {/* Compact dark-nebula hero header with framed mini video */}
+          <LinearGradient
+            colors={headerGradient}
+            start={{ x: 0.1, y: 0 }}
+            end={{ x: 0.9, y: 1 }}
+            style={styles.heroHeader}
           >
-            <Ionicons name="close" size={tvMode ? 22 : 20} color={isWhiteTheme ? "#0F172A" : "#FFFFFF"} />
-            {tvMode && (
-              <Text style={[styles.tvCloseLabel, { color: isWhiteTheme ? "#0F172A" : "#FFFFFF" }]}>
-                إغلاق
-              </Text>
-            )}
-          </Pressable>
+            <View
+              pointerEvents="none"
+              style={[
+                styles.heroAura,
+                isWhiteTheme && { backgroundColor: "rgba(34, 158, 217, 0.10)" },
+              ]}
+            />
 
-          {tvMode ? (
-            <LinearGradient
-              colors={["#0f172a", "#1e1b4b", "#090d16"]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={[styles.videoFrame, styles.tvVideoFrame, { borderColor: colors.border }]}
+            {/* Close button */}
+            <Pressable
+              key={`telegram-close-${visible ? "open" : "closed"}`}
+              accessibilityLabel="إغلاق"
+              testID="telegram-announcement-close"
+              onPress={onClose}
+              focusable={tvMode}
+              hasTVPreferredFocus={false}
+              hitSlop={10}
+              style={({ pressed, focused }) => [
+                styles.cornerButton,
+                styles.closeButtonPos,
+                isWhiteTheme ? styles.whiteCornerButton : styles.darkCornerButton,
+                tvMode && tvFocusStyle(focused),
+                pressed && styles.pressed,
+              ]}
             >
-              <View style={styles.tvVisualBanner}>
-                <View style={styles.tvBigTelegramCircle}>
-                  <Ionicons name="paper-plane" size={44} color="#FFFFFF" />
-                </View>
-                <Text style={styles.tvVisualBrand}>ANIME NOVA</Text>
-                <Text style={styles.tvVisualHandle}>@Anime_NOVA_0</Text>
-              </View>
-            </LinearGradient>
-          ) : (
-            <View style={[styles.videoFrame, { borderColor: colors.border }]}>
-              <PhoneAnnouncementVideo visible={visible} />
-            </View>
-          )}
+              <Ionicons
+                name="close"
+                size={18}
+                color={isWhiteTheme ? "#0F172A" : "rgba(255,255,255,0.88)"}
+              />
+            </Pressable>
 
-          <View style={[styles.content, tvMode && styles.tvContent]}>
-            <View style={styles.telegramIcon}>
-              <Ionicons name="paper-plane" size={20} color="#FFFFFF" />
+
+            {/* Compact mini video medallion */}
+            <View style={styles.videoMedallionWrap}>
+              <LinearGradient
+                colors={["#38BDF8", "#229ED9", "#A855F7"]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.videoGradientRing}
+              >
+                <View style={styles.miniVideoFrame}>
+                  <PhoneAnnouncementVideo visible={visible} />
+                </View>
+              </LinearGradient>
+
+              <View
+                style={[
+                  styles.floatingTelegramBadge,
+                  { borderColor: isWhiteTheme ? "#FFFFFF" : "#120F1D" },
+                ]}
+              >
+                <Ionicons name="paper-plane" size={14} color="#FFFFFF" />
+              </View>
             </View>
-            <Text style={[styles.title, { color: colors.textPrimary }, tvMode && styles.tvTitle]}>
+
+            {/* Official channel handle badge */}
+            <View
+              style={[
+                styles.handlePill,
+                isWhiteTheme && styles.whiteHandlePill,
+              ]}
+            >
+              <View style={styles.handleLiveDot} />
+              <Text
+                style={[
+                  styles.handleText,
+                  isWhiteTheme && { color: "#0369A1" },
+                ]}
+              >
+                @Anime_NOVA_0
+              </Text>
+            </View>
+          </LinearGradient>
+
+          {/* Main body */}
+          <View style={styles.content}>
+            <Text style={[styles.title, { color: colors.textPrimary }]}>
               انضم إلى قناتنا على تلجرام
             </Text>
-            <Text style={[styles.message, { color: colors.textSecondary }, tvMode && styles.tvMessage]}>
-              تابع أخبار وتحديثات NOVA Anime عبر قناتنا الرسمية على تلجرام،
-              وأرسل لنا بلاغاتك عن أي مشكلة تواجهك.
+
+            <Text style={[styles.message, { color: colors.textSecondary }]}>
+              تابع أحدث الحلقات والتحديثات الفورية لتطبيق{" "}
+              {"\u2066Anime NOVA\u2069"}، وشاركنا بلاغاتك واقتراحاتك مباشرة.
             </Text>
 
-            <View style={tvMode ? styles.tvActionsColumn : styles.phoneActionsColumn}>
+            {/* 3 crisp benefits */}
+            <View
+              style={[
+                styles.perksBox,
+                { backgroundColor: perksBoxBg, borderColor: perksBoxBorder },
+              ]}
+            >
+              {CHANNEL_PERKS.map((perk) => (
+                <View key={perk.text} style={styles.perkRow}>
+                  <View
+                    style={[
+                      styles.perkIconWrap,
+                      { backgroundColor: `${perk.color}18` },
+                    ]}
+                  >
+                    <Ionicons name={perk.icon} size={14} color={perk.color} />
+                  </View>
+                  <Text
+                    style={[
+                      styles.perkText,
+                      {
+                        color: isWhiteTheme
+                          ? "#334155"
+                          : "rgba(241, 245, 249, 0.88)",
+                      },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {perk.text}
+                  </Text>
+                </View>
+              ))}
+            </View>
+
+            {/* Actions */}
+            <View style={styles.phoneActionsColumn}>
               <Pressable
                 accessibilityLabel="متابعة إلى التطبيق"
                 testID="telegram-announcement-dismiss"
                 onPress={onClose}
                 focusable={tvMode}
-                hasTVPreferredFocus={tvMode && visible}
+                hasTVPreferredFocus={false}
                 style={({ pressed, focused }) => [
-                  tvMode ? styles.tvContinuePrimaryBtn : styles.secondaryButton,
-                  !tvMode && { backgroundColor: colors.input, borderRadius: 12 },
+                  styles.secondaryButton,
+                  {
+                    backgroundColor: isWhiteTheme
+                      ? "#F1F5F9"
+                      : "rgba(255, 255, 255, 0.055)",
+                    borderColor: isWhiteTheme
+                      ? "#E2E8F0"
+                      : "rgba(255, 255, 255, 0.09)",
+                  },
                   tvMode && tvFocusStyle(focused),
                   pressed && styles.pressed,
                 ]}
               >
-                {tvMode && <Ionicons name="play-circle-outline" size={22} color="#FFFFFF" />}
                 <Text
                   style={[
                     styles.secondaryButtonText,
-                    { color: tvMode ? "#FFFFFF" : colors.textSecondary },
-                    tvMode && styles.tvContinuePrimaryText,
+                    { color: colors.textSecondary },
                   ]}
                 >
                   متابعة إلى التطبيق
@@ -195,20 +335,30 @@ export function TelegramAnnouncementModal({
                 focusable={tvMode}
                 hasTVPreferredFocus={false}
                 style={({ pressed, focused }) => [
-                  styles.primaryButton,
-                  tvMode && styles.tvButton,
+                  styles.primaryButtonOuter,
                   tvMode && tvFocusStyle(focused),
                   pressed && styles.pressed,
                 ]}
               >
-                <Ionicons name="paper-plane-outline" size={tvMode ? 22 : 18} color="#FFFFFF" />
-                <Text style={[styles.primaryButtonText, tvMode && styles.tvPrimaryButtonText]}>
-                  انضم الآن
-                </Text>
+                <LinearGradient
+                  colors={["#2AABEE", "#229ED9", "#0284C7"]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.primaryButton}
+                >
+                  <Ionicons
+                    name="paper-plane"
+                    size={17}
+                    color="#FFFFFF"
+                  />
+                  <Text style={styles.primaryButtonText}>
+                    انضم إلى القناة الآن
+                  </Text>
+                </LinearGradient>
               </Pressable>
             </View>
           </View>
-        </View>
+        </Animated.View>
       </View>
     </Modal>
   );
@@ -219,230 +369,202 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 20,
-    backgroundColor: "rgba(0, 0, 0, 0.78)",
-  },
-  tvBackdrop: {
-    paddingHorizontal: 48,
-    backgroundColor: "rgba(2, 4, 12, 0.88)",
+    paddingHorizontal: 22,
   },
   card: {
     width: "100%",
-    maxWidth: 420,
+    maxWidth: 368,
     overflow: "hidden",
-    borderRadius: 26,
-    backgroundColor: "#15111F",
+    borderRadius: 28,
     borderWidth: 1,
-    borderColor: "rgba(216, 180, 254, 0.24)",
     shadowColor: "#000000",
-    shadowOpacity: 0.45,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: 12 },
-    elevation: 12,
+    shadowOpacity: 0.5,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 14 },
+    elevation: 16,
   },
-  tvCard: {
-    width: "82%",
-    maxWidth: 820,
-    minHeight: 310,
-    borderRadius: 24,
-    flexDirection: "row",
+  heroHeader: {
+    width: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingTop: 22,
+    paddingBottom: 14,
+    paddingHorizontal: 20,
+    overflow: "hidden",
   },
-  closeButton: {
+  heroAura: {
     position: "absolute",
-    top: 12,
-    right: 12,
-    zIndex: 2,
+    width: 210,
+    height: 210,
+    borderRadius: 105,
+    top: -42,
+    backgroundColor: "rgba(34, 158, 217, 0.14)",
+  },
+  cornerButton: {
+    position: "absolute",
+    top: 13,
+    zIndex: 4,
     width: 34,
     height: 34,
-    alignItems: "center",
-    justifyContent: "center",
     borderRadius: 17,
-  },
-  whiteCloseButton: {
-    backgroundColor: "#F1F5F9",
+    alignItems: "center",
+    justifyContent: "center",
     borderWidth: 1,
+  },
+  closeButtonPos: {
+    right: 13,
+  },
+  whiteCornerButton: {
+    backgroundColor: "rgba(255, 255, 255, 0.9)",
     borderColor: "#CBD5E1",
   },
-  darkCloseButton: {
-    backgroundColor: "rgba(0, 0, 0, 0.48)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.16)",
+  darkCornerButton: {
+    backgroundColor: "rgba(9, 12, 24, 0.62)",
+    borderColor: "rgba(255, 255, 255, 0.14)",
   },
-  tvWhiteCloseButton: {
-    width: 92,
-    height: 44,
-    borderRadius: 14,
-    top: 14,
-    right: 14,
-    flexDirection: "row",
-    gap: 6,
-    paddingHorizontal: 14,
-    borderWidth: 1.5,
-    borderColor: "#CBD5E1",
+  videoMedallionWrap: {
+    position: "relative",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  videoGradientRing: {
+    padding: 2.5,
+    borderRadius: 23,
+  },
+  miniVideoFrame: {
+    width: 118,
+    height: 104,
+    borderRadius: 20.5,
+    overflow: "hidden",
     backgroundColor: "#FFFFFF",
-    shadowColor: "#000",
-    shadowOpacity: 0.10,
-    shadowRadius: 6,
-    elevation: 3,
   },
-  tvCloseButton: {
-    width: 92,
-    height: 44,
-    borderRadius: 14,
-    top: 14,
-    right: 14,
-    flexDirection: "row",
-    gap: 6,
-    paddingHorizontal: 14,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.22)",
-    backgroundColor: "rgba(20,16,30,0.92)",
-  },
-  tvCloseLabel: {
-    color: "#FFFFFF",
-    fontFamily: "Cairo_700Bold",
-    fontSize: 15,
-  },
-  videoFrame: {
+  video: {
     width: "100%",
-    aspectRatio: 498 / 436,
-    backgroundColor: "#09090B",
+    height: "100%",
   },
-  tvVideoFrame: {
-    width: "36%",
-    alignSelf: "stretch",
-    aspectRatio: undefined,
-    borderRightWidth: 1,
-    borderRightColor: "rgba(216, 180, 254, 0.16)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  tvVisualBanner: {
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-    padding: 20,
-  },
-  tvBigTelegramCircle: {
-    width: 84,
-    height: 84,
-    borderRadius: 42,
+  floatingTelegramBadge: {
+    position: "absolute",
+    bottom: -7,
+    right: -7,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: "#229ED9",
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 4,
-    borderWidth: 3,
-    borderColor: "rgba(255,255,255,0.25)",
+    borderWidth: 2.5,
   },
-  tvVisualBrand: {
-    color: "#FFFFFF",
-    fontFamily: "Cairo_800ExtraBold",
-    fontSize: 20,
-    letterSpacing: 1,
+  handlePill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 99,
+    backgroundColor: "rgba(34, 158, 217, 0.14)",
+    borderWidth: 1,
+    borderColor: "rgba(56, 189, 248, 0.3)",
   },
-  tvVisualHandle: {
-    color: "#38bdf8",
+  whiteHandlePill: {
+    backgroundColor: "rgba(14, 165, 233, 0.12)",
+    borderColor: "rgba(14, 165, 233, 0.28)",
+  },
+  handleLiveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#38BDF8",
+  },
+  handleText: {
+    color: "#7DD3FC",
     fontFamily: "Cairo_700Bold",
-    fontSize: 14,
-  },
-  video: {
-    flex: 1,
+    fontSize: 12,
+    letterSpacing: 0.3,
   },
   content: {
     alignItems: "center",
-    paddingHorizontal: 22,
-    paddingTop: 18,
+    paddingHorizontal: 20,
+    paddingTop: 6,
     paddingBottom: 20,
   },
-  tvContent: {
-    flex: 1,
-    alignItems: "stretch",
-    justifyContent: "center",
-    paddingHorizontal: 32,
-    paddingTop: 26,
-    paddingBottom: 26,
-  },
-  telegramIcon: {
-    width: 42,
-    height: 42,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 9,
-    borderRadius: 21,
-    backgroundColor: "#229ED9",
-    alignSelf: "center",
-  },
   title: {
-    color: "#FFFFFF",
-    fontFamily: "Cairo_700Bold",
+    fontFamily: "Cairo_800ExtraBold",
     fontSize: 19,
     textAlign: "center",
   },
-  tvTitle: { fontSize: 22 },
   message: {
-    marginTop: 7,
-    color: "rgba(255, 255, 255, 0.7)",
+    marginTop: 6,
     fontFamily: "Cairo_400Regular",
-    fontSize: 13,
-    lineHeight: 22,
+    fontSize: 12.5,
+    lineHeight: 20,
     textAlign: "center",
   },
-  tvMessage: { fontSize: 15, lineHeight: 24 },
+  perksBox: {
+    width: "100%",
+    marginTop: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 16,
+    borderWidth: 1,
+    gap: 8,
+  },
+  perkRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 9,
+  },
+  perkIconWrap: {
+    width: 24,
+    height: 24,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  perkText: {
+    flex: 1,
+    fontFamily: "Cairo_600SemiBold",
+    fontSize: 12,
+    textAlign: "right",
+  },
   phoneActionsColumn: {
     width: "100%",
     flexDirection: "column-reverse",
     alignItems: "center",
-    gap: 8,
-    marginTop: 14,
+    gap: 9,
+    marginTop: 16,
   },
-  tvActionsColumn: {
+  primaryButtonOuter: {
     width: "100%",
-    flexDirection: "column",
-    gap: 10,
-    marginTop: 18,
+    borderRadius: 15,
+    overflow: "hidden",
   },
   primaryButton: {
     width: "100%",
-    height: 46,
+    height: 48,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    borderRadius: 15,
-    backgroundColor: "#229ED9",
   },
   primaryButtonText: {
     color: "#FFFFFF",
     fontFamily: "Cairo_700Bold",
-    fontSize: 14,
+    fontSize: 14.5,
   },
-  tvPrimaryButtonText: { fontSize: 16 },
-  tvButton: { height: 50, borderRadius: 14 },
   secondaryButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-  },
-  secondaryButtonText: {
-    color: "rgba(255, 255, 255, 0.55)",
-    fontFamily: "Cairo_600SemiBold",
-    fontSize: 12,
-  },
-  tvContinuePrimaryBtn: {
     width: "100%",
-    height: 52,
-    flexDirection: "row",
+    height: 42,
+    borderRadius: 13,
+    borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
-    borderRadius: 14,
-    backgroundColor: "#06b6d4",
   },
-  tvContinuePrimaryText: {
-    fontSize: 17,
-    fontFamily: "Cairo_700Bold",
-    color: "#FFFFFF",
+  secondaryButtonText: {
+    fontFamily: "Cairo_600SemiBold",
+    fontSize: 13,
   },
   pressed: {
-    opacity: 0.72,
+    opacity: 0.78,
   },
 });
