@@ -540,6 +540,7 @@ export default function AnimeDetailScreen() {
   }
 
   const arabicTitle = anime?.title_ar || anime?.synonyms?.find((value: string) => /[\u0600-\u06FF]/.test(value)) || getKnownArabicAnimeTitle(anime?.id, anime?.title?.english, anime?.title?.romaji) || autoTitleAr || undefined;
+  const isDonghua = anime?.countryOfOrigin === "CN";
   const mediaTitles = anime
     ? formatMediaTitleHierarchy({
         english: anime.title?.english,
