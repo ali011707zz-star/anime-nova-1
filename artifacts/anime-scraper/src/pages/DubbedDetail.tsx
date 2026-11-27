@@ -1,7 +1,7 @@
 import { API_BASE } from "@/lib/apiBase";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useLocation, useSearch } from "wouter";
-import { ChevronRight, Play, Clock, Loader2, X } from "lucide-react";
+import { ChevronRight, Play, Clock, Loader2, X, Eye, EyeOff } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AnimeMascot } from "@/components/AnimeMascot";
 import SEO from "@/components/SEO";

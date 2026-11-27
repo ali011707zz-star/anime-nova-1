@@ -337,6 +337,11 @@ export default function AwDubbedWatch() {
           }
         }}
         onFail={() => {
+          // إذا فشل الرابط المباشر وكان هناك رابط proxy احتياطي لنفس الجودة، بدّل إليه بصمت أولاً
+          if (curSrc?.hlsUrl && playUrl !== curSrc.hlsUrl) {
+            setPlayUrl(curSrc.hlsUrl);
+            return;
+          }
           // عند فشل الـ source الحالي انتقل للتالي تلقائياً
           const next = selIdx + 1;
           if (next < allSources.length) handlePlay(next);

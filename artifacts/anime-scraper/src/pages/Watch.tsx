@@ -10,6 +10,13 @@ import {
   type ReactNode,
 } from "react";
 import { getAppToken } from "@/lib/appToken";
+import {
+  buildWebPlaybackCandidates,
+  getWebDirectRequestHeaders,
+  isBrowserNonIframeMediaUrl,
+  isKawaiiCdnUrl,
+  isKawaiiHlsUrl,
+} from "@/lib/webStreamRouting.mjs";
 import { useLocation } from "wouter";
 import { useAuth } from "@/lib/auth-context";
 import { saveProgress as saveProgressServer } from "@/lib/db";
@@ -120,7 +127,7 @@ const GENRE_MAP: Record<string, string> = {
 };
 
 /* ══════════════════════════════════ TYPES ════════════════════ */
-type Quality = "1080p FHD" | "720p HD" | "360p SD";
+type Quality = "1080p FHD" | "720p HD" | "480p SD" | "360p SD";
 interface SkipTimes {
   op?: { start: number; end: number };
   ed?: { start: number; end: number };
@@ -312,7 +319,7 @@ function saveHistory(
   } catch {}
 }
 
-const QUALITY_LABELS: Quality[] = ["1080p FHD", "720p HD", "360p SD"];
+const QUALITY_LABELS: Quality[] = ["1080p FHD", "720p HD", "480p SD", "360p SD"];
 
 /* ── FetchedSrc: shape returned by /api/anime/fetch-source ── */
 interface FetchedSrc {
@@ -331,6 +338,8 @@ interface FetchedSrc {
   available?: boolean;
   checkOnly?: boolean;
   corsOk?: boolean; // CDN يدعم CORS * → تشغيل مباشر بدون proxy
+  rawUrl?: string;
+  deliveryMode?: string;
   subtitleUrl?: string;
   hasBuiltinSub?: boolean;
   skipIntro?: { start: number; end: number };
@@ -446,6 +455,21 @@ const SCRAPER_DEFS: {
   audioLang?: "en";
   isArabic?: true;
 }[] = [
+  // ── NOVA VIP (تيليجرام مباشر) ──
+  {
+    site: "nova_tg",
+    name: "NOVA VIP",
+    desc: "سيرفر خاص فائق السرعة · ترجمة عربية",
+    tag: "VIP",
+    isArabic: true,
+  },
+  {
+    site: "nova_tg_dub",
+    name: "NOVA VIP (إنجليزي)",
+    desc: "سيرفر خاص فائق السرعة · دبلجة إنجليزية",
+    tag: "VIP EN",
+    audioLang: "en",
+  },
   // ── ترجمة عربية مدمجة (الأولوية العليا) ──
   {
     site: "animewitcher",
@@ -502,6 +526,20 @@ const SCRAPER_DEFS: {
     desc: "ترجمة آلية خارجية · HLS",
     tag: "RE",
   },
+  {
+    site: "reflix_dub",
+    name: "ReAnime (إنجليزي)",
+    desc: "دبلجة إنجليزية · ترجمة آلية · HLS",
+    tag: "RE DUB",
+    audioLang: "en",
+  },
+  {
+    site: "megaplay_dub",
+    name: "MegaPlay (إنجليزي)",
+    desc: "دبلجة إنجليزية · ترجمة آلية · HLS",
+    tag: "MP DUB",
+    audioLang: "en",
+  },
 ];
 
 /** مجموعة المصادر العربية — لا تعرض زر الترجمة الخارجية لها */
@@ -510,13 +548,15 @@ const ARABIC_SITES = new Set(
 );
 
 /* ── Static picker للويب: جودات مكدّسة + صفوف مصادر (تصميم Aniyomi) ── */
-type WebQualityKey = "1080p" | "720p" | "360p";
+type WebQualityKey = "1080p" | "720p" | "480p" | "360p";
 /* KW (kawaii) يوفر 1080p فقط — لا يُعرض في 720p/480p لتجنب الإيهام بأنه متاح بجودات أخرى */
 const STATIC_PICKER_WEB: Record<
   WebQualityKey,
   { site: string; tag: string; serverLabel?: string }[]
 > = {
   "1080p": [
+    { site: "nova_tg", tag: "VIP" },
+    { site: "nova_tg_dub", tag: "VIP EN" },
     { site: "animewitcher", tag: "AW" },
     { site: "animeify", tag: "AF" },
     { site: "sanime", tag: "SA" },
@@ -526,8 +566,12 @@ const STATIC_PICKER_WEB: Record<
     { site: "kawaii", tag: "KW" },
     { site: "megaplay", tag: "MP" },
     { site: "reflix", tag: "RE" },
+    { site: "reflix_dub", tag: "RE DUB" },
+    { site: "megaplay_dub", tag: "MP DUB" },
   ],
   "720p": [
+    { site: "nova_tg", tag: "VIP" },
+    { site: "nova_tg_dub", tag: "VIP EN" },
     { site: "animewitcher", tag: "AW" },
     { site: "animeify", tag: "AF" },
     { site: "sanime", tag: "SA" },
@@ -536,8 +580,26 @@ const STATIC_PICKER_WEB: Record<
     { site: "anime4up2", tag: "AD 2" },
     { site: "megaplay", tag: "MP" },
     { site: "reflix", tag: "RE" },
+    { site: "reflix_dub", tag: "RE DUB" },
+    { site: "megaplay_dub", tag: "MP DUB" },
+  ],
+  "480p": [
+    { site: "nova_tg", tag: "VIP" },
+    { site: "nova_tg_dub", tag: "VIP EN" },
+    { site: "animewitcher", tag: "AW" },
+    { site: "animeify", tag: "AF" },
+    { site: "sanime", tag: "SA" },
+    { site: "anifox", tag: "FX" },
+    { site: "anime4up2_hard", tag: "AD 1" },
+    { site: "anime4up2", tag: "AD 2" },
+    { site: "megaplay", tag: "MP" },
+    { site: "reflix", tag: "RE" },
+    { site: "reflix_dub", tag: "RE DUB" },
+    { site: "megaplay_dub", tag: "MP DUB" },
   ],
   "360p": [
+    { site: "nova_tg", tag: "VIP" },
+    { site: "nova_tg_dub", tag: "VIP EN" },
     { site: "animewitcher", tag: "AW" },
     { site: "animeify", tag: "AF" },
     { site: "sanime", tag: "SA" },
@@ -546,13 +608,16 @@ const STATIC_PICKER_WEB: Record<
     { site: "anime4up2", tag: "AD 2" },
     { site: "megaplay", tag: "MP" },
     { site: "reflix", tag: "RE" },
+    { site: "reflix_dub", tag: "RE DUB" },
+    { site: "megaplay_dub", tag: "MP DUB" },
   ],
 };
-const WEB_Q_KEYS: WebQualityKey[] = ["1080p", "720p", "360p"];
+const WEB_Q_KEYS: WebQualityKey[] = ["1080p", "720p", "480p", "360p"];
 /* خريطة جودة الويب → Quality tier — لفلترة المصادر per-row */
 const PICKER_QMAP: Record<WebQualityKey, Quality> = {
   "1080p": "1080p FHD",
   "720p": "720p HD",
+  "480p": "480p SD",
   "360p": "360p SD",
 };
 
@@ -598,6 +663,10 @@ const KAWAII_SUBTITLE_SITES = new Set([
   "anineko", // AN
   "animekai", // AK
   "megaplay", // MP
+  "megaplay_dub", // MP DUB
+  "reflix", // RE
+  "reflix_dub", // RE DUB
+  "anime4up2", // AD 2
 ]);
 
 /* These providers are intentionally left without the generic episode subtitle
@@ -619,9 +688,11 @@ function getSrcQualityTier(src: FetchedSrc): Quality {
   if (/(?:2160|1440|1080)\s*p?|\bfhd\b|full[ ._-]*hd/.test(text))
     return "1080p FHD";
   if (/(?:720)\s*p?|(?<!f)\bhd\b/.test(text)) return "720p HD";
-  if (/(?:480|360)\s*p?|\bsd\b/.test(text)) return "360p SD";
+  if (/(?:480)\s*p?/.test(text)) return "480p SD";
+  if (/(?:360)\s*p?|\bsd\b/.test(text)) return "360p SD";
   if (rank >= 13) return "1080p FHD";
-  if (rank >= 8) return "720p HD";
+  if (rank >= 10) return "720p HD";
+  if (rank >= 7) return "480p SD";
   return "360p SD";
 }
 
@@ -629,6 +700,7 @@ function buildMerged(srcs: FetchedSrc[]): Record<Quality, string[]> {
   const merged: Record<Quality, string[]> = {
     "1080p FHD": [],
     "720p HD": [],
+    "480p SD": [],
     "360p SD": [],
   };
   srcs.forEach((s) => {
@@ -642,12 +714,14 @@ function buildMerged(srcs: FetchedSrc[]): Record<Quality, string[]> {
 const QUALITY_SHORT: Record<Quality, string> = {
   "1080p FHD": "1080",
   "720p HD": "720",
+  "480p SD": "480",
   "360p SD": "360",
 };
 const QUALITY_AR: Record<Quality, string> = {
   "1080p FHD": "دقة عالية جداً",
   "720p HD": "دقة عالية",
-  "360p SD": "دقة متوسطة",
+  "480p SD": "دقة متوسطة",
+  "360p SD": "دقة اقتصادية",
 };
 
 /* ── Filter: sources to show in the picker ── */
@@ -716,46 +790,9 @@ function normCdnHost(url: string): string {
   }
 }
 
-const KAWAII_CDN_HOSTS = new Set([
-  "cdn.momentoai.dev",
-  "video.kawaii-anime.com",
-  "cdn.mewstream.buzz",
-  "hls.krussdomi.com",
-  "bl.krussdomi.com",
-  "cdn.imgnex.top",
-  "cdn.watching.onl",
-  "cdn.kryntal.top",
-  "fetch.nexabloom.top",
-]);
-
-function isKawaiiCdnUrl(url: string): boolean {
-  try {
-    const host = new URL(url, "https://source.invalid").hostname.toLowerCase();
-    return KAWAII_CDN_HOSTS.has(host) ||
-      host.endsWith(".kawaii-anime.com") ||
-      host.endsWith(".momentoai.dev") ||
-      host.endsWith(".mewstream.buzz") ||
-      host.endsWith(".imgnex.top");
-  } catch {
-    return false;
-  }
-}
-
-function isKawaiiHlsUrl(url: string, directType?: string): boolean {
-  return String(directType || "").toLowerCase() === "hls" ||
-    /\.m3u8(?:[?#]|$)/i.test(url) ||
-    /\/(?:hls|playlist)(?:\/|[?#]|$)/i.test(url);
-}
-
 /* ── Detect embed-type URLs (must render in sandboxed iframe, not native video) ── */
 function isIframeUrl(url: string): boolean {
-  if (!url || url.startsWith("/")) return false; // our proxy endpoints start with /
-  if (url.includes("workers.dev")) return false; // Anime-Phoenix CDN (direct video)
-  if (url.includes("streamtape.com")) return false; // direct MP4
-  if (url.includes("sendvid.com")) return false; // direct MP4
-  if (isKawaiiCdnUrl(url)) return false; // Kawaii rotates among several direct media CDNs
-  if (url.includes("missourimonster-vyla.hf.space")) return false; // Vyla proxy (direct HLS)
-  if (url.match(/\.(m3u8|mp4|mkv|webm|ts)([?#]|$)/i)) return false; // video file
+  if (!url || isBrowserNonIframeMediaUrl(url)) return false;
   return url.startsWith("https://"); // external embed page
 }
 
@@ -856,10 +893,26 @@ function getServerInfo(url: string, idx: number): ServerInfo {
       isDirect: !isHls,
     };
   }
-  if (url.includes("pixeldrain.com/api/file/")) {
+  if (url.includes("/api/tg-stream/") || url.includes("/api/tg-media/stream")) {
     return {
-      label: "AnimeWitcher · PD",
-      sublabel: "مباشر · 1080p",
+      label: "NOVA VIP",
+      sublabel: "سيرفر خاص · مباشر",
+      isHls: false,
+      isDirect: true,
+    };
+  }
+  if (url.includes("pixeldrain.com/api/file/") || url.includes("pixeldrain.net/api/file/")) {
+    return {
+      label: "مباشر · PD",
+      sublabel: "مباشر CDN",
+      isHls: false,
+      isDirect: true,
+    };
+  }
+  if (/^https?:\/\/download\d*\.mediafire\.com\//i.test(url)) {
+    return {
+      label: "مباشر · MF",
+      sublabel: "مباشر CDN",
       isHls: false,
       isDirect: true,
     };
@@ -1597,6 +1650,13 @@ const QUALITY_STYLE: Record<
     text: "rgba(110,231,183,0.92)",
     icon: "rgba(52,211,153,0.68)",
   },
+  "480p SD": {
+    dot: "#60a5fa",
+    badge: "rgba(96,165,250,0.09)",
+    border: "rgba(96,165,250,0.22)",
+    text: "rgba(147,197,253,0.90)",
+    icon: "rgba(96,165,250,0.65)",
+  },
   "360p SD": {
     dot: "#94a3b8",
     badge: "rgba(148,163,184,0.07)",
@@ -1608,18 +1668,21 @@ const QUALITY_STYLE: Record<
 const Q_LABEL: Record<Quality, string> = {
   "1080p FHD": "جودة عالية جداً · FHD 1080",
   "720p HD": "جودة عالية · HD 720",
-  "360p SD": "جودة متوسطة · SD 360",
+  "480p SD": "جودة متوسطة · SD 480",
+  "360p SD": "جودة اقتصادية · SD 360",
 };
 const Q_SHORT: Record<Quality, string> = {
   "1080p FHD": "FHD",
   "720p HD": "HD",
+  "480p SD": "480",
   "360p SD": "SD",
 };
 
 /* ══════════════════════════════════ SCRAPER PICKER ══════════ */
 const QUALITY_TIER_RANK: Record<Quality, number> = {
-  "1080p FHD": 3,
-  "720p HD": 2,
+  "1080p FHD": 4,
+  "720p HD": 3,
+  "480p SD": 2,
   "360p SD": 1,
 };
 
@@ -1965,6 +2028,7 @@ function ScraperPicker({
     () => ({
       "1080p FHD": sourceGroups.filter((g) => g.quality === "1080p FHD"),
       "720p HD": sourceGroups.filter((g) => g.quality === "720p HD"),
+      "480p SD": sourceGroups.filter((g) => g.quality === "480p SD"),
       "360p SD": sourceGroups.filter((g) => g.quality === "360p SD"),
     }),
     [sourceGroups],
@@ -1982,6 +2046,9 @@ function ScraperPicker({
         [...g.srcs].sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0)),
       ),
       "720p HD": groupsByQuality["720p HD"].flatMap((g) =>
+        [...g.srcs].sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0)),
+      ),
+      "480p SD": groupsByQuality["480p SD"].flatMap((g) =>
         [...g.srcs].sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0)),
       ),
       "360p SD": groupsByQuality["360p SD"].flatMap((g) =>
@@ -2374,7 +2441,14 @@ function ScraperPicker({
                       text: "rgba(110,231,183,0.92)",
                       dot: "#34d399",
                     }
-                  : {
+                  : qk === "480p"
+                    ? {
+                        badge: "rgba(96,165,250,0.12)",
+                        border: "rgba(96,165,250,0.28)",
+                        text: "rgba(147,197,253,0.92)",
+                        dot: "#60a5fa",
+                      }
+                    : {
                       badge: "rgba(147,197,253,0.10)",
                       border: "rgba(147,197,253,0.24)",
                       text: "rgba(147,197,253,0.88)",
@@ -4864,7 +4938,7 @@ export default function WatchPage() {
     Record<string, SlotStatus>
   >({});
   const [playerServers, setPlayerServers] = useState<Record<Quality, string[]>>(
-    { "1080p FHD": [], "720p HD": [], "360p SD": [] },
+    { "1080p FHD": [], "720p HD": [], "480p SD": [], "360p SD": [] },
   );
   const [quality, setQuality] = useState<Quality>("720p HD");
   const [availabilityDone, setAvailabilityDone] = useState(false);
@@ -5542,8 +5616,12 @@ export default function WatchPage() {
           ? "1080p"
           : requestedQuality === "720p HD"
             ? "720p"
-            : "360p",
+            : requestedQuality === "480p SD"
+              ? "480p"
+              : "360p",
       );
+      // Enable Direct Mode parity with mobile v1.0.11 (without clientExtract, which is native-only)
+      params.set("directOnly", "1");
       /* anslayerId: يمرَّر من قسم "أحدث الحلقات" (معرّف anslayer المباشر من كتالوجه —
          يتجاوز البحث بالاسم ويحدّد الأنمي الصحيح 100%).
          titleAr: العنوان العربي يُحسَّن البحث على AnimeSlayer (يبحث بالعربي أولاً). */
@@ -5568,14 +5646,14 @@ export default function WatchPage() {
       for (let attempt = 0; attempt < 2 && !ctrl.signal.aborted; attempt++) {
         let r = await fetch(`${API_BASE}/api/anime/fetch-source?${params}`, {
           signal: ctrl.signal,
-          headers: token ? { "X-App-Token": token } : {},
+          headers: getWebDirectRequestHeaders(token),
         });
         // A token can expire between the cache check and the request.
         if (r.status === 403 && !ctrl.signal.aborted) {
           token = await getAppToken(true);
           r = await fetch(`${API_BASE}/api/anime/fetch-source?${params}`, {
             signal: ctrl.signal,
-            headers: token ? { "X-App-Token": token } : {},
+            headers: getWebDirectRequestHeaders(token),
           });
         }
         if (r.ok) {
@@ -5591,7 +5669,8 @@ export default function WatchPage() {
          live quality differs from the card, rather than dropping a healthy source. */
       const QUALITY_FALLBACK_SITES = new Set([
         "kawaii", "anineko", "animekai", "animewitcher", "sanime", "megaplay",
-        "animeify", "anime4up2", "anifox", "anslayer",
+        "megaplay_dub", "reflix", "reflix_dub", "animeify", "anime4up2",
+        "anime4up2_hard", "anifox", "anslayer", "nova_tg", "nova_tg_dub",
       ]);
       if (!data.sources?.length && QUALITY_FALLBACK_SITES.has(site) && !ctrl.signal.aborted) {
         const fallbackParams = new URLSearchParams(params);
@@ -5599,7 +5678,7 @@ export default function WatchPage() {
         try {
           const fallbackResponse = await fetch(`${API_BASE}/api/anime/fetch-source?${fallbackParams}`, {
             signal: ctrl.signal,
-            headers: token ? { "X-App-Token": token } : {},
+            headers: getWebDirectRequestHeaders(token),
           });
           if (fallbackResponse.ok) {
             data = {
@@ -5926,15 +6005,17 @@ export default function WatchPage() {
       const next: Record<Quality, string[]> = {
         "1080p FHD": [...prev["1080p FHD"]],
         "720p HD": [...prev["720p HD"]],
+        "480p SD": [...prev["480p SD"]],
         "360p SD": [...prev["360p SD"]],
       };
       for (const s of newFlat) {
-        const u = s.directUrl || s.url;
+        const plan = buildWebPlaybackCandidates(s);
+        const u = plan.primaryUrl;
         if (!u) continue;
         const tier = getSrcQualityTier(s);
         if (!next[tier].includes(u)) next[tier].push(u);
       }
-      const changed = (["1080p FHD", "720p HD", "360p SD"] as Quality[]).some(
+      const changed = QUALITY_LABELS.some(
         (k) => JSON.stringify(next[k]) !== JSON.stringify(prev[k]),
       );
       return changed ? next : prev;
@@ -5967,7 +6048,7 @@ export default function WatchPage() {
     upgradedToFhdRef.current = true;
     fhdSrcs.sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0));
     const allFhdUs = fhdSrcs
-      .map((s) => s.directUrl || s.url)
+      .map((s) => buildWebPlaybackCandidates(s).primaryUrl)
       .filter(Boolean) as string[];
     // إضافة مصادر 1080p بصمت — لا نبدّل الجودة تلقائياً لتجنّب إيقاف التشغيل الحالي
     setPlayerServers((prev) => ({
@@ -5983,34 +6064,24 @@ export default function WatchPage() {
        wave to cap unnecessary scraper traffic (in-flight requests are left to finish so they
        can still populate the full server list). */
     cancelRemainingScrapers();
-    const clickedUrl = src.directUrl || src.url;
+    const plan = buildWebPlaybackCandidates(src);
+    const clickedUrl = plan.primaryUrl || src.directUrl || src.url;
     const clickedTier = getSrcQualityTier(src);
 
-    /* The player receives only the link selected by the user. Other provider
-       rows remain metadata-only until the user explicitly selects one. */
+    /* Deterministic Browser-Safe Stream Routing (mirrors mobile v1.0.11):
+       - Browser-direct CDNs (Kawaii, Pixeldrain, MediaFire, Drive, OK/VK, BuzzHeavier)
+         play DIRECTLY first (0% VPS bandwidth) with silent VPS proxy fallback as server #2.
+       - VPS-only sites (SA, NOVA VIP) and CORS/Referer-locked HLS (RE, RE DUB, AD 2, MP)
+         route cleanly through VPS proxy (with directSegs=1 stripped for browser CORS safety). */
     const servers: Record<Quality, string[]> = {
       "1080p FHD": [],
       "720p HD": [],
+      "480p SD": [],
       "360p SD": [],
     };
-    servers[clickedTier].push(clickedUrl);
-
-    /* ── kawaii CDN fallback: إذا فشل التشغيل المباشر، نجرّب عبر VPS proxy بـ Referer الصحيح ──
-       cdn.momentoai.dev يشترط Referer: kawaiianime.cc — المتصفح لا يستطيع تعيينه → proxy fallback */
-    const isKawaiiCdn =
-      src.site === "kawaii" && isKawaiiCdnUrl(clickedUrl);
-    if (isKawaiiCdn) {
-      let host = "";
-      try { host = new URL(clickedUrl).hostname.toLowerCase(); } catch {}
-      const kawaiiRef = src.headers?.Referer?.trim() ||
-        (host.endsWith(".mewstream.buzz")
-          ? "https://megaplay.buzz/"
-          : "https://kawaiianime.cc/");
-      const isHlsKw = isKawaiiHlsUrl(clickedUrl, src.directType);
-      const kwProxy = isHlsKw
-        ? `/api/anime/hls-proxy?url=${encodeURIComponent(clickedUrl)}&ref=${encodeURIComponent(kawaiiRef)}`
-        : `/api/anime/video-proxy?url=${encodeURIComponent(clickedUrl)}&ref=${encodeURIComponent(kawaiiRef)}`;
-      servers[clickedTier].splice(1, 0, kwProxy);
+    if (clickedUrl) servers[clickedTier].push(clickedUrl);
+    for (const fb of plan.fallbackUrls) {
+      if (fb && !servers[clickedTier].includes(fb)) servers[clickedTier].push(fb);
     }
 
     /* Store download URL + subtitle URL for player */

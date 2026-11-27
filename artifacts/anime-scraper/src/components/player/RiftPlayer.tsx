@@ -1,4 +1,10 @@
 import { API_BASE } from "@/lib/apiBase";
+import {
+  isBrowserDirectMediaUrl,
+  isKawaiiCdnUrl,
+  isKawaiiHlsUrl,
+  isPreProxiedDirectVideoUrl,
+} from "@/lib/webStreamRouting.mjs";
 /**
  * GLASSY PLAYER v5 — مشغل أنمي زجاجي فاخر
  */
@@ -15,39 +21,7 @@ import {
   ChevronDown, SkipForward,
 } from "lucide-react";
 
-const KAWAII_CDN_HOSTS = new Set([
-  "cdn.momentoai.dev",
-  "video.kawaii-anime.com",
-  "cdn.mewstream.buzz",
-  "hls.krussdomi.com",
-  "bl.krussdomi.com",
-  "cdn.imgnex.top",
-  "cdn.watching.onl",
-  "cdn.kryntal.top",
-  "fetch.nexabloom.top",
-]);
-
-function isKawaiiCdnUrl(value: string): boolean {
-  try {
-    const host = new URL(value, "https://player.invalid").hostname.toLowerCase();
-    return KAWAII_CDN_HOSTS.has(host) ||
-      host.endsWith(".kawaii-anime.com") ||
-      host.endsWith(".momentoai.dev") ||
-      host.endsWith(".mewstream.buzz") ||
-      host.endsWith(".imgnex.top") ||
-      host.endsWith(".watching.onl") ||
-      host.endsWith(".kryntal.top") ||
-      (new URL(value, "https://player.invalid").searchParams.has("md5") &&
-        /^(cdn|video)([.-][a-z0-9-]+)*\./i.test(host));
-  } catch {
-    return false;
-  }
-}
-
-function isKawaiiHlsUrl(value: string): boolean {
-  return /\.m3u8(?:[?#]|$)/i.test(value) ||
-    /\/(?:hls|playlist)(?:\/|[?#]|$)/i.test(value);
-}
+// Kawaii & browser-direct CDN detectors live in @/lib/webStreamRouting.mjs
 
 /* ─────────────────────────────────────── helpers ─── */
 function fmtTime(s: number) {
@@ -584,14 +558,14 @@ export default function RiftPlayer({
       return;
     }
 
-    // Kawaii rotates direct media hostnames; Pixeldrain is a separate confirmed
-    // CORS + Range source. Playlist-shaped Kawaii links must go through HLS.js.
+    // Confirmed browser-direct CDNs (Kawaii, Pixeldrain, MediaFire CDN, Drive, OK/VK, BuzzHeavier, Workers):
+    // stream directly from CDN (0% VPS bandwidth), matching the mobile app direct streaming architecture.
     const isKawaiiCdn = isKawaiiCdnUrl(src);
-    const isCorsDirectCdn = isKawaiiCdn || src.includes("pixeldrain.com/api/file/");
-    if (isCorsDirectCdn && !(isKawaiiCdn && isKawaiiHlsUrl(src))) {
-      // MP4/non-HLS: native <video> element works fine (CORS *)
-      // kawaii CDN: no-Referer=200, wrong-Referer=403 — browser sends page URL as Referer by default
-      if (isKawaiiCdn) v.referrerPolicy = "no-referrer";
+    const isCorsDirectCdn = isBrowserDirectMediaUrl(src);
+    if (isCorsDirectCdn && !isKawaiiHlsUrl(src)) {
+      // MP4/non-HLS: native <video> element streams directly without VPS relay.
+      // kawaii CDN: no-Referer=200, wrong-Referer=403 — browser sends page URL as Referer by default.
+      v.referrerPolicy = isKawaiiCdn ? "no-referrer" : "";
       v.src = src; v.load();
       let done = false;
       const cleanup = () => { done = true; clearTimeout(t); v.removeEventListener("loadedmetadata", onMd); v.removeEventListener("error", onEd); };
@@ -602,16 +576,16 @@ export default function RiftPlayer({
       v.addEventListener("error", onEd, { once: true });
       return;
     }
+    v.referrerPolicy = "";
     // kawaii m3u8: CORS * allows direct hls.js load — falls through to Hls.isSupported() block below
 
-    const isDirect = src.includes("streamtape.com") || src.includes("sendvid.com")
-      || src.includes("videos2.sendvid.com") || src.includes("video-proxy?")
-      || src.includes("/aw-dubbed/mf-stream?")
-      || src.includes("workers.dev")
+    const isPreProxied = isPreProxiedDirectVideoUrl(src);
+    const isDirect = isPreProxied
+      || src.includes("streamtape.com") || src.includes("sendvid.com")
+      || src.includes("videos2.sendvid.com")
       || /\.(mp4|mkv|webm)([?#]|$)/i.test(src);
     if (isDirect) {
-      // روابط proxy الجاهزة تُستخدم مباشرةً بدون إعادة تغليف
-      const isPreProxied = src.includes("video-proxy?") || src.includes("/aw-dubbed/mf-stream?");
+      // روابط proxy الجاهزة (video-proxy / mf-stream / dubbed/stream / tg-stream) تُستخدم مباشرةً بدون إعادة تغليف
       const px = isPreProxied ? src
         : `/api/anime/video-proxy?url=${encodeURIComponent(src)}&ref=${encodeURIComponent(src)}`;
       v.src = px; v.load();

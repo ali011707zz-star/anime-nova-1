@@ -278,7 +278,7 @@ export default function AnimationEpisodes() {
                       <Play className="w-3.5 h-3.5 text-primary fill-primary" />
                     </div>
                     <button
-                      onClick={e => { e.preventDefault(); e.stopPropagation(); setCommentEp({ episode_number: epItem.episode_number }); }}
+                      onClick={e => { e.preventDefault(); e.stopPropagation(); navigate(`/comments?animeId=${encodeURIComponent(String(id || ""))}&ep=${epItem.episode_number}&animeTitle=${encodeURIComponent(String(detail?.title || detail?.name || ""))}`); }}
                       className="w-8 h-8 rounded-xl flex items-center justify-center active:scale-90 transition-transform"
                       style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)" }}
                     >

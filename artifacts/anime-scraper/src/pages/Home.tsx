@@ -391,7 +391,7 @@ export default function Home() {
       .then((d) => setAwCards((d?.results || []).slice(0, 12)))
       .catch(() => {});
 
-    fetch(`${API_BASE}/api/stardima/catalog?section=animation&page=1`)
+    fetch(`${API_BASE}/api/source-catalog/titles?provider=stardima_catalog&section=animation&page=1&limit=8`)
       .then((r) => r.json())
       .then((d) => setStardimaAnim((d?.items || d?.results || []).slice(0, 8)))
       .catch(() => {});
@@ -401,7 +401,7 @@ export default function Home() {
       .then((d) => setDubbedCards((d?.results || d?.items || []).slice(0, 12)))
       .catch(() => {});
 
-    fetch(`${API_BASE}/api/stardima/catalog?section=cartoon&page=1`)
+    fetch(`${API_BASE}/api/source-catalog/titles?provider=stardima_catalog&section=cartoon&page=1&limit=8`)
       .then((r) => r.json())
       .then((d) => setStardimaCartoon((d?.items || d?.results || []).slice(0, 8)))
       .catch(() => {});
