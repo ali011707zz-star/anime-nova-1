@@ -16,7 +16,18 @@ import {
   isExternalFilmId,
   resolveExternalFilmStreams,
   searchExternalCatalog,
+  type ExternalFilmSummary,
 } from "../lib/filmExternalSources.js";
+import {
+  buildTmdbDiscoverSpec,
+  decodeSyntheticTmdbId,
+  formatMergedSeriesDuration,
+  isOfficialAnimationCategory,
+  mapTmdbItemToFilmSummary,
+  mergeSeasonEpisodes,
+  mergeTvSeasons,
+  normalizeArabicSearchVariants,
+} from "../lib/filmCatalogHelpers.mjs";
 
 const router = Router();
 
@@ -173,6 +184,7 @@ async function enrichDetailFromTmdb(row: any): Promise<{
   imdbId: string | null;
   trailerYoutubeKey: string | null;
   cast: any[];
+  seasons: any[];
 }> {
   const type: "movie" | "tv" = row.tmdb_type === "tv" ? "tv" : "movie";
   const cleanEn = String(row.title_en || "").trim();
@@ -204,6 +216,7 @@ async function enrichDetailFromTmdb(row: any): Promise<{
       imdbId: null,
       trailerYoutubeKey: null,
       cast: [],
+      seasons: [],
     };
   }
 
@@ -230,6 +243,7 @@ async function enrichDetailFromTmdb(row: any): Promise<{
       imdbId: null,
       trailerYoutubeKey: null,
       cast: [],
+      seasons: [],
     };
   }
 
@@ -300,16 +314,86 @@ async function enrichDetailFromTmdb(row: any): Promise<{
     imdbId: data?.external_ids?.imdb_id || null,
     trailerYoutubeKey: trailer?.key || null,
     cast,
+    seasons:
+      type === "tv" && Array.isArray(data?.seasons)
+        ? data.seasons.filter((s: any) => Number(s?.season_number) >= 1 && Number(s?.episode_count) > 0)
+        : [],
   };
 }
 
-function decodeSyntheticTmdbId(rawId: number): { realTmdbId: number; tmdbType: "movie" | "tv" } | null {
-  if (!Number.isFinite(rawId) || rawId <= 0) return null;
-  if (rawId >= 1_500_000_000 && rawId < 1_800_000_000) {
-    return { realTmdbId: rawId - 1_500_000_000, tmdbType: "movie" };
+async function fetchTmdbDiscoverCategory(
+  category: string,
+  opts: { genre?: string; sort?: string; year?: number; page?: number } = {},
+  limit = 24,
+): Promise<{ items: ExternalFilmSummary[]; totalPages: number; totalResults: number }> {
+  const spec = buildTmdbDiscoverSpec(category, opts);
+  if (!spec) return { items: [], totalPages: 1, totalResults: 0 };
+  const data = await tmdbFetchOptional(spec.path, "ar");
+  if (!data || !Array.isArray(data.results)) {
+    return { items: [], totalPages: 1, totalResults: 0 };
   }
-  if (rawId >= 1_800_000_000 && rawId < 2_000_000_000) {
-    return { realTmdbId: rawId - 1_800_000_000, tmdbType: "tv" };
+  const items = data.results
+    .map((raw: any) => mapTmdbItemToFilmSummary(raw, spec))
+    .filter((x: ExternalFilmSummary | null): x is ExternalFilmSummary => Boolean(x))
+    .slice(0, limit);
+  return {
+    items,
+    totalPages: Math.min(500, Math.max(1, Number(data.total_pages || 1))),
+    totalResults: Math.max(items.length, Number(data.total_results || items.length)),
+  };
+}
+
+async function searchTmdbCatalog(
+  rawQuery: string,
+  typeFilter: "multi" | "movie" | "tv" = "multi",
+  page = 1,
+  opts: { animationOnly?: boolean } = {},
+): Promise<ExternalFilmSummary[]> {
+  const variants = normalizeArabicSearchVariants(rawQuery).slice(0, 2);
+  if (variants.length === 0) return [];
+  const endpoint = typeFilter === "movie" ? "/search/movie" : typeFilter === "tv" ? "/search/tv" : "/search/multi";
+  const reqs: Promise<any>[] = [];
+  for (const v of variants) {
+    reqs.push(tmdbFetchOptional(`${endpoint}?query=${encodeURIComponent(v)}&page=${page}&include_adult=false`, "ar"));
+  }
+  if (/[A-Za-z]{2,}/.test(variants[0])) {
+    reqs.push(tmdbFetchOptional(`${endpoint}?query=${encodeURIComponent(variants[0])}&page=${page}&include_adult=false`, "en-US"));
+  }
+  const settled = await Promise.all(reqs);
+  const mapped: ExternalFilmSummary[] = [];
+  for (const data of settled) {
+    if (!data || !Array.isArray(data.results)) continue;
+    for (const raw of data.results) {
+      const mType = typeFilter === "multi" ? raw?.media_type : typeFilter;
+      if (mType !== "movie" && mType !== "tv") continue;
+      const item = mapTmdbItemToFilmSummary(raw, { tmdbType: mType });
+      if (!item) continue;
+      if (opts.animationOnly && item.mediaType !== "animation") continue;
+      mapped.push(item);
+    }
+  }
+  return deduplicateFilmSummaries([mapped], undefined, 32);
+}
+
+async function resolveTmdbTvByTitle(title: string, year?: number): Promise<{ tmdbId: number; seasons: any[]; posterUrl: string | null; backdropUrl: string | null } | null> {
+  const variants = normalizeArabicSearchVariants(title).slice(0, 2);
+  for (const q of variants) {
+    const yearParam = year && year >= 1950 ? `&first_air_date_year=${year}` : "";
+    const lang = /[A-Za-z]{2,}/.test(q) ? "en-US" : "ar";
+    const sData = await tmdbFetchOptional(`/search/tv?query=${encodeURIComponent(q)}${yearParam}&include_adult=false`, lang);
+    const hit = Array.isArray(sData?.results) ? sData.results[0] : null;
+    if (hit?.id) {
+      const full = await tmdbFetchOptional(`/tv/${hit.id}`, "ar");
+      const seasons = Array.isArray(full?.seasons)
+        ? full.seasons.filter((s: any) => Number(s?.season_number) >= 1 && Number(s?.episode_count) > 0)
+        : [];
+      return {
+        tmdbId: Number(hit.id),
+        seasons,
+        posterUrl: full?.poster_path ? `${TMDB_IMG_POSTER}${full.poster_path}` : null,
+        backdropUrl: full?.backdrop_path ? `${TMDB_IMG_BACKDROP}${full.backdrop_path}` : null,
+      };
+    }
   }
   return null;
 }
@@ -1149,12 +1233,24 @@ router.get("/home", async (_req: Request, res: Response) => {
       asianRes,
       seriesRes,
       topRatedRes,
-      animRes,
       extHome,
+      tmdbForeignM,
+      tmdbArabicM,
+      tmdbTurkishM,
+      tmdbIndianM,
+      tmdbAsianM,
+      tmdbArabicS,
+      tmdbTurkishS,
+      tmdbIndianS,
+      tmdbAsianS,
+      tmdbDubbedS,
+      tmdbAnimM,
+      tmdbAnimS,
     ] = await Promise.all([
       pool.query(
         `SELECT * FROM film_vault_titles
          WHERE is_archived = FALSE AND has_live_server = TRUE
+           AND media_type != 'animation'
            AND poster_url != '' AND poster_url NOT LIKE '%images.jpg%'
          ORDER BY COALESCE(year, 2020) DESC, COALESCE(imdb_rating, 7.0) DESC, updated_at DESC
          LIMIT 8`,
@@ -1194,16 +1290,19 @@ router.get("/home", async (_req: Request, res: Response) => {
          ORDER BY imdb_rating DESC, COALESCE(year, 2020) DESC, id DESC
          LIMIT 16`,
       ),
-      pool.query(
-        `SELECT * FROM film_vault_titles
-         WHERE is_archived = FALSE AND has_live_server = TRUE AND media_type = 'animation'
-           AND poster_url IS NOT NULL AND poster_url != '' AND poster_url NOT LIKE '%images.jpg%'
-           AND title_en !~* '(detective conan|gintama|mononoke|isekai|gundam|one piece|naruto|bleach|kimetsu|jujutsu|doraemon|crayon shin|precure|anpanman)'
-           AND title_ar !~ '[\u3040-\u30ff\u4e00-\u9faf]'
-         ORDER BY COALESCE(year, 2020) DESC, COALESCE(imdb_rating, 6.8) DESC, id DESC
-         LIMIT 16`,
-      ),
       fetchExternalHomeCatalog().catch(() => null),
+      fetchTmdbDiscoverCategory("foreign_movies", { page: 1 }, 16).catch(() => ({ items: [] })),
+      fetchTmdbDiscoverCategory("arabic_movies", { page: 1 }, 16).catch(() => ({ items: [] })),
+      fetchTmdbDiscoverCategory("turkish_movies", { page: 1 }, 16).catch(() => ({ items: [] })),
+      fetchTmdbDiscoverCategory("indian_movies", { page: 1 }, 16).catch(() => ({ items: [] })),
+      fetchTmdbDiscoverCategory("asian_movies", { page: 1 }, 16).catch(() => ({ items: [] })),
+      fetchTmdbDiscoverCategory("arabic_series", { page: 1 }, 16).catch(() => ({ items: [] })),
+      fetchTmdbDiscoverCategory("turkish_series", { page: 1 }, 16).catch(() => ({ items: [] })),
+      fetchTmdbDiscoverCategory("indian_series", { page: 1 }, 16).catch(() => ({ items: [] })),
+      fetchTmdbDiscoverCategory("asian_series", { page: 1 }, 16).catch(() => ({ items: [] })),
+      fetchTmdbDiscoverCategory("dubbed_series", { page: 1 }, 16).catch(() => ({ items: [] })),
+      fetchTmdbDiscoverCategory("animation_movies", { page: 1 }, 16).catch(() => ({ items: [] })),
+      fetchTmdbDiscoverCategory("animation_series", { page: 1 }, 16).catch(() => ({ items: [] })),
     ]);
 
     const vHero = heroRes.rows.map(rowToFilmSummary);
@@ -1212,7 +1311,6 @@ router.get("/home", async (_req: Request, res: Response) => {
     const vAsian = asianRes.rows.map(rowToFilmSummary);
     const vSeries = seriesRes.rows.map(rowToFilmSummary);
     const vTopRated = topRatedRes.rows.map(rowToFilmSummary);
-    const vAnim = animRes.rows.map(rowToFilmSummary);
 
     const ext = extHome || {
       foreignMovies: [], arabicMovies: [], turkishMovies: [], indianMovies: [],
@@ -1220,25 +1318,26 @@ router.get("/home", async (_req: Request, res: Response) => {
       turkishSeries: [], indianSeries: [], asianSeries: [], dubbedSeries: [], animationSeries: [],
     };
 
-    const hero = deduplicateFilmSummaries([vHero, ext.foreignMovies.slice(0, 4), ext.foreignSeries.slice(0, 2)], undefined, 6);
-    const trendingMovies = deduplicateFilmSummaries([vTrending, ext.foreignMovies], undefined, 16);
-    const latestMovies = deduplicateFilmSummaries([ext.foreignMovies, vLatest], undefined, 16);
-    const foreignMovies = deduplicateFilmSummaries([ext.foreignMovies, vTrending, vLatest], undefined, 16);
-    const arabicMovies = deduplicateFilmSummaries([ext.arabicMovies], undefined, 16);
-    const turkishMovies = deduplicateFilmSummaries([ext.turkishMovies], undefined, 16);
-    const indianMovies = deduplicateFilmSummaries([ext.indianMovies], undefined, 16);
-    const asianMovies = deduplicateFilmSummaries([ext.asianMovies, vAsian], undefined, 16);
+    const hero = deduplicateFilmSummaries([vHero, tmdbForeignM.items.slice(0, 4), ext.foreignMovies.slice(0, 4), ext.foreignSeries.slice(0, 2)], undefined, 6);
+    const trendingMovies = deduplicateFilmSummaries([vTrending, tmdbForeignM.items, ext.foreignMovies], undefined, 16);
+    const latestMovies = deduplicateFilmSummaries([tmdbForeignM.items, ext.foreignMovies, vLatest], undefined, 16);
+    const foreignMovies = deduplicateFilmSummaries([tmdbForeignM.items, ext.foreignMovies, vTrending, vLatest], undefined, 16);
+    const arabicMovies = deduplicateFilmSummaries([ext.arabicMovies, tmdbArabicM.items], undefined, 16);
+    const turkishMovies = deduplicateFilmSummaries([ext.turkishMovies, tmdbTurkishM.items], undefined, 16);
+    const indianMovies = deduplicateFilmSummaries([ext.indianMovies, tmdbIndianM.items], undefined, 16);
+    const asianMovies = deduplicateFilmSummaries([ext.asianMovies, tmdbAsianM.items, vAsian], undefined, 16);
     const popularSeries = deduplicateFilmSummaries([vSeries, ext.foreignSeries], undefined, 16);
     const latestSeries = deduplicateFilmSummaries([ext.foreignSeries, vSeries], undefined, 16);
-    const arabicSeries = deduplicateFilmSummaries([ext.arabicSeries], undefined, 16);
-    const turkishSeries = deduplicateFilmSummaries([ext.turkishSeries], undefined, 16);
-    const asianSeries = deduplicateFilmSummaries([ext.asianSeries], undefined, 16);
-    const dubbedSeries = deduplicateFilmSummaries([ext.dubbedSeries], undefined, 16);
-    const indianSeries = deduplicateFilmSummaries([ext.indianSeries], undefined, 16);
-    const topRated = deduplicateFilmSummaries([vTopRated, ext.foreignMovies], undefined, 16);
-    const animationMovies = deduplicateFilmSummaries([ext.animationMovies, vAnim.filter((x) => x.tmdbType === "movie")], undefined, 16);
-    const animationSeries = deduplicateFilmSummaries([ext.animationSeries, vAnim.filter((x) => x.tmdbType === "tv")], undefined, 16);
-    const animations = deduplicateFilmSummaries([vAnim], undefined, 16);
+    const arabicSeries = deduplicateFilmSummaries([ext.arabicSeries, tmdbArabicS.items], undefined, 16);
+    const turkishSeries = deduplicateFilmSummaries([ext.turkishSeries, tmdbTurkishS.items], undefined, 16);
+    const asianSeries = deduplicateFilmSummaries([ext.asianSeries, tmdbAsianS.items], undefined, 16);
+    const dubbedSeries = deduplicateFilmSummaries([ext.dubbedSeries, tmdbDubbedS.items], undefined, 16);
+    const indianSeries = deduplicateFilmSummaries([ext.indianSeries, tmdbIndianS.items], undefined, 16);
+    const topRated = deduplicateFilmSummaries([vTopRated, tmdbForeignM.items, ext.foreignMovies], undefined, 16);
+    // Official Animation Movies & Animation Series DB ONLY (stops wrong saved vault/scraped anime posters)
+    const animationMovies = deduplicateFilmSummaries([tmdbAnimM.items], undefined, 16);
+    const animationSeries = deduplicateFilmSummaries([tmdbAnimS.items], undefined, 16);
+    const animations = deduplicateFilmSummaries([tmdbAnimM.items.slice(0, 10), tmdbAnimS.items.slice(0, 8)], undefined, 16);
 
     const payload = {
       hero,
@@ -1281,13 +1380,51 @@ router.get("/browse", async (req: Request, res: Response) => {
     const limit = 24;
     const offset = (page - 1) * limit;
 
-    // Map browse category to external catalog key(s)
+    // Official Animation Movies & Animation Series DB ONLY (never serve wrong saved vault or scraped anime posters)
+    if (isOfficialAnimationCategory(category)) {
+      if (q) {
+        const tf = category === "animation_series" ? "tv" : category === "animation_movies" ? "movie" : "multi";
+        const results = await searchTmdbCatalog(q, tf, page, { animationOnly: true });
+        res.json({
+          results: results.slice(0, limit),
+          page,
+          totalPages: results.length >= 16 ? page + 1 : page,
+          totalResults: results.length,
+        });
+        return;
+      }
+      if (category === "animation") {
+        const [mRes, sRes] = await Promise.all([
+          fetchTmdbDiscoverCategory("animation_movies", { genre, sort: sortRaw, year: yearParam, page }, 16),
+          fetchTmdbDiscoverCategory("animation_series", { genre, sort: sortRaw, year: yearParam, page }, 12),
+        ]);
+        const mergedAnim = deduplicateFilmSummaries([mRes.items, sRes.items], undefined, limit);
+        res.json({
+          results: mergedAnim,
+          page,
+          totalPages: Math.max(mRes.totalPages, sRes.totalPages),
+          totalResults: mRes.totalResults + sRes.totalResults,
+        });
+        return;
+      }
+      const animRes = await fetchTmdbDiscoverCategory(category, { genre, sort: sortRaw, year: yearParam, page }, limit);
+      res.json({
+        results: animRes.items,
+        page,
+        totalPages: animRes.totalPages,
+        totalResults: animRes.totalResults,
+      });
+      return;
+    }
+
     const extCatKeys: Record<string, string[]> = {
       all: ["foreign_movies", "foreign_series", "arabic_movies", "arabic_series"],
       movie: ["foreign_movies"],
       foreign_movies: ["foreign_movies"],
+      western_movies: ["foreign_movies"],
       series: ["foreign_series"],
       foreign_series: ["foreign_series"],
+      western_series: ["foreign_series"],
       arabic_movies: ["arabic_movies"],
       arabic_series: ["arabic_series"],
       arabic: ["arabic_movies", "arabic_series"],
@@ -1302,13 +1439,35 @@ router.get("/browse", async (req: Request, res: Response) => {
       asian: ["asian_movies", "asian_series"],
       dubbed: ["dubbed_series"],
       dubbed_series: ["dubbed_series"],
-      animation: [],
-      animation_movies: ["animation_movies"],
-      animation_series: ["animation_series"],
       top_rated: ["foreign_movies"],
     };
 
-    const isPureExternalCat = [
+    const tmdbCatKeys: Record<string, string[]> = {
+      all: ["foreign_movies", "foreign_series"],
+      movie: ["foreign_movies"],
+      foreign_movies: ["foreign_movies"],
+      western_movies: ["western_movies"],
+      series: ["foreign_series"],
+      foreign_series: ["foreign_series"],
+      western_series: ["western_series"],
+      arabic_movies: ["arabic_movies"],
+      arabic_series: ["arabic_series"],
+      arabic: ["arabic_movies", "arabic_series"],
+      turkish_movies: ["turkish_movies"],
+      turkish_series: ["turkish_series"],
+      turkish: ["turkish_series", "turkish_movies"],
+      indian_movies: ["indian_movies"],
+      indian_series: ["indian_series"],
+      indian: ["indian_movies", "indian_series"],
+      asian_movies: ["asian_movies"],
+      asian_series: ["asian_series"],
+      asian: ["asian_movies", "asian_series"],
+      dubbed: ["dubbed_series"],
+      dubbed_series: ["dubbed_series"],
+      top_rated: ["top_rated"],
+    };
+
+    const isPureRegionalCat = [
       "arabic_movies",
       "arabic_series",
       "arabic",
@@ -1321,23 +1480,27 @@ router.get("/browse", async (req: Request, res: Response) => {
       "asian_series",
       "dubbed",
       "dubbed_series",
-      "animation_series",
     ].includes(category);
 
-    // 1) Vault query (skip when pure external category and no search query)
+    // 1) Vault query (skip saved vault animation posters & skip when pure regional category without search)
     const vaultPromise = (async () => {
-      if (isPureExternalCat && !q) return { rows: [] as any[], total: 0 };
-      const conditions: string[] = ["is_archived = FALSE", "has_live_server = TRUE", "poster_url IS NOT NULL", "poster_url != ''", "poster_url NOT LIKE '%images.jpg%'"];
+      if (isPureRegionalCat && !q) return { rows: [] as any[], total: 0 };
+      const conditions: string[] = [
+        "is_archived = FALSE",
+        "has_live_server = TRUE",
+        "media_type != 'animation'",
+        "poster_url IS NOT NULL",
+        "poster_url != ''",
+        "poster_url NOT LIKE '%images.jpg%'",
+      ];
       const params: any[] = [];
 
       if (category === "asian" || category === "asian_movies") {
         conditions.push(`media_type = 'movie' AND category_label IN ('أفلام آسيوية', 'أفلام أوروبية')`);
-      } else if (category === "movie" || category === "foreign_movies" || category === "top_rated") {
+      } else if (category === "movie" || category === "foreign_movies" || category === "western_movies" || category === "top_rated") {
         conditions.push(`media_type = 'movie'`);
-      } else if (category === "series" || category === "foreign_series") {
+      } else if (category === "series" || category === "foreign_series" || category === "western_series") {
         conditions.push(`media_type = 'series'`);
-      } else if (category === "animation" || category === "animation_movies") {
-        conditions.push(`media_type = 'animation'`);
       }
 
       if (Number.isFinite(yearParam) && yearParam >= 1950 && yearParam <= 2035) {
@@ -1346,17 +1509,18 @@ router.get("/browse", async (req: Request, res: Response) => {
       }
 
       if (genre && genre !== "الكل") {
-        if (genre === "أنميشن") {
-          conditions.push(`(media_type = 'animation' OR genres_json ILIKE '%أنميشن%')`);
-        } else {
-          params.push(`%${genre}%`);
-          conditions.push(`genres_json ILIKE $${params.length}`);
-        }
+        params.push(`%${genre}%`);
+        conditions.push(`genres_json ILIKE $${params.length}`);
       }
 
       if (q) {
-        params.push(`%${q}%`);
-        conditions.push(`(title_ar ILIKE $${params.length} OR title_en ILIKE $${params.length} OR synopsis ILIKE $${params.length})`);
+        const variants = normalizeArabicSearchVariants(q);
+        const orParts: string[] = [];
+        for (const v of variants) {
+          params.push(`%${v}%`);
+          orParts.push(`title_ar ILIKE $${params.length} OR title_en ILIKE $${params.length}`);
+        }
+        if (orParts.length > 0) conditions.push(`(${orParts.join(" OR ")})`);
       }
 
       const whereSql = `WHERE ${conditions.join(" AND ")}`;
@@ -1381,7 +1545,7 @@ router.get("/browse", async (req: Request, res: Response) => {
       };
     })();
 
-    // 2) Live External query (EgyDead + TopCinema)
+    // 2) Live External query (TopCinema + EgyDead)
     const extPromise = (async () => {
       try {
         if (q) {
@@ -1392,7 +1556,7 @@ router.get("/browse", async (req: Request, res: Response) => {
               : category === "series" || category.endsWith("_series") || category === "dubbed"
                 ? "tv"
                 : "multi";
-          return await searchExternalCatalog(q, typeFilter, 32);
+          return await searchExternalCatalog(q, typeFilter, 28);
         }
         const keys = extCatKeys[category] || ["foreign_movies"];
         const perKey = Math.max(12, Math.ceil(36 / keys.length));
@@ -1416,27 +1580,54 @@ router.get("/browse", async (req: Request, res: Response) => {
       }
     })();
 
-    const [vaultData, extItems] = await Promise.all([vaultPromise, extPromise]);
+    // 3) Official TMDB Discover / Search query (guarantees zero empty categories & full Arabic+English search!)
+    const tmdbPromise = (async () => {
+      try {
+        if (q) {
+          const typeFilter: "multi" | "movie" | "tv" =
+            category === "movie" || category.endsWith("_movies")
+              ? "movie"
+              : category === "series" || category.endsWith("_series") || category === "dubbed"
+                ? "tv"
+                : "multi";
+          const items = await searchTmdbCatalog(q, typeFilter, page);
+          return { items, totalPages: items.length >= 16 ? page + 1 : page, totalResults: items.length };
+        }
+        const keys = tmdbCatKeys[category] || ["foreign_movies"];
+        const perKey = Math.max(12, Math.ceil(limit / keys.length));
+        const batches = await Promise.all(
+          keys.map((k) => fetchTmdbDiscoverCategory(k, { genre, sort: sortRaw, year: yearParam, page }, perKey)),
+        );
+        const items = deduplicateFilmSummaries(batches.map((b) => b.items), undefined, 32);
+        const totalPages = batches.reduce((m, b) => Math.max(m, b.totalPages), 1);
+        const totalResults = batches.reduce((sum, b) => sum + b.totalResults, 0);
+        return { items, totalPages, totalResults };
+      } catch {
+        return { items: [] as ExternalFilmSummary[], totalPages: 1, totalResults: 0 };
+      }
+    })();
 
-    // Prefer fresh external items first for pure external / latest-year sorts, vault first for top-rated
-    const orderedLists =
-      isPureExternalCat || sortRaw === "year"
-        ? [extItems, vaultData.rows]
-        : [vaultData.rows, extItems];
+    const [vaultData, extItems, tmdbData] = await Promise.all([vaultPromise, extPromise, tmdbPromise]);
+
+    const orderedLists = q
+      ? [vaultData.rows, tmdbData.items, extItems]
+      : isPureRegionalCat || sortRaw === "year"
+        ? [extItems, tmdbData.items, vaultData.rows]
+        : [vaultData.rows, tmdbData.items, extItems];
     const merged = deduplicateFilmSummaries(orderedLists, undefined, limit);
-
-    const hasExternalPages = !q && extItems.length >= 6;
+    const hasRichPages = !q && (extItems.length >= 6 || tmdbData.items.length >= 6);
     const estTotalPages = Math.max(
       1,
       Math.ceil(vaultData.total / limit),
-      hasExternalPages ? Math.max(page + 1, 25) : page,
+      tmdbData.totalPages,
+      hasRichPages ? Math.max(page + 1, 25) : page,
     );
 
     res.json({
       results: merged,
       page,
       totalPages: estTotalPages,
-      totalResults: Math.max(merged.length, vaultData.total + (hasExternalPages ? 500 : extItems.length)),
+      totalResults: Math.max(merged.length, vaultData.total + tmdbData.totalResults),
     });
   } catch (err: any) {
     res.status(500).json({ error: String(err?.message || err) });
@@ -1457,7 +1648,15 @@ router.get("/search", async (req: Request, res: Response) => {
       return;
     }
 
-    const conditions: string[] = ["is_archived = FALSE", "has_live_server = TRUE", "poster_url IS NOT NULL", "poster_url != ''", "poster_url NOT LIKE '%images.jpg%'"];
+    const variants = normalizeArabicSearchVariants(q);
+    const conditions: string[] = [
+      "is_archived = FALSE",
+      "has_live_server = TRUE",
+      "media_type != 'animation'",
+      "poster_url IS NOT NULL",
+      "poster_url != ''",
+      "poster_url NOT LIKE '%images.jpg%'",
+    ];
     const params: any[] = [];
 
     if (type === "movie") {
@@ -1466,12 +1665,16 @@ router.get("/search", async (req: Request, res: Response) => {
       conditions.push(`tmdb_type = 'tv'`);
     }
 
-    params.push(`%${q}%`);
-    conditions.push(`(title_ar ILIKE $${params.length} OR title_en ILIKE $${params.length})`);
+    const orParts: string[] = [];
+    for (const v of variants) {
+      params.push(`%${v}%`);
+      orParts.push(`title_ar ILIKE $${params.length} OR title_en ILIKE $${params.length}`);
+    }
+    if (orParts.length > 0) conditions.push(`(${orParts.join(" OR ")})`);
     const whereSql = `WHERE ${conditions.join(" AND ")}`;
 
     const typeFilter: "multi" | "movie" | "tv" = type === "movie" ? "movie" : type === "tv" ? "tv" : "multi";
-    const [countRes, rowsRes, extResults] = await Promise.all([
+    const [countRes, rowsRes, tmdbResults, extResults] = await Promise.all([
       pool.query(`SELECT COUNT(*)::int AS total FROM film_vault_titles ${whereSql}`, params),
       pool.query(
         `SELECT * FROM film_vault_titles ${whereSql}
@@ -1479,11 +1682,16 @@ router.get("/search", async (req: Request, res: Response) => {
          LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
         [...params, limit, offset],
       ),
-      page === 1 ? searchExternalCatalog(q, typeFilter, 28).catch(() => []) : Promise.resolve([]),
+      searchTmdbCatalog(q, typeFilter, page).catch(() => []),
+      page === 1 ? searchExternalCatalog(q, typeFilter, 24).catch(() => []) : Promise.resolve([]),
     ]);
 
-    const merged = deduplicateFilmSummaries([rowsRes.rows.map(rowToFilmSummary), extResults], undefined, limit);
-    const total = Math.max(merged.length, Number(countRes.rows[0]?.total || 0) + extResults.length);
+    const merged = deduplicateFilmSummaries(
+      [rowsRes.rows.map(rowToFilmSummary), tmdbResults, extResults],
+      undefined,
+      limit,
+    );
+    const total = Math.max(merged.length, Number(countRes.rows[0]?.total || 0) + tmdbResults.length);
     res.json({
       results: merged,
       page,
@@ -1508,6 +1716,32 @@ router.get("/detail", async (req: Request, res: Response) => {
       if (!extDetail) {
         res.status(404).json({ error: "External title not found" });
         return;
+      }
+      if (extDetail.tmdbType === "tv") {
+        try {
+          const tmdbMatch = await resolveTmdbTvByTitle(extDetail.titleEn || extDetail.titleAr, extDetail.year);
+          if (tmdbMatch) {
+            extDetail.realTmdbId = tmdbMatch.tmdbId;
+            if (tmdbMatch.posterUrl) extDetail.posterUrl = tmdbMatch.posterUrl;
+            if (tmdbMatch.backdropUrl) extDetail.backdropUrl = tmdbMatch.backdropUrl;
+            const mergedSeasons = mergeTvSeasons(extDetail.seasons || [], tmdbMatch.seasons, extDetail.posterUrl);
+            if (mergedSeasons.length > 0) {
+              extDetail.seasons = mergedSeasons;
+              extDetail.durationOrSeasons = formatMergedSeriesDuration(mergedSeasons);
+              const firstNum = mergedSeasons[0].seasonNumber || 1;
+              const liveFirst = await fetchLiveTmdbSeason(tmdbMatch.tmdbId, firstNum, rawId);
+              if (liveFirst?.episodes?.length) {
+                extDetail.episodes = mergeSeasonEpisodes(
+                  extDetail.episodes || [],
+                  liveFirst.episodes,
+                  rawId,
+                  firstNum,
+                  extDetail.backdropUrl || extDetail.posterUrl,
+                );
+              }
+            }
+          }
+        } catch {}
       }
       // Attach real similar recommendations from cached home/category catalog
       try {
@@ -1571,14 +1805,12 @@ router.get("/detail", async (req: Request, res: Response) => {
       ),
     ]);
 
+    const effectiveRealTmdbId = tmdbExtra.tmdbId || (row.tmdb_id ? Number(row.tmdb_id) : null);
+    const effectivePosterUrl = tmdbExtra.posterUrl || summary.posterUrl;
+    const effectiveBackdropUrl = tmdbExtra.backdropUrl || summary.backdropUrl;
+
     const seasons = isTv
-      ? seasonsRes.rows.map((s: any) => ({
-          seasonNumber: Number(s.season_number),
-          name: `الموسم ${s.season_number}`,
-          episodeCount: Number(s.ep_count),
-          posterUrl: summary.posterUrl,
-          airDate: String(row.year || ""),
-        }))
+      ? mergeTvSeasons(seasonsRes.rows, tmdbExtra.seasons, effectivePosterUrl)
       : [];
 
     const firstSeasonNum = seasons[0]?.seasonNumber || 1;
@@ -1595,18 +1827,23 @@ router.get("/detail", async (req: Request, res: Response) => {
           overview: tmdbExtra.overviewAr || summary.overviewAr || "لا يوجد ملخص متوفر حالياً.",
           runtimeMin: tmdbExtra.runtimeMin,
           airDate: String(row.year || ""),
-          stillUrl: tmdbExtra.backdropUrl || summary.backdropUrl || summary.posterUrl,
+          stillUrl: effectiveBackdropUrl || effectivePosterUrl,
         },
       ];
     } else {
-      const epsRes = await pool.query(
-        `SELECT id, season_number, episode_number, raw_title
-         FROM film_vault_episodes
-         WHERE title_id = $1 AND season_number = $2 AND is_archived = FALSE AND has_live_server = TRUE
-         ORDER BY episode_number ASC`,
-        [row.id, firstSeasonNum],
-      );
-      episodes = epsRes.rows.map((ep: any) => ({
+      const [epsRes, liveFirstSeason] = await Promise.all([
+        pool.query(
+          `SELECT id, season_number, episode_number, raw_title
+           FROM film_vault_episodes
+           WHERE title_id = $1 AND season_number = $2 AND is_archived = FALSE AND has_live_server = TRUE
+           ORDER BY episode_number ASC`,
+          [row.id, firstSeasonNum],
+        ),
+        effectiveRealTmdbId
+          ? fetchLiveTmdbSeason(effectiveRealTmdbId, firstSeasonNum, row.id).catch(() => null)
+          : Promise.resolve(null),
+      ]);
+      const vaultFirstEps = epsRes.rows.map((ep: any) => ({
         id: `${row.id}-s${ep.season_number}-e${ep.episode_number}`,
         seasonNumber: Number(ep.season_number),
         episodeNumber: Number(ep.episode_number),
@@ -1615,18 +1852,25 @@ router.get("/detail", async (req: Request, res: Response) => {
         overview: "",
         runtimeMin: tmdbExtra.runtimeMin || 45,
         airDate: String(row.year || ""),
-        stillUrl: tmdbExtra.backdropUrl || summary.backdropUrl || summary.posterUrl,
+        stillUrl: effectiveBackdropUrl || effectivePosterUrl,
       }));
+      episodes = mergeSeasonEpisodes(
+        vaultFirstEps,
+        liveFirstSeason?.episodes || [],
+        row.id,
+        firstSeasonNum,
+        effectiveBackdropUrl || effectivePosterUrl,
+      );
     }
 
     res.json({
       ...summary,
-      realTmdbId: tmdbExtra.tmdbId || (row.tmdb_id ? Number(row.tmdb_id) : null),
-      posterUrl: tmdbExtra.posterUrl || summary.posterUrl,
-      backdropUrl: tmdbExtra.backdropUrl || summary.backdropUrl,
+      realTmdbId: effectiveRealTmdbId,
+      posterUrl: effectivePosterUrl,
+      backdropUrl: effectiveBackdropUrl,
       overviewAr: tmdbExtra.overviewAr || summary.overviewAr || "لا يوجد ملخص متوفر حالياً.",
       runtimeMin: tmdbExtra.runtimeMin,
-      durationOrSeasons: formatDurationOrSeasons(row),
+      durationOrSeasons: isTv ? formatMergedSeriesDuration(seasons) : formatDurationOrSeasons(row),
       statusLabel: isTv ? (seasons.length > 1 ? "مكتمل" : "متوفر") : "فيلم كامل",
       ageRating: tmdbExtra.ageRating,
       director: tmdbExtra.director,
@@ -1655,56 +1899,98 @@ router.get("/season", async (req: Request, res: Response) => {
     }
 
     if (isExternalFilmId(id)) {
-      const extSeason = await getExternalSeasonEpisodes(id, season);
-      if (!extSeason) {
+      const extSeason = await getExternalSeasonEpisodes(id, season).catch(() => null);
+      const extDetail = await getExternalFilmDetail(id).catch(() => null);
+      let liveSeason: any = null;
+      if (extDetail?.titleEn || extDetail?.titleAr) {
+        const tmdbMatch = await resolveTmdbTvByTitle(extDetail.titleEn || extDetail.titleAr, extDetail.year).catch(() => null);
+        if (tmdbMatch?.tmdbId) {
+          liveSeason = await fetchLiveTmdbSeason(tmdbMatch.tmdbId, season, id).catch(() => null);
+        }
+      }
+      const mergedEps = mergeSeasonEpisodes(
+        extSeason?.episodes || [],
+        liveSeason?.episodes || [],
+        id,
+        season,
+        extDetail?.backdropUrl || extDetail?.posterUrl || null,
+      );
+      if (mergedEps.length === 0) {
         res.status(404).json({ error: "Season not found" });
         return;
       }
-      res.json(extSeason);
+      res.json({
+        seasonNumber: season,
+        name: liveSeason?.name || extSeason?.name || `الموسم ${season}`,
+        episodes: mergedEps,
+      });
       return;
     }
 
     const decoded = decodeSyntheticTmdbId(id);
-    let titleRes = await pool.query(`SELECT id, tmdb_id, poster_url, backdrop_url, year FROM film_vault_titles WHERE id = $1 LIMIT 1`, [id]);
+    let titleRes = await pool.query(
+      `SELECT id, tmdb_id, title_en, title_ar, poster_url, backdrop_url, year FROM film_vault_titles WHERE id = $1 LIMIT 1`,
+      [id],
+    );
     if (titleRes.rows.length === 0) {
       const lookupTmdbId = decoded ? decoded.realTmdbId : id;
-      titleRes = await pool.query(`SELECT id, tmdb_id, poster_url, backdrop_url, year FROM film_vault_titles WHERE tmdb_id = $1 AND tmdb_type = 'tv' ORDER BY has_live_server DESC, id DESC LIMIT 1`, [lookupTmdbId]);
+      titleRes = await pool.query(
+        `SELECT id, tmdb_id, title_en, title_ar, poster_url, backdrop_url, year FROM film_vault_titles WHERE tmdb_id = $1 AND tmdb_type = 'tv' ORDER BY has_live_server DESC, id DESC LIMIT 1`,
+        [lookupTmdbId],
+      );
     }
     const tRow = titleRes.rows[0];
     const vaultTitleId = tRow?.id ? Number(tRow.id) : id;
-    const epsRes = await pool.query(
-      `SELECT id, season_number, episode_number, raw_title
-       FROM film_vault_episodes
-       WHERE title_id = $1 AND season_number = $2 AND is_archived = FALSE AND has_live_server = TRUE
-       ORDER BY episode_number ASC`,
-      [vaultTitleId, season],
-    );
 
-    if (epsRes.rows.length === 0) {
-      const realTmdbId = tRow?.tmdb_id ? Number(tRow.tmdb_id) : (decoded ? decoded.realTmdbId : id);
-      const liveSeason = await fetchLiveTmdbSeason(realTmdbId, season, id);
-      if (liveSeason) {
-        res.json(liveSeason);
-        return;
-      }
+    let realTmdbId: number | null = tRow?.tmdb_id
+      ? Number(tRow.tmdb_id)
+      : decoded
+        ? decoded.realTmdbId
+        : !tRow
+          ? id
+          : null;
+
+    if (!realTmdbId && tRow && (tRow.title_en || tRow.title_ar)) {
+      const matched = await resolveTmdbTvByTitle(String(tRow.title_en || tRow.title_ar), Number(tRow.year || 0)).catch(() => null);
+      if (matched?.tmdbId) realTmdbId = matched.tmdbId;
     }
 
+    const [epsRes, liveSeason] = await Promise.all([
+      pool.query(
+        `SELECT id, season_number, episode_number, raw_title
+         FROM film_vault_episodes
+         WHERE title_id = $1 AND season_number = $2 AND is_archived = FALSE AND has_live_server = TRUE
+         ORDER BY episode_number ASC`,
+        [vaultTitleId, season],
+      ),
+      realTmdbId ? fetchLiveTmdbSeason(realTmdbId, season, id).catch(() => null) : Promise.resolve(null),
+    ]);
+
     const stillUrl = encodeMediaUrl(tRow?.backdrop_url) || encodeMediaUrl(tRow?.poster_url);
+    const vaultEps = epsRes.rows.map((ep: any) => ({
+      id: `${id}-s${ep.season_number}-e${ep.episode_number}`,
+      seasonNumber: Number(ep.season_number),
+      episodeNumber: Number(ep.episode_number),
+      titleAr: `الحلقة ${ep.episode_number}`,
+      titleEn: `Episode ${ep.episode_number}`,
+      overview: "",
+      runtimeMin: 45,
+      airDate: String(tRow?.year || ""),
+      stillUrl,
+    }));
+
+    const mergedEpisodes = mergeSeasonEpisodes(
+      vaultEps,
+      liveSeason?.episodes || [],
+      id,
+      season,
+      stillUrl,
+    );
 
     res.json({
       seasonNumber: season,
-      name: `الموسم ${season}`,
-      episodes: epsRes.rows.map((ep: any) => ({
-        id: `${id}-s${ep.season_number}-e${ep.episode_number}`,
-        seasonNumber: Number(ep.season_number),
-        episodeNumber: Number(ep.episode_number),
-        titleAr: `الحلقة ${ep.episode_number}`,
-        titleEn: `Episode ${ep.episode_number}`,
-        overview: "",
-        runtimeMin: 45,
-        airDate: String(tRow?.year || ""),
-        stillUrl,
-      })),
+      name: liveSeason?.name || `الموسم ${season}`,
+      episodes: mergedEpisodes,
     });
   } catch (err: any) {
     res.status(500).json({ error: String(err?.message || err) });
@@ -1859,7 +2145,11 @@ router.get("/sources-stream", async (req: Request, res: Response) => {
     const resolved = await resolveEpisodeFromVault(tmdbId, type, season, ep);
     const decodedId = decodeSyntheticTmdbId(tmdbId);
     const effectiveRealTmdbId = resolved.tmdbId || decodedId?.realTmdbId || null;
-    const effectiveTitleEn = resolved.titleEn || titleParam;
+    let effectiveTitleEn = resolved.titleEn || titleParam;
+    if (effectiveRealTmdbId && (!effectiveTitleEn || !/[A-Za-z]{2,}/.test(effectiveTitleEn))) {
+      const tmdbEn = await resolveTmdbTitleEn(effectiveRealTmdbId, type).catch(() => "");
+      if (tmdbEn) effectiveTitleEn = tmdbEn;
+    }
     if (effectiveRealTmdbId) {
       sendEvent("meta", { realTmdbId: effectiveRealTmdbId, titleEn: effectiveTitleEn });
     }
