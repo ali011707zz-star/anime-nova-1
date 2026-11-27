@@ -370,11 +370,21 @@ export default function RiftPlayer({
     return () => document.removeEventListener("fullscreenchange", fn);
   }, []);
 
-  /* ── Web Audio API setup (once per mount) ── */
-  useEffect(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    let cleanup: (() => void) | undefined;
+  /* ── Web Audio API (lazy boost > 100% ONLY for CORS-clean sources) ──
+     NEVER attach createMediaElementSource eagerly on mount: Chromium zeroes audio
+     for cross-origin direct CDN MP4s without CORS once bound to Web Audio. */
+  const isWebAudioCorsSafe = useCallback((v: HTMLVideoElement): boolean => {
+    const cur = v.currentSrc || v.src || "";
+    if (!cur || cur.startsWith("blob:") || cur.startsWith("/")) return true;
+    try {
+      if (new URL(cur, window.location.href).origin === window.location.origin) return true;
+    } catch {}
+    return v.crossOrigin === "anonymous";
+  }, []);
+
+  const ensureAudioBoost = useCallback((v: HTMLVideoElement): boolean => {
+    if (gainNodeRef.current) return true;
+    if (!isWebAudioCorsSafe(v)) return false;
     try {
       const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
       const source = ctx.createMediaElementSource(v);
@@ -391,18 +401,31 @@ export default function RiftPlayer({
       comp.connect(ctx.destination);
       audioCtxRef.current = ctx;
       gainNodeRef.current = gain;
-      const resume = () => { if (ctx.state === "suspended") ctx.resume().catch(() => {}); };
-      v.addEventListener("play", resume);
-      cleanup = () => {
-        v.removeEventListener("play", resume);
-        try { gain.gain.cancelScheduledValues(0); gain.gain.value = 0; } catch {}
-        ctx.close().catch(() => {});
-        audioCtxRef.current = null;
-        gainNodeRef.current = null;
-      };
-    } catch { /* AudioContext not supported — native volume fallback */ }
-    return cleanup;
-  }, []); // once per mount
+      return true;
+    } catch {
+      return false;
+    }
+  }, [isWebAudioCorsSafe]);
+
+  useEffect(() => {
+    const v = videoRef.current;
+    const resume = () => {
+      if (audioCtxRef.current?.state === "suspended") audioCtxRef.current.resume().catch(() => {});
+    };
+    v?.addEventListener("play", resume);
+    return () => {
+      v?.removeEventListener("play", resume);
+      try {
+        if (gainNodeRef.current) {
+          gainNodeRef.current.gain.cancelScheduledValues(0);
+          gainNodeRef.current.gain.value = 0;
+        }
+      } catch {}
+      audioCtxRef.current?.close().catch(() => {});
+      audioCtxRef.current = null;
+      gainNodeRef.current = null;
+    };
+  }, []);
 
   /* ── auto-fullscreen on physical device rotation ── */
   useEffect(() => {
@@ -561,24 +584,31 @@ export default function RiftPlayer({
 
     let m3u8 = src;
 
+    v.removeAttribute("crossorigin");
+
     if (src.includes("animegg.org/play/") || src.includes("vidcache.net")
         || (src.includes("/api/animation/videasy-fresh") && src.includes("vtype=mp4"))
         || src.includes("go.itsdeskmate.com")) {
+      setDocumentNoReferrer(false);
       v.src = src; v.load();
       v.addEventListener("loadedmetadata", () => { setLoading(false); v.play().catch(() => {}); showControls(); }, { once: true });
       v.addEventListener("error", () => fireOnFail(), { once: true });
       return;
     }
 
-    // Confirmed browser-direct CDNs (Kawaii, Pixeldrain, MediaFire CDN, Drive, OK/VK, BuzzHeavier, Workers):
+    // Confirmed browser-direct CDNs (Kawaii, MediaFire CDN, Drive, OK/VK, BuzzHeavier, Workers):
     // stream directly from CDN (0% VPS bandwidth), matching the mobile app direct streaming architecture.
     const isKawaiiCdn = isKawaiiCdnUrl(src);
     const isCorsDirectCdn = isBrowserDirectMediaUrl(src);
-    if (isCorsDirectCdn && !isKawaiiHlsUrl(src)) {
+    // If Web Audio boost was lazily bound earlier in this session, non-CORS third-party MP4s
+    // would output silence; let them fall through to same-origin video-proxy in that rare case.
+    const canPlayDirectWithoutWebAudioSilence = !audioCtxRef.current || isKawaiiCdn;
+    if (isCorsDirectCdn && !isKawaiiHlsUrl(src) && canPlayDirectWithoutWebAudioSilence) {
       // MP4/non-HLS: native <video> element streams directly without VPS relay.
-      // kawaii CDN: no-Referer=200, wrong-Referer=403. HTMLVideoElement lacks referrerPolicy
+      // kawaii CDN: no-Referer=200 (ACAO: *), wrong-Referer=403. HTMLVideoElement lacks referrerPolicy
       // in Chromium, so toggle <meta name="referrer" content="no-referrer"> on document.head.
       setDocumentNoReferrer(isKawaiiCdn);
+      if (isKawaiiCdn) v.crossOrigin = "anonymous";
       v.src = src; v.load();
       let done = false;
       const cleanup = () => { done = true; clearTimeout(t); v.removeEventListener("loadedmetadata", onMd); v.removeEventListener("error", onEd); };
@@ -1208,9 +1238,12 @@ export default function RiftPlayer({
       // Landscape: player-up = screen-up = clientY decreases → g.lastY - t.clientY is positive
       const dV = (isPortrait && !isFs) ? (t.clientX - g.lastX) : (g.lastY - t.clientY);
       if (isPortrait && !isFs) g.lastX = t.clientX; else g.lastY = t.clientY;
-      // Use videoRef.current.volume for freshest value (avoids stale React state)
+      // Use volumeRef.current for freshest value (avoids stale React state)
       const curVol = volumeRef.current;
-      const nV = Math.max(0, Math.min(2.0, curVol + dV / 150));
+      let nV = Math.max(0, Math.min(2.0, curVol + dV / 150));
+      if (nV > 1 && videoRef.current && !gainNodeRef.current) {
+        if (!ensureAudioBoost(videoRef.current)) nV = 1;
+      }
       volumeRef.current = nV;
       setVolume(nV);
       if (gainNodeRef.current) {
