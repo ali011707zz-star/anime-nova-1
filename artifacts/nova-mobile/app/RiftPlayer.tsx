@@ -20,7 +20,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system";
 import { useColors } from "@/hooks/useColors";
 import { getBaseUrl } from "@/utils/api";
-import { convertSubtitleToVtt } from "@/utils/donghuaLogic.mjs";
+import { convertSubtitleToVtt, normalizeAndSortSubtitleCues } from "@/utils/donghuaLogic.mjs";
 import { TvPressable } from "@/utils/tv";
 
 const Pressable = TvPressable;
@@ -155,10 +155,7 @@ function parseVTTTime(s: string): number {
 
 /* ─── Merge + sort subtitle cue arrays by start time ─── */
 function _mergeCues(existing: SubCue[], incoming: SubCue[]): SubCue[] {
-  if (!existing.length) return incoming;
-  const out = [...existing, ...incoming];
-  out.sort((a, b) => a.start - b.start);
-  return out;
+  return normalizeAndSortSubtitleCues([...existing, ...incoming]);
 }
 
 /**
@@ -273,7 +270,7 @@ function parseVTT(rawText: string): SubCue[] {
       .filter(Boolean);
     if (textLines.length > 0) cues.push({ start, end, text: textLines.join("\n") });
   }
-  return cues;
+  return normalizeAndSortSubtitleCues(cues);
 }
 
 /* ─── PulseRing (نبض أرجواني حول زر التشغيل عند الإيقاف المؤقت) ─── */

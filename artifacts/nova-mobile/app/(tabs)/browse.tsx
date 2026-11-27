@@ -11,7 +11,6 @@ import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from
 import { useTvFocusMemory } from "@/utils/tvFocus";
 import { getGridColumnCount } from "@/components/AnimeCard";
 import { AnimeFilterSheet, type AnimeFilterOption } from "@/components/AnimeFilterSheet";
-import { DonghuaBrowsePanel } from "@/components/DonghuaBrowsePanel";
 import { useColors } from "@/hooks/useColors";
 import { getKnownArabicAnimeTitle } from "@/utils/arabicAnimeTitles";
 import type { ThemePalette } from "@/constants/colors";
@@ -270,19 +269,19 @@ query { Page(page:1,perPage:1) {
   media(type:ANIME,genre:"${genre}",sort:[POPULARITY_DESC]){id coverImage{large}}
 }}`;
 
-const BROWSE_QUERY = (sort: string, format: string, season: string, year: string, genre: string, status: string) => `
+const BROWSE_QUERY = (sort: string, format: string, season: string, year: string, genre: string, status: string, country: "JP" | "CN" = "JP") => `
 query ($page: Int) {
   Page(page: $page, perPage: 30) {
-    media(type:ANIME, countryOfOrigin:"JP", isAdult:false, genre_not_in:["Hentai"], sort:[${sort || "POPULARITY_DESC"}]${format ? `, format:${format}` : ""}${season ? `, season:${season}` : ""}${year ? `, seasonYear:${year}` : ""}${genre ? `, genre:"${genre}"` : ""}${status ? `, status:${status}` : ""}) {
+    media(type:ANIME, countryOfOrigin:"${country}", isAdult:false, genre_not_in:["Hentai"], sort:[${sort || "POPULARITY_DESC"}]${format ? `, format:${format}` : ""}${season ? `, season:${season}` : ""}${year ? `, seasonYear:${year}` : ""}${genre ? `, genre:"${genre}"` : ""}${status ? `, status:${status}` : ""}) {
       id title { romaji english } coverImage { large extraLarge } averageScore episodes format status startDate { year } genres
     }
   }
 }`;
 
-const SEARCH_QUERY = (sort: string, format: string, season: string, year: string, genre: string, status: string) => `
+const SEARCH_QUERY = (sort: string, format: string, season: string, year: string, genre: string, status: string, country: "JP" | "CN" = "JP") => `
 query ($search: String!) {
   Page(page: 1, perPage: 30) {
-    media(search: $search, type: ANIME, isAdult: false, genre_not_in:["Hentai","Ecchi"], sort:[SEARCH_MATCH,${sort || "POPULARITY_DESC"}]${format ? `,format:${format}` : ""}${season ? `,season:${season}` : ""}${year ? `,seasonYear:${year}` : ""}${genre ? `,genre:"${genre}"` : ""}${status ? `,status:${status}` : ""}) {
+    media(search: $search, type: ANIME, countryOfOrigin:"${country}", isAdult: false, genre_not_in:["Hentai","Ecchi"], sort:[SEARCH_MATCH,${sort || "POPULARITY_DESC"}]${format ? `,format:${format}` : ""}${season ? `,season:${season}` : ""}${year ? `,seasonYear:${year}` : ""}${genre ? `,genre:"${genre}"` : ""}${status ? `,status:${status}` : ""}) {
       id title { romaji english } coverImage { large } averageScore episodes format status startDate { year } genres
     }
   }
@@ -306,6 +305,14 @@ const ARABIC_SEARCH_ALIASES: Record<string, string> = {
   "جوجوتسو": "Jujutsu Kaisen",
   "سولو ليفلينج": "Solo Leveling",
   "بلاك كلوفر": "Black Clover",
+  "سول لاند": "Douluo Dalu",
+  "معركة عبر السماء": "Doupo Cangqiong",
+  "الخالد المتمرد": "Xian Ni",
+  "النجم المبتلع": "Tunshi Xingkong",
+  "عالم مثالي": "Wanmei Shijie",
+  "لينك كليك": "Shiguang Dailiren",
+  "ارادة ابدية": "Yi Nian Yong Heng",
+  "إرادة أبدية": "Yi Nian Yong Heng",
 };
 
 function translateSearchQuery(value: string): string {
@@ -353,6 +360,7 @@ export default function BrowseScreen() {
   const routeTab = routeValue(routeParams.tab);
   const [browseSection, setBrowseSection] = useState<"anime" | "donghua">(routeTab === "donghua" ? "donghua" : "anime");
   const [view, setView] = useState<"genres" | "list">("list");
+  const activeCountry: "JP" | "CN" = browseSection === "donghua" ? "CN" : "JP";
   const [activeGenre, setActiveGenre] = useState(routeValue(routeParams.genre));
   const [activeGenreAr, setActiveGenreAr] = useState(routeValue(routeParams.genreAr));
   const [format, setFormat] = useState(FORMAT_OPTIONS.some(opt => opt.value === routeFormat) ? routeFormat : "");
@@ -410,7 +418,7 @@ export default function BrowseScreen() {
       const r = await fetch(`${getBaseUrl()}/api/anilist`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-            query: BROWSE_QUERY(sort, format, season, year, activeGenre, status),
+            query: BROWSE_QUERY(sort, format, season, year, activeGenre, status, activeCountry),
           variables: { page: p },
         }),
         signal: ctrl.signal,
@@ -431,7 +439,7 @@ export default function BrowseScreen() {
     } finally {
       if (genRef.current === gen && !ctrl.signal.aborted) setLoading(false);
     }
-  }, [sort, format, season, year, activeGenre, status]);
+  }, [sort, format, season, year, activeGenre, status, activeCountry]);
 
   useEffect(() => {
     if (view !== "list") return;
@@ -440,7 +448,7 @@ export default function BrowseScreen() {
     listRef.current?.scrollToOffset({ offset: 0, animated: false });
     setPage(1); setHasMore(true);
     loadItems(1, true);
-  }, [view, sort, format, season, year, activeGenre, status]);
+  }, [view, sort, format, season, year, activeGenre, status, activeCountry]);
 
   useEffect(() => {
     searchAbortRef.current?.abort();
@@ -461,7 +469,7 @@ export default function BrowseScreen() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            query: SEARCH_QUERY(sort, format, season, year, activeGenre, status),
+            query: SEARCH_QUERY(sort, format, season, year, activeGenre, status, activeCountry),
             variables: { search: translated },
           }),
           signal: ctrl.signal,
@@ -482,7 +490,7 @@ export default function BrowseScreen() {
       if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
       ctrl.abort();
     };
-  }, [search, sort, format, season, year, activeGenre, status]);
+  }, [search, sort, format, season, year, activeGenre, status, activeCountry]);
 
   function openGenre(genre: string, ar: string) {
     setActiveGenre(genre); setActiveGenreAr(ar);
@@ -585,13 +593,11 @@ export default function BrowseScreen() {
             style={({ focused }) => [
               {
                 flex: 1,
-                flexDirection: ROW_RTL,
                 alignItems: "center",
                 justifyContent: "center",
-                gap: 6,
                 paddingVertical: 7,
                 paddingHorizontal: 10,
-                borderRadius: 11,
+                borderRadius: 10,
                 borderWidth: 1,
                 backgroundColor: browseSection === "anime" ? colors.accent : colors.card,
                 borderColor: browseSection === "anime" ? colors.accent : colors.border,
@@ -599,16 +605,11 @@ export default function BrowseScreen() {
               tvMode && tvFocusStyle(focused),
             ]}
           >
-            <Ionicons
-              name="sparkles-outline"
-              size={14}
-              color={browseSection === "anime" ? colors.buttonText : colors.textSecondary}
-            />
             <Text
               numberOfLines={1}
               maxFontSizeMultiplier={1.15}
               style={{
-                fontSize: 12,
+                fontSize: 12.5,
                 fontFamily: "Cairo_700Bold",
                 color: browseSection === "anime" ? colors.buttonText : colors.textPrimary,
               }}
@@ -622,32 +623,25 @@ export default function BrowseScreen() {
             style={({ focused }) => [
               {
                 flex: 1,
-                flexDirection: ROW_RTL,
                 alignItems: "center",
                 justifyContent: "center",
-                gap: 6,
                 paddingVertical: 7,
                 paddingHorizontal: 10,
-                borderRadius: 11,
+                borderRadius: 10,
                 borderWidth: 1,
-                backgroundColor: browseSection === "donghua" ? "#f59e0b" : colors.card,
-                borderColor: browseSection === "donghua" ? "#f59e0b" : colors.border,
+                backgroundColor: browseSection === "donghua" ? colors.accent : colors.card,
+                borderColor: browseSection === "donghua" ? colors.accent : colors.border,
               },
               tvMode && tvFocusStyle(focused),
             ]}
           >
-            <Ionicons
-              name="flame-outline"
-              size={14}
-              color={browseSection === "donghua" ? "#0b0f19" : colors.textSecondary}
-            />
             <Text
               numberOfLines={1}
               maxFontSizeMultiplier={1.15}
               style={{
-                fontSize: 12,
+                fontSize: 12.5,
                 fontFamily: "Cairo_700Bold",
-                color: browseSection === "donghua" ? "#0b0f19" : colors.textPrimary,
+                color: browseSection === "donghua" ? colors.buttonText : colors.textPrimary,
               }}
             >
               دونغهوا
@@ -655,8 +649,6 @@ export default function BrowseScreen() {
           </Pressable>
         </View>
 
-        {browseSection === "anime" ? (
-        <>
         <Pressable
           focusable={tvMode}
           onPress={() => setFilterVisible(true)}
@@ -690,21 +682,10 @@ export default function BrowseScreen() {
             />
           ))}
         </ScrollView>
-        </>
-        ) : null}
       </View>
 
-      {/* ── Donghua Catalog Section ── */}
-      {browseSection === "donghua" && (
-        <DonghuaBrowsePanel
-          gridColumns={gridColumns}
-          gridWidth={gridWidth}
-          tvMode={tvMode}
-        />
-      )}
-
       {/* ── Genre grid ── */}
-      {browseSection === "anime" && view === "genres" && (
+      {view === "genres" && (
         <FlatList
           data={GENRES_WITH_COVERS}
           style={{ width: gridWidth, alignSelf: "center" }}
@@ -731,7 +712,7 @@ export default function BrowseScreen() {
       )}
 
       {/* ── Anime list ── */}
-      {browseSection === "anime" && view === "list" && (
+      {view === "list" && (
         <>
           {listLoading && filteredItems.length === 0 ? (
             <View style={g.center}>

@@ -73,3 +73,14 @@ export function selectBestOpenSubtitleMatch(
   query?: { title?: string; episode?: number; season?: number }
 ): OpenSubtitleMatch | null;
 export function convertSubtitleToVtt(rawText: string): string;
+export function matchDonghuaCatalogItemByTitle(
+  items: DonghuaCatalogItem[],
+  candidateTitles?: string[]
+): DonghuaCatalogItem | null;
+export function pickDonghuaEpisodeByNumber(
+  episodes: DonghuaEpisodeItem[],
+  episodeNumber: number
+): DonghuaEpisodeItem | null;
+export function normalizeAndSortSubtitleCues<T extends { start: number; end: number; text: string }>(
+  cues: T[]
+): { start: number; end: number; text: string }[];

@@ -156,3 +156,45 @@ test("convertSubtitleToVtt converts both SRT (comma timestamps) and ASS/SSA to v
   assert.ok(vttFromAss.startsWith("WEBVTT"));
   assert.ok(vttFromAss.includes("00:00:01.020 --> 00:00:04.500\nسطر أول\nسطر ثاني"));
 });
+
+import {
+  matchDonghuaCatalogItemByTitle,
+  pickDonghuaEpisodeByNumber,
+  normalizeAndSortSubtitleCues,
+} from "./donghuaLogic.mjs";
+
+test("matchDonghuaCatalogItemByTitle matches AniList title/synonym and avoids movie mismatch", () => {
+  const items = [
+    { id: "ax:1", source: "animexin", slug: "renegade-immortal-movie", url: "https://animexin.dev/renegade-immortal-movie/", title: "Renegade Immortal Movie: Slaying the Blood Progenitor", poster: "", status: "Completed", type: "Movie" },
+    { id: "ax:2", source: "animexin", slug: "renegade-immortal", url: "https://animexin.dev/renegade-immortal/", title: "Renegade Immortal", poster: "", status: "Ongoing", type: "ONA" },
+  ];
+  const matched = matchDonghuaCatalogItemByTitle(items, ["Xian Ni", "Renegade Immortal"]);
+  assert.ok(matched);
+  assert.equal(matched.slug, "renegade-immortal");
+});
+
+test("pickDonghuaEpisodeByNumber selects exact episode or single movie entry", () => {
+  const eps = [
+    { number: 3, numberLabel: "3", title: "Ep 3", date: "", url: "u3" },
+    { number: 2, numberLabel: "2", title: "Ep 2", date: "", url: "u2" },
+    { number: 1, numberLabel: "1", title: "Ep 1", date: "", url: "u1" },
+  ];
+  assert.equal(pickDonghuaEpisodeByNumber(eps, 2)?.url, "u2");
+  assert.equal(pickDonghuaEpisodeByNumber(eps, 99), null);
+});
+
+test("normalizeAndSortSubtitleCues sorts out-of-order ASS cues and keeps ranges binary-search safe", () => {
+  const cues = [
+    { start: 10, end: 13, text: "السطر الثاني" },
+    { start: 2, end: 6, text: "السطر الأول" },
+    { start: 2.05, end: 5, text: "ملاحظة متزامنة" },
+    { start: 5, end: 8, text: "السطر المتداخل" },
+  ];
+  const sorted = normalizeAndSortSubtitleCues(cues);
+  assert.equal(sorted.length, 3);
+  assert.equal(sorted[0].start, 2);
+  assert.ok(sorted[0].text.includes("السطر الأول") && sorted[0].text.includes("ملاحظة متزامنة"));
+  assert.equal(sorted[0].end, 5);
+  assert.equal(sorted[1].start, 5);
+  assert.equal(sorted[2].start, 10);
+});

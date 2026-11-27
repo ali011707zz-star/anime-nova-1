@@ -509,3 +509,142 @@ export function convertSubtitleToVtt(rawText) {
 
   return "";
 }
+
+function normMatchText(s) {
+  return String(s || "")
+    .toLowerCase()
+    .replace(/\[[^\]]*\]/g, " ")
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractSeasonNum(s) {
+  const m =
+    String(s || "").match(/\bseason\s*(\d+)\b/i) ||
+    String(s || "").match(/\bs(\d+)\b/i) ||
+    String(s || "").match(/\b(\d+)(?:nd|rd|th)\s+season\b/i) ||
+    String(s || "").match(/\bpart\s*(\d+)\b/i);
+  return m ? parseInt(m[1], 10) : 0;
+}
+
+/**
+ * Match AniList Donghua titles/synonyms against parsed catalog items from AX or AK.
+ */
+export function matchDonghuaCatalogItemByTitle(items, candidateTitles = []) {
+  if (!Array.isArray(items) || items.length === 0) return null;
+  const targets = candidateTitles
+    .map((t) => ({ raw: String(t || ""), norm: normMatchText(t), season: extractSeasonNum(t) }))
+    .filter((t) => t.norm.length >= 2);
+  if (targets.length === 0) return null;
+
+  let best = null;
+  let bestScore = -Infinity;
+
+  for (const item of items) {
+    const itemNorm = normMatchText(item?.title || "");
+    if (!itemNorm) continue;
+    const itemSeason = extractSeasonNum(item?.title || "");
+    const itemTokens = new Set(itemNorm.split(" ").filter((w) => w.length >= 2));
+
+    for (const target of targets) {
+      let score = 0;
+      if (itemNorm === target.norm) {
+        score += 200;
+      } else if (itemNorm.includes(target.norm) || target.norm.includes(itemNorm)) {
+        score += 120;
+      }
+      const targetTokens = target.norm.split(" ").filter((w) => w.length >= 2);
+      if (targetTokens.length > 0) {
+        let hit = 0;
+        for (const w of targetTokens) {
+          if (itemTokens.has(w)) hit++;
+        }
+        const coverage = hit / targetTokens.length;
+        const precision = hit / Math.max(1, itemTokens.size);
+        score += Math.round(coverage * 90 + precision * 35);
+      }
+
+      // Season alignment bonus/penalty
+      if (target.season > 0 && itemSeason > 0) {
+        score += target.season === itemSeason ? 45 : -60;
+      } else if (target.season === 0 && itemSeason > 1) {
+        score -= 35;
+      }
+      // Avoid matching a Movie when searching a regular series (unless target says Movie)
+      const targetMovie = /\bmovie\b|\bfilm\b/i.test(target.raw);
+      const itemMovie = /\bmovie\b|\bfilm\b/i.test(item?.title || "");
+      if (targetMovie !== itemMovie) score -= 45;
+
+      if (score > bestScore) {
+        bestScore = score;
+        best = item;
+      }
+    }
+  }
+
+  return bestScore >= 75 ? best : null;
+}
+
+/**
+ * Pick exact episode from parsed Donghua detail episodes list.
+ */
+export function pickDonghuaEpisodeByNumber(episodes, episodeNumber) {
+  if (!Array.isArray(episodes) || episodes.length === 0) return null;
+  const target = Math.max(1, Math.floor(Number(episodeNumber) || 1));
+  const exact = episodes.find((e) => Math.floor(Number(e?.number || 0)) === target);
+  if (exact) return exact;
+  if (target === 1 && episodes.length === 1) return episodes[0];
+  return null;
+}
+
+/**
+ * Sort, clamp, deduplicate, and merge overlapping subtitle cues so binary search
+ * (`bisectCue` in RiftPlayer) NEVER skips, flickers, or drops Arabic lines.
+ */
+export function normalizeAndSortSubtitleCues(cues) {
+  if (!Array.isArray(cues) || cues.length === 0) return [];
+  const cleaned = [];
+  for (const c of cues) {
+    if (!c) continue;
+    const start = Number(c.start);
+    let end = Number(c.end);
+    const text = String(c.text || "").trim();
+    if (!Number.isFinite(start) || !text) continue;
+    if (!Number.isFinite(end) || end <= start) end = start + 2.0;
+    cleaned.push({ start: Math.max(0, start), end: Math.max(0.1, end), text });
+  }
+  if (cleaned.length === 0) return [];
+
+  cleaned.sort((a, b) => (a.start !== b.start ? a.start - b.start : a.end - b.end));
+
+  const out = [];
+  for (const cue of cleaned) {
+    const prev = out[out.length - 1];
+    if (!prev) {
+      out.push({ ...cue });
+      continue;
+    }
+    // Exact or near-duplicate cue
+    if (Math.abs(prev.start - cue.start) < 0.08 && prev.text === cue.text) {
+      prev.end = Math.max(prev.end, cue.end);
+      continue;
+    }
+    // Simultaneous or overlapping cue -> split/merge cleanly so bisectCue never hides prev
+    if (cue.start < prev.end) {
+      if (Math.abs(cue.start - prev.start) < 0.12) {
+        if (!prev.text.includes(cue.text)) {
+          prev.text = `${prev.text}\n${cue.text}`;
+        }
+        prev.end = Math.max(prev.end, cue.end);
+        continue;
+      }
+      // Trim previous cue end slightly so ranges remain monotonically non-overlapping for bisectCue
+      prev.end = cue.start;
+    }
+    out.push({ ...cue });
+  }
+
+  return out.filter((c) => c.end > c.start && c.text.length > 0);
+}

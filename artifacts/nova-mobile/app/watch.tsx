@@ -35,6 +35,7 @@ const Pressable = TvPressable;
 import { useTvFocusMemory } from "@/utils/tvFocus";
 import { getBaseUrl } from "@/utils/api";
 import { fetchHumanArabicSubtitleFromOpenSubtitles } from "@/utils/openSubtitlesClient";
+import { probeDonghuaAvailabilityOnPhone, resolveDonghuaSiteOnPhone, type DonghuaPhoneResolvedSource } from "@/utils/donghuaClient";
 import { anilistQuery, EPISODE_COUNT_QUERY } from "@/utils/anilist";
 import { secureFetch, secureStreamFetch, warmAuthToken, getAuthToken, getDownloadToken } from "@/utils/secureApi";
 import {
@@ -158,6 +159,8 @@ const EXTERNAL_SUB_DOWNLOAD_SITES = new Set([
   "kawaii",    // KW
   "megaplay",  // MP
   "reflix",    // RE
+  "donghua_ax", // DX 1
+  "donghua_ak", // DX 2
 ]);
 
 /* Playback and download providers are separate product surfaces. */
@@ -175,6 +178,8 @@ const DOWNLOAD_SOURCE_SITES = new Set([
   "kawaii",         // KW — HLS/MP4 + ترجمة خارجية منفصلة
   "megaplay",       // MP — HLS + ترجمة خارجية منفصلة
   "reflix",         // RE — HLS + ترجمة خارجية منفصلة
+  "donghua_ax",     // DX 1 — دونغهوا + ترجمة عربية خارجية
+  "donghua_ak",     // DX 2 — دونغهوا + ترجمة عربية خارجية
 ]);
 
 function subtitlesDisabledForSite(site?: string): boolean {
@@ -195,6 +200,7 @@ const SITE_TAG: Record<string, string> = {
   akwam: "AQ",
   anivexa_animegg: "GG", anivexa_anidbapp: "DB", anivexa_2dhive: "2D",
   anivexa_anibd: "BD", anivexa_senshi: "SE", anivexa_kaa: "KA",
+  donghua_ax: "DX 1", donghua_ak: "DX 2",
 };
 
 /* ── اسم عرض لكل موقع في منتقي المصادر ── */
@@ -656,6 +662,8 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "reflix",         name: "ReAnime",            tag: "RE" },
     { site: "reflix_dub",     name: "ReAnime (إنجليزي)",  tag: "RE DUB" },
     { site: "megaplay_dub",   name: "MegaPlay (إنجليزي)", tag: "MP DUB" },
+    { site: "donghua_ax",     name: "DX 1",               tag: "DX 1" },
+    { site: "donghua_ak",     name: "DX 2",               tag: "DX 2" },
   ],
   "720p": [
     { site: "animewitcher",   name: "AnimeWitcher",       tag: "AW" },
@@ -668,6 +676,8 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "reflix",         name: "ReAnime",            tag: "RE" },
     { site: "reflix_dub",     name: "ReAnime (إنجليزي)",  tag: "RE DUB" },
     { site: "megaplay_dub",   name: "MegaPlay (إنجليزي)", tag: "MP DUB" },
+    { site: "donghua_ax",     name: "DX 1",               tag: "DX 1" },
+    { site: "donghua_ak",     name: "DX 2",               tag: "DX 2" },
   ],
   "480p": [
     { site: "animewitcher",   name: "AnimeWitcher",       tag: "AW" },
@@ -680,6 +690,8 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "reflix",         name: "ReAnime",            tag: "RE" },
     { site: "reflix_dub",     name: "ReAnime (إنجليزي)",  tag: "RE DUB" },
     { site: "megaplay_dub",   name: "MegaPlay (إنجليزي)", tag: "MP DUB" },
+    { site: "donghua_ax",     name: "DX 1",               tag: "DX 1" },
+    { site: "donghua_ak",     name: "DX 2",               tag: "DX 2" },
   ],
   "360p": [
     { site: "animewitcher",   name: "AnimeWitcher",       tag: "AW" },
@@ -1140,6 +1152,8 @@ export default function WatchScreen() {
     (item) => item.animeId === Number(anime) && item.ep === epNum,
   )?.totalEps;
   const [catalogTotalEps, setCatalogTotalEps] = useState<number | undefined>();
+  const [isDonghuaOrigin, setIsDonghuaOrigin] = useState(false);
+  const donghuaSynonymsRef = useRef<string[]>([]);
   const [awEpisodeNumbersBySeason, setAwEpisodeNumbersBySeason] =
     useState<Record<string, number[]>>({});
   const [awEpisodesReady, setAwEpisodesReady] = useState(false);
@@ -1147,32 +1161,90 @@ export default function WatchScreen() {
   /* بطاقات «متابعة المشاهدة» القديمة لا تحتوي دائماً على totalEps. جلب
      العدد من AniList عند الحاجة يعيد تفعيل التالي بدون اختراع حد للحلقات. */
   useEffect(() => {
-    const explicit = parseInt(totalEpsParam || "", 10);
-    const legacy = parseInt(episodes || "", 10);
-    if (
-      (Number.isFinite(explicit) && explicit > 0) ||
-      (Number.isFinite(legacy) && legacy > 0) ||
-      (historyTotalEps !== undefined && Number.isFinite(historyTotalEps) && historyTotalEps > 0)
-    ) {
-      return;
-    }
     const id = Number(sourceAnimeId);
     if (!Number.isInteger(id) || id <= 0) return;
     let cancelled = false;
-    anilistQuery<{ Media?: { episodes?: number | null; nextAiringEpisode?: { episode?: number | null } | null } }>(
+    const explicit = parseInt(totalEpsParam || "", 10);
+    const legacy = parseInt(episodes || "", 10);
+    const alreadyHasTotal =
+      (Number.isFinite(explicit) && explicit > 0) ||
+      (Number.isFinite(legacy) && legacy > 0) ||
+      (historyTotalEps !== undefined && Number.isFinite(historyTotalEps) && historyTotalEps > 0);
+    anilistQuery<{
+      Media?: {
+        episodes?: number | null;
+        countryOfOrigin?: string | null;
+        synonyms?: string[] | null;
+        nextAiringEpisode?: { episode?: number | null } | null;
+      };
+    }>(
       EPISODE_COUNT_QUERY,
       { id },
     )
       .then((data) => {
         if (cancelled) return;
-        const listed = Number(data?.Media?.episodes || 0);
-        const airing = Number(data?.Media?.nextAiringEpisode?.episode || 0) - 1;
-        const total = Math.max(listed, airing);
-        if (total > 0) setCatalogTotalEps(total);
+        if (Array.isArray(data?.Media?.synonyms)) {
+          donghuaSynonymsRef.current = data.Media.synonyms.filter((x): x is string => typeof x === "string");
+        }
+        setIsDonghuaOrigin(data?.Media?.countryOfOrigin === "CN");
+        if (!alreadyHasTotal) {
+          const listed = Number(data?.Media?.episodes || 0);
+          const airing = Number(data?.Media?.nextAiringEpisode?.episode || 0) - 1;
+          const total = Math.max(listed, airing);
+          if (total > 0) setCatalogTotalEps(total);
+        }
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [anime, episodes, historyTotalEps, totalEpsParam]);
+  }, [anime, sourceAnimeId, episodes, historyTotalEps, totalEpsParam]);
+
+  // Check-only Donghua availability probe (same check-first, extract-on-tap lifecycle as Anime!)
+  useEffect(() => {
+    if (Platform.OS === "web" || isAwDubbed || !isDonghuaOrigin) return;
+    const ctrl = new AbortController();
+    let cancelled = false;
+    void probeDonghuaAvailabilityOnPhone({
+      title: titleStr,
+      englishTitle: englishStr,
+      synonyms: donghuaSynonymsRef.current,
+      episode: epNum,
+      signal: ctrl.signal,
+    }).then((found) => {
+      if (cancelled || !isMountedRef.current) return;
+      const entries: { site: "donghua_ax" | "donghua_ak"; tag: string }[] = [];
+      if (found.donghua_ax) entries.push({ site: "donghua_ax", tag: "DX 1" });
+      if (found.donghua_ak) entries.push({ site: "donghua_ak", tag: "DX 2" });
+      if (entries.length === 0) return;
+
+      setAvailableSlots((curr) => {
+        const next = { ...curr };
+        for (const e of entries) {
+          next[e.site] = {
+            "1080p": { serverCount: 1, name: e.tag, tag: e.tag, qualityRank: 1080 },
+            "720p": { serverCount: 1, name: e.tag, tag: e.tag, qualityRank: 720 },
+            "480p": { serverCount: 1, name: e.tag, tag: e.tag, qualityRank: 480 },
+          };
+        }
+        return next;
+      });
+      setSlotStatus((curr) => {
+        const next = { ...curr };
+        for (const e of entries) {
+          for (const q of ["1080p", "720p", "480p"] as const) {
+            const k = pickerSlotKey(e.site, q);
+            next[k] = next[k] || "ready";
+          }
+        }
+        return next;
+      });
+      setAvailabilityChecked(true);
+      setAvailabilityChecking(false);
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+      ctrl.abort();
+    };
+  }, [isAwDubbed, isDonghuaOrigin, titleStr, englishStr, epNum, availabilityAttempt]);
 
   /* لا نسمح بالتالية عندما لا نملك حداً مؤكداً. شاشة الحلقات تمرر العدد
      الكامل، وسجل المشاهدة يستخدم القيمة المحفوظة أو جلب AniList الاحتياطي. */
@@ -2580,7 +2652,50 @@ export default function WatchScreen() {
         }
       };
 
-      // Phone-first direct resolution for AD 1 (Anime4Up A4SL 1.2 + MegaMax Inertia, 0% VPS load)
+      // On-demand direct resolution for Donghua servers (DX 1 / DX 2) — extracted ONLY on tap
+      if (Platform.OS !== "web" && (site === "donghua_ax" || site === "donghua_ak") && !currentSiteCtrl.signal.aborted && isMountedRef.current) {
+        const resolvedList = await resolveDonghuaSiteOnPhone({
+          site,
+          title: titleStr,
+          englishTitle: englishStr,
+          synonyms: donghuaSynonymsRef.current,
+          episode: epNum,
+          preferredQuality,
+          signal: currentSiteCtrl.signal,
+        });
+        if (resolvedList.length > 0 && isMountedRef.current && progressivePlaybackRef.current === playback) {
+          const siteTag = site === "donghua_ax" ? "DX 1" : "DX 2";
+          const toDonghuaSrc = (item: DonghuaPhoneResolvedSource, idx: number): Src => ({
+            site,
+            name: siteTag,
+            label: `${siteTag} · ${item.quality}`,
+            quality: preferredQuality || item.quality,
+            url: item.url,
+            directUrl: item.url,
+            rawUrl: item.url,
+            directType: item.isHls ? "hls" : "mp4",
+            isEmbed: false,
+            deliveryMode: "direct",
+            headers: item.headers,
+            subtitleUrl: item.subtitleUrl,
+            candidateKey: `${site}-phone-${idx}-${item.quality}`,
+          });
+          const primarySrc = toDonghuaSrc(resolvedList[0], 0);
+          if (primarySrc.subtitleUrl) setGlobalSubUrl(primarySrc.subtitleUrl);
+          resolvedList.slice(1).forEach((fb, i) => {
+            const fbSrc = toDonghuaSrc(fb, i + 1);
+            playback.fallbackSources.push(fbSrc);
+            setSources(prev => prev.some(item => item.candidateKey === fbSrc.candidateKey) ? prev : [...prev, fbSrc]);
+          });
+          streamDoneSeen = true;
+          playback.streamOpen = false;
+          acceptPlayableCandidate(primarySrc, primarySrc.candidateKey!, "primary");
+          return;
+        }
+        throw new Error("donghua source unavailable");
+      }
+
+            // Phone-first direct resolution for AD 1 (Anime4Up A4SL 1.2 + MegaMax Inertia, 0% VPS load)
       if (Platform.OS !== "web" && site === "anime4up2_hard" && !excludeKeys.length && !currentSiteCtrl.signal.aborted && isMountedRef.current) {
         const ad1Fast = await resolveAd1OnPhone({
           title: titleStr,
@@ -3139,7 +3254,38 @@ export default function WatchScreen() {
       let chosenExact: Src | null = null;
       let chosenFallback: Src | null = null;
 
-      // Phone-first AD 1 download resolution (0% VPS load, skips broken server AD 1 scraper)
+      // On-demand direct download resolution for Donghua servers (DX 1 / DX 2)
+      if (Platform.OS !== "web" && (site === "donghua_ax" || site === "donghua_ak") && !siteCtrl.signal.aborted) {
+        const resolvedList = await resolveDonghuaSiteOnPhone({
+          site,
+          title: titleStr,
+          englishTitle: englishStr,
+          synonyms: donghuaSynonymsRef.current,
+          episode: epNum,
+          preferredQuality,
+          signal: siteCtrl.signal,
+        });
+        const siteTag = site === "donghua_ax" ? "DX 1" : "DX 2";
+        for (const item of resolvedList) {
+          newSrcs.push({
+            site,
+            name: siteTag,
+            label: `${siteTag} · ${item.quality}`,
+            quality: item.quality,
+            url: item.url,
+            directUrl: item.url,
+            rawUrl: item.url,
+            directType: item.isHls ? "hls" : "mp4",
+            isEmbed: false,
+            deliveryMode: "direct",
+            headers: item.headers,
+            subtitleUrl: item.subtitleUrl,
+          });
+        }
+        if (newSrcs.length === 0) throw new Error("donghua download unavailable");
+      }
+
+            // Phone-first AD 1 download resolution (0% VPS load, skips broken server AD 1 scraper)
       if (Platform.OS !== "web" && site === "anime4up2_hard" && !siteCtrl.signal.aborted) {
         const ad1PhoneFirst = await resolveAd1OnPhone({
           title: titleStr,
@@ -4119,7 +4265,7 @@ export default function WatchScreen() {
                       pressed && { opacity: 0.82 },
                     ]}
                   >
-                    <Text style={{ fontSize: tvMode ? 18 : 15 }}>🇯🇵</Text>
+                    <Text style={{ fontSize: tvMode ? 18 : 15 }}>{isDonghuaOrigin ? "🇨🇳" : "🇯🇵"}</Text>
                     <Text
                       style={{
                         color: effectiveAudioTab === "sub" ? "#10b981" : colors.textSecondary,
@@ -4128,7 +4274,7 @@ export default function WatchScreen() {
                       }}
                       numberOfLines={1}
                     >
-                      ياباني مترجم
+                      {isDonghuaOrigin ? "صيني مترجم" : "ياباني مترجم"}
                     </Text>
                   </Pressable>
                   <Pressable
@@ -4318,11 +4464,17 @@ export default function WatchScreen() {
                                       ? "rgba(16,185,129,0.34)"
                                       : "rgba(245,158,11,0.30)";
                                   const badgeColor = isEngDub ? "#38bdf8" : isHardsub ? "#10b981" : "#f59e0b";
+                                  const isHumanSub = Boolean(globalSubUrl?.includes("dl.opensubtitles.org"));
+                                  const isDonghuaSite = slot.site === "donghua_ax" || slot.site === "donghua_ak";
                                   const badgeText = isEngDub
                                     ? "دبلجة إنجليزية · ترجمة عربية"
                                     : isHardsub
                                       ? "ترجمة عربية مدمجة"
-                                      : "ترجمة آلية خارجية";
+                                      : isHumanSub
+                                        ? "ترجمة عربية بشرية"
+                                        : isDonghuaSite
+                                          ? "ترجمة عربية خارجية"
+                                          : "ترجمة آلية خارجية";
                                   return (
                                     <View
                                       style={{
