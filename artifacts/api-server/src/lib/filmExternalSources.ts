@@ -351,7 +351,7 @@ export function deduplicateFilmSummaries<T extends ExternalFilmSummary>(
 }
 
 // ── Dynamic TopCinema Origin Resolver ───────────────────────────────────────
-let cachedTopCinemaOrigin = "https://topcinemaa.one";
+let cachedTopCinemaOrigin = "https://topcinemaa.tv";
 let cachedTopCinemaOriginAt = 0;
 
 export async function getTopCinemaOrigin(): Promise<string> {
@@ -570,7 +570,7 @@ function toClientPosterUrl(raw?: string | null): string {
       h.endsWith(".egydead.here") ||
       h === "topcinemaa.one" ||
       h.endsWith(".topcinemaa.one") ||
-      h.includes("topcinema.") ||
+      h.includes("topcinema") ||
       h.includes("moviztime.") ||
       h.includes("aoneroom.")
     ) {
@@ -779,6 +779,40 @@ function parseEgyDeadCards(
   return results;
 }
 
+const CF_PROXY_BASE = `http://127.0.0.1:${process.env.CF_PROXY_PORT || "8000"}`;
+async function fetchHtmlWithCfFallback(url: string, referer?: string, timeoutMs = 8_000): Promise<string | null> {
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": BROWSER_UA,
+        Accept: "text/html,application/xhtml+xml",
+        ...(referer ? { Referer: referer } : {}),
+      },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (res.ok) {
+      const text = await res.text();
+      if (!/Just a moment|cf-browser-verification|_cf_chl_opt/i.test(text)) {
+        return text;
+      }
+    }
+  } catch {}
+  try {
+    const proxyUrl = new URL(`${CF_PROXY_BASE}/fetch`);
+    proxyUrl.searchParams.set("url", url);
+    if (referer) proxyUrl.searchParams.set("ref", referer);
+    proxyUrl.searchParams.set("timeout", String(Math.ceil(timeoutMs / 1000)));
+    const pRes = await fetch(proxyUrl.toString(), { signal: AbortSignal.timeout(timeoutMs + 3000) });
+    if (pRes.ok) {
+      const text = await pRes.text();
+      if (!/Just a moment|cf-browser-verification|_cf_chl_opt/i.test(text)) {
+        return text;
+      }
+    }
+  } catch {}
+  return null;
+}
+
 // ── Live Category Fetchers (with short TTL cache) ───────────────────────────
 async function fetchTopCinemaCategory(pathSlug: string, page: number, spec: CategorySpec): Promise<ExternalFilmSummary[]> {
   const key = `tc:${pathSlug}:p${page}`;
@@ -809,12 +843,8 @@ async function fetchEgyDeadCategory(pathSlug: string, page: number, spec: Catego
   try {
     const cleanPath = pathSlug.endsWith("/") ? pathSlug : `${pathSlug}/`;
     const url = safeEncodeUrl(page > 1 ? `${EGYDEAD_BASE}${cleanPath}?page=${page}` : `${EGYDEAD_BASE}${cleanPath}`);
-    const res = await fetch(url, {
-      headers: { "User-Agent": BROWSER_UA, Accept: "text/html,application/xhtml+xml" },
-      signal: AbortSignal.timeout(7_500),
-    });
-    if (!res.ok) return [];
-    const html = await res.text();
+    const html = await fetchHtmlWithCfFallback(url, `${EGYDEAD_BASE}/`, 7_500);
+    if (!html) return [];
     const items = parseEgyDeadCards(html, spec);
     if (items.length > 0) pageCache.set(key, items, PAGE_CACHE_TTL_MS);
     return items;
@@ -1100,12 +1130,9 @@ async function scrapeEgyDeadSeasonsAndEpisodes(
   seasons: ExternalSeasonInfo[];
   episodes: ExternalEpisodeRef[];
 }> {
-  const firstRes = await fetch(safeEncodeUrl(itemUrl), {
-    headers: { "User-Agent": BROWSER_UA, Accept: "text/html" },
-    signal: AbortSignal.timeout(8_000),
-  });
-  if (!firstRes.ok) return { overviewAr: "", posterUrl: "", genres: [], seasons: [], episodes: [] };
-  let html = await firstRes.text();
+  const firstHtml = await fetchHtmlWithCfFallback(safeEncodeUrl(itemUrl), `${EGYDEAD_BASE}/`, 8_000);
+  if (!firstHtml) return { overviewAr: "", posterUrl: "", genres: [], seasons: [], episodes: [] };
+  let html = firstHtml;
 
   // If itemUrl is an /episode/... page, follow the parent /season/... link so we get full season & episodes!
   if (/\/episode\//i.test(itemUrl)) {
