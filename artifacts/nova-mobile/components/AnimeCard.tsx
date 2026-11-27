@@ -73,6 +73,7 @@ export const AnimeCard = React.memo(function AnimeCard({ anime, size = "sm", car
     <Pressable
       onPress={() => router.push(`/anime/${anime.id}?title=${encodeURIComponent(anime.title.romaji)}&english=${encodeURIComponent(anime.title.english || "")}`)}
       focusable={tvMode && tvFocusable}
+      nativeFocusOnly
       hasTVPreferredFocus={hasTVPreferredFocus}
       hitSlop={tvMode ? 8 : 4}
       pressRetentionOffset={12}

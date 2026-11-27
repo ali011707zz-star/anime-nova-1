@@ -208,12 +208,12 @@ function subscribeTvStore(listener: () => void): () => void {
   };
 }
 
-function getTvDeviceSnapshot(): boolean {
-  return isTvDevice();
-}
+let lastAnyTvFocusAt = 0;
 
-function getNativeTvRingSnapshot(): boolean {
-  return isNativeTvRingActive();
+function getTvCombinedSnapshot(): number {
+  const tvBit = isTvDevice() ? 1 : 0;
+  const ringBit = isNativeTvRingActive() ? 2 : 0;
+  return tvBit | ringBit;
 }
 
 let activeFullScreenOverlay = false;
@@ -379,6 +379,7 @@ type TvPressableState = PressableStateCallbackType & { focused: boolean };
 
 type TvPressableProps = Omit<PressableProps, "style"> & {
   style?: StyleProp<ViewStyle> | ((state: TvPressableState) => StyleProp<ViewStyle>);
+  nativeFocusOnly?: boolean;
   onKeyDown?: (event: any) => void;
   nextFocusUp?: number;
   nextFocusDown?: number;
@@ -390,6 +391,7 @@ export const TvPressable = React.forwardRef<View, TvPressableProps>(function TvP
   {
     style,
     children,
+    nativeFocusOnly = false,
     hasTVPreferredFocus = false,
     focusable,
     onFocus,
@@ -398,12 +400,15 @@ export const TvPressable = React.forwardRef<View, TvPressableProps>(function TvP
   }: TvPressableProps,
   ref: React.ForwardedRef<View>,
 ) {
-  const tv = React.useSyncExternalStore(subscribeTvStore, getTvDeviceSnapshot, getTvDeviceSnapshot);
-  const nativeRing = React.useSyncExternalStore(subscribeTvStore, getNativeTvRingSnapshot, getNativeTvRingSnapshot);
-  const needsJsFocusState = !nativeRing || typeof style === "function" || typeof children === "function";
+  const tvFlags = React.useSyncExternalStore(subscribeTvStore, getTvCombinedSnapshot, getTvCombinedSnapshot);
+  const tv = (tvFlags & 1) !== 0;
+  const nativeRing = (tvFlags & 2) !== 0;
+  const needsJsFocusState = !nativeRing || (!nativeFocusOnly && (typeof style === "function" || typeof children === "function"));
   const [focused, setFocused] = React.useState<boolean>(false);
   const innerRef = React.useRef<View | null>(null);
+  const nodeTagRef = React.useRef<number | null>(null);
   const focusedRef = React.useRef(false);
+  const mountedAtRef = React.useRef<number>(Date.now());
 
   const clearSelfFocus = React.useCallback(() => {
     focusedRef.current = false;
@@ -412,7 +417,10 @@ export const TvPressable = React.forwardRef<View, TvPressableProps>(function TvP
 
   const setCombinedRef = React.useCallback(
     (node: View | null) => {
-      innerRef.current = node;
+      if (innerRef.current !== node) {
+        innerRef.current = node;
+        nodeTagRef.current = null;
+      }
       if (typeof ref === "function") {
         ref(node);
       } else if (ref) {
@@ -434,6 +442,8 @@ export const TvPressable = React.forwardRef<View, TvPressableProps>(function TvP
     if (!tv || !hasTVPreferredFocus || isDisabled) return;
     const t1 = setTimeout(() => {
       if (focusedRef.current) return;
+      // Do not hijack focus if user already navigated elsewhere after this component mounted.
+      if (lastAnyTvFocusAt > mountedAtRef.current) return;
       try {
         (innerRef.current as any)?.focus?.();
       } catch {}
@@ -457,9 +467,12 @@ export const TvPressable = React.forwardRef<View, TvPressableProps>(function TvP
       android_ripple={tv ? null : props.android_ripple}
       onFocus={(event: any) => {
         focusedRef.current = true;
+        lastAnyTvFocusAt = Date.now();
         if (needsJsFocusState) {
-          const tag = innerRef.current ? findNodeHandle(innerRef.current) : null;
-          claimTvFocus(clearSelfFocus, tag);
+          if (nodeTagRef.current === null && innerRef.current) {
+            nodeTagRef.current = findNodeHandle(innerRef.current);
+          }
+          claimTvFocus(clearSelfFocus, nodeTagRef.current);
           setFocused(true);
         }
         onFocus?.(event);
@@ -566,20 +579,25 @@ export function useTvMetrics() {
   const { width, height } = useWindowDimensions();
   const tv = overrideMode === "on" ? true : overrideMode === "off" ? false : isTvDevice(width, height);
   const isTablet = !tv && Math.min(width, height) >= 600;
-  const deviceScale = getDeviceScale(width, height);
-  const size = (phoneValue: number, tvValue?: number) =>
-    responsiveScale(phoneValue, width, tv, tvValue);
+  const deviceScale = React.useMemo(() => getDeviceScale(width, height), [width, height]);
+  const size = React.useCallback(
+    (phoneValue: number, tvValue?: number) => responsiveScale(phoneValue, width, tv, tvValue),
+    [width, tv],
+  );
 
-  return {
-    width,
-    height,
-    tv,
-    isTablet,
-    deviceScale,
-    size,
-    horizontalPadding: size(16, 28),
-    controlTarget: size(40, 48),
-  };
+  return React.useMemo(
+    () => ({
+      width,
+      height,
+      tv,
+      isTablet,
+      deviceScale,
+      size,
+      horizontalPadding: size(16, 28),
+      controlTarget: size(40, 48),
+    }),
+    [width, height, tv, isTablet, deviceScale, size],
+  );
 }
 
 export const tvReadable = {

@@ -554,6 +554,7 @@ export default function AnimeDetailScreen() {
       <View style={[d.topBar, tvMode && d.tvTopBar]}>
         <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")}
           focusable={tvMode}
+          nativeFocusOnly
           hasTVPreferredFocus={tvMode}
           onFocus={() => rememberDetailFocus("back")}
           style={({ focused }) => [d.topBarBack, d.topBarBackRight, tvMode && d.tvTopBarBack, tvMode && tvFocusStyle(focused)]}>
@@ -572,6 +573,7 @@ export default function AnimeDetailScreen() {
       <View style={[d.topBar, tvMode && d.tvTopBar]}>
         <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")}
           focusable={tvMode}
+          nativeFocusOnly
           hasTVPreferredFocus={tvMode}
           onFocus={() => rememberDetailFocus("back")}
           style={({ focused }) => [d.topBarBack, d.topBarBackRight, tvMode && d.tvTopBarBack, tvMode && tvFocusStyle(focused)]}>
@@ -592,6 +594,7 @@ export default function AnimeDetailScreen() {
         </Text>
         <Pressable onPress={() => setRetryTick(t => t + 1)}
           focusable={tvMode}
+          nativeFocusOnly
           style={({ focused }) => [
             { marginTop: 6, backgroundColor: colors.primary, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 14, flexDirection: "row", alignItems: "center", gap: 8 },
             tvMode && tvFocusStyle(focused),
@@ -633,6 +636,7 @@ export default function AnimeDetailScreen() {
       <View style={[d.topBar, tvMode && d.tvTopBar]}>
         <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")}
           focusable={tvMode}
+          nativeFocusOnly
           testID="nova-tv-header-action"
           onFocus={() => rememberDetailFocus("back")}
           style={({ focused }) => [d.topBarBack, tvMode && d.tvTopBarBack, tvMode && tvFocusStyle(focused)]}>
@@ -770,6 +774,7 @@ export default function AnimeDetailScreen() {
               },
             } as any)}
             focusable={tvMode}
+            nativeFocusOnly
             hasTVPreferredFocus={tvMode}
             testID={tvMode ? "nova-tv-preferred-focus" : undefined}
             onFocus={() => rememberDetailFocus("watch")}
@@ -821,6 +826,7 @@ export default function AnimeDetailScreen() {
             <Text style={d.warnText}>{ageRating.warn}</Text>
              <Pressable onPress={() => { setWarnDismissed(true); AsyncStorage.setItem(`adult-warn-${id}`, "1"); }}
                focusable={tvMode}
+               nativeFocusOnly
                style={({ focused }) => [d.warnBtn, tvMode && tvFocusStyle(focused)]}>
               <Text style={d.warnBtnText}>فهمتُ، لا تُظهر مجدداً</Text>
             </Pressable>
@@ -835,6 +841,7 @@ export default function AnimeDetailScreen() {
             { icon: "star-outline",       activeIcon: "star",       label: "تقييمي",    active: myRating > 0, activeColor: "#FBBF24", onPress: () => setShowRating(true) },
           ].map(({ icon, activeIcon, label, active, activeColor, onPress }) => (
              <Pressable key={label} onPress={onPress} focusable={tvMode}
+               nativeFocusOnly
                onFocus={() => rememberDetailFocus(label)}
                style={({ focused }) => [d.actionBtn, tvMode && d.tvActionBtn, active && { backgroundColor: activeColor + "18", borderColor: activeColor + "45" }, tvMode && tvFocusStyle(focused)]}>
               <Ionicons name={(active ? activeIcon : icon) as any} size={tvMode ? 18 : 16} color={active ? activeColor : colors.textPrimary} />
@@ -849,6 +856,7 @@ export default function AnimeDetailScreen() {
         {(score || allTimeRank || anime.idMal) && (
           <Pressable
             focusable={tvMode}
+            nativeFocusOnly
             onFocus={() => rememberDetailFocus("malStats")}
             style={({ focused }) => [d.malBox, { marginHorizontal: 16 }, tvMode && tvFocusStyle(focused)]}
           >
@@ -887,6 +895,7 @@ export default function AnimeDetailScreen() {
             <Pressable
               onPress={() => setShowFull(f => !f)}
               focusable={tvMode}
+              nativeFocusOnly
               onFocus={() => rememberDetailFocus("synopsis")}
               style={({ focused }) => [
                 d.descBox,
@@ -925,6 +934,7 @@ export default function AnimeDetailScreen() {
           <SectionHeader title="معلومات الإنتاج" tvMode={tvMode} />
           <Pressable
             focusable={tvMode}
+            nativeFocusOnly
             onFocus={() => rememberDetailFocus("metadata")}
             style={({ focused }) => [
               d.metaGrid,
@@ -983,7 +993,7 @@ export default function AnimeDetailScreen() {
               { key: "related", label: "ذات صلة" },
               { key: "similar", label: "مشابهة" },
             ] as const).map(t => (
-               <Pressable key={t.key} onPress={() => setTab(t.key)} focusable={tvMode}
+               <Pressable key={t.key} onPress={() => setTab(t.key)} focusable={tvMode} nativeFocusOnly
                  onFocus={() => rememberDetailFocus(`tab:${t.key}`)}
                 style={({ focused }) => [
                   d.tabBtn,
@@ -1039,7 +1049,7 @@ export default function AnimeDetailScreen() {
                 {related.map((e: any) => {
                   const n = e.node;
                   return (
-                     <Pressable key={n.id} onPress={() => router.push(`/anime/${n.id}`)} focusable={tvMode}
+                     <Pressable key={n.id} onPress={() => router.push(`/anime/${n.id}`)} focusable={tvMode} nativeFocusOnly
                        style={({ focused }) => [d.relCard, tvMode && tvFocusStyle(focused)]}>
                       <View style={d.relImgWrap}>
                         {n.coverImage?.large ? (
@@ -1086,7 +1096,7 @@ export default function AnimeDetailScreen() {
                   const rec = n.mediaRecommendation;
                   if (!rec) return null;
                   return (
-                     <Pressable key={rec.id} onPress={() => router.push(`/anime/${rec.id}`)} focusable={tvMode}
+                     <Pressable key={rec.id} onPress={() => router.push(`/anime/${rec.id}`)} focusable={tvMode} nativeFocusOnly
                        style={({ focused }) => [d.simCard, tvMode && { width: Math.floor((width - 88 - 48) / 5), borderRadius: 12, padding: 2 }, tvMode && tvFocusStyle(focused)]}>
                       <View style={d.simImgWrap}>
                         {rec.coverImage?.large ? (
@@ -1144,6 +1154,7 @@ export default function AnimeDetailScreen() {
                 return (
                   <Pressable key={n} onPress={() => submitRating(n)}
                     focusable={tvMode}
+                    nativeFocusOnly
                     hasTVPreferredFocus={isPreferred}
                     testID={isPreferred ? "nova-tv-preferred-focus" : undefined}
                     style={({ focused }) => [d.ratingNum, n <= (myRating) && d.ratingNumActive, tvMode && tvFocusStyle(focused)]}>
@@ -1153,13 +1164,13 @@ export default function AnimeDetailScreen() {
               })}
             </View>
             {myRating > 0 && (
-              <Pressable onPress={() => submitRating(0)} focusable={tvMode} style={({ focused }) => [{ marginTop: 10, paddingVertical: 6, paddingHorizontal: 14, borderRadius: 10 }, tvMode && tvFocusStyle(focused)]}>
+              <Pressable onPress={() => submitRating(0)} focusable={tvMode} nativeFocusOnly style={({ focused }) => [{ marginTop: 10, paddingVertical: 6, paddingHorizontal: 14, borderRadius: 10 }, tvMode && tvFocusStyle(focused)]}>
                 <Text style={{ color: colors.destructive, fontSize: 12, fontFamily: "Cairo_700Bold", textAlign: "center" }}>
                   حذف التقييم
                 </Text>
               </Pressable>
             )}
-            <Pressable onPress={() => setShowRating(false)} focusable={tvMode} style={({ focused }) => [{ marginTop: 8, paddingVertical: 8, paddingHorizontal: 18, borderRadius: 10, backgroundColor: colors.surfaceElevated }, tvMode && tvFocusStyle(focused)]}>
+            <Pressable onPress={() => setShowRating(false)} focusable={tvMode} nativeFocusOnly style={({ focused }) => [{ marginTop: 8, paddingVertical: 8, paddingHorizontal: 18, borderRadius: 10, backgroundColor: colors.surfaceElevated }, tvMode && tvFocusStyle(focused)]}>
               <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: "Cairo_700Bold", textAlign: "center" }}>
                 إغلاق
               </Text>

@@ -11,7 +11,7 @@ import { StatusBar } from "expo-status-bar";
 import { useVideoPlayer, VideoView, type BufferOptions } from "expo-video";
 import * as Brightness from "expo-brightness";
 import { VolumeManager } from "../lib/volume-manager";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator, Alert, Animated, AppState, DeviceEventEmitter, Dimensions, Easing, I18nManager, InteractionManager, Linking, Platform,
   BackHandler, findNodeHandle, PanResponder, Pressable as RNPressable, ScrollView, StyleSheet, Text, View,
@@ -186,7 +186,7 @@ type Props = {
   anilistId?: number;
   onBack: () => void;
   /** Watch routes own phone orientation; standalone player surfaces use the local fallback. */
-  onToggleOrientation?: () => void;
+  onToggleOrientation?: (nextPortrait?: boolean) => void;
   onNextEpisode?: () => void;
   onPrevEpisode?: () => void;
   onPreviousEpisode?: () => void;
@@ -657,6 +657,7 @@ function ExpoRiftPlayer({
   const suppressProgressAutoFocusUntilRef = useRef(0);
   const controlsVisibleRef = useRef(true);
   const isHidingControlsRef = useRef(false);
+  const controlsAtFullOpacityRef = useRef(true);
   const playIntentRef = useRef(true);
   const lastPlayToggleAtRef = useRef(0);
   const btnSeekCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -747,7 +748,7 @@ function ExpoRiftPlayer({
 
   /* ─── New UI state ─── */
   const [isMuted, setIsMuted]             = useState(false);
-  const [isPortrait, setIsPortrait]       = useState(false);
+  const [isPortrait, setIsPortrait]       = useState(() => !tvMode && winHeight > winWidth);
   /* showSpeedMenu / showFitMenu / showSubPanel hoisted above for BackHandler */
   const [subLang, setSubLang]             = useState<"ar" | "en">("ar");
   const userSelectedSubLangRef            = useRef(false);
@@ -2050,49 +2051,40 @@ function ExpoRiftPlayer({
     setIsFlipped(f => !f);
   }, []);
 
-  /* ─── Portrait / Landscape toggle (سلس بدون قفز الواجهة قبل دوران الشاشة الفعلي) ─── */
+  /* ─── Portrait / Landscape toggle — تبديل فوري وسلس بدون تعتيم الأزرار أو تجميد السطح ─── */
   const togglePortrait = useCallback(() => {
     setShowFitMenu(false);
     setShowSpeedMenu(false);
-    if (hideTimer.current) clearTimeout(hideTimer.current);
-    if (rotationAnimTimerRef.current) clearTimeout(rotationAnimTimerRef.current);
-    isRotatingRef.current = true;
-    const nextPortrait = !isPortrait;
-    const triggerLock = () => {
-      if (onToggleOrientation) {
-        onToggleOrientation();
-      } else {
-        requestOrientation(
-          nextPortrait
-            ? ScreenOrientation.OrientationLock.PORTRAIT_UP
-            : ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT,
-        );
-      }
-    };
-    controlsOpacity.stopAnimation();
-    Animated.timing(controlsOpacity, {
-      toValue: 0.08,
-      duration: 85,
-      easing: Easing.out(Easing.quad),
-      useNativeDriver: true,
-    }).start(() => {
-      triggerLock();
-    });
-    rotationAnimTimerRef.current = setTimeout(() => {
+    if (hideTimer.current) {
+      clearTimeout(hideTimer.current);
+      hideTimer.current = null;
+    }
+    if (rotationAnimTimerRef.current) {
+      clearTimeout(rotationAnimTimerRef.current);
       rotationAnimTimerRef.current = null;
-      if (!aliveRef.current) return;
-      isRotatingRef.current = false;
-      measureSeekBar();
-      if (controlsVisibleRef.current) {
-        controlsOpacity.stopAnimation();
-        Animated.timing(controlsOpacity, {
-          toValue: 1,
-          duration: 180,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }).start();
-      }
-    }, 360);
+    }
+    isRotatingRef.current = false;
+    const nextPortrait = !isPortrait;
+    setIsPortrait(nextPortrait);
+
+    // Ensure controls remain crisp at full opacity across the orientation transition.
+    isHidingControlsRef.current = false;
+    controlsVisibleRef.current = true;
+    controlsAtFullOpacityRef.current = true;
+    setShowControls(true);
+    controlsOpacity.stopAnimation();
+    controlsOpacity.setValue(1);
+
+    if (onToggleOrientation) {
+      onToggleOrientation(nextPortrait);
+    } else {
+      requestOrientation(
+        nextPortrait
+          ? ScreenOrientation.OrientationLock.PORTRAIT_UP
+          : ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT,
+      );
+    }
+    schedHideRef.current?.();
   }, [isPortrait, onToggleOrientation, requestOrientation, controlsOpacity]);
 
   /* ─── Screenshot ─── */
@@ -2152,33 +2144,26 @@ function ExpoRiftPlayer({
   }, [showControls]);
 
   /* ─── Orientation change listener + live geometry sync ─── */
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (tvMode || !winWidth || !winHeight) return;
     const geomPortrait = winHeight > winWidth;
     setIsPortrait(prev => (prev === geomPortrait ? prev : geomPortrait));
+    if (controlsVisibleRef.current && !isHidingControlsRef.current && !controlsAtFullOpacityRef.current) {
+      controlsAtFullOpacityRef.current = true;
+      controlsOpacity.stopAnimation();
+      controlsOpacity.setValue(1);
+    }
+    const raf = requestAnimationFrame(() => {
+      if (aliveRef.current) measureSeekBar();
+    });
     const remeasureTimer = setTimeout(() => {
-      if (!aliveRef.current) return;
-      measureSeekBar();
-      if (isRotatingRef.current) {
-        isRotatingRef.current = false;
-        if (rotationAnimTimerRef.current) {
-          clearTimeout(rotationAnimTimerRef.current);
-          rotationAnimTimerRef.current = null;
-        }
-        if (controlsVisibleRef.current) {
-          controlsOpacity.stopAnimation();
-          Animated.timing(controlsOpacity, {
-            toValue: 1,
-            duration: 190,
-            easing: Easing.out(Easing.cubic),
-            useNativeDriver: true,
-          }).start();
-          schedHideRef.current?.();
-        }
-      }
-    }, 60);
-    return () => clearTimeout(remeasureTimer);
-  }, [winWidth, winHeight, tvMode, controlsOpacity]);
+      if (aliveRef.current) measureSeekBar();
+    }, 90);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(remeasureTimer);
+    };
+  }, [winWidth, winHeight, tvMode, controlsOpacity, measureSeekBar]);
 
   useEffect(() => {
     const detect = async () => {
@@ -2450,6 +2435,7 @@ function ExpoRiftPlayer({
       hideTimer.current = null;
     }
     isHidingControlsRef.current = true;
+    controlsAtFullOpacityRef.current = false;
     controlsOpacity.stopAnimation();
     Animated.timing(controlsOpacity, {
       toValue: 0,
@@ -2485,18 +2471,19 @@ function ExpoRiftPlayer({
       revealHintTimer.current = null;
     }
     if (showTvRevealHint) setShowTvRevealHint(false);
-    // إذا كانت الأدوات ظاهرة بالفعل وليست قيد الإخفاء، نعيد ضبط المؤقت فقط بدون إعادة تشغيل الأنميشن
-    if (controlsVisibleRef.current && !isHidingControlsRef.current) {
+    // إذا كانت الأدوات ظاهرة بالفعل وبكامل سطوعها وليست قيد الإخفاء، نعيد ضبط المؤقت فقط
+    if (controlsVisibleRef.current && !isHidingControlsRef.current && controlsAtFullOpacityRef.current) {
       schedHide();
       return;
     }
     isHidingControlsRef.current = false;
     controlsVisibleRef.current = true;
+    controlsAtFullOpacityRef.current = true;
     setShowControls(true);
     controlsOpacity.stopAnimation();
     Animated.timing(controlsOpacity, {
       toValue: 1,
-      duration: 165,
+      duration: 150,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();
@@ -3631,8 +3618,6 @@ function ExpoRiftPlayer({
     <View ref={rootViewRef} style={[s.root, isFlipped && { transform: [{ rotate: "180deg" }] }]}>
       <StatusBar hidden />
       <Animated.View
-        renderToHardwareTextureAndroid={true}
-        shouldRasterizeIOS={true}
         style={[
           StyleSheet.absoluteFill,
           { opacity: entryFadeAnim, transform: [{ scale: entryScaleAnim }] },

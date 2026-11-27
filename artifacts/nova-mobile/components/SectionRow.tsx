@@ -37,9 +37,7 @@ export const SectionRow = React.memo(function SectionRow({
   onSectionFocus,
 }: Props) {
   const colors = useColors();
-  const { width, height } = useWindowDimensions();
-  const { tv: tvMode } = useTvMetrics();
-  const { size: scaleSize } = useTvMetrics();
+  const { width, tv: tvMode, size: scaleSize } = useTvMetrics();
   const cardWidth = getRailCardWidth(width, tvMode ? 5 : 3);
   const sidePadding = getRailSidePadding(width);
   const railRef = React.useRef<FlatList<AnilistMedia>>(null);

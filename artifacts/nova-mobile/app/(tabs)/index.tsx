@@ -519,6 +519,7 @@ export default function HomeScreen() {
             <SectionHeader
               onSeeAll={() => router.push("/(tabs)/library")}
               focusable={isTvLayout && sectionFocusable}
+                    nativeFocusOnly
               onFocus={handleSectionFocus}
               seeAllLabel="السجل الكامل"
             >
@@ -576,6 +577,7 @@ export default function HomeScreen() {
                       if (isTvLayout) scrollContinueIntoView(hIdx);
                     }}
                     focusable={isTvLayout && sectionFocusable}
+                    nativeFocusOnly
                     style={({ focused }) => [
                       styles.historyCard,
                       {
@@ -689,6 +691,7 @@ export default function HomeScreen() {
             <SectionHeader
               onSeeAll={() => router.push((activeLatestTab === "manga" ? "/manga" : "/latest") as any)}
               focusable={isTvLayout && sectionFocusable}
+                    nativeFocusOnly
               onFocus={handleSectionFocus}
             >
               <View style={styles.sectionRightRow}>
@@ -700,6 +703,7 @@ export default function HomeScreen() {
               </View>
             </SectionHeader>
             <ScrollView
+              focusable={false}
               horizontal
               showsHorizontalScrollIndicator={false}
               style={{ marginBottom: 12 }}
@@ -719,6 +723,7 @@ export default function HomeScreen() {
                     }}
                     onFocus={handleSectionFocus}
                     focusable={isTvLayout && sectionFocusable}
+                    nativeFocusOnly
                     style={({ focused }) => [
                       {
                         paddingHorizontal: isTvLayout ? 20 : 16,
@@ -781,6 +786,7 @@ export default function HomeScreen() {
                         if (isTvLayout) scrollTodayEpsIntoView(epIdx);
                       }}
                       focusable={isTvLayout && sectionFocusable}
+                    nativeFocusOnly
                       style={({ focused }) => [todayEpStyles.card, { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border }, isTvLayout && tvFocusStyle(focused)]}
                     >
                       {ep.cover ? (
@@ -894,6 +900,7 @@ export default function HomeScreen() {
                         if (isTvLayout) scrollTodayEpsIntoView(mIdx);
                       }}
                       focusable={isTvLayout && sectionFocusable}
+                    nativeFocusOnly
                       style={({ focused }) => [
                         todayEpStyles.card,
                         {
@@ -1006,6 +1013,7 @@ export default function HomeScreen() {
               <SectionHeader
                 onSeeAll={currentTab.onSeeAll}
                 focusable={isTvLayout && sectionFocusable}
+                    nativeFocusOnly
                 onFocus={handleSectionFocus}
               >
                 <View style={styles.sectionRightRow}>
@@ -1017,6 +1025,7 @@ export default function HomeScreen() {
                 </View>
               </SectionHeader>
               <ScrollView
+                focusable={false}
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 style={{ marginBottom: 12 }}
@@ -1033,6 +1042,7 @@ export default function HomeScreen() {
                       }}
                       onFocus={handleSectionFocus}
                       focusable={isTvLayout && sectionFocusable}
+                    nativeFocusOnly
                       style={({ focused }) => [
                         {
                           paddingHorizontal: isTvLayout ? 20 : 16,
@@ -1069,6 +1079,7 @@ export default function HomeScreen() {
               {activeItems.length === 0 ? (
                 <SkeletonRow />
               ) : (
+                <TvFocusGuideView autoFocus={false} style={isTvLayout ? { minHeight: 1 } : undefined}>
                 <FlatList
                   ref={animeUnifiedListRef}
                   data={isTvLayout ? activeItems.slice(0, 14) : activeItems}
@@ -1096,11 +1107,12 @@ export default function HomeScreen() {
                       }}
                     />
                   )}
-                  initialNumToRender={isTvLayout ? 5 : 4}
-                  maxToRenderPerBatch={isTvLayout ? 4 : 3}
-                  windowSize={isTvLayout ? 5 : 3}
+                  initialNumToRender={isTvLayout ? 6 : 4}
+                  maxToRenderPerBatch={isTvLayout ? 5 : 3}
+                  windowSize={isTvLayout ? 7 : 3}
                   removeClippedSubviews={false}
                 />
+                </TvFocusGuideView>
               )}
             </View>
           );
@@ -1113,6 +1125,7 @@ export default function HomeScreen() {
               onSeeAll={() => router.push("/(tabs)/news" as any)}
               seeAllLabel="عرض المزيد"
               focusable={isTvLayout && sectionFocusable}
+                    nativeFocusOnly
               onFocus={handleSectionFocus}
             >
               <View style={styles.sectionRightRow}>
@@ -1165,6 +1178,7 @@ export default function HomeScreen() {
                       if (isTvLayout) newsFocusScroll.scrollToFocusedIndex(newsIdx);
                     }}
                     focusable={isTvLayout && sectionFocusable}
+                    nativeFocusOnly
                     style={({ pressed, focused }) => [
                       homeNewsStyles.card,
                       {
@@ -1274,6 +1288,7 @@ export default function HomeScreen() {
             <SectionHeader
               onSeeAll={() => router.push({ pathname: "/aw-dubbed" as any, params: { tab: activeDubbedTab } })}
               focusable={isTvLayout && sectionFocusable}
+                    nativeFocusOnly
               onFocus={handleSectionFocus}
             >
               <View style={styles.sectionRightRow}>
@@ -1316,6 +1331,7 @@ export default function HomeScreen() {
                     }}
                     onFocus={handleSectionFocus}
                     focusable={isTvLayout && sectionFocusable}
+                    nativeFocusOnly
                     style={({ focused }) => [
                       {
                         paddingHorizontal: isTvLayout ? 20 : 16,
@@ -1381,6 +1397,7 @@ export default function HomeScreen() {
                           if (isTvLayout) scrollDubbedRailIntoView(itemIdx);
                         }}
                         focusable={isTvLayout && sectionFocusable}
+                    nativeFocusOnly
                         style={({ focused }) => [
                           todayStyles.card,
                           { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border },
@@ -1477,6 +1494,7 @@ export default function HomeScreen() {
                           if (isTvLayout) scrollDubbedRailIntoView(rowIdx);
                         }}
                         focusable={isTvLayout && sectionFocusable}
+                    nativeFocusOnly
                         style={({ focused }) => [todayStyles.card, { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border }, isTvLayout && tvFocusStyle(focused)]}
                       >
                         {imgUri ? (
@@ -1549,6 +1567,7 @@ export default function HomeScreen() {
                           if (isTvLayout) scrollDubbedRailIntoView(spIdx);
                         }}
                         focusable={isTvLayout && sectionFocusable}
+                    nativeFocusOnly
                         style={({ focused }) => [
                           todayStyles.card,
                           { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border },
@@ -1632,6 +1651,7 @@ export default function HomeScreen() {
                           if (isTvLayout) scrollDubbedRailIntoView(c1Idx);
                         }}
                         focusable={isTvLayout && sectionFocusable}
+                    nativeFocusOnly
                         style={({ focused }) => [todayStyles.card, { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border }, isTvLayout && tvFocusStyle(focused)]}
                       >
                         {imgUri ? (
@@ -1701,6 +1721,7 @@ export default function HomeScreen() {
                           if (isTvLayout) scrollDubbedRailIntoView(c2Idx);
                         }}
                         focusable={isTvLayout && sectionFocusable}
+                    nativeFocusOnly
                         style={({ focused }) => [
                           todayStyles.card,
                           { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border },
@@ -1754,6 +1775,7 @@ export default function HomeScreen() {
               <SectionHeader
                 onSeeAll={() => router.push({ pathname: "/manga" as any, params: { tab: isManhwaView ? "manhwa" : "all" } })}
                 focusable={isTvLayout && sectionFocusable}
+                    nativeFocusOnly
                 onFocus={handleSectionFocus}
               >
                 <View style={styles.sectionRightRow}>
@@ -1791,6 +1813,7 @@ export default function HomeScreen() {
                       }}
                       onFocus={handleSectionFocus}
                       focusable={isTvLayout && sectionFocusable}
+                    nativeFocusOnly
                       style={({ focused }) => [
                         {
                           paddingHorizontal: isTvLayout ? 20 : 16,
@@ -1864,6 +1887,7 @@ export default function HomeScreen() {
                       if (isTvLayout) scrollMangaRailIntoView(mIdx);
                     }}
                     focusable={isTvLayout && sectionFocusable}
+                    nativeFocusOnly
                     style={({ focused }) => [
                       todayStyles.card,
                       { width: railCardWidth, height: Math.round(railCardWidth * 1.46), backgroundColor: colors.card, borderColor: colors.border },
@@ -1927,6 +1951,7 @@ export default function HomeScreen() {
             testID="nova-tv-header-action"
             onPress={() => setShowDrawer(true)}
             focusable={isTvLayout && headerTvFocusable}
+              nativeFocusOnly
             hitSlop={isTvLayout ? 10 : 6}
             style={({ focused }) => [
               styles.iconBtn,
@@ -1950,6 +1975,7 @@ export default function HomeScreen() {
               testID="nova-tv-header-action"
               onPress={() => router.push("/(tabs)/search" as any)}
               focusable={isTvLayout && headerTvFocusable}
+              nativeFocusOnly
               style={({ focused }) => [
                 styles.headerSearch,
                 {

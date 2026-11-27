@@ -76,7 +76,7 @@ if (Platform.OS !== "web") {
 export function useWatchPlayerOrientation(
   playerActive: boolean,
   tvMode: boolean,
-): (() => void) | undefined {
+): ((nextPortrait?: boolean) => void) | undefined {
   const sessionIdRef = useRef<number | null>(null);
   if (sessionIdRef.current === null) {
     sessionIdRef.current = ++nextSessionId;
@@ -114,7 +114,7 @@ export function useWatchPlayerOrientation(
     queueOrientationLock(lock);
   }, [playerActive, tvMode]);
 
-  const toggleOrientation = useCallback(() => {
+  const toggleOrientation = useCallback((nextPortrait?: boolean) => {
     const sessionId = sessionIdRef.current;
     if (
       tvMode ||
@@ -126,11 +126,11 @@ export function useWatchPlayerOrientation(
       return;
     }
 
-    const nextLock = requestedLockRef.current === LANDSCAPE_LOCK
-      ? PORTRAIT_LOCK
-      : LANDSCAPE_LOCK;
+    const nextLock = typeof nextPortrait === "boolean"
+      ? (nextPortrait ? PORTRAIT_LOCK : LANDSCAPE_LOCK)
+      : (requestedLockRef.current === LANDSCAPE_LOCK ? PORTRAIT_LOCK : LANDSCAPE_LOCK);
     requestedLockRef.current = nextLock;
-    queueOrientationLock(nextLock);
+    queueOrientationLock(nextLock, true);
   }, [tvMode]);
 
   return tvMode || Platform.OS === "web" ? undefined : toggleOrientation;

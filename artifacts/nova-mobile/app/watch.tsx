@@ -1045,7 +1045,7 @@ function SrcRow({ src, idx, onPlay }: { src: Src; idx: number; onPlay: (s: Src) 
   const tag = getSiteTag(src.site || "");
   const { tv: tvMode } = useTvMetrics();
   return (
-    <Pressable onPress={() => onPlay(src)} focusable={tvMode}
+    <Pressable onPress={() => onPlay(src)} focusable={tvMode} nativeFocusOnly
       style={({ focused }) => [d.srcRow, tvMode && tvFocusStyle(focused)]}>
       <View style={[d.srcIcon, { backgroundColor: qs.badge, borderColor: qs.border }]}>
         <Ionicons name="play-circle" size={11} color={qs.text} />
@@ -4042,14 +4042,14 @@ export default function WatchScreen() {
     if (Platform.OS === "web") {
       return (
         <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 16 }}>
-          <Pressable onPress={handleBack} focusable={tvMode} style={({ focused }) => [d.playerBackBtn, { position: "absolute", top: topPad + 4, right: 12 }, tvMode && tvFocusStyle(focused)]}>
+          <Pressable onPress={handleBack} focusable={tvMode} nativeFocusOnly style={({ focused }) => [d.playerBackBtn, { position: "absolute", top: topPad + 4, right: 12 }, tvMode && tvFocusStyle(focused)]}>
             <Ionicons name="arrow-back" size={18} color="#fff" style={{ transform: [{ scaleX: -1 }] }} />
           </Pressable>
           <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
             <Ionicons name="tv-outline" size={36} color="rgba(139,92,246,0.7)" />
           </View>
           <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: 16, textAlign: "center" }}>هذا المصدر يحتاج التطبيق الأصلي</Text>
-          <Pressable onPress={() => setScreen("picker")} focusable={tvMode}
+          <Pressable onPress={() => setScreen("picker")} focusable={tvMode} nativeFocusOnly
             style={({ focused }) => [tvMode && tvFocusStyle(focused)]}>
             <Text style={{ color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular", fontSize: 13 }}>العودة للمصادر</Text>
           </Pressable>
@@ -4059,11 +4059,11 @@ export default function WatchScreen() {
     // Native: never show broken "needs native app" card — fail cleanly back to picker
     return (
       <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 16 }}>
-        <Pressable onPress={handleBack} focusable={tvMode} style={({ focused }) => [d.playerBackBtn, { position: "absolute", top: topPad + 4, right: 12 }, tvMode && tvFocusStyle(focused)]}>
+        <Pressable onPress={handleBack} focusable={tvMode} nativeFocusOnly style={({ focused }) => [d.playerBackBtn, { position: "absolute", top: topPad + 4, right: 12 }, tvMode && tvFocusStyle(focused)]}>
           <Ionicons name="arrow-back" size={18} color="#fff" style={{ transform: [{ scaleX: -1 }] }} />
         </Pressable>
         <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: 16, textAlign: "center" }}>تعذّر تشغيل هذا السيرفر، اختر سيرفراً آخر</Text>
-        <Pressable onPress={() => { saveProgress(); setPlayingSrc(null); setScreen("picker"); }} focusable={tvMode}
+        <Pressable onPress={() => { saveProgress(); setPlayingSrc(null); setScreen("picker"); }} focusable={tvMode} nativeFocusOnly
           style={({ focused }) => [{ paddingHorizontal: 18, paddingVertical: 10, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.2)" }, tvMode && tvFocusStyle(focused)]}>
           <Text style={{ color: "#fff", fontFamily: "Cairo_600SemiBold", fontSize: 13 }}>العودة للمصادر</Text>
         </Pressable>
@@ -4091,7 +4091,7 @@ export default function WatchScreen() {
 
       {/* ── Header ── */}
       <View style={[d.header, tvMode && d.tvHeader, { paddingTop: topPad + 4 }]}>
-        <Pressable onPress={handleBack} focusable={tvMode}
+        <Pressable onPress={handleBack} focusable={tvMode} nativeFocusOnly
           testID="nova-tv-header-action"
           hasTVPreferredFocus={false}
           style={({ focused }) => [d.headerBack, tvMode && d.tvHeaderActionBtn, tvMode && tvFocusStyle(focused)]}>
@@ -4104,7 +4104,7 @@ export default function WatchScreen() {
           </Text>
         </View>
         <View style={d.headerLeft}>
-          <Pressable disabled={!canGoPrevEpisode} onPress={onRiftPrevEpisode} focusable={tvMode && canGoPrevEpisode}
+          <Pressable disabled={!canGoPrevEpisode} onPress={onRiftPrevEpisode} focusable={tvMode && canGoPrevEpisode} nativeFocusOnly
             testID="nova-tv-header-action"
             hasTVPreferredFocus={false}
             style={({ focused }) => [d.epNavBtn, tvMode && d.tvEpNavBtn, !canGoPrevEpisode && { opacity: 0.22 }, tvMode && tvFocusStyle(focused)]}>
@@ -4115,6 +4115,7 @@ export default function WatchScreen() {
             disabled={!canGoNextEpisode}
             onPress={onRiftNextEpisode}
             focusable={tvMode && canGoNextEpisode}
+            nativeFocusOnly
             testID="nova-tv-header-action"
             hasTVPreferredFocus={false}
             style={({ focused }) => [d.epNavBtn, tvMode && d.tvEpNavBtn, { borderColor: colors.accentBorder, backgroundColor: colors.accentSurface },
@@ -4122,7 +4123,7 @@ export default function WatchScreen() {
             <Text style={[d.epNavText, tvMode && d.tvEpNavText, { color: colors.accent }]}>التالية</Text>
             <Ionicons name="chevron-back" size={tvMode ? 22 : 12} color={colors.accent} />
           </Pressable>
-          <Pressable onPress={refreshAllSources} focusable={tvMode}
+          <Pressable onPress={refreshAllSources} focusable={tvMode} nativeFocusOnly
             testID="nova-tv-header-action"
             hasTVPreferredFocus={false}
             style={({ focused }) => [d.headerRefreshBtn, tvMode && d.tvHeaderActionBtn, tvMode && tvFocusStyle(focused)]}>
@@ -4175,6 +4176,7 @@ export default function WatchScreen() {
               <Pressable
                 onPress={refreshAllSources}
                 focusable={tvMode}
+                nativeFocusOnly
                 accessibilityRole="button"
                 accessibilityLabel="فحص مصادر الحلقة الحالية"
                 style={({ focused }) => [
@@ -4195,6 +4197,7 @@ export default function WatchScreen() {
                 hitSlop={10}
                 testID={tvMode ? "nova-tv-scan-exit" : undefined}
                 focusable={tvMode}
+                nativeFocusOnly
                 hasTVPreferredFocus={tvMode}
                 style={({ focused }) => [d.scanExitBtn, tvMode && d.tvScanExitBtn, tvMode && tvFocusStyle(focused)]}
                 accessibilityRole="button"
@@ -4217,6 +4220,7 @@ export default function WatchScreen() {
                 <Pressable
                   onPress={refreshAllSources}
                   focusable={tvMode}
+                  nativeFocusOnly
                   accessibilityRole="button"
                   accessibilityLabel="إعادة فحص السيرفرات"
                   style={({ focused }) => [d.retryBigBtn, { marginTop: 10 }, tvMode && tvFocusStyle(focused)]}
@@ -4266,6 +4270,7 @@ export default function WatchScreen() {
               <Pressable
                 onPress={refreshAllSources}
                 focusable={tvMode}
+                nativeFocusOnly
                 accessibilityRole="button"
                 style={({ focused }) => [d.retryBigBtn, tvMode && tvFocusStyle(focused)]}
               >
@@ -4325,6 +4330,7 @@ export default function WatchScreen() {
                   <Pressable
                     onPress={() => setAudioModeTab("sub")}
                     focusable={tvMode}
+                    nativeFocusOnly
                     accessibilityRole="button"
                     accessibilityState={{ selected: effectiveAudioTab === "sub" }}
                     style={({ focused, pressed }) => [
@@ -4360,6 +4366,7 @@ export default function WatchScreen() {
                   <Pressable
                     onPress={() => setAudioModeTab("dub")}
                     focusable={tvMode}
+                    nativeFocusOnly
                     accessibilityRole="button"
                     accessibilityState={{ selected: effectiveAudioTab === "dub" }}
                     style={({ focused, pressed }) => [
@@ -4646,6 +4653,7 @@ export default function WatchScreen() {
                     onPress={() => { if (canTriggerDl) void handleDownloadSlotPress({ site: slot.site, quality: slot.quality, tag: slot.tag }); }}
                     disabled={!canTriggerDl}
                     focusable={tvMode}
+                    nativeFocusOnly
                     accessibilityRole="button"
                     accessibilityLabel={`تحميل ${slot.quality} من سيرفر ${slot.tag}`}
                     style={({ pressed, focused }) => [

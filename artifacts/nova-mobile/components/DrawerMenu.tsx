@@ -47,7 +47,7 @@ const NAV_MAIN: NavItem[] = [
   { icon: "home",            label: "الرئيسية",              route: "/(tabs)",             color: "#8B5CF6" },
   { icon: "flame",           label: "أحدث الحلقات",          route: "/latest",             color: "#f97316" },
   { icon: "search",          label: "البحث",                 route: "/(tabs)/search",      color: "#6366f1" },
-  { icon: "grid",            label: "تصفح الأنمي",           route: "/(tabs)/browse",      color: "#3b82f6" },
+  { icon: "grid",            label: "تصفح الأنمي",           route: "/(tabs)/browse?tab=anime", color: "#3b82f6" },
   { icon: "grid",            label: "الدونغهوا",             route: "/(tabs)/browse?tab=donghua", color: "#f59e0b" },
   { icon: "layers",          label: "المواسم",                route: "/seasons",            color: "#f59e0b" },
   { icon: "book",            label: "المانجا",                route: "/manga",              color: "#10b981" },
@@ -317,6 +317,7 @@ export function DrawerMenu({ visible, onClose }: Props) {
           <Pressable
             onPress={() => nav(isLogged ? "/profile" : "/settings")}
             focusable={tvMode && visible}
+            nativeFocusOnly
             style={({ focused }) => [
               s.userCard,
               tvMode && s.tvUserCard,
