@@ -1,3 +1,4 @@
+import { isDirectStreamVersion } from "./directStreamModeLogic.mjs";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
@@ -101,6 +102,7 @@ async function doFetchFreshToken(): Promise<string | null> {
           "Content-Type": "application/json",
           "X-Nova-Client": CLIENT_ID,
           "X-Nova-Version": APP_VERSION,
+          ...(isDirectStreamVersion(APP_VERSION) ? { "X-Nova-Direct-Mode": "1" } : {}),
           "X-Nova-Package": APP_PACKAGE,
           "User-Agent": APP_UA,
         },
@@ -217,6 +219,7 @@ export async function secureFetch(
       ...(options.headers as Record<string, string> || {}),
       "X-Nova-Client": CLIENT_ID,
       "X-Nova-Version": APP_VERSION,
+          ...(isDirectStreamVersion(APP_VERSION) ? { "X-Nova-Direct-Mode": "1" } : {}),
       "X-Nova-Package": APP_PACKAGE,
       "User-Agent": APP_UA,
     };
@@ -256,6 +259,7 @@ export async function secureStreamFetch(
     Accept: "text/event-stream",
     "X-Nova-Client": CLIENT_ID,
     "X-Nova-Version": APP_VERSION,
+          ...(isDirectStreamVersion(APP_VERSION) ? { "X-Nova-Direct-Mode": "1" } : {}),
     "X-Nova-Package": APP_PACKAGE,
     "User-Agent": APP_UA,
   };

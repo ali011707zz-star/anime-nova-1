@@ -24,6 +24,8 @@ import { getWatchlistStatusMeta, WatchlistStatus } from "@/utils/watchlistStatus
 import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { useTvFocusMemory } from "@/utils/tvFocus";
 import { useColors } from "@/hooks/useColors";
+import { getPrimaryCtaMetrics } from "@/utils/responsiveUiLogic.mjs";
+import { formatMediaTitleHierarchy } from "@/utils/donghuaLogic.mjs";
 import type { ThemePalette } from "@/constants/colors";
 
 const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
@@ -34,7 +36,7 @@ const { width: W } = Dimensions.get("window");
 const DETAIL_QUERY = `
 query ($id: Int) {
   Media(id: $id, type: ANIME) {
-    id idMal isAdult
+    id idMal isAdult countryOfOrigin
     title { romaji english native }
     synonyms
     coverImage { large extraLarge }
@@ -259,6 +261,7 @@ export default function AnimeDetailScreen() {
   const [saved, setSaved] = useState(false);
   const [warnDismissed, setWarnDismissed] = useState(false);
   const [descAr, setDescAr] = useState<string | null>(null);
+  const [autoTitleAr, setAutoTitleAr] = useState<string | null>(null);
   const [descLoading, setDescLoading] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [favCharIds, setFavCharIds] = useState<Set<number>>(new Set());
@@ -310,6 +313,7 @@ export default function AnimeDetailScreen() {
       setLoading(true);
       setAnime(null);
       setDescAr(null);
+      setAutoTitleAr(null);
       AsyncStorage.getItem(`nova:anime-detail:v1:${id}`).then(raw => {
         if (!raw || !isMountedRef.current) return;
         try {
@@ -437,6 +441,33 @@ export default function AnimeDetailScreen() {
       } else {
         setDescLoading(false);
       }
+      if (a?.countryOfOrigin === "CN") {
+        const knownTitleAr = a?.title_ar
+          || a?.synonyms?.find((value: string) => /[\u0600-\u06FF]/.test(value))
+          || getKnownArabicAnimeTitle(a?.id, a?.title?.english, a?.title?.romaji);
+        const primaryForAr = (a?.title?.english || a?.title?.romaji || "").trim();
+        if (!knownTitleAr && primaryForAr) {
+          const titleCacheKey = `title-ar-${id}`;
+          AsyncStorage.getItem(titleCacheKey).then(cachedTitle => {
+            if (controller.signal.aborted) return;
+            if (cachedTitle && /[\u0600-\u06FF]/.test(cachedTitle)) {
+              setAutoTitleAr(cachedTitle);
+              return;
+            }
+            fetch(`${base}/api/anime/translate?text=${encodeURIComponent(primaryForAr)}&from=en&to=ar&kind=title`, { signal: controller.signal })
+              .then(r2 => r2.json())
+              .then(d2 => {
+                if (controller.signal.aborted) return;
+                const t = typeof d2?.translated === "string" ? d2.translated.trim() : "";
+                if (t && /[\u0600-\u06FF]/.test(t) && t.length > 1) {
+                  setAutoTitleAr(t);
+                  AsyncStorage.setItem(titleCacheKey, t).catch(() => {});
+                }
+              })
+              .catch(() => {});
+          }).catch(() => {});
+        }
+      }
     }).catch(() => { if (isMountedRef.current) { setDescLoading(false); setLoadError(true); } })
       .finally(() => { clearTimeout(timeoutId); if (isMountedRef.current) setLoading(false); });
 
@@ -508,12 +539,22 @@ export default function AnimeDetailScreen() {
     await AsyncStorage.setItem(`my-rating-${id}`, String(n));
   }
 
-  const arabicTitle = anime?.title_ar || anime?.synonyms?.find((value: string) => /[\u0600-\u06FF]/.test(value)) || getKnownArabicAnimeTitle(anime?.id, anime?.title?.english, anime?.title?.romaji);
+  const arabicTitle = anime?.title_ar || anime?.synonyms?.find((value: string) => /[\u0600-\u06FF]/.test(value)) || getKnownArabicAnimeTitle(anime?.id, anime?.title?.english, anime?.title?.romaji) || autoTitleAr || undefined;
+  const isDonghua = anime?.countryOfOrigin === "CN";
+  const donghuaTitles = isDonghua && anime
+    ? formatMediaTitleHierarchy({
+        english: anime.title?.english,
+        romaji: anime.title?.romaji,
+        native: anime.title?.native,
+        arabic: arabicTitle,
+      })
+    : null;
   if (loading) return (
     <View style={[d.container, { paddingTop: topPad }]}>
       <View style={[d.topBar, tvMode && d.tvTopBar]}>
         <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")}
           focusable={tvMode}
+          nativeFocusOnly
           hasTVPreferredFocus={tvMode}
           onFocus={() => rememberDetailFocus("back")}
           style={({ focused }) => [d.topBarBack, d.topBarBackRight, tvMode && d.tvTopBarBack, tvMode && tvFocusStyle(focused)]}>
@@ -532,6 +573,7 @@ export default function AnimeDetailScreen() {
       <View style={[d.topBar, tvMode && d.tvTopBar]}>
         <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")}
           focusable={tvMode}
+          nativeFocusOnly
           hasTVPreferredFocus={tvMode}
           onFocus={() => rememberDetailFocus("back")}
           style={({ focused }) => [d.topBarBack, d.topBarBackRight, tvMode && d.tvTopBarBack, tvMode && tvFocusStyle(focused)]}>
@@ -552,6 +594,7 @@ export default function AnimeDetailScreen() {
         </Text>
         <Pressable onPress={() => setRetryTick(t => t + 1)}
           focusable={tvMode}
+          nativeFocusOnly
           style={({ focused }) => [
             { marginTop: 6, backgroundColor: colors.primary, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 14, flexDirection: "row", alignItems: "center", gap: 8 },
             tvMode && tvFocusStyle(focused),
@@ -593,13 +636,14 @@ export default function AnimeDetailScreen() {
       <View style={[d.topBar, tvMode && d.tvTopBar]}>
         <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")}
           focusable={tvMode}
+          nativeFocusOnly
           testID="nova-tv-header-action"
           onFocus={() => rememberDetailFocus("back")}
           style={({ focused }) => [d.topBarBack, tvMode && d.tvTopBarBack, tvMode && tvFocusStyle(focused)]}>
           <Ionicons name="chevron-forward" size={tvMode ? 20 : 20} color={colors.textPrimary} />
         </Pressable>
         <Text style={[d.topBarTitle, tvMode && d.tvTopBarTitle]} numberOfLines={1}>
-          {arabicTitle || anime.title?.english || anime.title?.romaji || "تفاصيل الأنمي"}
+          {donghuaTitles?.primary || arabicTitle || anime.title?.english || anime.title?.romaji || "تفاصيل الأنمي"}
         </Text>
         <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 6 }}>
           {anime.status ? (
@@ -651,14 +695,34 @@ export default function AnimeDetailScreen() {
             resizeMode="cover"
           />
           <View style={d.infoText}>
-            <Text style={[d.titleMain, d.titleArabicMain, tvMode && d.tvTitleMain]} numberOfLines={2}>
-              {arabicTitle || anime.title?.english || anime.title?.romaji || "عنوان غير متاح"}
-            </Text>
-            {(anime.title?.english || anime.title?.romaji) ? (
-              <Text style={[d.titleArabic, tvMode && d.tvTitleArabic, { writingDirection: "ltr", textAlign: "left" }]} numberOfLines={1}>
-                {anime.title?.english || anime.title?.romaji}
-              </Text>
-            ) : null}
+            {donghuaTitles ? (
+              <>
+                <Text style={[d.titleMain, tvMode && d.tvTitleMain, { writingDirection: "ltr", textAlign: "left" }]} numberOfLines={2}>
+                  {donghuaTitles.primary || "عنوان غير متاح"}
+                </Text>
+                {donghuaTitles.arabic ? (
+                  <Text style={[d.titleArabic, tvMode && d.tvTitleArabic, { writingDirection: "rtl", textAlign: "right" }]} numberOfLines={1}>
+                    {donghuaTitles.arabic}
+                  </Text>
+                ) : null}
+                {donghuaTitles.original ? (
+                  <Text style={[d.titleNative, { writingDirection: "ltr", textAlign: "left" }]} numberOfLines={1}>
+                    {donghuaTitles.original}
+                  </Text>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <Text style={[d.titleMain, d.titleArabicMain, tvMode && d.tvTitleMain]} numberOfLines={2}>
+                  {arabicTitle || anime.title?.english || anime.title?.romaji || "عنوان غير متاح"}
+                </Text>
+                {(anime.title?.english || anime.title?.romaji) ? (
+                  <Text style={[d.titleArabic, tvMode && d.tvTitleArabic, { writingDirection: "ltr", textAlign: "left" }]} numberOfLines={1}>
+                    {anime.title?.english || anime.title?.romaji}
+                  </Text>
+                ) : null}
+              </>
+            )}
             <View style={d.badgeRow}>
               {formatText ? (
                 <View style={[d.badge, d.badgeDefault]}>
@@ -710,26 +774,49 @@ export default function AnimeDetailScreen() {
               },
             } as any)}
             focusable={tvMode}
+            nativeFocusOnly
             hasTVPreferredFocus={tvMode}
             testID={tvMode ? "nova-tv-preferred-focus" : undefined}
             onFocus={() => rememberDetailFocus("watch")}
-            style={({ focused }) => [d.watchBtn, tvMode && d.tvWatchBtn, { width: "100%" }, tvMode && tvFocusStyle(focused)]}
+            style={({ focused }) => {
+              const cta = getPrimaryCtaMetrics({ width, tvMode });
+              return [
+                d.watchBtn,
+                {
+                  width: "100%",
+                  maxWidth: cta.maxWidth,
+                  alignSelf: cta.maxWidth ? "center" : undefined,
+                  minHeight: cta.minHeight,
+                  borderRadius: cta.borderRadius,
+                  paddingHorizontal: cta.paddingHorizontal,
+                  paddingVertical: cta.paddingVertical,
+                },
+                tvMode && tvFocusStyle(focused),
+              ];
+            }}
           >
-            <View style={d.watchBtnRight}>
-              <View style={[d.watchBtnIcon, tvMode && d.tvWatchBtnIcon]}>
-                <Ionicons name="play" size={tvMode ? 18 : 18} color="#fff" style={{ marginLeft: 2 }} />
-              </View>
-              <View style={d.watchBtnTextWrap}>
-                <Text style={[d.watchBtnText, tvMode && d.tvButtonText]}>مشاهدة الآن</Text>
-                <Text style={d.watchBtnSub}>تصفح الحلقات وابدأ المشاهدة فوراً</Text>
-              </View>
-            </View>
-            <View style={d.watchBtnEpPill}>
-              <Ionicons name="chevron-back" size={13} color="#fff" />
-              <Text style={d.watchBtnEpPillText}>
-                {anime.episodes ? `${anime.episodes} حلقة` : "الحلقات"}
-              </Text>
-            </View>
+            {(() => {
+              const cta = getPrimaryCtaMetrics({ width, tvMode });
+              return (
+                <>
+                  <View style={[d.watchBtnRight, { gap: cta.gap }]}>
+                    <View style={[d.watchBtnIcon, { width: cta.iconBoxSize, height: cta.iconBoxSize, borderRadius: cta.iconBoxRadius }]}>
+                      <Ionicons name="play" size={cta.iconSize} color="#fff" style={{ marginLeft: 2 }} />
+                    </View>
+                    <View style={d.watchBtnTextWrap}>
+                      <Text style={[d.watchBtnText, { fontSize: cta.titleSize, lineHeight: cta.titleLineHeight }]}>مشاهدة الآن</Text>
+                      <Text style={[d.watchBtnSub, { fontSize: cta.subSize, lineHeight: cta.subLineHeight }]} numberOfLines={1}>تصفح الحلقات وابدأ المشاهدة فوراً</Text>
+                    </View>
+                  </View>
+                  <View style={[d.watchBtnEpPill, { paddingHorizontal: cta.pillPadH, paddingVertical: cta.pillPadV, borderRadius: cta.pillRadius }]}>
+                    <Ionicons name="chevron-back" size={12} color="#fff" />
+                    <Text style={[d.watchBtnEpPillText, { fontSize: cta.pillTextSize }]}>
+                      {anime.episodes ? `${anime.episodes} حلقة` : "الحلقات"}
+                    </Text>
+                  </View>
+                </>
+              );
+            })()}
           </Pressable>
         </View>
 
@@ -739,6 +826,7 @@ export default function AnimeDetailScreen() {
             <Text style={d.warnText}>{ageRating.warn}</Text>
              <Pressable onPress={() => { setWarnDismissed(true); AsyncStorage.setItem(`adult-warn-${id}`, "1"); }}
                focusable={tvMode}
+               nativeFocusOnly
                style={({ focused }) => [d.warnBtn, tvMode && tvFocusStyle(focused)]}>
               <Text style={d.warnBtnText}>فهمتُ، لا تُظهر مجدداً</Text>
             </Pressable>
@@ -753,6 +841,7 @@ export default function AnimeDetailScreen() {
             { icon: "star-outline",       activeIcon: "star",       label: "تقييمي",    active: myRating > 0, activeColor: "#FBBF24", onPress: () => setShowRating(true) },
           ].map(({ icon, activeIcon, label, active, activeColor, onPress }) => (
              <Pressable key={label} onPress={onPress} focusable={tvMode}
+               nativeFocusOnly
                onFocus={() => rememberDetailFocus(label)}
                style={({ focused }) => [d.actionBtn, tvMode && d.tvActionBtn, active && { backgroundColor: activeColor + "18", borderColor: activeColor + "45" }, tvMode && tvFocusStyle(focused)]}>
               <Ionicons name={(active ? activeIcon : icon) as any} size={tvMode ? 18 : 16} color={active ? activeColor : colors.textPrimary} />
@@ -767,6 +856,7 @@ export default function AnimeDetailScreen() {
         {(score || allTimeRank || anime.idMal) && (
           <Pressable
             focusable={tvMode}
+            nativeFocusOnly
             onFocus={() => rememberDetailFocus("malStats")}
             style={({ focused }) => [d.malBox, { marginHorizontal: 16 }, tvMode && tvFocusStyle(focused)]}
           >
@@ -801,10 +891,11 @@ export default function AnimeDetailScreen() {
         {/* ── Synopsis ── */}
         {desc ? (
           <View style={[d.section, tvMode && d.tvSection]}>
-            <SectionHeader title="قصة الأنمي" tvMode={tvMode} />
+            <SectionHeader title={isDonghua ? "القصة" : "قصة الأنمي"} tvMode={tvMode} />
             <Pressable
               onPress={() => setShowFull(f => !f)}
               focusable={tvMode}
+              nativeFocusOnly
               onFocus={() => rememberDetailFocus("synopsis")}
               style={({ focused }) => [
                 d.descBox,
@@ -843,6 +934,7 @@ export default function AnimeDetailScreen() {
           <SectionHeader title="معلومات الإنتاج" tvMode={tvMode} />
           <Pressable
             focusable={tvMode}
+            nativeFocusOnly
             onFocus={() => rememberDetailFocus("metadata")}
             style={({ focused }) => [
               d.metaGrid,
@@ -901,7 +993,7 @@ export default function AnimeDetailScreen() {
               { key: "related", label: "ذات صلة" },
               { key: "similar", label: "مشابهة" },
             ] as const).map(t => (
-               <Pressable key={t.key} onPress={() => setTab(t.key)} focusable={tvMode}
+               <Pressable key={t.key} onPress={() => setTab(t.key)} focusable={tvMode} nativeFocusOnly
                  onFocus={() => rememberDetailFocus(`tab:${t.key}`)}
                 style={({ focused }) => [
                   d.tabBtn,
@@ -957,7 +1049,7 @@ export default function AnimeDetailScreen() {
                 {related.map((e: any) => {
                   const n = e.node;
                   return (
-                     <Pressable key={n.id} onPress={() => router.push(`/anime/${n.id}`)} focusable={tvMode}
+                     <Pressable key={n.id} onPress={() => router.push(`/anime/${n.id}`)} focusable={tvMode} nativeFocusOnly
                        style={({ focused }) => [d.relCard, tvMode && tvFocusStyle(focused)]}>
                       <View style={d.relImgWrap}>
                         {n.coverImage?.large ? (
@@ -1004,7 +1096,7 @@ export default function AnimeDetailScreen() {
                   const rec = n.mediaRecommendation;
                   if (!rec) return null;
                   return (
-                     <Pressable key={rec.id} onPress={() => router.push(`/anime/${rec.id}`)} focusable={tvMode}
+                     <Pressable key={rec.id} onPress={() => router.push(`/anime/${rec.id}`)} focusable={tvMode} nativeFocusOnly
                        style={({ focused }) => [d.simCard, tvMode && { width: Math.floor((width - 88 - 48) / 5), borderRadius: 12, padding: 2 }, tvMode && tvFocusStyle(focused)]}>
                       <View style={d.simImgWrap}>
                         {rec.coverImage?.large ? (
@@ -1062,6 +1154,7 @@ export default function AnimeDetailScreen() {
                 return (
                   <Pressable key={n} onPress={() => submitRating(n)}
                     focusable={tvMode}
+                    nativeFocusOnly
                     hasTVPreferredFocus={isPreferred}
                     testID={isPreferred ? "nova-tv-preferred-focus" : undefined}
                     style={({ focused }) => [d.ratingNum, n <= (myRating) && d.ratingNumActive, tvMode && tvFocusStyle(focused)]}>
@@ -1071,13 +1164,13 @@ export default function AnimeDetailScreen() {
               })}
             </View>
             {myRating > 0 && (
-              <Pressable onPress={() => submitRating(0)} focusable={tvMode} style={({ focused }) => [{ marginTop: 10, paddingVertical: 6, paddingHorizontal: 14, borderRadius: 10 }, tvMode && tvFocusStyle(focused)]}>
+              <Pressable onPress={() => submitRating(0)} focusable={tvMode} nativeFocusOnly style={({ focused }) => [{ marginTop: 10, paddingVertical: 6, paddingHorizontal: 14, borderRadius: 10 }, tvMode && tvFocusStyle(focused)]}>
                 <Text style={{ color: colors.destructive, fontSize: 12, fontFamily: "Cairo_700Bold", textAlign: "center" }}>
                   حذف التقييم
                 </Text>
               </Pressable>
             )}
-            <Pressable onPress={() => setShowRating(false)} focusable={tvMode} style={({ focused }) => [{ marginTop: 8, paddingVertical: 8, paddingHorizontal: 18, borderRadius: 10, backgroundColor: colors.surfaceElevated }, tvMode && tvFocusStyle(focused)]}>
+            <Pressable onPress={() => setShowRating(false)} focusable={tvMode} nativeFocusOnly style={({ focused }) => [{ marginTop: 8, paddingVertical: 8, paddingHorizontal: 18, borderRadius: 10, backgroundColor: colors.surfaceElevated }, tvMode && tvFocusStyle(focused)]}>
               <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: "Cairo_700Bold", textAlign: "center" }}>
                 إغلاق
               </Text>

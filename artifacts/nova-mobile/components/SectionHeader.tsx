@@ -35,6 +35,7 @@ export function SectionHeader({
           onPress={onSeeAll}
           onFocus={onFocus}
           focusable={focusable ?? tv}
+          nativeFocusOnly
           style={({ focused, pressed }) => [
             styles.seeAll,
             {

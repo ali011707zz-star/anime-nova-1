@@ -238,22 +238,33 @@ function filterSafe(list: AnimeResult[]): AnimeResult[] {
 }
 
 /* ── Anime Card ── */
-function AnimeCard({ anime, onPress, columns }: { anime: AnimeResult; onPress: () => void; columns: number }) {
-  const { s } = useSearchTheme();
-  const { width, height } = useWindowDimensions();
-  const { tv: tvMode } = useTvMetrics();
+const AnimeCard = React.memo(function AnimeCard({
+  anime,
+  onPressAnime,
+  columns,
+  s,
+  tvMode,
+}: {
+  anime: AnimeResult;
+  onPressAnime: (anime: AnimeResult) => void;
+  columns: number;
+  s: ReturnType<typeof createSearchStyles>;
+  tvMode: boolean;
+}) {
   const fmt = anime.format ? FORMAT_AR[anime.format] || anime.format : null;
   const isFilm = anime.format === "MOVIE";
+  const coverUri = anime.coverImage?.large || anime.coverImage?.extraLarge;
   return (
     <Pressable
-      onPress={onPress}
+      onPress={() => onPressAnime(anime)}
       focusable={tvMode}
+      nativeFocusOnly
       style={({ focused }) => [s.card, { flex: 1 / columns }, tvMode && tvFocusStyle(focused)]}
     >
       <View style={s.cardImgWrap}>
-        {anime.coverImage?.large ? (
+        {coverUri ? (
           <Image
-            source={{ uri: tvMode ? anime.coverImage.extraLarge || anime.coverImage.large : anime.coverImage.large }}
+            source={{ uri: coverUri }}
             style={s.cardImg}
             resizeMethod="resize"
             fadeDuration={tvMode ? 0 : 100}
@@ -297,13 +308,18 @@ function AnimeCard({ anime, onPress, columns }: { anime: AnimeResult; onPress: (
       </View>
     </Pressable>
   );
-}
+});
 
 export default function SearchScreen() {
   const { colors, s, sm } = useSearchTheme();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const router = useRouter();
+  const handlePressSearchAnime = useCallback((item: AnimeResult) => {
+    router.push(
+      `/anime/${item.id}?title=${encodeURIComponent(item.title?.romaji || "")}&english=${encodeURIComponent(item.title?.english || "")}${item.idSource ? `&src=${encodeURIComponent(item.idSource)}` : ""}`
+    );
+  }, [router]);
   const { q: routeQuery } = useLocalSearchParams<{ q?: string | string[] }>();
   const initialQuery = typeof routeQuery === "string" ? routeQuery : "";
   const topPad = Platform.OS === "web" ? 0 : insets.top;
@@ -580,7 +596,7 @@ export default function SearchScreen() {
                 </View>
                 <View style={s.historyChips}>
                   {history.map((h, i) => (
-                    <Pressable key={i} onPress={() => setQuery(h)} focusable={tvMode}
+                    <Pressable key={i} onPress={() => setQuery(h)} focusable={tvMode} nativeFocusOnly
                       style={({ focused }) => [s.historyChip, tvMode && tvFocusStyle(focused)]}>
                       <Ionicons name="time" size={12} color={colors.textMuted} />
                       <Text style={s.historyChipText}>{h}</Text>
@@ -632,9 +648,9 @@ export default function SearchScreen() {
               <AnimeCard
                 anime={item}
                 columns={gridColumns}
-                onPress={() => router.push(
-                  `/anime/${item.id}?title=${encodeURIComponent(item.title?.romaji || "")}&english=${encodeURIComponent(item.title?.english || "")}${item.idSource ? `&src=${encodeURIComponent(item.idSource)}` : ""}`
-                )}
+                s={s}
+                tvMode={tvMode}
+                onPressAnime={handlePressSearchAnime}
               />
             )}
           />

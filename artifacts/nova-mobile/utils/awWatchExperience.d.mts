@@ -7,6 +7,13 @@ export type AwWatchSource = {
   quality: string;
   qualityKey: AwWatchQualityKey;
   url: string;
+  deliveryMode?: string;
+  clientExtract?: {
+    embedUrl: string;
+    referer: string;
+    hostKind?: "okru" | "standard";
+  };
+  headers?: Record<string, string>;
 };
 export type AwWatchDestination = {
   episode: number;

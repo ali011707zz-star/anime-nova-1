@@ -24,6 +24,7 @@ import {
   saveDownloadToGallery, GalleryPermissionError,
 } from "@/utils/downloadManager";
 import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
+import { MIN_VALID_VIDEO_BYTES } from "@/utils/downloadIntegrityLogic.mjs";
 import * as FileSystem from "expo-file-system";
 import { setTvFullScreenOverlayActive, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
@@ -120,9 +121,12 @@ function ActiveDownloadCard({
 }) {
   const { colors, s } = useDownloadsTheme();
   const { tv: tvMode } = useTvMetrics();
-  const pct = Math.round(item.progress * 100);
   const isPaused = item.status === "paused";
   const isError = item.status === "error";
+  const isQueued = Boolean(item.queued) && item.status === "downloading";
+  const hasRealProgress = item.totalBytes > 0 || (item.segmentsTotal != null && item.segmentsTotal > 0 && (item.segmentsDone || 0) > 0);
+  const isPreparing = !isError && !isPaused && !isQueued && !hasRealProgress && item.bytesWritten <= 0;
+  const pct = hasRealProgress ? Math.round(item.progress * 100) : 0;
   const canPause = item.pauseSupported !== false;
 
   return (
@@ -156,13 +160,23 @@ function ActiveDownloadCard({
           <View style={{ flex: 1 }}>
             <Text style={s.activeTitle} numberOfLines={1}>{item.title}</Text>
             <Text style={s.activeEp} numberOfLines={1}>
-              الحلقة {item.ep} · {item.quality || "جودة غير محددة"} · {item.totalBytes > 0 ? formatFileSize(item.totalBytes) : item.bytesWritten > 0 ? formatFileSize(item.bytesWritten) : "جارٍ التجهيز"}
+              الحلقة {item.ep} · {item.quality || "جودة غير محددة"}{item.totalBytes > 0 ? ` · ${formatFileSize(item.totalBytes)}` : item.bytesWritten > 0 ? ` · ${formatFileSize(item.bytesWritten)}` : ""}
             </Text>
           </View>
           {/* Percentage badge */}
           <View style={[s.activePctBadge, isError && s.activePctBadgeError]}>
             <Text style={[s.activePctText, isError && { color: colors.destructive }]}>
-           {isError ? "خطأ" : isPaused ? "متوقف" : `${Math.max(1, pct)}%`}
+              {isError
+                ? "خطأ"
+                : isPaused
+                  ? "متوقف"
+                  : isQueued
+                    ? "بالانتظار"
+                    : hasRealProgress
+                      ? `${Math.max(1, pct)}%`
+                      : item.bytesWritten > 0
+                        ? formatFileSize(item.bytesWritten)
+                        : "تجهيز"}
             </Text>
           </View>
         </View>
@@ -171,20 +185,34 @@ function ActiveDownloadCard({
         <View style={s.progressTrack}>
           <View style={[
             s.progressFill,
-            { width: `${isError ? 100 : Math.max(isPaused ? pct : 2, pct)}%` as any },
+            { width: `${isError ? 100 : isPreparing ? 4 : Math.max(isPaused ? pct : 2, pct)}%` as any },
             isError && { backgroundColor: colors.destructive },
           ]} />
         </View>
 
         <View style={s.activeProgressMeta}>
-          <Text style={s.activeStatus}>
-            {item.totalBytes > 0
-              ? `${formatFileSize(item.bytesWritten)} من ${formatFileSize(item.totalBytes)}`
-              : item.bytesWritten > 0
-                ? `تم تنزيل ${formatFileSize(item.bytesWritten)} · جارٍ التنزيل...`
-                : "جارٍ تجهيز وتحويل الحلقة للتنزيل..."}
+          <Text style={s.activeStatus} numberOfLines={1}>
+            {isQueued
+              ? "في قائمة الانتظار..."
+              : item.hlsDirect && item.segmentsTotal
+                ? `${item.bytesWritten > 0 ? `${formatFileSize(item.bytesWritten)}${item.totalBytes > 0 ? ` من ~${formatFileSize(item.totalBytes)}` : ""} · ` : ""}مقطع ${item.segmentsDone || 0}/${item.segmentsTotal}`
+                : item.totalBytes > 0
+                  ? `${formatFileSize(item.bytesWritten)} من ${formatFileSize(item.totalBytes)}`
+                  : item.bytesWritten > 0
+                    ? `تم تنزيل ${formatFileSize(item.bytesWritten)} · جارٍ التنزيل...`
+                    : "بانتظار بدء التحميل..."}
           </Text>
-          <Text style={s.activeStatus}>{isError ? "لم يكتمل" : `${Math.max(1, pct)}%`}</Text>
+          <Text style={s.activeStatus}>
+            {isError
+              ? "لم يكتمل"
+              : isQueued
+                ? "انتظار"
+                : hasRealProgress
+                  ? `${Math.max(1, pct)}%`
+                  : item.bytesWritten > 0
+                    ? "جارٍ..."
+                    : "تجهيز"}
+          </Text>
         </View>
 
         <Text style={[s.activeStatus, isError && { color: colors.destructive }]}>
@@ -192,9 +220,13 @@ function ActiveDownloadCard({
             ? `${item.errorMessage || "فشل التنزيل"} — اضغط × للإغلاق`
               : isPaused
               ? "متوقف مؤقتاً — اضغط ▶ للاستئناف"
-                : canPause
-                  ? "يجري التنزيل في الخلفية..."
-                  : "تنزيل نظامي — يستمر حتى بعد إغلاق التطبيق"}
+                : isQueued
+                  ? "بانتظار اكتمال أحد التنزيلات الحالية..."
+                  : item.hlsDirect
+                    ? "تحميل مباشر على الهاتف بدون تحويل الخادم..."
+                    : canPause
+                      ? "يجري التنزيل في الخلفية..."
+                      : "تنزيل نظامي — يستمر حتى بعد إغلاق التطبيق"}
         </Text>
       </View>
       <DownloadCoverImage
@@ -283,7 +315,7 @@ function DownloadCard({
           </View>
           {item.subtitleLocalPath && (
             <View style={[s.badge, { borderColor: colors.success + "40" }]}>
-              <Text style={[s.badgeText, { color: colors.success }]}>ترجمة</Text>
+              <Text style={[s.badgeText, { color: colors.success }]}>ترجمة منفصلة</Text>
             </View>
           )}
         </View>
@@ -424,12 +456,21 @@ function toFileUri(path: string): string {
   return path;
 }
 
-function LocalPlayer({ item, onClose }: { item: DownloadItem; onClose: () => void }) {
+function LocalPlayer({
+  item,
+  onClose,
+  onPlaybackError,
+}: {
+  item: DownloadItem;
+  onClose: () => void;
+  onPlaybackError?: (failedItem: DownloadItem) => void;
+}) {
   const src: PlayerSource = {
     url: toFileUri(item.localPath),
     label: `${item.quality} · ${item.site}`,
     quality: (item.quality as any) || "720p HD",
     subtitleUrl: item.subtitleLocalPath ? toFileUri(item.subtitleLocalPath) : undefined,
+    isArabic: true,
   };
   return (
     <RiftPlayer
@@ -438,7 +479,10 @@ function LocalPlayer({ item, onClose }: { item: DownloadItem; onClose: () => voi
       title={item.title}
       episode={item.ep}
       onBack={onClose}
-      onError={onClose}
+      onError={() => {
+        if (onPlaybackError) onPlaybackError(item);
+        else onClose();
+      }}
     />
   );
 }
@@ -683,7 +727,7 @@ export default function DownloadsScreen() {
       const fileUri = toFileUri(item.localPath);
       const info = await FileSystem.getInfoAsync(fileUri, { size: true });
       const size = (info as { size?: number }).size ?? 0;
-      if (!info.exists || size <= 0) {
+      if (!info.exists || size < MIN_VALID_VIDEO_BYTES) {
         Alert.alert(
           "التنزيل غير مكتمل",
           "لم يكتمل حفظ الحلقة على الجهاز، لذلك لن يتم فتح شاشة بيضاء.",
@@ -747,6 +791,25 @@ export default function DownloadsScreen() {
     return () => sub.remove();
   }, [playingItem]);
 
+  const handleLocalPlaybackError = useCallback((failedItem: DownloadItem) => {
+    setPlayingItem(null);
+    Alert.alert(
+      "تعذر تشغيل الحلقة",
+      "ملف الحلقة المحفوظة تالف أو غير متوافق مع المشغل. هل تريد حذفه لإعادة التنزيل من سيرفر آخر؟",
+      [
+        { text: "إلغاء", style: "cancel" },
+        {
+          text: "حذف الملف",
+          style: "destructive",
+          onPress: async () => {
+            await deleteDownload(failedItem);
+            await loadDownloads();
+          },
+        },
+      ],
+    );
+  }, [loadDownloads]);
+
   const handleClosePlayer = useCallback(() => setPlayingItem(null), []);
 
   const handleHeaderBack = useCallback(() => {
@@ -777,7 +840,7 @@ export default function DownloadsScreen() {
     {/* ── تشغيل محلي — Modal كاملة الشاشة حتى لا يظهر شريط التنقل السفلي ── */}
     {playingItem !== null && tvMode ? (
       <View style={[StyleSheet.absoluteFillObject, { zIndex: 9999, elevation: 9999, backgroundColor: "#000" }]} testID="nova-tv-modal-root">
-        <LocalPlayer item={playingItem} onClose={handleClosePlayer} />
+        <LocalPlayer item={playingItem} onClose={handleClosePlayer} onPlaybackError={handleLocalPlaybackError} />
       </View>
     ) : (
       <Modal
@@ -787,7 +850,7 @@ export default function DownloadsScreen() {
         onRequestClose={handleClosePlayer}
         statusBarTranslucent
       >
-        {playingItem && <LocalPlayer item={playingItem} onClose={handleClosePlayer} />}
+        {playingItem && <LocalPlayer item={playingItem} onClose={handleClosePlayer} onPlaybackError={handleLocalPlaybackError} />}
       </Modal>
     )}
 
@@ -852,9 +915,11 @@ export default function DownloadsScreen() {
               flexDirection: ROW_RTL,
               alignItems: "center",
               justifyContent: "center",
-              gap: 6,
-              paddingVertical: 9,
-              borderRadius: 12,
+              gap: 5,
+              paddingVertical: 8,
+              paddingHorizontal: 8,
+              overflow: "hidden",
+              borderRadius: 11,
               borderWidth: 1,
               backgroundColor: downloadsTab === "anime" ? colors.accent : colors.surface,
               borderColor: downloadsTab === "anime" ? colors.accent : colors.border,
@@ -862,14 +927,19 @@ export default function DownloadsScreen() {
           >
             <Ionicons
               name="film-outline"
-              size={15}
+              size={14}
               color={downloadsTab === "anime" ? colors.buttonText : colors.textSecondary}
             />
             <Text
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.8}
+              maxFontSizeMultiplier={1.15}
               style={{
-                fontSize: 12.5,
+                fontSize: 11.5,
                 fontFamily: "Cairo_700Bold",
                 color: downloadsTab === "anime" ? colors.buttonText : colors.textPrimary,
+                flexShrink: 1,
               }}
             >
               حلقات الأنمي ({downloads.length})
@@ -882,9 +952,11 @@ export default function DownloadsScreen() {
               flexDirection: ROW_RTL,
               alignItems: "center",
               justifyContent: "center",
-              gap: 6,
-              paddingVertical: 9,
-              borderRadius: 12,
+              gap: 5,
+              paddingVertical: 8,
+              paddingHorizontal: 8,
+              overflow: "hidden",
+              borderRadius: 11,
               borderWidth: 1,
               backgroundColor: downloadsTab === "manga" ? colors.accent : colors.surface,
               borderColor: downloadsTab === "manga" ? colors.accent : colors.border,
@@ -892,14 +964,19 @@ export default function DownloadsScreen() {
           >
             <Ionicons
               name="book-outline"
-              size={15}
+              size={14}
               color={downloadsTab === "manga" ? colors.buttonText : colors.textSecondary}
             />
             <Text
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.8}
+              maxFontSizeMultiplier={1.15}
               style={{
-                fontSize: 12.5,
+                fontSize: 11.5,
                 fontFamily: "Cairo_700Bold",
                 color: downloadsTab === "manga" ? colors.buttonText : colors.textPrimary,
+                flexShrink: 1,
               }}
             >
               المانجا والمانهوا ({mangaDownloads.length})

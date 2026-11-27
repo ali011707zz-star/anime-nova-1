@@ -7,7 +7,19 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
+import { HiddenResolverWebView, ResolvedStream } from "@/components/HiddenResolverWebView";
+import {
+  ClientExtractDescriptor,
+  extractDirectStreamOnPhone,
+  getDeliveryBadge,
+  getDirectRequestHeaders,
+  isDirectStreamActive,
+  MOBILE_DIRECT_UA,
+  resolveMediaFireDirectOnPhone,
+  withDirectStreamParams,
+} from "@/utils/directClientExtractor";
 import { getBaseUrl } from "@/utils/api";
+import { reconcileDownloadButtonStates } from "@/utils/downloadIntegrityLogic.mjs";
 import { getAuthToken, getDownloadToken } from "@/utils/secureApi";
 import { getWatchContentId, useApp } from "@/context/AppContext";
 import { ensureWatchAccess } from "@/utils/adPolicy";
@@ -18,6 +30,14 @@ import { useColors } from "@/hooks/useColors";
 import { useWatchPlayerOrientation } from "@/utils/watchOrientation";
 import { createPlaybackTraceId, withPlaybackTrace } from "@/utils/playbackTrace";
 import { inferDubbedSourceFromKey, parseCarateenEpisodeUrl } from "@/utils/carateenEpisodeRef.mjs";
+import { extractMediaUrlFromHtml } from "@/utils/directStreamModeLogic.mjs";
+import {
+  buildDeterministicPlayerSource,
+  buildVpsProxyUrl,
+  isFixedVpsPlaybackSource,
+  isOwnVpsProxyUrl,
+  resolveDirectInternalMp4Download,
+} from "@/utils/hybridStreamLogic.mjs";
 import {
   ActiveDownload,
   formatFileSize,
@@ -125,6 +145,11 @@ export default function DubbedWatchScreen() {
   slotsRef.current = slots;
   const [checkingAvailability, setCheckingAvailability] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [resolvingClientExtract, setResolvingClientExtract] = useState<{
+    slot: DubbedServerSlot;
+    descriptor: ClientExtractDescriptor;
+    fallbackType: "hls" | "progressive";
+  } | null>(null);
   const [resumeTime, setResumeTime] = useState(0);
   const [episodeList, setEpisodeList] = useState<DubbedEpRef[]>([]);
   const [dlStates, setDlStates] = useState<Record<string, "idle" | "fetching" | "downloading" | "done" | "error">>({});
@@ -139,7 +164,11 @@ export default function DubbedWatchScreen() {
   const lastTimeRef = useRef(0);
   const lastDurationRef = useRef(0);
   const savedOnExitRef = useRef(false);
-  const preloadedMediaRef = useRef<{ url: string; contentType: "hls" | "progressive"; rawUrl?: string; serverId?: string } | null>(null);
+  const preloadedMediaRef = useRef<{ url: string; proxyUrl?: string; contentType: "hls" | "progressive"; rawUrl?: string; serverId?: string; headers?: Record<string, string>; deliveryMode?: string; pendingClientExtract?: ClientExtractDescriptor } | null>(null);
+  const preloadingPromiseRef = useRef<{
+    serverId?: string;
+    promise: Promise<{ url: string; proxyUrl?: string; contentType: "hls" | "progressive"; rawUrl: string; serverId?: string; headers?: Record<string, string>; deliveryMode?: string; pendingClientExtract?: ClientExtractDescriptor } | null>;
+  } | null>(null);
 
   const onToggleOrientation = useWatchPlayerOrientation(screen === "player" && sources.length > 0, tvMode);
 
@@ -396,7 +425,7 @@ export default function DubbedWatchScreen() {
     signal: AbortSignal,
     mode: "api" | "direct" = "api",
     overrideEpisodeId?: string,
-  ): Promise<{ url: string; contentType: "hls" | "progressive"; rawUrl: string; servers?: any[] } | null> => {
+  ): Promise<{ url: string; proxyUrl?: string; contentType: "hls" | "progressive"; rawUrl: string; servers?: any[]; headers?: Record<string, string>; deliveryMode?: string } | null> => {
     const BASE = getBaseUrl();
     const prov = provider || "sp";
     let targetEpId = overrideEpisodeId || effectiveEpisodeId;
@@ -425,8 +454,9 @@ export default function DubbedWatchScreen() {
       } catch {}
     }
 
-    // 1. Try /api/dubbed/carateen/stream (Available on live server https://animenovaa.duckdns.org)
-    if (targetEpId && showId) {
+    // 1. Try /api/dubbed/carateen/stream (skip for Telegram IDs > 9e9 so watch-src runs immediately)
+    const isTgNumericId = Number(targetEpId) > 9_000_000_000 || Number(showId) > 9_000_000_000;
+    if (targetEpId && showId && !isTgNumericId) {
       try {
         const streamRes = await fetch(
           `${BASE}/api/dubbed/carateen/stream?provider=${encodeURIComponent(prov)}&showId=${encodeURIComponent(showId)}&episodeId=${encodeURIComponent(targetEpId)}`,
@@ -437,6 +467,34 @@ export default function DubbedWatchScreen() {
           const rawStreamUrl = typeof d?.streamUrl === "string" ? d.streamUrl.trim() : "";
           if (rawStreamUrl) {
             const isHls = /\.m3u8(?:[?#]|$)/i.test(rawStreamUrl) || rawStreamUrl.includes("/hls/");
+            const absStreamUrl = rawStreamUrl.startsWith("/") ? `${BASE}${rawStreamUrl}` : rawStreamUrl;
+            const isInternalApi = absStreamUrl.startsWith(`${BASE}/api/`);
+            const mustUseVps = isFixedVpsPlaybackSource({
+              url: absStreamUrl,
+              provider: prov,
+              contentType: isHls ? "hls" : "progressive",
+              headers: { Referer: "https://carateen.tv/" },
+            });
+            if (isDirectStreamActive() && !isInternalApi && !mustUseVps) {
+              return {
+                url: absStreamUrl,
+                contentType: isHls ? "hls" : "progressive",
+                rawUrl: absStreamUrl,
+                headers: {
+                  Referer: "https://carateen.tv/",
+                  Origin: "https://carateen.tv",
+                  "User-Agent": MOBILE_DIRECT_UA,
+                },
+                deliveryMode: "direct",
+              };
+            }
+            if (isInternalApi) {
+              return {
+                url: withPlaybackTrace(absStreamUrl, playbackTraceId, BASE),
+                contentType: isHls ? "hls" : "progressive",
+                rawUrl: absStreamUrl,
+              };
+            }
             const proxied = isHls
               ? `${BASE}/api/anime/hls-proxy?url=${encodeURIComponent(rawStreamUrl)}&ref=${encodeURIComponent("https://carateen.tv/")}`
               : `${BASE}/api/anime/video-proxy?url=${encodeURIComponent(rawStreamUrl)}&ref=${encodeURIComponent("https://carateen.tv/")}`;
@@ -457,8 +515,8 @@ export default function DubbedWatchScreen() {
     if (targetEpId && showId) {
       try {
         const watchRes = await fetch(
-          `${BASE}/api/dubbed/carateen/watch-src?provider=${encodeURIComponent(prov)}&showId=${encodeURIComponent(showId)}&episodeId=${encodeURIComponent(targetEpId)}`,
-          { signal, cache: "no-store" },
+          withDirectStreamParams(`${BASE}/api/dubbed/carateen/watch-src?provider=${encodeURIComponent(prov)}&showId=${encodeURIComponent(showId)}&episodeId=${encodeURIComponent(targetEpId)}`),
+          { signal, cache: "no-store", headers: getDirectRequestHeaders() },
         );
         if (watchRes.ok && (watchRes.headers.get("content-type") || "").includes("json")) {
           const d = await watchRes.json();
@@ -466,10 +524,29 @@ export default function DubbedWatchScreen() {
             ? (d.hlsUrl.startsWith("/") ? `${BASE}${d.hlsUrl}` : d.hlsUrl)
             : null;
           if (proxyUrl) {
+            const cType = d.type === "hls" ? "hls" : "progressive";
+            const mustUseVps = !isDirectStreamActive() || isFixedVpsPlaybackSource({
+              url: proxyUrl,
+              provider: prov,
+              contentType: cType,
+              headers: d.headers,
+              deliveryMode: d.deliveryMode,
+            });
+            const finalUrl = mustUseVps
+              ? withPlaybackTrace(
+                  isOwnVpsProxyUrl(proxyUrl)
+                    ? proxyUrl
+                    : buildVpsProxyUrl({ url: proxyUrl, referer: d.headers?.Referer || "https://carateen.tv/", baseUrl: BASE, contentType: cType }),
+                  playbackTraceId,
+                  BASE,
+                )
+              : proxyUrl;
             return {
-              url: withPlaybackTrace(proxyUrl, playbackTraceId, BASE),
-              contentType: d.type === "hls" ? "hls" : "progressive",
-              rawUrl: proxyUrl,
+              url: finalUrl,
+              contentType: cType,
+              rawUrl: finalUrl,
+              headers: mustUseVps ? undefined : d.headers,
+              deliveryMode: mustUseVps ? (d.deliveryMode || "vps-proxy") : d.deliveryMode,
               servers: Array.isArray(d?.servers) ? d.servers : undefined,
             };
           }
@@ -479,15 +556,15 @@ export default function DubbedWatchScreen() {
       }
     }
 
-    // 3. Direct fallback using video_id from episode metadata
+    // 3. Carateen / SP HLS requires Referer — route straight via VPS proxy
     if (targetVideoId) {
       const directHls = `https://pegasus.5387692.xyz/api/${prov === "sp" ? "sp" : "ct"}/hls/${encodeURIComponent(targetVideoId)}/playlist.m3u8`;
       const proxiedHls = `${BASE}/api/anime/hls-proxy?url=${encodeURIComponent(directHls)}&ref=${encodeURIComponent("https://carateen.tv/")}`;
-      const chosenUrl = mode === "direct" ? directHls : proxiedHls;
       return {
-        url: withPlaybackTrace(chosenUrl, playbackTraceId, BASE),
+        url: withPlaybackTrace(proxiedHls, playbackTraceId, BASE),
         contentType: "hls",
         rawUrl: proxiedHls,
+        deliveryMode: "vps-proxy",
       };
     }
 
@@ -523,7 +600,7 @@ export default function DubbedWatchScreen() {
     signal: AbortSignal,
     serverId?: string,
     preferMp4 = false,
-  ): Promise<{ url: string; contentType: "hls" | "progressive"; rawUrl: string; serverId?: string } | null> => {
+  ): Promise<{ url: string; contentType: "hls" | "progressive"; rawUrl: string; serverId?: string; headers?: Record<string, string>; deliveryMode?: string; pendingClientExtract?: ClientExtractDescriptor } | null> => {
     const BASE = getBaseUrl();
     const wUrl = await ensureSd2WatchUrl(signal);
     if (!wUrl || signal.aborted) return null;
@@ -534,14 +611,71 @@ export default function DubbedWatchScreen() {
       const res = await fetch(`${BASE}/api/dubbed/sd2/watch-src?${params}`, { signal, cache: "no-store" });
       if (signal.aborted || !res.ok) return null;
       const d = await res.json();
+      if (isDirectStreamActive() && d?.clientExtract?.embedUrl) {
+        const descriptor: ClientExtractDescriptor = {
+          ...d.clientExtract,
+          referer: d.clientExtract.referer || d.headers?.Referer || "",
+        };
+        const extracted = await extractDirectStreamOnPhone(descriptor, signal);
+        if (extracted?.url) {
+          return {
+            url: extracted.url,
+            contentType: extracted.type === "hls" ? "hls" : "progressive",
+            rawUrl: extracted.url,
+            headers: extracted.headers,
+            deliveryMode: "client-extract",
+            serverId: d.serverId || serverId || undefined,
+          };
+        }
+        return {
+          url: "",
+          contentType: d.type === "hls" ? "hls" : "progressive",
+          rawUrl: descriptor.embedUrl,
+          pendingClientExtract: descriptor,
+          deliveryMode: "client-extract",
+          serverId: d.serverId ? String(d.serverId) : serverId,
+        };
+      }
       const proxyUrl = typeof d?.hlsUrl === "string" && d.hlsUrl
         ? (d.hlsUrl.startsWith("/") ? `${BASE}${d.hlsUrl}` : d.hlsUrl)
         : null;
       if (!proxyUrl) return null;
+      if (isDirectStreamActive() && (proxyUrl.includes("/api/aw-dubbed/mf-stream") || /https?:\/\/(?:www\.)?mediafire\.com\/(?:file|view|download)\//i.test(proxyUrl))) {
+        const mfDirect = await resolveMediaFireDirectOnPhone(proxyUrl, BASE, signal);
+        if (mfDirect?.url) {
+          return {
+            url: mfDirect.url,
+            headers: mfDirect.headers,
+            deliveryMode: "client-extract",
+            contentType: "progressive",
+            rawUrl: mfDirect.url,
+            serverId: d.serverId ? String(d.serverId) : serverId,
+          };
+        }
+      }
+      const cType = d.type === "hls" ? "hls" : "progressive";
+      const mustUseVps = !isDirectStreamActive() || isFixedVpsPlaybackSource({
+        url: proxyUrl,
+        provider: "sd2",
+        contentType: cType,
+        headers: d.headers,
+        deliveryMode: d.deliveryMode,
+      });
+      const finalUrl = mustUseVps
+        ? withPlaybackTrace(
+            isOwnVpsProxyUrl(proxyUrl)
+              ? proxyUrl
+              : buildVpsProxyUrl({ url: proxyUrl, referer: d.headers?.Referer || "", baseUrl: BASE, contentType: cType, deliveryMode: d.deliveryMode }),
+            playbackTraceId,
+            BASE,
+          )
+        : proxyUrl;
       return {
-        url: withPlaybackTrace(proxyUrl, playbackTraceId, BASE),
-        contentType: d.type === "hls" ? "hls" : "progressive",
-        rawUrl: proxyUrl,
+        url: finalUrl,
+        headers: mustUseVps ? undefined : d.headers,
+        deliveryMode: mustUseVps ? (d.deliveryMode || "vps-proxy") : d.deliveryMode,
+        contentType: cType,
+        rawUrl: finalUrl,
         serverId: d.serverId ? String(d.serverId) : serverId,
       };
     } catch {
@@ -573,7 +707,7 @@ export default function DubbedWatchScreen() {
   const resolveAzMedia = useCallback(async (
     signal: AbortSignal,
     serverId?: string,
-  ): Promise<{ url: string; contentType: "hls" | "progressive"; rawUrl: string; serverId?: string } | null> => {
+  ): Promise<{ url: string; contentType: "hls" | "progressive"; rawUrl: string; serverId?: string; headers?: Record<string, string>; deliveryMode?: string; pendingClientExtract?: ClientExtractDescriptor } | null> => {
     const BASE = getBaseUrl();
     const vid = await ensureAzEpisodeId(signal);
     if (!vid || signal.aborted) return null;
@@ -583,14 +717,71 @@ export default function DubbedWatchScreen() {
       const res = await fetch(`${BASE}/api/dubbed/animezid/watch-src?${params}`, { signal, cache: "no-store" });
       if (signal.aborted || !res.ok) return null;
       const d = await res.json();
+      if (isDirectStreamActive() && d?.clientExtract?.embedUrl) {
+        const descriptor: ClientExtractDescriptor = {
+          ...d.clientExtract,
+          referer: d.clientExtract.referer || d.headers?.Referer || "",
+        };
+        const extracted = await extractDirectStreamOnPhone(descriptor, signal);
+        if (extracted?.url) {
+          return {
+            url: extracted.url,
+            contentType: extracted.type === "hls" ? "hls" : "progressive",
+            rawUrl: extracted.url,
+            headers: extracted.headers,
+            deliveryMode: "client-extract",
+            serverId: serverId || undefined,
+          };
+        }
+        return {
+          url: "",
+          contentType: d.type === "hls" ? "hls" : "progressive",
+          rawUrl: descriptor.embedUrl,
+          pendingClientExtract: descriptor,
+          deliveryMode: "client-extract",
+          serverId: serverId || undefined,
+        };
+      }
       const proxyUrl = typeof d?.hlsUrl === "string" && d.hlsUrl
         ? (d.hlsUrl.startsWith("/") ? `${BASE}${d.hlsUrl}` : d.hlsUrl)
         : null;
       if (!proxyUrl) return null;
+      if (isDirectStreamActive() && (proxyUrl.includes("/api/aw-dubbed/mf-stream") || /https?:\/\/(?:www\.)?mediafire\.com\/(?:file|view|download)\//i.test(proxyUrl))) {
+        const mfDirect = await resolveMediaFireDirectOnPhone(proxyUrl, BASE, signal);
+        if (mfDirect?.url) {
+          return {
+            url: mfDirect.url,
+            headers: mfDirect.headers,
+            deliveryMode: "client-extract",
+            contentType: "progressive",
+            rawUrl: mfDirect.url,
+            serverId: serverId || undefined,
+          };
+        }
+      }
+      const cType = d.type === "hls" ? "hls" : "progressive";
+      const mustUseVps = !isDirectStreamActive() || isFixedVpsPlaybackSource({
+        url: proxyUrl,
+        provider: "az",
+        contentType: cType,
+        headers: d.headers,
+        deliveryMode: d.deliveryMode,
+      });
+      const finalUrl = mustUseVps
+        ? withPlaybackTrace(
+            isOwnVpsProxyUrl(proxyUrl)
+              ? proxyUrl
+              : buildVpsProxyUrl({ url: proxyUrl, referer: d.headers?.Referer || "", baseUrl: BASE, contentType: cType, deliveryMode: d.deliveryMode }),
+            playbackTraceId,
+            BASE,
+          )
+        : proxyUrl;
       return {
-        url: withPlaybackTrace(proxyUrl, playbackTraceId, BASE),
-        contentType: d.type === "hls" ? "hls" : "progressive",
-        rawUrl: proxyUrl,
+        url: finalUrl,
+        headers: mustUseVps ? undefined : d.headers,
+        deliveryMode: mustUseVps ? (d.deliveryMode || "vps-proxy") : d.deliveryMode,
+        contentType: cType,
+        rawUrl: finalUrl,
         serverId: serverId || undefined,
       };
     } catch {
@@ -604,6 +795,7 @@ export default function DubbedWatchScreen() {
     const ctrl = new AbortController();
     checkCtrlRef.current = ctrl;
     preloadedMediaRef.current = null;
+    preloadingPromiseRef.current = null;
     setError(null);
     setCheckingAvailability(true);
 
@@ -630,6 +822,7 @@ export default function DubbedWatchScreen() {
         },
       ];
       setSlots(defaultAzSlots);
+      setCheckingAvailability(false);
       try {
         const resolvedVid = await ensureAzEpisodeId(ctrl.signal);
         if (resolvedVid && !ctrl.signal.aborted) {
@@ -658,11 +851,16 @@ export default function DubbedWatchScreen() {
               setSlots(dynamicSlots);
               setCheckingAvailability(false);
               const firstSrvId = dynamicSlots[0]?.serverId;
-              void resolveAzMedia(ctrl.signal, firstSrvId).then((resolved) => {
+              const azPromise = resolveAzMedia(ctrl.signal, firstSrvId).then((resolved) => {
                 if (resolved && !ctrl.signal.aborted && mountedRef.current) {
                   preloadedMediaRef.current = resolved;
                 }
+                if (preloadingPromiseRef.current?.promise === azPromise) {
+                  preloadingPromiseRef.current = null;
+                }
+                return resolved;
               });
+              preloadingPromiseRef.current = { serverId: firstSrvId, promise: azPromise };
               return;
             }
           }
@@ -697,10 +895,12 @@ export default function DubbedWatchScreen() {
         },
       ];
       setSlots(defaultSd2Slots);
+      setCheckingAvailability(false);
       try {
         const wUrl = await ensureSd2WatchUrl(ctrl.signal);
         if (ctrl.signal.aborted || !mountedRef.current) return;
         if (wUrl) {
+          let sd2FirstSrvId: string | undefined;
           const srvRes = await fetch(`${BASE}/api/dubbed/sd2/servers?watchUrl=${encodeURIComponent(wUrl)}`, { signal: ctrl.signal });
           if (srvRes.ok && !ctrl.signal.aborted && mountedRef.current) {
             const srvJson = await srvRes.json();
@@ -721,17 +921,23 @@ export default function DubbedWatchScreen() {
                   serverId: String(srv.id),
                 };
               });
+              sd2FirstSrvId = dynamicSlots[0]?.serverId;
               setSlots(dynamicSlots);
               setCheckingAvailability(false);
             }
           }
           setSlots((prev) => prev.map((s) => ({ ...s, state: "available" })));
           setCheckingAvailability(false);
-          void resolveSd2Media(ctrl.signal).then((resolved) => {
+          const sd2Promise = resolveSd2Media(ctrl.signal, sd2FirstSrvId).then((resolved) => {
             if (resolved && !ctrl.signal.aborted && mountedRef.current) {
               preloadedMediaRef.current = resolved;
             }
+            if (preloadingPromiseRef.current?.promise === sd2Promise) {
+              preloadingPromiseRef.current = null;
+            }
+            return resolved;
           });
+          preloadingPromiseRef.current = { serverId: sd2FirstSrvId, promise: sd2Promise };
           return;
         }
       } catch (e: any) {
@@ -791,7 +997,8 @@ export default function DubbedWatchScreen() {
             state: "checking",
           },
         ];
-    setSlots(initialSlots);
+    setSlots(initialSlots.map((s) => ({ ...s, state: "available" })));
+    setCheckingAvailability(false);
 
     const mapBackendServersToSlots = (serverList: any[]): DubbedServerSlot[] =>
       serverList.map((srv, idx) => {
@@ -819,37 +1026,71 @@ export default function DubbedWatchScreen() {
 
     try {
       if (isCarateenSource) {
-        const resolved = await resolveCarateenMedia(ctrl.signal, "api");
-        if (resolved && !ctrl.signal.aborted && mountedRef.current) {
-          preloadedMediaRef.current = resolved;
-          if (Array.isArray(resolved.servers) && resolved.servers.length > 0) {
-            setSlots(mapBackendServersToSlots(resolved.servers));
-            setCheckingAvailability(false);
-            return;
+        const carPromise = resolveCarateenMedia(ctrl.signal, "api").then((resolved) => {
+          if (resolved && !ctrl.signal.aborted && mountedRef.current) {
+            preloadedMediaRef.current = resolved;
+            if (Array.isArray(resolved.servers) && resolved.servers.length > 0) {
+              setSlots(mapBackendServersToSlots(resolved.servers));
+            }
           }
-        }
+          if (preloadingPromiseRef.current?.promise === carPromise) {
+            preloadingPromiseRef.current = null;
+          }
+          return resolved;
+        });
+        preloadingPromiseRef.current = { serverId: undefined, promise: carPromise };
+        await carPromise;
       } else if (effectiveEpUrl) {
-        const sourceUrl = `${BASE}/api/dubbed/watch-src?epUrl=${encodeURIComponent(effectiveEpUrl)}&trace=${encodeURIComponent(playbackTraceId)}`;
-        const r = await fetch(sourceUrl, { signal: ctrl.signal, cache: "no-store" });
-        if (ctrl.signal.aborted || !mountedRef.current) return;
-        if (r.ok && (r.headers.get("content-type") || "").includes("json")) {
-          const d = await r.json();
-          const proxyUrl = typeof d.hlsUrl === "string" && d.hlsUrl
-            ? (d.hlsUrl.startsWith("/") ? `${BASE}${d.hlsUrl}` : d.hlsUrl)
-            : null;
-          if (proxyUrl) {
-            preloadedMediaRef.current = {
-              url: withPlaybackTrace(proxyUrl, playbackTraceId, BASE),
-              contentType: d.type === "hls" ? "hls" : "progressive",
-              rawUrl: proxyUrl,
-            };
+        const atPromise = (async () => {
+          const sourceUrl = `${BASE}/api/dubbed/watch-src?epUrl=${encodeURIComponent(effectiveEpUrl)}&trace=${encodeURIComponent(playbackTraceId)}`;
+          const r = await fetch(sourceUrl, { signal: ctrl.signal, cache: "no-store" });
+          if (ctrl.signal.aborted || !mountedRef.current) return null;
+          if (r.ok && (r.headers.get("content-type") || "").includes("json")) {
+            const d = await r.json();
+            if (Array.isArray(d?.servers) && d.servers.length > 0) {
+              setSlots(mapBackendServersToSlots(d.servers));
+              return null;
+            }
+            const proxyUrl = typeof d.hlsUrl === "string" && d.hlsUrl
+              ? (d.hlsUrl.startsWith("/") ? `${BASE}${d.hlsUrl}` : d.hlsUrl)
+              : null;
+            if (proxyUrl) {
+              const cType = d.type === "hls" ? "hls" : "progressive";
+              const mustUseVps = !isDirectStreamActive() || isFixedVpsPlaybackSource({
+                url: proxyUrl,
+                provider: "arabic-toons",
+                contentType: cType,
+                headers: d.headers,
+                deliveryMode: d.deliveryMode,
+              });
+              const finalUrl = mustUseVps
+                ? withPlaybackTrace(
+                    isOwnVpsProxyUrl(proxyUrl)
+                      ? proxyUrl
+                      : buildVpsProxyUrl({ url: proxyUrl, referer: d.headers?.Referer || "https://www.arabic-toons.com/", baseUrl: BASE, contentType: cType }),
+                    playbackTraceId,
+                    BASE,
+                  )
+                : proxyUrl;
+              const resolved = {
+                url: finalUrl,
+                contentType: cType as "hls" | "progressive",
+                rawUrl: finalUrl,
+                headers: mustUseVps ? undefined : d.headers,
+                deliveryMode: mustUseVps ? (d.deliveryMode || "vps-proxy") : d.deliveryMode,
+              };
+              preloadedMediaRef.current = resolved;
+              return resolved;
+            }
           }
-          if (Array.isArray(d?.servers) && d.servers.length > 0) {
-            setSlots(mapBackendServersToSlots(d.servers));
-            setCheckingAvailability(false);
-            return;
+          return null;
+        })().finally(() => {
+          if (preloadingPromiseRef.current?.promise === atPromise) {
+            preloadingPromiseRef.current = null;
           }
-        }
+        });
+        preloadingPromiseRef.current = { serverId: undefined, promise: atPromise };
+        await atPromise;
       }
     } catch (e: any) {
       if (e?.name === "AbortError" || !mountedRef.current) return;
@@ -906,7 +1147,7 @@ export default function DubbedWatchScreen() {
     bypassCache = false,
     serverId?: string,
     preferMp4 = false,
-  ): Promise<{ url: string; contentType: "hls" | "progressive"; rawUrl: string } | null> => {
+  ): Promise<{ url: string; proxyUrl?: string; contentType: "hls" | "progressive"; rawUrl: string; headers?: Record<string, string>; deliveryMode?: string; pendingClientExtract?: ClientExtractDescriptor } | null> => {
     if (isAzSource) {
       if (
         !bypassCache &&
@@ -915,9 +1156,17 @@ export default function DubbedWatchScreen() {
       ) {
         return {
           url: preloadedMediaRef.current.url,
+          proxyUrl: preloadedMediaRef.current.proxyUrl,
           contentType: preloadedMediaRef.current.contentType,
           rawUrl: preloadedMediaRef.current.rawUrl || preloadedMediaRef.current.url,
+          headers: preloadedMediaRef.current.headers,
+          deliveryMode: preloadedMediaRef.current.deliveryMode,
+          pendingClientExtract: preloadedMediaRef.current.pendingClientExtract,
         };
+      }
+      if (!bypassCache && preloadingPromiseRef.current && (!serverId || !preloadingPromiseRef.current.serverId || serverId === preloadingPromiseRef.current.serverId)) {
+        const inFlight = await preloadingPromiseRef.current.promise.catch(() => null);
+        if (inFlight && !signal.aborted) return inFlight;
       }
       const resolved = await resolveAzMedia(signal, serverId);
       if (resolved) {
@@ -937,9 +1186,17 @@ export default function DubbedWatchScreen() {
       ) {
         return {
           url: preloadedMediaRef.current.url,
+          proxyUrl: preloadedMediaRef.current.proxyUrl,
           contentType: preloadedMediaRef.current.contentType,
           rawUrl: preloadedMediaRef.current.rawUrl || preloadedMediaRef.current.url,
+          headers: preloadedMediaRef.current.headers,
+          deliveryMode: preloadedMediaRef.current.deliveryMode,
+          pendingClientExtract: preloadedMediaRef.current.pendingClientExtract,
         };
+      }
+      if (!bypassCache && !preferMp4 && preloadingPromiseRef.current && (!serverId || !preloadingPromiseRef.current.serverId || serverId === preloadingPromiseRef.current.serverId)) {
+        const inFlight = await preloadingPromiseRef.current.promise.catch(() => null);
+        if (inFlight && !signal.aborted) return inFlight;
       }
       const resolved = await resolveSd2Media(signal, serverId, preferMp4);
       if (resolved) {
@@ -951,12 +1208,20 @@ export default function DubbedWatchScreen() {
       return null;
     }
 
-    if (!bypassCache && mode === "api" && preloadedMediaRef.current) {
+    if (!bypassCache && !serverId && preloadedMediaRef.current) {
       return {
         url: preloadedMediaRef.current.url,
+        proxyUrl: preloadedMediaRef.current.proxyUrl,
         contentType: preloadedMediaRef.current.contentType,
         rawUrl: preloadedMediaRef.current.rawUrl || preloadedMediaRef.current.url,
+        headers: preloadedMediaRef.current.headers,
+        deliveryMode: preloadedMediaRef.current.deliveryMode,
+        pendingClientExtract: preloadedMediaRef.current.pendingClientExtract,
       };
+    }
+    if (!bypassCache && !serverId && preloadingPromiseRef.current) {
+      const inFlight = await preloadingPromiseRef.current.promise.catch(() => null);
+      if (inFlight && !signal.aborted) return inFlight;
     }
 
     if (isCarateenSource) {
@@ -998,7 +1263,7 @@ export default function DubbedWatchScreen() {
         }
       } catch {}
     }
-    const fetchViaWatchSrc = async (): Promise<{ url: string; contentType: "hls" | "progressive"; rawUrl: string } | null> => {
+    const fetchViaWatchSrc = async (): Promise<{ url: string; contentType: "hls" | "progressive"; rawUrl: string; headers?: Record<string, string>; deliveryMode?: string } | null> => {
       if (!targetEpUrl) return null;
       for (let attempt = 0; attempt < 2; attempt += 1) {
         try {
@@ -1015,6 +1280,8 @@ export default function DubbedWatchScreen() {
                 url: withPlaybackTrace(proxyUrl, playbackTraceId, BASE),
                 contentType: (d.type === "hls" ? "hls" : "progressive") as "hls" | "progressive",
                 rawUrl: proxyUrl,
+                headers: d.headers,
+                deliveryMode: d.deliveryMode,
               };
               preloadedMediaRef.current = resolved;
               return resolved;
@@ -1029,80 +1296,82 @@ export default function DubbedWatchScreen() {
       }
       return null;
     };
-    if (mode === "api" && targetEpUrl) {
-      const viaApi = await fetchViaWatchSrc();
-      if (viaApi) return viaApi;
-    }
-    if (false && mode === "api" && targetEpUrl) {
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        try {
-          const sourceUrl = `${BASE}/api/dubbed/watch-src?epUrl=${encodeURIComponent(targetEpUrl)}&trace=${encodeURIComponent(playbackTraceId)}`;
-          const r = await fetch(sourceUrl, { signal, cache: "no-store" });
-          if (signal.aborted) return null;
-          if (r.ok && (r.headers.get("content-type") || "").includes("json")) {
-            const d = await r.json();
-            const proxyUrl = typeof d.hlsUrl === "string" && d.hlsUrl
-              ? (d.hlsUrl.startsWith("/") ? `${BASE}${d.hlsUrl}` : d.hlsUrl)
-              : null;
-            if (proxyUrl) {
-              const resolved = {
-                url: withPlaybackTrace(proxyUrl, playbackTraceId, BASE),
-                contentType: (d.type === "hls" ? "hls" : "progressive") as "hls" | "progressive",
-                rawUrl: proxyUrl,
-              };
-              preloadedMediaRef.current = resolved;
-              return resolved;
-            }
-          }
-        } catch (e: any) {
-          if (e?.name === "AbortError" || signal.aborted) return null;
-        }
-        if (attempt < 1) {
-          await new Promise<void>((r) => setTimeout(r, 400));
-        }
-      }
-    }
-
-    if (!isCarateenSource && targetEpUrl) {
+    const fetchArabicToonsDirect = async (): Promise<{ url: string; contentType: "hls" | "progressive"; rawUrl: string; headers?: Record<string, string>; deliveryMode?: string } | null> => {
+      if (!targetEpUrl) return null;
+      const directCtrl = new AbortController();
+      const directTimer = setTimeout(() => directCtrl.abort(), 3500);
+      const onOuterAbort = () => directCtrl.abort();
+      signal.addEventListener("abort", onOuterAbort);
       try {
         const pageR = await fetch(targetEpUrl, {
-          signal,
+          signal: directCtrl.signal,
           headers: {
-            "User-Agent": "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.6367.82 Mobile Safari/537.36",
+            "User-Agent": MOBILE_DIRECT_UA,
             Referer: "https://www.arabic-toons.com/",
             Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
           },
         });
-        if (signal.aborted) return null;
-        if (pageR.ok) {
-          const html = await pageR.text();
-          const videoUrl = extractVideoFromHtml(html);
-          if (videoUrl) {
-            const mediaHost = (() => {
-              try { return new URL(videoUrl).hostname.toLowerCase(); } catch { return ""; }
-            })();
-            const isHls = /\.m3u8(?:[?#]|$)/i.test(videoUrl);
-            const ref = "https://www.arabic-toons.com/";
-            const proxyUrl = isHls
-              ? `${BASE}/api/anime/hls-proxy?url=${encodeURIComponent(videoUrl)}&ref=${encodeURIComponent(ref)}`
-              : mediaHost === "stream.foupix.com"
-                ? `${BASE}/api/dubbed/stream?url=${encodeURIComponent(videoUrl)}`
-                : `${BASE}/api/anime/video-proxy?url=${encodeURIComponent(videoUrl)}&ref=${encodeURIComponent(ref)}`;
-            return {
-              url: withPlaybackTrace(proxyUrl, playbackTraceId, BASE),
-              contentType: isHls ? "hls" : "progressive",
-              rawUrl: proxyUrl,
-            };
-          }
+        if (signal.aborted || !pageR.ok) return null;
+        const html = await pageR.text();
+        const rawVideoUrl = extractVideoFromHtml(html) || extractMediaUrlFromHtml(html, targetEpUrl)?.url || null;
+        if (!rawVideoUrl) return null;
+        let videoUrl = rawVideoUrl;
+        try { videoUrl = new URL(rawVideoUrl, targetEpUrl).toString(); } catch {}
+        const mediaHost = (() => {
+          try { return new URL(videoUrl).hostname.toLowerCase(); } catch { return ""; }
+        })();
+        const isHls = /\.m3u8(?:[?#]|$)/i.test(videoUrl);
+        const ref = "https://www.arabic-toons.com/";
+        const mustUseVps = !isDirectStreamActive() || isFixedVpsPlaybackSource({
+          url: videoUrl,
+          provider: "arabic-toons",
+          contentType: isHls ? "hls" : "progressive",
+          headers: { Referer: ref },
+        });
+        if (!mustUseVps) {
+          const resolved = {
+            url: videoUrl,
+            contentType: (isHls ? "hls" : "progressive") as "hls" | "progressive",
+            rawUrl: videoUrl,
+            headers: { Referer: ref, Origin: "https://www.arabic-toons.com", "User-Agent": MOBILE_DIRECT_UA },
+            deliveryMode: "direct",
+          };
+          preloadedMediaRef.current = resolved;
+          return resolved;
         }
-      } catch {}
+        const proxyUrl = isHls
+          ? `${BASE}/api/anime/hls-proxy?url=${encodeURIComponent(videoUrl)}&ref=${encodeURIComponent(ref)}`
+          : mediaHost === "stream.foupix.com"
+            ? `${BASE}/api/dubbed/stream?url=${encodeURIComponent(videoUrl)}`
+            : `${BASE}/api/anime/video-proxy?url=${encodeURIComponent(videoUrl)}&ref=${encodeURIComponent(ref)}`;
+        return {
+          url: withPlaybackTrace(proxyUrl, playbackTraceId, BASE),
+          contentType: isHls ? "hls" : "progressive",
+          rawUrl: proxyUrl,
+        };
+      } catch {
+        return null;
+      } finally {
+        clearTimeout(directTimer);
+        signal.removeEventListener("abort", onOuterAbort);
+      }
+    };
+    if (!isCarateenSource && targetEpUrl) {
+      const viaApi = await fetchViaWatchSrc();
+      if (viaApi) return viaApi;
+      const directRes = await fetchArabicToonsDirect();
+      if (directRes) return directRes;
+      return null;
+    }
+    if (!isCarateenSource && targetEpUrl) {
+      const directRes = await fetchArabicToonsDirect();
+      if (directRes) return directRes;
       if (mode === "direct") {
         const fallbackApi = await fetchViaWatchSrc();
         if (fallbackApi) return fallbackApi;
       }
     }
-
     return null;
   }, [effectiveEpUrl, episodeNumber, isAzSource, isCarateenSource, isSd2Source, playbackTraceId, resolveAzMedia, resolveCarateenMedia, resolveSd2Media, series, title]);
 
@@ -1116,7 +1385,13 @@ export default function DubbedWatchScreen() {
   const handlePickSlot = useCallback(async (slot: DubbedServerSlot) => {
     if (tvMode && Date.now() - pickerOpenedAtRef.current < 750) return;
     if (slot.state === "fetching") return;
-    checkCtrlRef.current?.abort();
+    const isReusingPreload = Boolean(
+      preloadingPromiseRef.current &&
+      (!slot.serverId || !preloadingPromiseRef.current.serverId || slot.serverId === preloadingPromiseRef.current.serverId)
+    );
+    if (!isReusingPreload) {
+      checkCtrlRef.current?.abort();
+    }
     ctrlRef.current?.abort();
     const ctrl = new AbortController();
     ctrlRef.current = ctrl;
@@ -1125,6 +1400,7 @@ export default function DubbedWatchScreen() {
     autoRetryCountRef.current = 0;
     setSelectedSlotKey(slot.key);
     selectedSlotKeyRef.current = slot.key;
+    setResolvingClientExtract(null);
     setError(null);
     setSlots((prev) =>
       prev.map((s) => (s.key === slot.key ? { ...s, state: "fetching" } : s)),
@@ -1140,11 +1416,24 @@ export default function DubbedWatchScreen() {
     }
 
     const extracted = slot.directUrl
-      ? { url: slot.directUrl, contentType: "progressive" as const, rawUrl: slot.rawDirectUrl || slot.directUrl }
-      : await extractPlayableSource(slot.mode, ctrl.signal, false, slot.serverId, isSd2Source);
+      ? {
+          url: slot.directUrl,
+          contentType: (/\.m3u8(?:[?#]|$)/i.test(slot.directUrl) ? "hls" : "progressive") as "hls" | "progressive",
+          rawUrl: slot.rawDirectUrl || slot.directUrl,
+        }
+      : await extractPlayableSource(slot.mode, ctrl.signal, false, slot.serverId, false);
     if (ctrl.signal.aborted || !mountedRef.current) return;
 
-    if (!extracted) {
+    if (extracted && (extracted as any).pendingClientExtract?.embedUrl) {
+      setResolvingClientExtract({
+        slot,
+        descriptor: (extracted as any).pendingClientExtract,
+        fallbackType: extracted.contentType,
+      });
+      return;
+    }
+
+    if (!extracted || !extracted.url) {
       failedSlotKeysRef.current.add(slot.key);
       setSlots((prev) =>
         prev.map((s) => (s.key === slot.key ? { ...s, state: "failed" } : s)),
@@ -1156,47 +1445,72 @@ export default function DubbedWatchScreen() {
     setSlots((prev) =>
       prev.map((s) => (s.key === slot.key ? { ...s, state: "available" } : s)),
     );
-    setSources([
-      {
-        url: extracted.url,
-        contentType: extracted.contentType,
-        label: slot.label,
-        quality: slot.quality === "2160p" ? "4K UHD" : slot.quality === "1080p" ? "1080p FHD" : slot.quality === "720p" ? "720p HD" : slot.quality.toUpperCase(),
-      },
-    ]);
+    const base = getBaseUrl();
+    const effectiveProvider = isAzSource ? "az" : isSd2Source ? "sd2" : isCarateenSource ? provider : "arabic-toons";
+    const builtPrimary = buildDeterministicPlayerSource({
+      url: extracted.url,
+      contentType: extracted.contentType,
+      headers: (extracted as any).headers,
+      baseUrl: base,
+      deliveryMode: (extracted as any).deliveryMode,
+      site: slot.site,
+      provider: effectiveProvider,
+      label: slot.label,
+      quality: slot.quality === "2160p" ? "4K UHD" : slot.quality === "1080p" ? "1080p FHD" : slot.quality === "720p" ? "720p HD" : slot.quality.toUpperCase(),
+    });
+    const primaryBadge = isDirectStreamActive()
+      ? ` · ${getDeliveryBadge(builtPrimary.url, (extracted as any).deliveryMode).badgeLabel}`
+      : "";
+    setSources([{ ...builtPrimary, label: slot.label + primaryBadge }]);
     setScreen("player");
 
-    // Pre-resolve the next backup server in background so RiftPlayer fails over seamlessly if needed
-    const backupSlots = slotsRef.current.filter((s) => s.key !== slot.key && s.serverId).slice(0, 2);
+    // Pre-resolve one backup server quietly after initial stream startup so it never slows buffering
+    const backupSlots = slotsRef.current.filter((s) => s.key !== slot.key && s.serverId).slice(0, 1);
     if (backupSlots.length > 0) {
-      void (async () => {
-        for (const alt of backupSlots) {
+      setTimeout(() => {
+        if (ctrl.signal.aborted || !mountedRef.current) return;
+        void (async () => {
+          for (const alt of backupSlots) {
           if (ctrl.signal.aborted || !mountedRef.current) return;
-          const altRes = await extractPlayableSource(alt.mode, ctrl.signal, true, alt.serverId, isSd2Source);
-          if (altRes && !ctrl.signal.aborted && mountedRef.current) {
+          const altRes = await extractPlayableSource(alt.mode, ctrl.signal, true, alt.serverId, false);
+          if (altRes && altRes.url && !altRes.pendingClientExtract && !ctrl.signal.aborted && mountedRef.current) {
             setSources((prev) => {
               if (prev.some((x) => x.url === altRes.url)) return prev;
               return [
                 ...prev,
-                {
-                  url: altRes.url,
-                  contentType: altRes.contentType,
-                  label: alt.label,
-                  quality: alt.quality === "1080p" ? "1080p FHD" : "720p HD",
-                },
+                (() => {
+                  const builtAlt = buildDeterministicPlayerSource({
+                    url: altRes.url,
+                    contentType: altRes.contentType,
+                    headers: (altRes as any).headers,
+                    baseUrl: base,
+                    deliveryMode: (altRes as any).deliveryMode,
+                    site: alt.site,
+                    provider: effectiveProvider,
+                    label: alt.label,
+                    quality: alt.quality === "1080p" ? "1080p FHD" : "720p HD",
+                  });
+                  return {
+                    ...builtAlt,
+                    label: alt.label + (isDirectStreamActive() ? ` · ${getDeliveryBadge(builtAlt.url, (altRes as any).deliveryMode).badgeLabel}` : ""),
+                  };
+                })(),
               ];
             });
             break;
           }
         }
-      })();
+        })();
+      }, 3500);
     }
   }, [extractPlayableSource, ensureWatchAccess, isSd2Source]);
 
   const [activeEpisodeDownloads, setActiveEpisodeDownloads] = useState<ActiveDownload[]>([]);
+  const startingDlKeysRef = useRef<Set<string>>(new Set());
 
-  /* ── Sync Active & Completed Downloads ── */
+  /* ── Sync Active & Completed Downloads (verified against getDownloads) ── */
   useEffect(() => {
+    let cancelled = false;
     const sync = () => {
       const snapshot = getActiveDownloadsSnapshot();
       const epActive = snapshot.filter(
@@ -1205,18 +1519,15 @@ export default function DubbedWatchScreen() {
       setActiveEpisodeDownloads(epActive);
 
       const activeBySite = new Map(epActive.map((d) => [d.site, d]));
-      setDlStates((prev) => {
-        const next = { ...prev };
-        for (const slot of slots) {
-          const activeDl = activeBySite.get(slot.site);
-          if (activeDl) {
-            next[slot.key] = activeDl.status === "error" ? "error" : "downloading";
-          } else if (next[slot.key] === "downloading") {
-            next[slot.key] = "done";
-          }
+      const activeStatusByKey: Record<string, string> = {};
+      for (const slot of slots) {
+        const activeDl = activeBySite.get(slot.site);
+        if (activeDl) {
+          activeStatusByKey[slot.key] = activeDl.status;
+        } else if (startingDlKeysRef.current.has(slot.key)) {
+          activeStatusByKey[slot.key] = "downloading";
         }
-        return next;
-      });
+      }
       setDlProgress((prev) => {
         const next = { ...prev };
         for (const slot of slots) {
@@ -1228,16 +1539,30 @@ export default function DubbedWatchScreen() {
         return next;
       });
       getDownloads().then((list) => {
+        if (cancelled) return;
+        const completedKeys = new Set<string>();
         for (const slot of slots) {
           const dlId = makeDownloadId(numericAnimeId, episodeNumber, slot.site, slot.quality);
           if (list.some((d) => d.id === dlId)) {
-            setDlStates((p) => ({ ...p, [slot.key]: "done" }));
+            completedKeys.add(slot.key);
           }
         }
+        setDlStates((prev) =>
+          reconcileDownloadButtonStates({
+            prevStates: prev,
+            activeStatusByKey,
+            completedKeys,
+            allKeys: slots.map((s) => s.key),
+          }),
+        );
       }).catch(() => {});
     };
     sync();
-    return subscribeActiveDownloads(sync);
+    const unsub = subscribeActiveDownloads(sync);
+    return () => {
+      cancelled = true;
+      unsub();
+    };
   }, [slots, numericAnimeId, episodeNumber]);
 
   const handleDownloadSlot = useCallback(async (slot: DubbedServerSlot, downloadMode: "internal" | "adm" = "internal") => {
@@ -1291,47 +1616,136 @@ export default function DubbedWatchScreen() {
         });
         return;
       }
+      const effectiveProvider = isAzSource
+        ? "az"
+        : isSd2Source
+          ? "sd2"
+          : isCarateenSource
+            ? provider
+            : "arabic-toons";
+
+      let candidateUrl = extracted.url || extracted.rawUrl;
+      let candidateRawUrl = extracted.rawUrl || extracted.url;
+      let candidateType: "hls" | "progressive" = extracted.contentType;
+      let candidateHeaders: Record<string, string> | undefined = (extracted as any).headers;
+      let candidateDelivery: string | undefined = (extracted as any).deliveryMode;
+
+      if ((extracted as any).pendingClientExtract?.embedUrl) {
+        const phoneExt = await extractDirectStreamOnPhone({
+          ...(extracted as any).pendingClientExtract,
+          referer: (extracted as any).pendingClientExtract.referer || candidateHeaders?.Referer || "",
+        });
+        if (phoneExt?.url) {
+          candidateUrl = phoneExt.url;
+          candidateRawUrl = phoneExt.url;
+          candidateType = phoneExt.type === "hls" ? "hls" : "progressive";
+          candidateHeaders = phoneExt.headers;
+          candidateDelivery = "client-extract";
+        }
+      }
+
+      const mfCandidate = [candidateUrl, candidateRawUrl].find(
+        (u) =>
+          typeof u === "string" &&
+          (u.includes("/api/aw-dubbed/mf-stream") || /https?:\/\/(?:www\.)?mediafire\.com\/(?:file|view|download)\//i.test(u)),
+      );
+      if (mfCandidate) {
+        const mfDirect = await resolveMediaFireDirectOnPhone(mfCandidate, base);
+        if (mfDirect?.url) {
+          candidateUrl = mfDirect.url;
+          candidateRawUrl = mfDirect.url;
+          candidateType = "progressive";
+          candidateHeaders = mfDirect.headers;
+          candidateDelivery = "client-extract";
+        }
+      }
+
+      const directMp4 = resolveDirectInternalMp4Download({
+        url: candidateUrl,
+        rawUrl: candidateRawUrl,
+        directType: candidateType === "hls" ? "hls" : "mp4",
+        site: slot.site,
+        provider: effectiveProvider,
+        deliveryMode: candidateDelivery,
+        headers: candidateHeaders,
+        baseUrl: base,
+      });
+
       const [authToken, downloadToken] = await Promise.all([
         getAuthToken(),
         getDownloadToken(),
       ]);
 
-      const rawMediaUrl = extracted.rawUrl || extracted.url;
-      const isTgDirectStream =
-        rawMediaUrl.includes("/api/tg-media/stream/") ||
-        extracted.url.includes("/api/tg-media/stream/");
-      const isDirectProgressiveProxy =
-        isTgDirectStream ||
-        rawMediaUrl.includes("/api/dubbed/stream") ||
-        rawMediaUrl.includes("/api/anime/video-proxy") ||
-        extracted.url.includes("/api/dubbed/stream") ||
-        extracted.url.includes("/api/anime/video-proxy");
-      const downloadSite = isSd2Source || isCarateenSource ? (slot.site || "sd2") : "animewitcher";
-      const downloadUrl =
-        extracted.contentType === "hls" && !rawMediaUrl.includes("/api/anime/download-mp4")
-          ? `${base}/api/anime/download-mp4?site=${encodeURIComponent(downloadSite)}&url=${encodeURIComponent(rawMediaUrl)}${downloadToken ? `&dlToken=${encodeURIComponent(downloadToken)}` : ""}`
-          : isTgDirectStream
-            ? `${rawMediaUrl}${rawMediaUrl.includes("?") ? "&" : "?"}dl=1`
-            : isDirectProgressiveProxy
-              ? rawMediaUrl
-            : `${base}/api/anime/download-mp4?site=${encodeURIComponent(downloadSite)}&url=${encodeURIComponent(rawMediaUrl)}${downloadToken ? `&dlToken=${encodeURIComponent(downloadToken)}` : ""}`;
+      let downloadUrl: string;
+      let downloadHeaders: Record<string, string> | undefined;
+      let hlsManifestUrl: string | undefined;
 
+      if (directMp4.isDirect && directMp4.url) {
+        downloadUrl = directMp4.url;
+        downloadHeaders = directMp4.headers;
+        hlsManifestUrl = undefined;
+      } else {
+        const isTgDirectStream =
+          candidateRawUrl.includes("/api/tg-media/stream/") ||
+          candidateUrl.includes("/api/tg-media/stream/");
+        const isDirectProgressiveProxy =
+          isTgDirectStream ||
+          candidateRawUrl.includes("/api/dubbed/stream") ||
+          candidateRawUrl.includes("/api/anime/video-proxy") ||
+          candidateUrl.includes("/api/dubbed/stream") ||
+          candidateUrl.includes("/api/anime/video-proxy");
+        const downloadSite =
+          isSd2Source || isCarateenSource || isAzSource
+            ? (slot.site || "dubbed")
+            : "dubbed";
+        const proxiedHlsManifest =
+          candidateType === "hls"
+            ? (isOwnVpsProxyUrl(candidateRawUrl)
+                ? (candidateRawUrl.startsWith("/") ? `${base}${candidateRawUrl}` : candidateRawUrl)
+                : buildVpsProxyUrl({
+                    url: candidateRawUrl,
+                    referer: candidateHeaders?.Referer || "",
+                    baseUrl: base,
+                    contentType: "hls",
+                    site: slot.site,
+                    deliveryMode: candidateDelivery,
+                  }))
+            : undefined;
+        downloadUrl =
+          candidateType === "hls" && proxiedHlsManifest && !proxiedHlsManifest.includes("/api/anime/download-mp4")
+            ? `${base}/api/anime/download-mp4?site=${encodeURIComponent(downloadSite)}&url=${encodeURIComponent(proxiedHlsManifest)}${downloadToken ? `&dlToken=${encodeURIComponent(downloadToken)}` : ""}`
+            : isTgDirectStream
+              ? `${candidateRawUrl}${candidateRawUrl.includes("?") ? "&" : "?"}dl=1`
+              : isDirectProgressiveProxy
+                ? candidateRawUrl
+                : `${base}/api/anime/download-mp4?site=${encodeURIComponent(downloadSite)}&url=${encodeURIComponent(candidateRawUrl)}${downloadToken ? `&dlToken=${encodeURIComponent(downloadToken)}` : ""}`;
+        downloadHeaders = candidateHeaders;
+        hlsManifestUrl = candidateType === "hls" ? candidateRawUrl : undefined;
+      }
+
+      startingDlKeysRef.current.add(slot.key);
       setDlStates((p) => ({ ...p, [slot.key]: "downloading" }));
       setDlProgress((p) => ({ ...p, [slot.key]: 0 }));
 
-      await startGlobalDownload({
-        animeId: numericAnimeId,
-        ep: episodeNumber,
-        title: title || "مدبلج",
-        cover: posterUrl,
-        site: slot.site,
-        quality: slot.quality,
-        url: downloadUrl,
-        authToken: authToken ?? undefined,
-        downloadToken: downloadToken ?? undefined,
-        hlsManifestUrl: extracted.contentType === "hls" ? rawMediaUrl : undefined,
-      });
+      try {
+        await startGlobalDownload({
+          animeId: numericAnimeId,
+          ep: episodeNumber,
+          title: title || "مدبلج",
+          cover: posterUrl,
+          site: slot.site,
+          quality: slot.quality,
+          url: downloadUrl,
+          authToken: authToken ?? undefined,
+          downloadToken: downloadToken ?? undefined,
+          headers: downloadHeaders,
+          hlsManifestUrl,
+        });
+      } finally {
+        startingDlKeysRef.current.delete(slot.key);
+      }
     } catch {
+      startingDlKeysRef.current.delete(slot.key);
       setDlStates((p) => ({ ...p, [slot.key]: "error" }));
     }
   }, [dlStates, episodeNumber, extractPlayableSource, isAzSource, isCarateenSource, isSd2Source, numericAnimeId, posterUrl, provider, title]);
@@ -1393,16 +1807,27 @@ export default function DubbedWatchScreen() {
         ctrl.signal,
         true,
         candidate?.serverId,
-        isSd2Source,
+        false,
       );
-      if (fresh && mountedRef.current) {
+      if (fresh && (fresh as any).pendingClientExtract?.embedUrl && mountedRef.current && candidate) {
+        setResolvingClientExtract({
+          slot: candidate,
+          descriptor: (fresh as any).pendingClientExtract,
+          fallbackType: fresh.contentType,
+        });
+      } else if (fresh && fresh.url && mountedRef.current) {
         setSources([
-          {
+          buildDeterministicPlayerSource({
             url: fresh.url,
             contentType: fresh.contentType,
+            headers: (fresh as any).headers,
+            baseUrl: getBaseUrl(),
+            deliveryMode: (fresh as any).deliveryMode,
+            site: candidate?.site,
+            provider: isAzSource ? "az" : isSd2Source ? "sd2" : isCarateenSource ? provider : "arabic-toons",
             label: candidate?.label || "مدبلج عربي عبر الخادم",
             quality: candidate?.quality === "1080p" ? "1080p FHD" : "720p HD",
-          },
+          }),
         ]);
       } else if (mountedRef.current) {
         setScreen("picker");
@@ -1738,7 +2163,7 @@ export default function DubbedWatchScreen() {
               ]}
             >
               {group.items.map((slot, idx) => {
-                const isBusy = slot.state === "fetching" || checkingAvailability;
+                const isBusy = slot.state === "fetching";
                 const isFailed = slot.state === "failed";
                 return (
                   <Pressable
@@ -1943,6 +2368,49 @@ export default function DubbedWatchScreen() {
           </View>
         )}
       </ScrollView>
+      {resolvingClientExtract && (
+        <HiddenResolverWebView
+          key={`${resolvingClientExtract.slot.key}-${resolvingClientExtract.descriptor.embedUrl}`}
+          pageUrl={resolvingClientExtract.descriptor.embedUrl}
+          refererOverride={resolvingClientExtract.descriptor.referer}
+          onResolved={(stream: ResolvedStream) => {
+            const active = resolvingClientExtract;
+            setResolvingClientExtract(null);
+            if (!mountedRef.current) return;
+            setSlots((prev) =>
+              prev.map((s) => (s.key === active.slot.key ? { ...s, state: "available" } : s)),
+            );
+            const badge = isDirectStreamActive()
+              ? ` · ${getDeliveryBadge(stream.url, "client-extract").badgeLabel}`
+              : "";
+            const contentType = stream.type === "hls" || /\.m3u8(?:[?#]|$)/i.test(stream.url) ? "hls" : "progressive";
+            setSources([
+              buildDeterministicPlayerSource({
+                url: stream.url,
+                contentType,
+                headers: stream.headers,
+                baseUrl: getBaseUrl(),
+                deliveryMode: "client-extract",
+                site: active.slot.site,
+                provider: isAzSource ? "az" : isSd2Source ? "sd2" : isCarateenSource ? provider : "arabic-toons",
+                label: active.slot.label + badge,
+                quality: active.slot.quality === "2160p" ? "4K UHD" : active.slot.quality === "1080p" ? "1080p FHD" : active.slot.quality === "720p" ? "720p HD" : active.slot.quality.toUpperCase(),
+              }),
+            ]);
+            setScreen("player");
+          }}
+          onFailed={() => {
+            const active = resolvingClientExtract;
+            setResolvingClientExtract(null);
+            if (!mountedRef.current) return;
+            failedSlotKeysRef.current.add(active.slot.key);
+            setSlots((prev) =>
+              prev.map((s) => (s.key === active.slot.key ? { ...s, state: "failed" } : s)),
+            );
+            setError("تعذّر استخراج رابط الحلقة من هذا السيرفر — جرب سيرفر آخر أو أعد المحاولة");
+          }}
+        />
+      )}
       {!tvMode && (
         <DownloadMethodModal
           visible={Boolean(pendingAdmSlot)}
@@ -2028,35 +2496,36 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   pickerContent: {
-    padding: 14,
+    paddingHorizontal: 12,
+    paddingTop: 10,
     paddingBottom: 80,
-    gap: 12,
+    gap: 8,
   },
   infoCard: {
     flexDirection: ROW_RTL,
-    alignItems: "flex-start",
-    gap: 14,
-    padding: 14,
-    borderRadius: 18,
+    alignItems: "center",
+    gap: 11,
+    padding: 10,
+    borderRadius: 15,
     borderWidth: 1,
   },
   infoPosterWrap: {
-    width: 72,
-    height: 102,
+    width: 56,
+    height: 80,
     position: "relative",
     alignItems: "center",
     justifyContent: "center",
   },
   infoPosterGlow: {
     position: "absolute",
-    width: 80,
-    height: 110,
-    borderRadius: 20,
+    width: 62,
+    height: 86,
+    borderRadius: 14,
   },
   posterThumb: {
-    width: 72,
-    height: 102,
-    borderRadius: 12,
+    width: 56,
+    height: 80,
+    borderRadius: 10,
     borderWidth: 1,
   },
   infoMeta: {
@@ -2098,8 +2567,8 @@ const styles = StyleSheet.create({
     fontFamily: "Cairo_700Bold",
   },
   noticeText: {
-    fontSize: 12,
-    lineHeight: 20,
+    fontSize: 10.5,
+    lineHeight: 16,
     fontFamily: "Cairo_400Regular",
     textAlign: "center",
   },
@@ -2145,9 +2614,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    minHeight: 52,
+    minHeight: 48,
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 8,
     gap: 8,
   },
   serverRowBorder: {

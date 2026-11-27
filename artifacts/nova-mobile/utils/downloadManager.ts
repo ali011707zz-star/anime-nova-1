@@ -1,9 +1,12 @@
 /**
  * Nova Download Service
  *
- * The download task deliberately lives outside React screens.  DownloadResumable
- * uses the background file-system session, while the small persisted record lets
- * the service rebuild the task after the app is opened again.
+ * Manages offline video downloads outside React screens:
+ * - Phone-side direct HLS `.ts` segment downloader (concurrent chunks, 0% VPS ffmpeg)
+ * - JS `DownloadResumable` for VPS proxies, Range-less streams, and fallback MP4s
+ * - Android `DownloadManager` strictly for direct external progressive MP4 CDNs
+ * - Max-2 concurrent download queue, safe foreground native reconciliation, and
+ *   100%-complete disk-verified finalization.
  */
 import { AppState, Platform } from "react-native";
 import * as FileSystem from "expo-file-system";
@@ -13,6 +16,35 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
 import { recordSuccessfulDownload } from "./adPolicy";
 import { getAuthToken, getDownloadToken } from "./secureApi";
+import { getBaseUrl } from "./baseUrl";
+import {
+  openSequentialPartWriter,
+  readFileHeadBytes,
+  type SequentialPartWriter,
+} from "./nextFileBridge.mjs";
+import { isFirstPartyVpsUrl } from "./hybridStreamLogic.mjs";
+import {
+  buildHlsManifestCandidates,
+  parseMasterM3u8,
+  parseMediaM3u8,
+  selectBestHlsVariant,
+} from "./hlsDownloaderLogic.mjs";
+import {
+  canReconcileNativeRecordWithoutCancel,
+  isDubbedStreamProxyUrl,
+  isHlsDownloadCandidate,
+  pickQueuedEntriesToStart,
+  prepareDownloadRequestUrl,
+  shouldFinalizeNativeDownload,
+  shouldUseNativeDownloadManager,
+} from "./downloadRoutingLogic.mjs";
+import {
+  MIN_VALID_VIDEO_BYTES,
+  detectHlsContainerExtension,
+  replaceVideoExtension,
+  stripFakeImagePrefixFromTsSegment,
+  validateCompletedMediaFile,
+} from "./downloadIntegrityLogic.mjs";
 import {
   enqueueNativeDownload,
   forgetNativeDownload,
@@ -26,6 +58,9 @@ const DOWNLOADS_KEY = "nova-downloads-v3";
 const ACTIVE_PENDING_KEY = "nova-downloads-active-v2";
 const DOWNLOADS_ROOT = `${FileSystem.documentDirectory ?? ""}downloads/`;
 const MAX_RETRIES = 3;
+const MAX_CONCURRENT_JS_DOWNLOADS = 2;
+const HLS_SEGMENT_CONCURRENCY = 4;
+const HLS_SEGMENT_RETRIES = 3;
 const NOTIFICATION_CHANNEL = "nova-downloads";
 const MOBILE_CLIENT_ID = "nova-anime-mobile-v1";
 const MOBILE_PACKAGE_NAME =
@@ -33,6 +68,8 @@ const MOBILE_PACKAGE_NAME =
   Constants.expoConfig?.ios?.bundleIdentifier ||
   "com.nova.anime";
 const MOBILE_VERSION = Constants.expoConfig?.version || "1.0.0";
+const DIRECT_CDN_UA =
+  "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
 
 export interface DownloadItem {
   id: string;
@@ -66,6 +103,12 @@ export interface ActiveDownload {
   errorMessage?: string;
   /** Android DownloadManager jobs cannot be paused from the JS bridge. */
   pauseSupported?: boolean;
+  /** True while waiting in the max-2 concurrency queue. */
+  queued?: boolean;
+  /** True while phone-side direct HLS segment downloading is active. */
+  hlsDirect?: boolean;
+  segmentsDone?: number;
+  segmentsTotal?: number;
   cancelFn: () => void;
 }
 
@@ -80,7 +123,7 @@ export interface StartDownloadParams {
   authToken?: string | null;
   downloadToken?: string | null;
   subtitleUrl?: string;
-  /** Original/proxied HLS manifest used to discover an embedded subtitle track. */
+  /** Original/proxied HLS manifest used to download segments directly on phone & extract embedded subtitles. */
   hlsManifestUrl?: string;
   headers?: Record<string, string>;
 }
@@ -120,19 +163,23 @@ type RuntimeDownload = ActiveDownload & {
   params: StartDownloadParams;
   localPath: string;
   resumable?: FileSystem.DownloadResumable;
+  hlsAbortController?: AbortController;
   nativeJobId?: number;
   nativePollTimer?: ReturnType<typeof setTimeout>;
+  nativeCompleteStablePolls?: number;
   resumeState?: ResumeState;
   notificationAt: number;
   notificationPromise?: Promise<void>;
   startedAt: number;
   progressTicker?: ReturnType<typeof setInterval>;
+  runningWorker?: boolean;
 };
 
 const active = new Map<string, RuntimeDownload>();
 const listeners = new Set<() => void>();
 let notificationsReady: Promise<boolean> | null = null;
 let persistQueue = Promise.resolve();
+let restoreNativeInFlight: Promise<void> | null = null;
 let lastProgressNotifyAt = 0;
 let lastProgressPersistAt = 0;
 let progressNotifyTimer: ReturnType<typeof setTimeout> | null = null;
@@ -182,6 +229,18 @@ function localPathFor(params: StartDownloadParams): string {
   return `${DOWNLOADS_ROOT}${safePathSegment(params.title)}/${site}/${params.ep}-${quality}.mp4`;
 }
 
+function localFileUri(path: string): string {
+  if (!path) return path;
+  if (path.startsWith("file://")) return path;
+  return path.startsWith("/") ? `file://${path}` : path;
+}
+
+function subtitlePathForVideo(videoPath: string): string {
+  return /\.(?:mp4|ts|m4v|mkv|webm)$/i.test(videoPath)
+    ? videoPath.replace(/\.(?:mp4|ts|m4v|mkv|webm)$/i, ".vtt")
+    : `${videoPath}.vtt`;
+}
+
 async function ensureDirectoryFor(fileUri: string): Promise<void> {
   const slash = fileUri.lastIndexOf("/");
   const directory = slash > 0 ? fileUri.slice(0, slash + 1) : DOWNLOADS_ROOT;
@@ -226,8 +285,13 @@ export async function isDownloaded(
   if (!item) return null;
 
   try {
-    const info = await FileSystem.getInfoAsync(item.localPath, { size: true });
-    if (info.exists && ((info as { size?: number }).size ?? 0) > 0) return item;
+    const uri = localFileUri(item.localPath);
+    const info = await FileSystem.getInfoAsync(uri, { size: true });
+    if (info.exists && ((info as { size?: number }).size ?? 0) >= MIN_VALID_VIDEO_BYTES) return item;
+    if (uri !== item.localPath) {
+      const altInfo = await FileSystem.getInfoAsync(item.localPath, { size: true });
+      if (altInfo.exists && ((altInfo as { size?: number }).size ?? 0) >= MIN_VALID_VIDEO_BYTES) return item;
+    }
   } catch {
     // Treat an unreadable file exactly like a missing file.
   }
@@ -237,17 +301,16 @@ export async function isDownloaded(
 }
 
 export async function deleteDownload(item: DownloadItem): Promise<void> {
-  try { await FileSystem.deleteAsync(item.localPath, { idempotent: true }); } catch {}
+  const uri = localFileUri(item.localPath);
+  try { await FileSystem.deleteAsync(uri, { idempotent: true }); } catch {}
+  if (uri !== item.localPath) {
+    try { await FileSystem.deleteAsync(item.localPath, { idempotent: true }); } catch {}
+  }
   if (item.subtitleLocalPath) {
-    try { await FileSystem.deleteAsync(item.subtitleLocalPath, { idempotent: true }); } catch {}
+    try { await FileSystem.deleteAsync(localFileUri(item.subtitleLocalPath), { idempotent: true }); } catch {}
   }
   const items = await getDownloads();
   await saveDownloads(items.filter((entry) => entry.id !== item.id));
-}
-
-function localFileUri(path: string): string {
-  if (path.startsWith("file://")) return path;
-  return path.startsWith("/") ? `file://${path}` : path;
 }
 
 /**
@@ -300,9 +363,9 @@ export async function saveDownloadToGallery(item: DownloadItem): Promise<Downloa
 export async function clearAllDownloads(): Promise<void> {
   const items = await getDownloads();
   await Promise.allSettled(items.flatMap((item) => [
-    FileSystem.deleteAsync(item.localPath, { idempotent: true }),
+    FileSystem.deleteAsync(localFileUri(item.localPath), { idempotent: true }),
     item.subtitleLocalPath
-      ? FileSystem.deleteAsync(item.subtitleLocalPath, { idempotent: true })
+      ? FileSystem.deleteAsync(localFileUri(item.subtitleLocalPath), { idempotent: true })
       : Promise.resolve(),
   ]));
   await AsyncStorage.removeItem(DOWNLOADS_KEY);
@@ -314,24 +377,25 @@ function persistActive(): void {
     // them as JS resumables would make a reopened app start a duplicate task.
     .filter((entry) => entry.nativeJobId == null)
     .map((entry) => ({
-    id: entry.id,
-    animeId: entry.animeId,
-    ep: entry.ep,
-    title: entry.title,
-    cover: entry.cover,
-    site: entry.site,
-    quality: entry.quality,
-    progress: entry.progress,
-    bytesWritten: entry.bytesWritten,
-    totalBytes: entry.totalBytes,
-    retryCount: entry.retryCount,
-    status: entry.status,
-    url: entry.params.url,
-    localPath: entry.localPath,
-    subtitleUrl: entry.params.subtitleUrl,
-    hlsManifestUrl: entry.params.hlsManifestUrl,
-    headers: entry.params.headers,
-    resumeState: entry.resumeState,
+      id: entry.id,
+      animeId: entry.animeId,
+      ep: entry.ep,
+      title: entry.title,
+      cover: entry.cover,
+      site: entry.site,
+      quality: entry.quality,
+      progress: entry.progress,
+      bytesWritten: entry.bytesWritten,
+      totalBytes: entry.totalBytes,
+      retryCount: entry.retryCount,
+      status: entry.status,
+      queued: entry.queued,
+      url: entry.params.url,
+      localPath: entry.localPath,
+      subtitleUrl: entry.params.subtitleUrl,
+      hlsManifestUrl: entry.params.hlsManifestUrl,
+      headers: entry.params.headers,
+      resumeState: entry.resumeState,
     }));
   persistQueue = persistQueue
     .catch(() => {})
@@ -352,13 +416,6 @@ function notifyListeners(): void {
   persistActive();
 }
 
-/* DownloadResumable can report progress much faster than the downloads screen
-   needs. Rendering and persisting every callback floods the React Native
-   bridge, makes the list lose touch/scroll responsiveness, and queues many
-   AsyncStorage writes. User actions still call notifyListeners() directly.
-   When the app is in the background, never trigger React UI re-renders to
-   avoid queueing NativeViewHierarchyManager / ReactTextView layout batches
-   that cause Background ANRs. */
 function notifyProgressListeners(): void {
   const now = Date.now();
   if (!isAppActive()) {
@@ -402,10 +459,7 @@ async function configureNotifications(): Promise<boolean> {
     notificationsReady = (async () => {
       try {
         Notifications.setNotificationHandler({
-          handleNotification: async (notification) => ({
-            /* Download progress is an ongoing notification. Showing the
-               banner here also makes the first notification visible
-               immediately; the same notification id is updated below. */
+          handleNotification: async () => ({
             shouldShowBanner: true,
             shouldShowList: true,
             shouldPlaySound: false,
@@ -445,9 +499,8 @@ async function dismissDownloadNotification(id: string): Promise<void> {
 
 function updateDownloadNotification(entry: RuntimeDownload, force = false): void {
   if (Platform.OS === "web") return;
+  if (entry.nativeJobId != null) return;
   const now = Date.now();
-  /* Re-schedule the same identifier so Android updates one persistent row
-     instead of adding a new notification for every progress callback. */
   if (!force && now - entry.notificationAt < 800) return;
   entry.notificationAt = now;
   if (entry.notificationPromise) return;
@@ -458,7 +511,9 @@ function updateDownloadNotification(entry: RuntimeDownload, force = false): void
     const percentage = Math.round(Math.max(0, Math.min(1, entry.progress)) * 100);
     const byteText = entry.bytesWritten > 0 && entry.totalBytes > 0
       ? `${formatFileSize(entry.bytesWritten)} من ${formatFileSize(entry.totalBytes)}`
-      : "";
+      : entry.bytesWritten > 0
+        ? formatFileSize(entry.bytesWritten)
+        : "";
     try {
       await Notifications.scheduleNotificationAsync({
         identifier,
@@ -472,7 +527,7 @@ function updateDownloadNotification(entry: RuntimeDownload, force = false): void
           progress: {
             max: 100,
             current: percentage,
-            indeterminate: entry.totalBytes <= 0,
+            indeterminate: entry.totalBytes <= 0 && !(entry.segmentsTotal && entry.segmentsTotal > 0),
           },
           data: { downloadId: entry.id },
         } as any),
@@ -481,7 +536,7 @@ function updateDownloadNotification(entry: RuntimeDownload, force = false): void
     } catch {}
   })().finally(() => {
     entry.notificationPromise = undefined;
-    if (entry.status === "downloading" && Date.now() - entry.notificationAt >= 800) {
+    if (entry.status === "downloading" && !entry.queued && Date.now() - entry.notificationAt >= 800) {
       updateDownloadNotification(entry);
     }
   });
@@ -489,6 +544,7 @@ function updateDownloadNotification(entry: RuntimeDownload, force = false): void
 
 function completeNotification(entry: RuntimeDownload, error = false): void {
   if (Platform.OS === "web") return;
+  if (entry.nativeJobId != null && !error) return;
   void (async () => {
     await dismissDownloadNotification(entry.id);
     if (await configureNotifications()) {
@@ -500,8 +556,6 @@ function completeNotification(entry: RuntimeDownload, error = false): void {
             body: error
               ? `فشل تنزيل ${entry.title} — الحلقة ${entry.ep}`
               : `اكتمل تنزيل ${entry.title} — الحلقة ${entry.ep}`,
-            /* Leave the result in the notification shade. It should not
-               disappear before the user has a chance to read it. */
             sticky: true,
             autoDismiss: false,
             sound: !error,
@@ -521,7 +575,22 @@ export function subscribeActiveDownloads(listener: () => void): () => void {
 }
 
 export function getActiveDownloadsSnapshot(): ActiveDownload[] {
-  return Array.from(active.values()).map(({ params: _params, resumable: _resumable, resumeState: _resumeState, notificationAt: _notificationAt, notificationPromise: _notificationPromise, localPath: _localPath, ...item }) => item);
+  return Array.from(active.values()).map(({
+    params: _params,
+    resumable: _resumable,
+    hlsAbortController: _hlsAbortController,
+    resumeState: _resumeState,
+    notificationAt: _notificationAt,
+    notificationPromise: _notificationPromise,
+    localPath: _localPath,
+    progressTicker: _progressTicker,
+    nativePollTimer: _nativePollTimer,
+    nativeJobId: _nativeJobId,
+    nativeCompleteStablePolls: _nativeCompleteStablePolls,
+    startedAt: _startedAt,
+    runningWorker: _runningWorker,
+    ...item
+  }) => item);
 }
 
 export function getActiveDownload(animeId: number, ep: number): ActiveDownload | null {
@@ -534,6 +603,20 @@ export function getActiveSiteDownload(animeId: number, ep: number, site: string)
   ) ?? null;
 }
 
+async function cancelActiveDownloadAsync(id: string): Promise<void> {
+  const entry = active.get(id);
+  if (!entry) return;
+  const hadNative = entry.nativeJobId != null;
+  entry.cancelFn();
+  active.delete(id);
+  if (hadNative) {
+    await removeNativeDownload(id).catch(() => false);
+  }
+  void dismissDownloadNotification(id);
+  notifyListeners();
+  dispatchQueuedDownloads();
+}
+
 export function cancelActiveDownload(id: string): void {
   const entry = active.get(id);
   if (!entry) return;
@@ -541,69 +624,96 @@ export function cancelActiveDownload(id: string): void {
   active.delete(id);
   void dismissDownloadNotification(id);
   notifyListeners();
+  dispatchQueuedDownloads();
 }
 
-/** Pause without deleting the partial file. The resumable task and its byte
- * offset remain in memory and are persisted for the next app launch. */
+/** Pause without deleting the partial file. */
 export async function pauseActiveDownload(id: string): Promise<void> {
   const entry = active.get(id);
   if (!entry || entry.nativeJobId != null || entry.status !== "downloading") return;
 
   stopProgressTicker(entry);
   entry.status = "paused";
+  entry.queued = false;
+  entry.hlsAbortController?.abort();
+  entry.hlsAbortController = undefined;
+  entry.runningWorker = false;
   notifyListeners();
+  dispatchQueuedDownloads();
   try {
     if (entry.resumable) {
       entry.resumeState = await entry.resumable.pauseAsync();
     }
     notifyListeners();
   } catch {
-    if (active.has(id)) {
-      entry.status = "downloading";
+    if (active.has(id) && entry.status === "paused") {
       notifyListeners();
     }
   }
 }
 
-/** Resume a paused task from its saved native offset. */
+/** Resume a paused task or re-queue it into the max-2 concurrency runner. */
 export function resumeActiveDownload(id: string): void {
   const entry = active.get(id);
   if (!entry || entry.nativeJobId != null || entry.status !== "paused") return;
   entry.status = "downloading";
+  entry.queued = true;
+  entry.errorMessage = undefined;
   notifyListeners();
-  void runDownload(entry);
+  dispatchQueuedDownloads();
 }
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function requestHeaders(params: StartDownloadParams): Record<string, string> {
-  /* Provider Referer/Origin headers are needed when the phone talks directly
-     to a CDN, but they must not be forwarded to Nova's own API routes. The
-     global CORS middleware correctly rejects an API request whose Origin is
-     megaplay/mediafire/etc.; the proxy URL already contains the provider
-     referrer and the VPS supplies it upstream. */
-  const isNovaApiUrl = /\/api\/(?:anime|animation)\//i.test(params.url);
-  const sourceHeaders = isNovaApiUrl
-    ? Object.fromEntries(
-        Object.entries(params.headers || {}).filter(
-          ([key]) => !/^(origin|referer|host|content-length)$/i.test(key),
-        ),
-      )
-    : (params.headers || {});
+function requestHeaders(
+  params: StartDownloadParams,
+  targetUrl: string = params.url,
+  extraHeaders?: Record<string, string>,
+  isResuming = false,
+): Record<string, string> {
+  const isFirstParty = isFirstPartyVpsUrl(targetUrl, getBaseUrl());
+  if (!isFirstParty) {
+    const cleanHeaders: Record<string, string> = {};
+    for (const [k, v] of Object.entries({ ...(params.headers || {}), ...(extraHeaders || {}) })) {
+      if (v && !/^(host|content-length|x-app-token|x-download-token|x-nova-client|x-nova-package|x-nova-version|authorization)$/i.test(k)) {
+        cleanHeaders[k] = v;
+      }
+    }
+    if (!Object.keys(cleanHeaders).some((k) => k.toLowerCase() === "user-agent")) {
+      cleanHeaders["User-Agent"] = DIRECT_CDN_UA;
+    }
+    if (!Object.keys(cleanHeaders).some((k) => k.toLowerCase() === "accept")) {
+      cleanHeaders["Accept"] = "video/mp4,video/*;q=0.9,*/*;q=0.1";
+    }
+    return cleanHeaders;
+  }
+
+  // Cartoon Dubbed 1 (/api/dubbed/stream -> stream.foupix.com) aborts with HTTP/2 INTERNAL_ERROR
+  // when VPS multiRangeStreamer opens 14 parallel connections (triggered by dl=1, X-Download-Token,
+  // missing Range header, or NovaAnime UA). Route it through the resilient single-stream proxy instead.
+  if (isDubbedStreamProxyUrl(targetUrl)) {
+    const headers: Record<string, string> = {
+      "User-Agent": DIRECT_CDN_UA,
+      "Accept": "video/mp4,video/*;q=0.9,*/*;q=0.1",
+    };
+    if (params.authToken) headers["X-App-Token"] = params.authToken;
+    if (!isResuming) headers["Range"] = "bytes=0-";
+    return headers;
+  }
+
+  const sourceHeaders = Object.fromEntries(
+    Object.entries({ ...(params.headers || {}), ...(extraHeaders || {}) }).filter(
+      ([key]) => !/^(origin|referer|host|content-length)$/i.test(key),
+    ),
+  );
   const headers: Record<string, string> = {
     ...sourceHeaders,
-    /* The media routes are behind the same mobile release gate as source
-       fetching. DownloadResumable does not use secureFetch, so it must carry
-       the complete release identity itself or the VPS returns 403 before the
-       proxy sees the request. */
     "X-Nova-Client": MOBILE_CLIENT_ID,
     "X-Nova-Package": MOBILE_PACKAGE_NAME,
     "X-Nova-Version": MOBILE_VERSION,
     "User-Agent": `NovaAnime/${MOBILE_VERSION} (Expo; Mobile)`,
-    /* DownloadResumable may issue Range requests after a background retry.
-       Explicitly advertise byte-range support to the VPS conversion route. */
     "Accept": "video/mp4,video/*;q=0.9,*/*;q=0.1",
   };
   if (params.authToken) headers["X-App-Token"] = params.authToken;
@@ -659,8 +769,6 @@ function assTimeToVtt(value: string): string {
     : "00.000"}`;
 }
 
-/** Normalize every supported sidecar into VTT because the existing native
- * player consumes VTT cues for both streamed and offline playback. */
 function subtitleToVtt(url: string, body: string): string {
   const trimmed = body.replace(/^\uFEFF/, "").trim();
   if (/^WEBVTT(?:\s|$)/i.test(trimmed)) return trimmed.endsWith("\n") ? trimmed : `${trimmed}\n`;
@@ -679,8 +787,6 @@ function subtitleToVtt(url: string, body: string): string {
     if (cues.length) return `WEBVTT\n\n${cues.join("\n\n")}\n`;
   }
 
-  /* SRT timestamps use commas for milliseconds; the current player accepts
-     the WebVTT equivalent after this small normalization. */
   const srt = trimmed.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2");
   if (srt.includes("-->")) {
     const blocks = srt.split(/\n\s*\n/).map((block) => block.trim()).filter(Boolean);
@@ -693,7 +799,7 @@ function subtitleToVtt(url: string, body: string): string {
 async function fetchSubtitleResponse(url: string, params: StartDownloadParams): Promise<string> {
   const response = await fetch(url, {
     headers: {
-      ...requestHeaders(params),
+      ...requestHeaders(params, url),
       Accept: "application/vnd.apple.mpegurl, text/vtt, application/x-subrip, text/plain, */*",
     },
   });
@@ -706,11 +812,6 @@ function nativeFileName(entry: RuntimeDownload): string {
 }
 
 function nativeMetadata(entry: RuntimeDownload): Record<string, unknown> {
-  /*
-   * Do not persist authToken in the metadata handed to native storage. The
-   * request headers are already attached to the DownloadManager job, while a
-   * reopened app obtains a fresh token before rebuilding its JS record.
-   */
   return {
     id: entry.id,
     animeId: entry.animeId,
@@ -726,12 +827,39 @@ function nativeMetadata(entry: RuntimeDownload): Record<string, unknown> {
   };
 }
 
+async function readDiskFileSize(path: string): Promise<number> {
+  if (!path) return 0;
+  const uri = localFileUri(path);
+  const info = await FileSystem.getInfoAsync(uri, { size: true }).catch(() => null);
+  if (info?.exists) return (info as { size?: number }).size ?? 0;
+  const stripped = path.startsWith("file://") ? path.slice(7) : path;
+  if (stripped && stripped !== uri) {
+    const alt = await FileSystem.getInfoAsync(stripped, { size: true }).catch(() => null);
+    if (alt?.exists) return (alt as { size?: number }).size ?? 0;
+  }
+  return 0;
+}
+
 async function pollNativeDownload(entry: RuntimeDownload): Promise<void> {
   if (!active.has(entry.id) || entry.nativeJobId == null) return;
   try {
     const records = await listNativeDownloads();
     const record = records.find((item) => item.appId === entry.id);
     if (!record) {
+      // Check if Android auto-cleaned an already finished file before declaring error
+      const existingSize = await readDiskFileSize(entry.localPath);
+      if (existingSize > 512 * 1024 && (entry.totalBytes <= 0 || existingSize >= entry.totalBytes * 0.99)) {
+        stopProgressTicker(entry);
+        try {
+          await saveCompleted(entry);
+          active.delete(entry.id);
+          entry.nativePollTimer = undefined;
+          await forgetNativeDownload(entry.id);
+          completeNotification(entry);
+          notifyListeners();
+          return;
+        } catch {}
+      }
       entry.nativePollTimer = undefined;
       entry.status = "error";
       entry.errorMessage = "اختفت مهمة التنزيل من Android قبل اكتمالها.";
@@ -741,17 +869,47 @@ async function pollNativeDownload(entry: RuntimeDownload): Promise<void> {
 
     entry.localPath = record.localPath || entry.localPath;
     entry.bytesWritten = Math.max(entry.bytesWritten, Math.max(0, record.bytesWritten || 0));
-    entry.totalBytes = Math.max(0, record.totalBytes || 0);
+    entry.totalBytes = Math.max(entry.totalBytes, Math.max(0, record.totalBytes || 0));
     if (entry.totalBytes > 0) {
       entry.progress = Math.min(entry.bytesWritten / entry.totalBytes, 1);
     } else {
       entry.progress = Math.max(entry.progress, estimateActiveProgress(entry));
     }
 
-    if (record.status === "successful") {
+    let diskBytes = 0;
+    if (entry.totalBytes > 0 && entry.bytesWritten >= entry.totalBytes) {
+      diskBytes = await readDiskFileSize(entry.localPath);
+      if (diskBytes >= entry.totalBytes * 0.99) {
+        entry.nativeCompleteStablePolls = (entry.nativeCompleteStablePolls || 0) + 1;
+      } else {
+        entry.nativeCompleteStablePolls = 0;
+      }
+    } else {
+      entry.nativeCompleteStablePolls = 0;
+    }
+
+    if (
+      shouldFinalizeNativeDownload({
+        status: record.status,
+        bytesWritten: entry.bytesWritten,
+        totalBytes: entry.totalBytes,
+        diskBytes,
+        stablePolls: entry.nativeCompleteStablePolls,
+      })
+    ) {
       stopProgressTicker(entry);
       entry.status = "downloading";
-      await saveCompleted(entry);
+      try {
+        await saveCompleted(entry);
+      } catch (err) {
+        entry.status = "error";
+        entry.errorMessage = err instanceof Error && err.message ? err.message : "الملف المحمّل تالف أو غير مكتمل.";
+        entry.nativePollTimer = undefined;
+        await forgetNativeDownload(entry.id);
+        completeNotification(entry, true);
+        notifyListeners();
+        return;
+      }
       active.delete(entry.id);
       entry.nativePollTimer = undefined;
       await forgetNativeDownload(entry.id);
@@ -782,8 +940,6 @@ async function pollNativeDownload(entry: RuntimeDownload): Promise<void> {
       entry.nativePollTimer = undefined;
     }
   } catch {
-    // A transient DownloadManager query failure must not turn a live OS job
-    // into a visible error. Keep polling while the app is open.
     if (isAppActive()) {
       entry.nativePollTimer = setTimeout(() => {
         void pollNativeDownload(entry);
@@ -813,6 +969,7 @@ async function beginNativeDownload(entry: RuntimeDownload): Promise<void> {
     entry.localPath = result.localPath;
     entry.pauseSupported = false;
     entry.resumeState = undefined;
+    entry.nativeCompleteStablePolls = 0;
     startProgressTicker(entry);
     notifyListeners();
     void pollNativeDownload(entry);
@@ -825,11 +982,6 @@ async function beginNativeDownload(entry: RuntimeDownload): Promise<void> {
   }
 }
 
-/**
- * Finds the first subtitle rendition in an HLS master and materializes an
- * HLS WebVTT media playlist into one offline VTT file. A direct subtitle URL
- * still wins, so provider-specific subtitle behavior remains unchanged.
- */
 async function discoverHlsSubtitle(
   manifestUrl: string,
   params: StartDownloadParams,
@@ -873,7 +1025,34 @@ async function attachSubtitleSidecar(entry: RuntimeDownload): Promise<void> {
   try {
     let subtitleUrl = entry.params.subtitleUrl;
     let body = "";
-    if (subtitleUrl) body = await fetchSubtitleResponse(subtitleUrl, entry.params);
+    if (subtitleUrl) {
+      const lowerSub = subtitleUrl.toLowerCase();
+      const alreadyArabicOrTranslated =
+        lowerSub.includes("translate-vtt") ||
+        lowerSub.includes("dl.opensubtitles.org") ||
+        lowerSub.includes("dmcdn.net") ||
+        /_ar\.(?:vtt|srt|ass)(?:[?#]|$)/i.test(lowerSub) ||
+        /[?&]lang=ar(?:&|$)/i.test(lowerSub) ||
+        entry.site === "anime4up2" ||
+        entry.site.startsWith("donghua");
+      if (!alreadyArabicOrTranslated) {
+        const base = getBaseUrl();
+        if (base) {
+          const translatedUrl = `${base}/api/anime/translate-vtt?url=${encodeURIComponent(subtitleUrl)}&from=en&to=ar`;
+          try {
+            const translatedBody = await fetchSubtitleResponse(translatedUrl, entry.params);
+            if (translatedBody && translatedBody.includes("timing")) {
+              body = translatedBody;
+            }
+          } catch {
+            /* Fall back to raw subtitle track if translation is unavailable */
+          }
+        }
+      }
+      if (!body) {
+        body = await fetchSubtitleResponse(subtitleUrl, entry.params);
+      }
+    }
     else if (entry.params.hlsManifestUrl) {
       const discovered = await discoverHlsSubtitle(entry.params.hlsManifestUrl, entry.params);
       subtitleUrl = discovered?.url;
@@ -904,9 +1083,7 @@ async function attachSubtitleSidecar(entry: RuntimeDownload): Promise<void> {
     vtt = subtitleToVtt(subtitleUrl, vtt);
     if (!vtt.includes("-->")) return;
 
-    /* Keep one canonical extension so the current native player can attach
-       the sidecar without adding a second subtitle engine. */
-    const subtitlePath = `${entry.localPath.slice(0, -4)}.vtt`;
+    const subtitlePath = subtitlePathForVideo(localFileUri(entry.localPath));
     await FileSystem.writeAsStringAsync(subtitlePath, vtt);
 
     const items = await getDownloads();
@@ -924,35 +1101,33 @@ async function attachSubtitleSidecar(entry: RuntimeDownload): Promise<void> {
 }
 
 async function saveCompleted(entry: RuntimeDownload): Promise<void> {
-  let fileSize = 0;
-  const targetPath = entry.localPath;
-  const strippedPath = targetPath.startsWith("file://") ? targetPath.slice(7) : targetPath;
-  let info = await FileSystem.getInfoAsync(targetPath, { size: true }).catch(() => null);
-  if (!info?.exists) {
-    info = await FileSystem.getInfoAsync(strippedPath, { size: true }).catch(() => null);
-  }
-  if (info?.exists) fileSize = (info as { size?: number }).size ?? 0;
-
-  if (fileSize <= 0) {
-    // Retry shortly in case the OS file handle is still being finalized
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    const retryInfo = await FileSystem.getInfoAsync(targetPath, { size: true }).catch(() => null);
-    if (retryInfo?.exists) fileSize = (retryInfo as { size?: number }).size ?? 0;
+  const normalizedLocalPath = localFileUri(entry.localPath);
+  let fileSize = await readDiskFileSize(normalizedLocalPath);
+  if (fileSize < MIN_VALID_VIDEO_BYTES) {
+    await wait(600);
+    fileSize = await readDiskFileSize(normalizedLocalPath);
   }
 
-  if (fileSize <= 0) {
-    fileSize = Math.max(1024, entry.bytesWritten || entry.totalBytes || 1024);
+  const headBytes = readFileHeadBytes(normalizedLocalPath, 512);
+  const expectedBytes = entry.hlsDirect ? 0 : Math.max(0, entry.totalBytes || 0);
+  const validation = validateCompletedMediaFile({
+    fileSize,
+    expectedTotalBytes: expectedBytes,
+    headBytes,
+  });
+
+  if (!validation.ok) {
+    await FileSystem.deleteAsync(normalizedLocalPath, { idempotent: true }).catch(() => {});
+    throw new Error(validation.messageAr);
   }
-  /* Some Android builds report completion before the final progress callback.
-     Use the actual file size so a valid file is not persisted or displayed as
-     a successful zero-byte download. */
+
+  entry.localPath = normalizedLocalPath;
   entry.bytesWritten = fileSize;
-  entry.totalBytes = Math.max(entry.totalBytes, fileSize);
+  entry.totalBytes = fileSize;
   entry.progress = 1;
+  entry.queued = false;
   notifyListeners();
 
-  /* Persist the video immediately. Subtitle extraction continues in the
-     background so a slow/expired subtitle endpoint cannot delay completion. */
   const item: DownloadItem = {
     id: entry.id,
     animeId: entry.animeId,
@@ -961,29 +1136,30 @@ async function saveCompleted(entry: RuntimeDownload): Promise<void> {
     cover: entry.cover,
     site: entry.site,
     quality: entry.quality,
-    localPath: entry.localPath,
+    localPath: normalizedLocalPath,
     fileSize,
     downloadedAt: Date.now(),
   };
   const existing = await getDownloads();
   await saveDownloads([...existing.filter((old) => old.id !== entry.id), item]);
-  void attachSubtitleSidecar(entry);
-  /* The ad counter is updated only after the verified non-empty file has
-     been persisted. The server deduplicates the anime/episode pair. */
+  await Promise.race([
+    attachSubtitleSidecar(entry).catch(() => {}),
+    wait(10_000),
+  ]);
   void recordSuccessfulDownload(entry.animeId, entry.ep);
 }
 
 function estimateActiveProgress(entry: RuntimeDownload): number {
+  if (entry.segmentsTotal && entry.segmentsTotal > 0) {
+    if (!entry.segmentsDone) return 0;
+    return Math.max(0.01, Math.min(entry.segmentsDone / entry.segmentsTotal, 0.99));
+  }
   if (entry.totalBytes > 0) {
-    return Math.max(0.02, Math.min(entry.bytesWritten / entry.totalBytes, 1));
+    if (entry.bytesWritten <= 0) return 0;
+    return Math.max(0.01, Math.min(entry.bytesWritten / entry.totalBytes, 1));
   }
-  if (entry.bytesWritten > 0) {
-    const byBytes = 1 - 0.82 * Math.exp(-entry.bytesWritten / (28 * 1024 * 1024));
-    return Math.max(0.18, Math.min(0.94, byBytes));
-  }
-  const elapsedSec = Math.max(0, (Date.now() - entry.startedAt) / 1000);
-  const preparing = 0.03 + 0.35 * (1 - Math.exp(-elapsedSec / 18));
-  return Math.max(0.03, Math.min(0.38, preparing));
+  // Never fabricate a fake percentage (e.g. 25%) before real bytes or totalBytes arrive.
+  return 0;
 }
 
 function stopProgressTicker(entry: RuntimeDownload): void {
@@ -996,20 +1172,16 @@ function stopProgressTicker(entry: RuntimeDownload): void {
 function startProgressTicker(entry: RuntimeDownload): void {
   stopProgressTicker(entry);
   if (!entry.startedAt) entry.startedAt = Date.now();
-  if (entry.progress <= 0) {
-    entry.progress = 0.03;
-  }
   entry.progressTicker = setInterval(() => {
-    if (!active.has(entry.id) || entry.status !== "downloading") {
+    if (!active.has(entry.id) || entry.status !== "downloading" || entry.queued) {
       stopProgressTicker(entry);
       return;
     }
     void (async () => {
-      if (entry.localPath) {
+      if (!entry.hlsDirect && entry.localPath) {
         try {
-          const info = await FileSystem.getInfoAsync(localFileUri(entry.localPath), { size: true });
-          const diskBytes = (info as { size?: number }).size ?? 0;
-          if (info.exists && diskBytes > entry.bytesWritten) {
+          const diskBytes = await readDiskFileSize(entry.localPath);
+          if (diskBytes > entry.bytesWritten) {
             entry.bytesWritten = diskBytes;
           }
         } catch {}
@@ -1025,22 +1197,279 @@ function startProgressTicker(entry: RuntimeDownload): void {
   }, 900);
 }
 
+async function fetchTextWithTimeout(
+  url: string,
+  headers: Record<string, string>,
+  signal: AbortSignal,
+  timeoutMs = 15_000,
+): Promise<string> {
+  const localCtrl = new AbortController();
+  const onParentAbort = () => localCtrl.abort();
+  signal.addEventListener("abort", onParentAbort);
+  const timer = setTimeout(() => localCtrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      headers: {
+        ...headers,
+        Accept: "application/vnd.apple.mpegurl, application/x-mpegURL, text/plain, */*",
+      },
+      signal: localCtrl.signal,
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.text();
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener("abort", onParentAbort);
+  }
+}
+
+async function fetchBinaryWithRetry(
+  url: string,
+  headers: Record<string, string>,
+  signal: AbortSignal,
+  timeoutMs = 20_000,
+): Promise<Uint8Array> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < HLS_SEGMENT_RETRIES; attempt += 1) {
+    if (signal.aborted) throw new Error("aborted");
+    const localCtrl = new AbortController();
+    const onParentAbort = () => localCtrl.abort();
+    signal.addEventListener("abort", onParentAbort);
+    const timer = setTimeout(() => localCtrl.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { headers, signal: localCtrl.signal });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const buf = await res.arrayBuffer();
+      if (!buf || buf.byteLength === 0) throw new Error("empty segment");
+      return new Uint8Array(buf);
+    } catch (err) {
+      lastErr = err;
+      if (signal.aborted) throw err;
+      if (attempt < HLS_SEGMENT_RETRIES - 1) {
+        await wait(350 * (attempt + 1));
+      }
+    } finally {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onParentAbort);
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error("segment fetch failed");
+}
+
+/**
+ * Downloads HLS playlists and `.ts` segments directly on the user's phone,
+ * writing them sequentially to disk via `expo-file-system/next` FileHandle.
+ * Returns `"completed"` if saved, `"interrupted"` if paused/cancelled, or
+ * `"fallback"` if encrypted/blocked so the caller can fall back to DownloadResumable.
+ */
+async function downloadHlsDirectToPhone(
+  entry: RuntimeDownload,
+): Promise<"completed" | "interrupted" | "fallback"> {
+  if (Platform.OS === "web") return "fallback";
+
+
+
+  const base = getBaseUrl();
+  const candidates = buildHlsManifestCandidates({
+    manifestUrl: entry.params.hlsManifestUrl,
+    fallbackUrl: entry.params.url,
+    headers: entry.params.headers,
+    baseUrl: base,
+  });
+  if (!candidates.length) return "fallback";
+
+  const ctrl = new AbortController();
+  entry.hlsAbortController = ctrl;
+  const partUri = `${localFileUri(entry.localPath)}.part`;
+  const finalUri = localFileUri(entry.localPath);
+
+  for (const candidate of candidates) {
+    if (!active.has(entry.id) || isPaused(entry) || ctrl.signal.aborted) {
+      return "interrupted";
+    }
+
+    let handle: SequentialPartWriter | null = null;
+    try {
+      const hdrs = requestHeaders(entry.params, candidate.url, candidate.headers);
+      let playlistUrl = candidate.url;
+      let playlistText = await fetchTextWithTimeout(playlistUrl, hdrs, ctrl.signal);
+      if (!playlistText.includes("#EXTM3U")) continue;
+
+      const master = parseMasterM3u8(playlistText, playlistUrl);
+      if (master.isMaster) {
+        const chosen = selectBestHlsVariant(master.variants, entry.quality);
+        if (!chosen) continue;
+        playlistUrl = chosen.uri;
+        const variantHdrs = requestHeaders(entry.params, playlistUrl, candidate.headers);
+        playlistText = await fetchTextWithTimeout(playlistUrl, variantHdrs, ctrl.signal);
+      }
+
+      const media = parseMediaM3u8(playlistText, playlistUrl);
+      if (!media.supported || !media.segments.length) continue;
+
+      await ensureDirectoryFor(finalUri);
+      await FileSystem.deleteAsync(partUri, { idempotent: true }).catch(() => {});
+      handle = openSequentialPartWriter(partUri);
+      if (!handle) return "fallback";
+
+      entry.hlsDirect = true;
+      entry.pauseSupported = true;
+      entry.bytesWritten = 0;
+      entry.segmentsDone = 0;
+      entry.segmentsTotal = media.segments.length;
+      entry.totalBytes = 0;
+      entry.progress = 0.02;
+      notifyListeners();
+      updateDownloadNotification(entry, true);
+
+      let firstMediaBytes: Uint8Array | null = null;
+      if (media.initUri) {
+        const initHdrs = requestHeaders(entry.params, media.initUri, candidate.headers);
+        const initBytes = await fetchBinaryWithRetry(media.initUri, initHdrs, ctrl.signal);
+        firstMediaBytes = initBytes.subarray(0, Math.min(512, initBytes.byteLength));
+        handle.writeBytes(initBytes);
+        entry.bytesWritten += initBytes.byteLength;
+      }
+
+      const total = media.segments.length;
+      const buffered = new Map<number, Uint8Array>();
+      let nextFetchIdx = 0;
+      let nextWriteIdx = 0;
+      let finishedChunks = 0;
+      let writeBytesTotal = entry.bytesWritten;
+      let workerErr: unknown = null;
+
+      const flushOrdered = () => {
+        while (handle && buffered.has(nextWriteIdx)) {
+          const bytes = buffered.get(nextWriteIdx)!;
+          buffered.delete(nextWriteIdx);
+          if (!firstMediaBytes && bytes.byteLength > 0) {
+            firstMediaBytes = bytes.subarray(0, Math.min(512, bytes.byteLength));
+          }
+          handle.writeBytes(bytes);
+          writeBytesTotal += bytes.byteLength;
+          nextWriteIdx += 1;
+        }
+      };
+
+      const worker = async () => {
+        while (!ctrl.signal.aborted && !workerErr) {
+          // Bound in-memory segments ahead of nextWriteIdx so RAM stays small
+          while (
+            !ctrl.signal.aborted &&
+            !workerErr &&
+            nextFetchIdx - nextWriteIdx >= HLS_SEGMENT_CONCURRENCY * 2
+          ) {
+            await wait(80);
+          }
+          if (ctrl.signal.aborted || workerErr) break;
+          const idx = nextFetchIdx;
+          if (idx >= total) break;
+          nextFetchIdx += 1;
+
+          const seg = media.segments[idx];
+          const segHdrs = requestHeaders(entry.params, seg.uri, candidate.headers);
+          const rawSegBytes = await fetchBinaryWithRetry(seg.uri, segHdrs, ctrl.signal);
+          if (ctrl.signal.aborted) break;
+          const segBytes = media.initUri ? rawSegBytes : stripFakeImagePrefixFromTsSegment(rawSegBytes);
+          buffered.set(idx, segBytes);
+          finishedChunks += 1;
+          flushOrdered();
+
+          entry.segmentsDone = finishedChunks;
+          entry.bytesWritten = writeBytesTotal + Array.from(buffered.values()).reduce((s, a) => s + a.byteLength, 0);
+          if (finishedChunks >= 1 && finishedChunks < total) {
+            entry.totalBytes = Math.max(
+              entry.bytesWritten,
+              Math.round((entry.bytesWritten / finishedChunks) * total),
+            );
+          } else if (finishedChunks >= total) {
+            entry.totalBytes = entry.bytesWritten;
+          }
+          entry.progress = Math.max(0.01, Math.min(finishedChunks / total, 0.99));
+          notifyProgressListeners();
+          updateDownloadNotification(entry);
+        }
+      };
+
+      const workers = Array.from(
+        { length: Math.min(HLS_SEGMENT_CONCURRENCY, total) },
+        () => worker().catch((err) => {
+          if (!workerErr) workerErr = err;
+          ctrl.abort();
+        }),
+      );
+      await Promise.all(workers);
+
+      if (!active.has(entry.id) || isPaused(entry)) {
+        try { handle.close(); } catch {}
+        handle = null;
+        await FileSystem.deleteAsync(partUri, { idempotent: true }).catch(() => {});
+        return "interrupted";
+      }
+
+      if (workerErr || nextWriteIdx < total) {
+        try { handle.close(); } catch {}
+        handle = null;
+        await FileSystem.deleteAsync(partUri, { idempotent: true }).catch(() => {});
+        continue;
+      }
+
+      flushOrdered();
+      try { handle.close(); } catch {}
+      handle = null;
+
+      // Save MPEG-TS HLS concatenations with .ts extension (and fMP4 with .mp4) so Android Media3 plays them cleanly
+      const targetExt = detectHlsContainerExtension(firstMediaBytes, Boolean(media.initUri));
+      const targetFinalUri = replaceVideoExtension(finalUri, targetExt);
+
+      await FileSystem.deleteAsync(finalUri, { idempotent: true }).catch(() => {});
+      if (targetFinalUri !== finalUri) {
+        await FileSystem.deleteAsync(targetFinalUri, { idempotent: true }).catch(() => {});
+      }
+      await FileSystem.moveAsync({ from: partUri, to: targetFinalUri });
+      entry.localPath = targetFinalUri;
+      entry.totalBytes = entry.bytesWritten;
+      entry.hlsAbortController = undefined;
+      await saveCompleted(entry);
+      active.delete(entry.id);
+      completeNotification(entry);
+      notifyListeners();
+      return "completed";
+    } catch {
+      if (handle) {
+        try { handle.close(); } catch {}
+        handle = null;
+      }
+      await FileSystem.deleteAsync(partUri, { idempotent: true }).catch(() => {});
+      if (!active.has(entry.id) || isPaused(entry)) {
+        return "interrupted";
+      }
+    }
+  }
+
+  entry.hlsDirect = false;
+  entry.segmentsDone = undefined;
+  entry.segmentsTotal = undefined;
+  entry.hlsAbortController = undefined;
+  return "fallback";
+}
+
 function makeResumable(
   entry: RuntimeDownload,
   resumeState?: ResumeState,
 ): FileSystem.DownloadResumable {
   const state = resumeState;
+  const isResuming = Boolean(state?.resumeData);
   const options: DownloadOptions = {
     ...(state?.options ?? {
       sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
     }),
-    /* A saved download may outlive the anon token that created it. Keep the
-       native session settings, but always use the current request headers. */
-    headers: requestHeaders(entry.params),
+    headers: requestHeaders(entry.params, state?.url ?? entry.params.url, undefined, isResuming),
   };
   return FileSystem.createDownloadResumable(
     state?.url ?? entry.params.url,
-    state?.fileUri ?? entry.localPath,
+    state?.fileUri ?? localFileUri(entry.localPath),
     options,
     (progress) => {
       entry.bytesWritten = Math.max(entry.bytesWritten, Math.max(0, progress.totalBytesWritten));
@@ -1048,15 +1477,12 @@ function makeResumable(
       entry.progress = progress.totalBytesExpectedToWrite > 0
         ? Math.min(entry.bytesWritten / progress.totalBytesExpectedToWrite, 1)
         : Math.max(entry.progress, estimateActiveProgress(entry));
-      /* Android's resumable API represents resumeData as the byte offset.
-         Persist it on every callback so a process restart can append to the
-         partial file even when the native task could not produce pause data. */
       if (Platform.OS === "android") {
         entry.resumeState = {
           url: entry.params.url,
-          fileUri: entry.localPath,
+          fileUri: localFileUri(entry.localPath),
           options: {
-            headers: requestHeaders(entry.params),
+            headers: requestHeaders(entry.params, entry.params.url, undefined, true),
             sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
           },
           resumeData: String(entry.bytesWritten),
@@ -1073,8 +1499,9 @@ async function runDownload(entry: RuntimeDownload): Promise<void> {
   let resumeState = entry.resumeState;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
-    if (!active.has(entry.id)) return;
+    if (!active.has(entry.id) || isPaused(entry)) return;
     entry.status = "downloading";
+    entry.queued = false;
     entry.retryCount = attempt;
     entry.resumable = makeResumable(entry, resumeState);
     entry.resumeState = entry.resumable.savable();
@@ -1085,8 +1512,20 @@ async function runDownload(entry: RuntimeDownload): Promise<void> {
     try {
       const result = await entry.resumable.downloadAsync();
       stopProgressTicker(entry);
-      if (!active.has(entry.id)) return;
+      if (!active.has(entry.id) || isPaused(entry)) return;
       if (!result || result.status < 200 || result.status >= 300) {
+        const status = result?.status ?? 0;
+        // If resuming returned 416/400/401/403 or server rejected Range, reset cleanly & retry from byte 0
+        if (resumeState && (status === 416 || status === 400 || status === 401 || status === 403 || status === 404)) {
+          resumeState = undefined;
+          entry.resumeState = undefined;
+          entry.bytesWritten = 0;
+          await FileSystem.deleteAsync(localFileUri(entry.localPath), { idempotent: true }).catch(() => {});
+          if (status === 401 || status === 403) {
+            const [freshAuth, freshDl] = await Promise.all([getAuthToken(), getDownloadToken()]);
+            entry.params = { ...entry.params, authToken: freshAuth, downloadToken: freshDl };
+          }
+        }
         throw new Error(`HTTP ${result?.status ?? "?"}`);
       }
       await saveCompleted(entry);
@@ -1097,22 +1536,25 @@ async function runDownload(entry: RuntimeDownload): Promise<void> {
     } catch (error) {
       stopProgressTicker(entry);
       if (!active.has(entry.id)) return;
-      /* A user pause also interrupts downloadAsync on some Android versions.
-         Do not treat that intentional interruption as a failed retry. */
       if (isPaused(entry)) return;
-      /* Keep the resumable state and partial file. A subsequent attempt starts
-         from the saved native resume state instead of deleting the download. */
-      try {
-        const paused = await entry.resumable.pauseAsync();
-        resumeState = paused;
-        entry.resumeState = paused;
-      } catch {
-        /* On Android the progress callback already contains the byte offset.
-           Do not replace that durable offset with the initial savable state
-           when the native task has already failed and cannot be paused again. */
-        resumeState = entry.resumeState ?? entry.resumable.savable();
-        entry.resumeState = resumeState;
+
+      if (resumeState) {
+        // If a resumed request errored out, clear resumeState for the next clean retry
+        resumeState = undefined;
+        entry.resumeState = undefined;
+        entry.bytesWritten = 0;
+        await FileSystem.deleteAsync(localFileUri(entry.localPath), { idempotent: true }).catch(() => {});
+      } else {
+        try {
+          const paused = await entry.resumable.pauseAsync();
+          resumeState = paused;
+          entry.resumeState = paused;
+        } catch {
+          resumeState = entry.resumeState ?? entry.resumable.savable();
+          entry.resumeState = resumeState;
+        }
       }
+
       if (attempt >= MAX_RETRIES) {
         entry.status = "error";
         entry.errorMessage = error instanceof Error && error.message
@@ -1126,24 +1568,72 @@ async function runDownload(entry: RuntimeDownload): Promise<void> {
       notifyListeners();
       updateDownloadNotification(entry, true);
       await wait(1000 * (attempt + 1));
-      void error;
     }
   }
 }
 
-function withFastDownloadParam(rawUrl: string): string {
-  if (!rawUrl) return rawUrl;
+async function startJsDownloadEntry(entry: RuntimeDownload): Promise<void> {
+  if (!active.has(entry.id) || entry.runningWorker || isPaused(entry)) return;
+  entry.runningWorker = true;
+  entry.queued = false;
+  entry.status = "downloading";
+  notifyListeners();
+
   try {
-    const parsed = new URL(rawUrl);
-    if (
-      parsed.pathname.includes("/api/anime/video-proxy") ||
-      parsed.pathname.includes("/api/dubbed/stream")
-    ) {
-      parsed.searchParams.set("dl", "1");
-      return parsed.toString();
+    await ensureDirectoryFor(localFileUri(entry.localPath));
+    await configureNotifications().catch(() => false);
+
+    if (!active.has(entry.id) || isPaused(entry)) return;
+
+    const isHls = isHlsDownloadCandidate({
+      url: entry.params.url,
+      hlsManifestUrl: entry.params.hlsManifestUrl,
+    });
+    if (isHls) {
+      const outcome = await downloadHlsDirectToPhone(entry);
+      if (outcome === "completed" || outcome === "interrupted") {
+        return;
+      }
+      // Fall back to VPS /api/anime/download-mp4 ONLY if direct/proxy HLS segments cannot run on phone
+      const fallbackUrl = entry.params.url;
+      if (!fallbackUrl || (!fallbackUrl.includes("/api/anime/download-mp4") && isHlsDownloadCandidate({ url: fallbackUrl }))) {
+        if (active.has(entry.id)) {
+          entry.status = "error";
+          entry.errorMessage = "تعذر تنزيل مقاطع البث لهذا السيرفر.";
+          notifyListeners();
+          completeNotification(entry, true);
+        }
+        return;
+      }
     }
-  } catch {}
-  return rawUrl;
+
+    await runDownload(entry);
+  } catch {
+    if (active.has(entry.id) && !isPaused(entry)) {
+      entry.status = "error";
+      entry.errorMessage = "تعذر إكمال التنزيل.";
+      notifyListeners();
+      completeNotification(entry, true);
+    }
+  } finally {
+    entry.runningWorker = false;
+    dispatchQueuedDownloads();
+  }
+}
+
+function dispatchQueuedDownloads(): void {
+  const ready = pickQueuedEntriesToStart(
+    Array.from(active.values()),
+    MAX_CONCURRENT_JS_DOWNLOADS,
+  );
+  for (const entry of ready) {
+    if (entry.runningWorker) continue;
+    void startJsDownloadEntry(entry);
+  }
+}
+
+function withFastDownloadParam(rawUrl: string): string {
+  return prepareDownloadRequestUrl(rawUrl);
 }
 
 function enqueueDownload(
@@ -1155,6 +1645,14 @@ function enqueueDownload(
   params = { ...params, url: withFastDownloadParam(params.url) };
   const id = makeDownloadId(params.animeId, params.ep, params.site, params.quality);
   cancelActiveDownload(id);
+
+  const resolvedLocalPath = localFileUri(localPath ?? localPathFor(params));
+  const useNative = shouldUseNativeDownloadManager({
+    platformOs: Platform.OS,
+    hasNativeModule: isNativeDownloadAvailable(),
+    url: params.url,
+    hlsManifestUrl: params.hlsManifestUrl,
+  });
 
   const entry: RuntimeDownload = {
     id,
@@ -1169,52 +1667,51 @@ function enqueueDownload(
     totalBytes: 0,
     retryCount: 0,
     status: autoStart ? "downloading" : "paused",
-    pauseSupported: true,
+    pauseSupported: !useNative,
+    queued: autoStart && !useNative,
     params,
-    localPath: localPath ?? localPathFor(params),
+    localPath: resolvedLocalPath,
     resumeState,
     notificationAt: 0,
     startedAt: Date.now(),
     cancelFn: () => {
       stopProgressTicker(entry);
       if (entry.nativePollTimer) clearTimeout(entry.nativePollTimer);
+      entry.hlsAbortController?.abort();
+      entry.hlsAbortController = undefined;
       if (entry.nativeJobId != null) {
         void removeNativeDownload(entry.id);
       }
       entry.resumable?.cancelAsync().catch(() => {});
-      FileSystem.deleteAsync(entry.localPath, { idempotent: true }).catch(() => {});
-      FileSystem.deleteAsync(`${entry.localPath.slice(0, -4)}.vtt`, { idempotent: true }).catch(() => {});
+      FileSystem.deleteAsync(localFileUri(entry.localPath), { idempotent: true }).catch(() => {});
+      FileSystem.deleteAsync(`${localFileUri(entry.localPath)}.part`, { idempotent: true }).catch(() => {});
+      FileSystem.deleteAsync(subtitlePathForVideo(localFileUri(entry.localPath)), { idempotent: true }).catch(() => {});
     },
   };
+
   active.set(id, entry);
   notifyListeners();
   if (!autoStart) return;
-  if (Platform.OS === "android" && isNativeDownloadAvailable()) {
+
+  if (useNative) {
+    entry.queued = false;
     void configureNotifications()
       .then(() => beginNativeDownload(entry))
       .catch(() => beginNativeDownload(entry));
     return;
   }
-  void ensureDirectoryFor(entry.localPath)
-    .then(() => configureNotifications())
-    .then(() => runDownload(entry))
-    .catch(() => {
-      if (!active.has(id)) return;
-      entry.status = "error";
-      notifyListeners();
-      completeNotification(entry, true);
-    });
+
+  dispatchQueuedDownloads();
 }
 
 /**
- * Starts a download without tying it to a component lifecycle.
- * The task uses expo-file-system's background session and is retried up to 3
- * times while retaining the partial file and AsyncStorage resume state.
+ * Starts a download outside React component lifecycles.
  */
 export async function startGlobalDownload(params: StartDownloadParams): Promise<void> {
   await ensureDownloadsDir();
-  const existing = await getDownloads();
   const id = makeDownloadId(params.animeId, params.ep, params.site, params.quality);
+  await cancelActiveDownloadAsync(id);
+  const existing = await getDownloads();
   const existingItem = existing.find((entry) => entry.id === id);
   if (existingItem) {
     await deleteDownload(existingItem);
@@ -1223,8 +1720,7 @@ export async function startGlobalDownload(params: StartDownloadParams): Promise<
 }
 
 /**
- * Rebuilds resumable tasks saved before an app restart. Completed files are
- * left alone; incomplete files are automatically retried when the app opens.
+ * Rebuilds resumable tasks saved before an app restart.
  */
 export async function restoreInterruptedDownloads(): Promise<void> {
   try {
@@ -1236,9 +1732,6 @@ export async function restoreInterruptedDownloads(): Promise<void> {
     if (!Array.isArray(records)) return;
 
     const completed = await getDownloads();
-    /* download-mp4 is protected by the same anon-token middleware as source
-       fetching. Refresh once before rebuilding tasks so an app restart does
-       not turn a resumable download into a permanent 403. */
     const [restoredToken, restoredDownloadToken] = await Promise.all([
       getAuthToken(),
       getDownloadToken(),
@@ -1246,6 +1739,7 @@ export async function restoreInterruptedDownloads(): Promise<void> {
     for (const record of records) {
       if (!record?.id || completed.some((item) => item.id === record.id)) continue;
       if (!record.url || !record.localPath) continue;
+      if (active.has(record.id)) continue;
       const params: StartDownloadParams = {
         animeId: record.animeId,
         ep: record.ep,
@@ -1257,10 +1751,11 @@ export async function restoreInterruptedDownloads(): Promise<void> {
         authToken: restoredToken,
         downloadToken: restoredDownloadToken,
         subtitleUrl: record.subtitleUrl,
-         hlsManifestUrl: record.hlsManifestUrl,
+        hlsManifestUrl: record.hlsManifestUrl,
         headers: record.headers,
       };
-      const savedResumeState = record.resumeState
+      const isHls = isHlsDownloadCandidate({ url: record.url, hlsManifestUrl: record.hlsManifestUrl });
+      const savedResumeState = !isHls && record.resumeState
         ? {
             ...record.resumeState,
             options: {
@@ -1269,70 +1764,160 @@ export async function restoreInterruptedDownloads(): Promise<void> {
             },
           }
         : undefined;
-      enqueueDownload({
-        ...params,
-      }, savedResumeState ?? (Platform.OS === "android" && record.bytesWritten > 0
-        ? {
-            url: record.url,
-            fileUri: record.localPath,
-            options: {
-              headers: requestHeaders(params),
-              sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
-            },
-            resumeData: String(record.bytesWritten),
-          }
-         : undefined), record.localPath, record.status !== "paused");
+      enqueueDownload(
+        params,
+        savedResumeState ?? (!isHls && Platform.OS === "android" && record.bytesWritten > 0
+          ? {
+              url: record.url,
+              fileUri: localFileUri(record.localPath),
+              options: {
+                headers: requestHeaders(params),
+                sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
+              },
+              resumeData: String(record.bytesWritten),
+            }
+          : undefined),
+        record.localPath,
+        record.status !== "paused",
+      );
     }
   } catch {}
 }
 
 async function restoreNativeDownloads(): Promise<void> {
   if (Platform.OS !== "android" || !isNativeDownloadAvailable()) return;
-  const records = await listNativeDownloads();
-  if (!records.length) return;
+  if (restoreNativeInFlight) return restoreNativeInFlight;
 
-  const [restoredToken, restoredDownloadToken] = await Promise.all([
-    getAuthToken(),
-    getDownloadToken(),
-  ]);
-  for (const record of records) {
-    let metadata: Partial<StartDownloadParams> & { id?: string; animeId?: number; ep?: number } = {};
-    try {
-      metadata = JSON.parse(record.metadataJson || "{}");
-    } catch {
-      await forgetNativeDownload(record.appId);
-      continue;
-    }
-    if (!metadata.id || !metadata.url || !metadata.animeId || !metadata.ep) {
-      await forgetNativeDownload(record.appId);
-      continue;
-    }
+  restoreNativeInFlight = (async () => {
+    const records = await listNativeDownloads();
+    if (!records.length) return;
 
-    const params: StartDownloadParams = {
-      animeId: Number(metadata.animeId),
-      ep: Number(metadata.ep),
-      title: String(metadata.title || "أنمي"),
-      cover: String(metadata.cover || ""),
-      site: String(metadata.site || "source"),
-      quality: String(metadata.quality || "auto"),
-      url: String(metadata.url),
-      authToken: restoredToken,
-      downloadToken: restoredDownloadToken,
-      subtitleUrl: metadata.subtitleUrl ? String(metadata.subtitleUrl) : undefined,
-      hlsManifestUrl: metadata.hlsManifestUrl ? String(metadata.hlsManifestUrl) : undefined,
-      headers: metadata.headers && typeof metadata.headers === "object"
-        ? metadata.headers as Record<string, string>
-        : undefined,
-    };
+    const [restoredToken, restoredDownloadToken] = await Promise.all([
+      getAuthToken(),
+      getDownloadToken(),
+    ]);
 
-    const id = makeDownloadId(params.animeId, params.ep, params.site, params.quality);
-    if (id !== record.appId) {
-      await forgetNativeDownload(record.appId);
-      continue;
-    }
+    for (const record of records) {
+      let metadata: Partial<StartDownloadParams> & { id?: string; animeId?: number; ep?: number } = {};
+      try {
+        metadata = JSON.parse(record.metadataJson || "{}");
+      } catch {
+        await forgetNativeDownload(record.appId);
+        continue;
+      }
+      if (!metadata.id || !metadata.url || !metadata.animeId || !metadata.ep) {
+        await forgetNativeDownload(record.appId);
+        continue;
+      }
 
-    if (record.status === "successful") {
-      const restored: RuntimeDownload = {
+      const params: StartDownloadParams = {
+        animeId: Number(metadata.animeId),
+        ep: Number(metadata.ep),
+        title: String(metadata.title || "أنمي"),
+        cover: String(metadata.cover || ""),
+        site: String(metadata.site || "source"),
+        quality: String(metadata.quality || "auto"),
+        url: String(metadata.url),
+        authToken: restoredToken,
+        downloadToken: restoredDownloadToken,
+        subtitleUrl: metadata.subtitleUrl ? String(metadata.subtitleUrl) : undefined,
+        hlsManifestUrl: metadata.hlsManifestUrl ? String(metadata.hlsManifestUrl) : undefined,
+        headers: metadata.headers && typeof metadata.headers === "object"
+          ? metadata.headers as Record<string, string>
+          : undefined,
+      };
+
+      const id = makeDownloadId(params.animeId, params.ep, params.site, params.quality);
+      if (id !== record.appId) {
+        await forgetNativeDownload(record.appId);
+        continue;
+      }
+
+      const existing = active.get(id);
+      if (canReconcileNativeRecordWithoutCancel(existing, record) && existing) {
+        existing.localPath = record.localPath || existing.localPath;
+        existing.bytesWritten = Math.max(existing.bytesWritten, Math.max(0, record.bytesWritten || 0));
+        existing.totalBytes = Math.max(existing.totalBytes, Math.max(0, record.totalBytes || 0));
+        if (existing.totalBytes > 0) {
+          existing.progress = Math.min(existing.bytesWritten / existing.totalBytes, 1);
+        }
+        const diskBytes = existing.totalBytes > 0 && existing.bytesWritten >= existing.totalBytes
+          ? await readDiskFileSize(existing.localPath)
+          : 0;
+        if (
+          shouldFinalizeNativeDownload({
+            status: record.status,
+            bytesWritten: existing.bytesWritten,
+            totalBytes: existing.totalBytes,
+            diskBytes,
+            stablePolls: 1,
+          })
+        ) {
+          stopProgressTicker(existing);
+          if (existing.nativePollTimer) clearTimeout(existing.nativePollTimer);
+          await saveCompleted(existing).catch(() => {});
+          active.delete(id);
+          await forgetNativeDownload(id);
+          completeNotification(existing);
+          notifyListeners();
+          continue;
+        }
+        existing.status = record.status === "failed" || record.status === "unknown"
+          ? "error"
+          : record.status === "paused" ? "paused" : "downloading";
+        existing.errorMessage = existing.status === "error" ? nativeFailureReason(record) : undefined;
+        notifyListeners();
+        if (existing.status === "downloading" && !existing.nativePollTimer && isAppActive()) {
+          void pollNativeDownload(existing);
+        }
+        continue;
+      }
+
+      const diskBytes = record.totalBytes > 0 && record.bytesWritten >= record.totalBytes
+        ? await readDiskFileSize(record.localPath)
+        : 0;
+
+      if (
+        shouldFinalizeNativeDownload({
+          status: record.status,
+          bytesWritten: record.bytesWritten,
+          totalBytes: record.totalBytes,
+          diskBytes,
+          stablePolls: 1,
+        })
+      ) {
+        const restoredDone: RuntimeDownload = {
+          id,
+          animeId: params.animeId,
+          ep: params.ep,
+          title: params.title,
+          cover: params.cover,
+          site: params.site,
+          quality: params.quality,
+          progress: 1,
+          bytesWritten: record.bytesWritten,
+          totalBytes: record.totalBytes,
+          retryCount: 0,
+          status: "downloading",
+          pauseSupported: false,
+          params,
+          localPath: localFileUri(record.localPath),
+          nativeJobId: record.jobId,
+          notificationAt: 0,
+          startedAt: Date.now(),
+          cancelFn: () => { void removeNativeDownload(id); },
+        };
+        try {
+          await saveCompleted(restoredDone);
+          await forgetNativeDownload(id);
+        } catch {
+          // Leave OS record visible for the next pass if not yet readable.
+        }
+        continue;
+      }
+
+      // Attach existing Android DownloadManager job in-place without calling enqueueDownload()
+      const restoredEntry: RuntimeDownload = {
         id,
         animeId: params.animeId,
         ep: params.ep,
@@ -1340,55 +1925,49 @@ async function restoreNativeDownloads(): Promise<void> {
         cover: params.cover,
         site: params.site,
         quality: params.quality,
-        progress: 1,
-        bytesWritten: record.bytesWritten,
-        totalBytes: record.totalBytes,
+        progress: record.totalBytes > 0
+          ? Math.min(Math.max(0, record.bytesWritten) / record.totalBytes, 1)
+          : 0,
+        bytesWritten: Math.max(0, record.bytesWritten || 0),
+        totalBytes: Math.max(0, record.totalBytes || 0),
         retryCount: 0,
-        status: "downloading",
+        status: record.status === "failed" || record.status === "unknown"
+          ? "error"
+          : record.status === "paused" ? "paused" : "downloading",
+        errorMessage: record.status === "failed" || record.status === "unknown"
+          ? nativeFailureReason(record)
+          : undefined,
         pauseSupported: false,
+        queued: false,
         params,
-        localPath: record.localPath,
+        localPath: localFileUri(record.localPath),
         nativeJobId: record.jobId,
+        nativeCompleteStablePolls: 0,
         notificationAt: 0,
         startedAt: Date.now(),
-        cancelFn: () => { void removeNativeDownload(id); },
+        cancelFn: () => {
+          stopProgressTicker(restoredEntry);
+          if (restoredEntry.nativePollTimer) clearTimeout(restoredEntry.nativePollTimer);
+          void removeNativeDownload(id);
+          FileSystem.deleteAsync(localFileUri(restoredEntry.localPath), { idempotent: true }).catch(() => {});
+        },
       };
-      try {
-        await saveCompleted(restored);
-        await forgetNativeDownload(id);
-      } catch {
-        // Leave the OS record visible for the next launch if the file has not
-        // become readable yet.
+      active.set(id, restoredEntry);
+      notifyListeners();
+      if (restoredEntry.status === "downloading") {
+        startProgressTicker(restoredEntry);
+        void pollNativeDownload(restoredEntry);
       }
-      continue;
     }
+  })().finally(() => {
+    restoreNativeInFlight = null;
+  });
 
-    enqueueDownload(params, undefined, record.localPath, false);
-    const entry = active.get(id);
-    if (!entry) continue;
-    entry.nativeJobId = record.jobId;
-    entry.pauseSupported = false;
-    entry.bytesWritten = record.bytesWritten;
-    entry.totalBytes = record.totalBytes;
-    entry.progress = record.totalBytes > 0
-      ? Math.min(record.bytesWritten / record.totalBytes, 1)
-      : 0;
-    entry.status = record.status === "failed" || record.status === "unknown"
-      ? "error"
-      : record.status === "paused" ? "paused" : "downloading";
-    entry.errorMessage = entry.status === "error"
-      ? nativeFailureReason(record)
-      : undefined;
-    notifyListeners();
-    if (entry.status === "downloading") void pollNativeDownload(entry);
-  }
+  return restoreNativeInFlight;
 }
 
-/* Keep the service warm at module load. This does not attach any screen. */
 if (Platform.OS !== "web") {
   AppState.addEventListener("change", (state) => {
-    /* Save the latest offset before backgrounding. The native background
-       session continues independently of the watch screen. */
     persistActive();
     if (state !== "active") {
       if (progressNotifyTimer) {
@@ -1405,7 +1984,9 @@ if (Platform.OS !== "web") {
     }
     void restoreNativeDownloads();
     for (const entry of active.values()) {
-      updateDownloadNotification(entry, true);
+      if (!entry.queued) {
+        updateDownloadNotification(entry, true);
+      }
       if (entry.nativeJobId != null && entry.status === "downloading") {
         if (entry.nativePollTimer) clearTimeout(entry.nativePollTimer);
         void pollNativeDownload(entry);

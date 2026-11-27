@@ -107,6 +107,7 @@ export function buildMangaReaderHtml({
       -webkit-tap-highlight-color: transparent;
       user-select: none;
       -webkit-user-select: none;
+      -webkit-touch-callout: none;
     }
     html, body {
       width: 100%;
@@ -114,7 +115,7 @@ export function buildMangaReaderHtml({
       background-color: var(--bg);
       color: var(--text);
       font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-      transition: background-color 0.22s ease, color 0.22s ease;
+      transition: background-color 0.2s ease, color 0.2s ease;
     }
 
     /* ── Vertical Continuous Strips (Webtoon & Continuous Vertical) ── */
@@ -132,15 +133,16 @@ export function buildMangaReaderHtml({
       align-items: stretch;
       padding-left: var(--side-pad);
       padding-right: var(--side-pad);
-      transition: padding 0.22s ease;
+      background-color: var(--bg);
+      transition: padding 0.2s ease, background-color 0.2s ease;
     }
     body.mode-webtoon #reader-container {
       gap: 0px;
     }
     body.mode-continuous_vertical #reader-container {
-      gap: 14px;
-      padding-top: 8px;
-      padding-bottom: 16px;
+      gap: 16px;
+      padding-top: 10px;
+      padding-bottom: 18px;
     }
     body.mode-continuous_vertical .page-slot {
       border-top: 1px solid var(--border);
@@ -159,6 +161,7 @@ export function buildMangaReaderHtml({
       display: flex;
       flex-direction: row;
       align-items: center;
+      background-color: var(--bg);
     }
     body.mode-continuous_rtl {
       direction: rtl;
@@ -175,17 +178,25 @@ export function buildMangaReaderHtml({
       gap: 12px;
       padding: 0 12px;
       flex-shrink: 0;
+      background-color: var(--bg);
     }
     body.mode-continuous_rtl .page-slot,
     body.mode-continuous_ltr .page-slot {
       height: 100vh;
       width: auto;
-      min-width: 72vw;
+      min-width: 78vw;
       flex: 0 0 auto;
       display: flex;
       align-items: center;
       justify-content: center;
       background: var(--bg);
+    }
+    body.mode-continuous_rtl .page-slot.tall-page,
+    body.mode-continuous_ltr .page-slot.tall-page {
+      width: 92vw;
+      overflow-y: auto;
+      align-items: flex-start;
+      -webkit-overflow-scrolling: touch;
     }
     body.mode-continuous_rtl .page-img,
     body.mode-continuous_ltr .page-img {
@@ -193,6 +204,12 @@ export function buildMangaReaderHtml({
       width: auto !important;
       max-width: none !important;
       object-fit: contain;
+    }
+    body.mode-continuous_rtl .page-slot.tall-page .page-img,
+    body.mode-continuous_ltr .page-slot.tall-page .page-img {
+      width: 100% !important;
+      height: auto !important;
+      max-height: none !important;
     }
     body.mode-continuous_rtl .end-footer,
     body.mode-continuous_ltr .end-footer {
@@ -209,12 +226,14 @@ export function buildMangaReaderHtml({
       height: 100vh;
       overflow: hidden;
       position: relative;
+      background-color: var(--bg);
     }
     body.layout-paged #reader-container {
       width: 100vw;
       height: 100vh;
       position: relative;
       overflow: hidden;
+      background-color: var(--bg);
     }
     body.layout-paged .page-slot {
       position: absolute;
@@ -227,9 +246,19 @@ export function buildMangaReaderHtml({
       padding-left: var(--side-pad);
       padding-right: var(--side-pad);
       background: var(--bg);
+      overflow: hidden;
     }
     body.layout-paged .page-slot.active-page {
       display: flex;
+      animation: pageFadeIn 0.16s ease-out;
+    }
+    /* Tall manhwa strip inside paged mode: full width + vertical scroll (never squished into a thin line!) */
+    body.layout-paged .page-slot.tall-page {
+      align-items: flex-start;
+      justify-content: flex-start;
+      overflow-y: auto;
+      overflow-x: hidden;
+      -webkit-overflow-scrolling: touch;
     }
     body.layout-paged .page-img {
       max-width: 100% !important;
@@ -237,6 +266,16 @@ export function buildMangaReaderHtml({
       width: auto !important;
       height: auto !important;
       object-fit: contain;
+    }
+    body.layout-paged .page-slot.tall-page .page-img {
+      width: 100% !important;
+      max-width: 100% !important;
+      height: auto !important;
+      max-height: none !important;
+    }
+    @keyframes pageFadeIn {
+      from { opacity: 0.45; transform: scale(0.992); }
+      to { opacity: 1; transform: scale(1); }
     }
     body.layout-paged .end-footer {
       position: absolute;
@@ -279,7 +318,7 @@ export function buildMangaReaderHtml({
       content: "";
       position: absolute;
       inset: 0;
-      background: rgba(245, 158, 11, 0.12);
+      background: rgba(245, 158, 11, 0.16);
       pointer-events: none;
       animation: lpPulse 0.35s ease;
     }
@@ -312,9 +351,11 @@ export function buildMangaReaderHtml({
       margin: 0 !important;
       padding: 0 !important;
       border: 0 !important;
-      transition: transform 0.2s ease, clip-path 0.2s ease;
+      pointer-events: none;
+      -webkit-user-drag: none;
+      transition: transform 0.2s ease, width 0.2s ease, margin 0.2s ease;
     }
-    /* 32-bit True Color vs Memory Saver Rendering Hints */
+    /* 32-bit True Color vs Memory Saver Rendering */
     body.color-32bit .page-img {
       image-rendering: high-quality;
       image-rendering: auto;
@@ -324,10 +365,12 @@ export function buildMangaReaderHtml({
       image-rendering: optimizeSpeed;
       image-rendering: -webkit-optimize-contrast;
     }
-    /* Border Crop Fallback when cross-origin image blocks canvas pixel read */
+    /* Horizontal-only Border Crop fallback (removes side margins without cutting top/bottom text) */
     body.crop-borders .page-slot.crop-fallback .page-img {
-      transform: scale(1.055);
-      transform-origin: center center;
+      width: 112% !important;
+      max-width: none !important;
+      margin-left: -6% !important;
+      margin-right: -6% !important;
     }
     .retry-btn {
       margin-top: 8px;
@@ -343,7 +386,7 @@ export function buildMangaReaderHtml({
     }
     .end-footer {
       width: 100%;
-      padding: 40px 20px 56px;
+      padding: 40px 20px 64px;
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -393,7 +436,7 @@ export function buildMangaReaderHtml({
     <div class="end-sub">${pageUrls.length > 0 ? `${pageUrls.length} صفحة` : ""}</div>
     ${
       safeNextLabel
-        ? `<button class="next-btn" id="next-chapter-btn" onclick="goNextChapter()">الانتقال إلى الفصل التالي (${safeNextLabel}) ←</button>`
+        ? `<button class="next-btn" id="next-chapter-btn" onclick="goNextChapter()">الانتقال إلى الفصل التالي (${safeNextLabel})</button>`
         : ""
     }
     ${
@@ -454,15 +497,22 @@ export function buildMangaReaderHtml({
         }
       });
 
+      // Prevent Android WebView native long-press image menu so our Long-Press Page Info works reliably
+      document.addEventListener("contextmenu", function (ev) {
+        ev.preventDefault();
+      });
+
       function detectAndApplyCrop(entry) {
         const img = entry.img;
         const slot = entry.slot;
         slot.classList.remove("crop-fallback");
-        img.style.clipPath = "";
+        img.style.width = "";
+        img.style.maxWidth = "";
+        img.style.marginLeft = "";
+        img.style.marginRight = "";
         img.style.transform = "";
         if (!currentSettings.cropBorders || !entry.loaded) return;
 
-        // Try exact uniform-border scan on a downsampled offscreen canvas
         try {
           const nw = img.naturalWidth || 0;
           const nh = img.naturalHeight || 0;
@@ -486,32 +536,34 @@ export function buildMangaReaderHtml({
               const i = (y * cw + x) * 4;
               const r = data[i], g = data[i + 1], b = data[i + 2];
               samples++;
-              if (r >= 240 && g >= 240 && b >= 240) whiteCount++;
-              else if (r <= 16 && g <= 16 && b <= 16) blackCount++;
+              if (r >= 238 && g >= 238 && b >= 238) whiteCount++;
+              else if (r <= 18 && g <= 18 && b <= 18) blackCount++;
             }
-            return whiteCount / samples > 0.94 || blackCount / samples > 0.94;
+            return whiteCount / samples > 0.92 || blackCount / samples > 0.92;
           }
 
-          const maxTrimX = Math.floor(cw * 0.14);
+          const maxTrimX = Math.floor(cw * 0.16);
           let leftTrim = 0;
           while (leftTrim < maxTrimX && isUniformCol(leftTrim)) leftTrim++;
           let rightTrim = 0;
           while (rightTrim < maxTrimX && isUniformCol(cw - 1 - rightTrim)) rightTrim++;
-
           if (leftTrim > 0) leftTrim = Math.min(maxTrimX, leftTrim + 1);
           if (rightTrim > 0) rightTrim = Math.min(maxTrimX, rightTrim + 1);
+
           const leftPct = (leftTrim / cw) * 100;
           const rightPct = (rightTrim / cw) * 100;
           if (leftPct >= 1 || rightPct >= 1) {
-            const visibleWidthRatio = Math.max(0.72, 1 - (leftPct + rightPct) / 100);
-            const scale = 1 / visibleWidthRatio;
-            const shiftPct = ((rightPct - leftPct) / 2);
-            img.style.transform = "scale(" + scale.toFixed(3) + ") translateX(" + shiftPct.toFixed(2) + "%)";
+            const visibleRatio = Math.max(0.68, 1 - (leftPct + rightPct) / 100);
+            const widthPct = (100 / visibleRatio).toFixed(2);
+            const shiftLeft = (-leftPct / visibleRatio).toFixed(2);
+            img.style.setProperty("width", widthPct + "%", "important");
+            img.style.setProperty("max-width", "none", "important");
+            img.style.setProperty("margin-left", shiftLeft + "%", "important");
           } else {
             slot.classList.add("crop-fallback");
           }
         } catch (err) {
-          // Cross-origin image tainted canvas -> apply subtle safe CSS margin crop
+          // Cross-origin image tainted canvas -> apply clean horizontal-only margin trim
           slot.classList.add("crop-fallback");
         }
       }
@@ -524,6 +576,8 @@ export function buildMangaReaderHtml({
 
       function notifyPageChange(pageNum) {
         const clamped = Math.min(Math.max(1, pageNum), Math.max(1, pages.length));
+        if (clamped === currentPage && notifyPageChange._sentOnce) return;
+        notifyPageChange._sentOnce = true;
         currentPage = clamped;
         postNative({
           type: "PAGE_CHANGE",
@@ -536,8 +590,11 @@ export function buildMangaReaderHtml({
         if (!isPaged) return;
         for (let i = 0; i < slotEntries.length; i++) {
           const isCurrent = !showingEndScreen && (i + 1) === currentPage;
-          slotEntries[i].slot.classList.toggle("active-page", isCurrent);
-          // Preload neighboring pages eagerly in paged mode
+          const slot = slotEntries[i].slot;
+          slot.classList.toggle("active-page", isCurrent);
+          if (isCurrent) {
+            slot.scrollTop = 0;
+          }
           if (Math.abs(i + 1 - currentPage) <= 2 && !slotEntries[i].started) {
             slotEntries[i].startLoad();
           }
@@ -647,6 +704,7 @@ export function buildMangaReaderHtml({
         const img = document.createElement("img");
         img.className = "page-img";
         img.alt = "صفحة " + pageNum;
+        img.draggable = false;
         img.decoding = "async";
         img.loading = (currentSettings.color32Bit ? index < 6 : index < 2) ? "eager" : "lazy";
         if (url.indexOf("mangatek.com") !== -1) {
@@ -704,6 +762,12 @@ export function buildMangaReaderHtml({
           if (spinner.parentNode) spinner.remove();
           if (status.parentNode) status.remove();
           img.style.display = "block";
+          // Detect tall webtoon strips so paged & horizontal modes never shrink them into thin noodles
+          if (img.naturalWidth > 0 && img.naturalHeight / img.naturalWidth > 2.0) {
+            slot.classList.add("tall-page");
+          } else {
+            slot.classList.remove("tall-page");
+          }
           detectAndApplyCrop(entry);
         };
 
@@ -739,38 +803,32 @@ export function buildMangaReaderHtml({
         }
       });
 
-      // Continuous page tracking via IntersectionObserver
-      if (!isPaged && "IntersectionObserver" in window && slotEntries.length > 0) {
-        const visibleMap = new Map();
-        const observer = new IntersectionObserver(
-          function (entries) {
-            entries.forEach(function (ev) {
-              const p = Number(ev.target.dataset.page || 1);
-              if (ev.isIntersecting) {
-                visibleMap.set(p, ev.intersectionRatio);
-              } else {
-                visibleMap.delete(p);
-              }
-            });
-            if (visibleMap.size > 0) {
-              let bestPage = currentPage;
-              let bestRatio = -1;
-              visibleMap.forEach(function (ratio, p) {
-                if (ratio > bestRatio) {
-                  bestRatio = ratio;
-                  bestPage = p;
-                }
-              });
-              if (bestPage !== currentPage) {
-                notifyPageChange(bestPage);
-              }
+      // Accurate continuous page tracking via viewport-midpoint scroll scan (works even on 12,000px tall strips!)
+      if (!isPaged && slotEntries.length > 0) {
+        let scrollRaf = null;
+        function updateVisiblePageFromScroll() {
+          scrollRaf = null;
+          const isHoriz = currentMode === "continuous_rtl" || currentMode === "continuous_ltr";
+          const mid = isHoriz ? (window.innerWidth || 390) * 0.5 : (window.innerHeight || 844) * 0.42;
+          let found = currentPage;
+          for (let i = 0; i < slotEntries.length; i++) {
+            const rect = slotEntries[i].slot.getBoundingClientRect();
+            const start = isHoriz ? rect.left : rect.top;
+            const end = isHoriz ? rect.right : rect.bottom;
+            if (start <= mid && end >= mid) {
+              found = i + 1;
+              break;
             }
-          },
-          { threshold: [0.15, 0.4, 0.7] }
-        );
-        slotEntries.forEach(function (entry) {
-          observer.observe(entry.slot);
-        });
+          }
+          if (found !== currentPage) {
+            notifyPageChange(found);
+          }
+        }
+        window.addEventListener("scroll", function () {
+          if (!scrollRaf) {
+            scrollRaf = requestAnimationFrame(updateVisiblePageFromScroll);
+          }
+        }, { passive: true });
       }
 
       // Unified Touch Gesture Handler: Center Tap (Fullscreen Chrome), Swipe (Paged), Long-Press (Page Info)
@@ -781,6 +839,7 @@ export function buildMangaReaderHtml({
       let longPressFired = false;
       let longPressTimer = null;
       let activeEntry = null;
+      let lastTapSignalAt = 0;
 
       function findEntryFromTarget(target) {
         const slotEl = target && target.closest ? target.closest(".page-slot") : null;
@@ -794,6 +853,31 @@ export function buildMangaReaderHtml({
           clearTimeout(longPressTimer);
           longPressTimer = null;
         }
+      }
+
+      function handleCleanTap(clientX, clientY) {
+        const now = Date.now();
+        if (now - lastTapSignalAt < 220) return;
+        lastTapSignalAt = now;
+
+        const vw = window.innerWidth || 390;
+        const vh = window.innerHeight || 844;
+        const rx = clientX / vw;
+        const ry = clientY / vh;
+
+        if (isPaged) {
+          if (currentMode === "rtl") {
+            if (rx < 0.28) { window.goNextPage(); return; }
+            if (rx > 0.72) { window.goPrevPage(); return; }
+          } else if (currentMode === "ltr") {
+            if (rx > 0.72) { window.goNextPage(); return; }
+            if (rx < 0.28) { window.goPrevPage(); return; }
+          } else if (currentMode === "vertical") {
+            if (ry > 0.74) { window.goNextPage(); return; }
+            if (ry < 0.26) { window.goPrevPage(); return; }
+          }
+        }
+        postNative({ type: "TOGGLE_CHROME" });
       }
 
       document.addEventListener(
@@ -831,7 +915,7 @@ export function buildMangaReaderHtml({
                   loaded: !!captured.loaded,
                 });
               }
-            }, 520);
+            }, 480);
           }
         },
         { passive: true }
@@ -862,41 +946,29 @@ export function buildMangaReaderHtml({
           const dy = changed.clientY - touchStartY;
           const dt = Date.now() - touchStartTime;
 
-          // Swipe navigation in paged modes
-          if (isPaged && Math.max(Math.abs(dx), Math.abs(dy)) > 46) {
-            if (currentMode === "rtl") {
-              if (dx > 46) window.goNextPage();
-              else if (dx < -46) window.goPrevPage();
-            } else if (currentMode === "ltr") {
-              if (dx < -46) window.goNextPage();
-              else if (dx > 46) window.goPrevPage();
-            } else if (currentMode === "vertical") {
-              if (dy < -46) window.goNextPage();
-              else if (dy > 46) window.goPrevPage();
-            }
-            return;
-          }
-
-          // Clean tap (< 260ms, minimal movement)
-          if (!moved && dt < 280) {
-            const vw = window.innerWidth || 390;
-            const vh = window.innerHeight || 844;
-            const rx = changed.clientX / vw;
-            const ry = changed.clientY / vh;
-
-            if (isPaged) {
-              if (currentMode === "rtl") {
-                if (rx < 0.30) { window.goNextPage(); return; }
-                if (rx > 0.70) { window.goPrevPage(); return; }
-              } else if (currentMode === "ltr") {
-                if (rx > 0.70) { window.goNextPage(); return; }
-                if (rx < 0.30) { window.goPrevPage(); return; }
-              } else if (currentMode === "vertical") {
-                if (ry > 0.72) { window.goNextPage(); return; }
-                if (ry < 0.28) { window.goPrevPage(); return; }
+          // Swipe navigation in paged modes (ignore vertical scroll inside tall manhwa pages!)
+          if (isPaged && Math.max(Math.abs(dx), Math.abs(dy)) > 48) {
+            if (currentMode === "rtl" && Math.abs(dx) > Math.abs(dy) * 1.2) {
+              if (dx > 48) window.goNextPage();
+              else if (dx < -48) window.goPrevPage();
+              return;
+            } else if (currentMode === "ltr" && Math.abs(dx) > Math.abs(dy) * 1.2) {
+              if (dx < -48) window.goNextPage();
+              else if (dx > 48) window.goPrevPage();
+              return;
+            } else if (currentMode === "vertical" && Math.abs(dy) > Math.abs(dx) * 1.2) {
+              const curSlot = slotEntries[currentPage - 1]?.slot;
+              const isTall = curSlot && curSlot.classList.contains("tall-page");
+              if (!isTall) {
+                if (dy < -48) window.goNextPage();
+                else if (dy > 48) window.goPrevPage();
+                return;
               }
             }
-            postNative({ type: "TOGGLE_CHROME" });
+          }
+
+          if (!moved && dt < 290) {
+            handleCleanTap(changed.clientX, changed.clientY);
           }
         },
         { passive: true }
@@ -1002,7 +1074,7 @@ export function buildThemedTextReaderHtml({
     <div class="end-badge">✓ نهاية ${safeChapterLabel}</div>
     ${
       safeNextLabel
-        ? `<button class="next-btn" onclick="window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({type:'NEXT_CHAPTER'}))">الانتقال إلى الفصل التالي (${safeNextLabel}) ←</button>`
+        ? `<button class="next-btn" onclick="window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({type:'NEXT_CHAPTER'}))">الانتقال إلى الفصل التالي (${safeNextLabel})</button>`
         : ""
     }
   </div>

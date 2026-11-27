@@ -11,13 +11,21 @@ import { StatusBar } from "expo-status-bar";
 import { useVideoPlayer, VideoView, type BufferOptions } from "expo-video";
 import * as Brightness from "expo-brightness";
 import { VolumeManager } from "../lib/volume-manager";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator, Alert, Animated, AppState, DeviceEventEmitter, Dimensions, Easing, I18nManager, InteractionManager, Linking, Platform,
   BackHandler, findNodeHandle, PanResponder, Pressable as RNPressable, ScrollView, StyleSheet, Text, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as FileSystem from "expo-file-system";
+import { convertSubtitleToVtt, normalizeAndSortSubtitleCues } from "@/utils/donghuaLogic.mjs";
+import {
+  getHybridBufferProfile,
+  resolveHybridLoadTimeoutMs,
+  resolveHybridStallTimings,
+  type ProxyFallbackDescriptor,
+} from "@/utils/hybridStreamLogic.mjs";
 import { getBaseUrl } from "@/utils/api";
 import { secureFetch } from "@/utils/secureApi";
 import { isNativeTvRingActive, TvPressable, useTvMetrics } from "@/utils/tv";
@@ -57,6 +65,8 @@ export type PlayerSource = {
   /** أوقات تخطي المقدمة/النهاية التي أعادها مزود المصدر نفسه. */
   skipIntro?: { start: number; end: number };
   skipOutro?: { start: number; end: number };
+  /** مسار خادم احتياطي صامت (لا يُستدعى إلا عند فشل أو بطء البث المباشر) */
+  proxyFallback?: ProxyFallbackDescriptor;
 };
 
 type SeekRecoveryState = {
@@ -93,10 +103,11 @@ function isProgressiveSourceUrl(url: string, contentType?: PlayerSource["content
   if (contentType === "hls") return false;
   const lower = url.toLowerCase();
   return (
-    /\.(?:mp4|m4v|webm|mov)(?:[?#]|$)/i.test(lower) ||
+    /\.(?:mp4|m4v|webm|mov|ts)(?:[?#]|$)/i.test(lower) ||
     lower.includes("/api/dubbed/stream") ||
     lower.includes("/api/aw-dubbed/mf-stream") ||
-    lower.includes("/api/anime/video-proxy")
+    lower.includes("/api/anime/video-proxy") ||
+    lower.includes("pixeldrain.com/api/file/")
   );
 }
 
@@ -131,14 +142,8 @@ function logPlaybackStage(url: string | undefined, stage: string, detail = ""): 
   console.info(`[playback-trace] id=${trace} component=player stage=${stage}${safeDetail}`);
 }
 
-function getPlaybackBufferOptions(animePlayback: boolean): BufferOptions {
-  /* Generous 40s forward buffer and waitsToMinimizeStalling: true prevents stream drops
-     and micro-stuttering across all catalogs (Anime, Spacetoon, Cartoon/Carateen). */
-  return {
-    preferredForwardBufferDuration: 40,
-    waitsToMinimizeStalling: true,
-    minBufferForPlayback: 2.5,
-  };
+function getPlaybackBufferOptions(_animePlayback: boolean): BufferOptions {
+  return getHybridBufferProfile();
 }
 
 /** Never pass malformed URLs into the native player.
@@ -181,7 +186,7 @@ type Props = {
   anilistId?: number;
   onBack: () => void;
   /** Watch routes own phone orientation; standalone player surfaces use the local fallback. */
-  onToggleOrientation?: () => void;
+  onToggleOrientation?: (nextPortrait?: boolean) => void;
   onNextEpisode?: () => void;
   onPrevEpisode?: () => void;
   onPreviousEpisode?: () => void;
@@ -204,10 +209,12 @@ type Props = {
   onDownloadCurrent?: () => void;
   /** حالة تنزيل المصدر النشط حالياً */
   downloadState?: "idle" | "downloading" | "done" | "error";
-  /** نسبة تقدّم التنزيل (0..100) */
+  /** نسبة تقدّم التنزيل (0..100 أو 0..1) */
   downloadProgress?: number;
   /** وسم الجودة/السيرفر لعرضه في إشعار بدء التنزيل */
   downloadQualityLabel?: string;
+  /** Overlay opaque backdrop and raise bottom offset slightly when source has burned-in Chinese subs. */
+  hardsubOverlap?: boolean;
 };
 
 /**
@@ -317,10 +324,7 @@ function parseVTTTime(s: string): number {
 
 /* ─── Merge + sort subtitle cue arrays by start time ─── */
 function _mergeCues(existing: SubCue[], incoming: SubCue[]): SubCue[] {
-  if (!existing.length) return incoming;
-  const out = [...existing, ...incoming];
-  out.sort((a, b) => a.start - b.start);
-  return out;
+  return normalizeAndSortSubtitleCues([...existing, ...incoming]);
 }
 
 /**
@@ -400,8 +404,13 @@ async function _fetchStreamedSubtitles(
   return total;
 }
 
-function parseVTT(text: string): SubCue[] {
+function parseVTT(rawText: string): SubCue[] {
   const cues: SubCue[] = [];
+  let text = String(rawText || "").replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  if (!/^WEBVTT\b/i.test(text.trim())) {
+    const converted = convertSubtitleToVtt(text);
+    if (converted) text = converted;
+  }
   // ── X-TIMESTAMP-MAP: HLS-native VTT (e.g. Videasy cc.boopigcdn.com) ──
   // Header: X-TIMESTAMP-MAP=MPEGTS:900000,LOCAL:00:00:00.000
   // → offset = 900000/90000 = 10 s → subtract from every cue to fix late-subtitle bug.
@@ -418,7 +427,7 @@ function parseVTT(text: string): SubCue[] {
     let ti = 0;
     if (ti < lines.length && !lines[ti].includes("-->")) ti++;
     if (ti >= lines.length) continue;
-    const m = lines[ti].match(/(\d[\d:.]*)\s*-->\s*(\d[\d:.]*)/);
+    const m = lines[ti].match(/(\d[\d:.,]*)\s*-->\s*(\d[\d:.,]*)/);
     if (!m) continue;
     const start = Math.max(0, parseVTTTime(m[1]) - tsOffset);
     const end   = Math.max(0, parseVTTTime(m[2]) - tsOffset);
@@ -430,7 +439,7 @@ function parseVTT(text: string): SubCue[] {
       .filter(l => !/^kaa\.m\s*$/i.test(l)); // حذف علامة ترجمة kaa.m من مصدر Kawaii
     if (textLines.length > 0) cues.push({ start, end, text: textLines.join("\n") });
   }
-  return cues;
+  return normalizeAndSortSubtitleCues(cues);
 }
 
 /* ─── SpinRing ─── */
@@ -483,6 +492,7 @@ function ExpoRiftPlayer({
   subEnabled = false,
   autoPlayNext = true,
   animePlayback = false,
+  hardsubOverlap = false,
   /* Unknown totals must be fail-closed. A synthetic 999 allowed automatic
      and manual navigation into episodes that do not exist. */
   totalEps = 0,
@@ -551,6 +561,10 @@ function ExpoRiftPlayer({
     Math.max(playableSources.length - 1, 0),
   );
   const [srcIdx, setSrcIdx]         = useState(safeInitialIndex);
+  const srcIdxRef                   = useRef(safeInitialIndex);
+  useEffect(() => { srcIdxRef.current = srcIdx; }, [srcIdx]);
+  const playableSourcesRef          = useRef(playableSources);
+  useEffect(() => { playableSourcesRef.current = playableSources; }, [playableSources]);
   const currentSrc                  = playableSources[srcIdx];
   const playbackTraceStateRef = useRef({
     url: "",
@@ -655,6 +669,7 @@ function ExpoRiftPlayer({
   const suppressProgressAutoFocusUntilRef = useRef(0);
   const controlsVisibleRef = useRef(true);
   const isHidingControlsRef = useRef(false);
+  const controlsAtFullOpacityRef = useRef(true);
   const playIntentRef = useRef(true);
   const lastPlayToggleAtRef = useRef(0);
   const btnSeekCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -746,7 +761,7 @@ function ExpoRiftPlayer({
 
   /* ─── New UI state ─── */
   const [isMuted, setIsMuted]             = useState(false);
-  const [isPortrait, setIsPortrait]       = useState(false);
+  const [isPortrait, setIsPortrait]       = useState(() => !tvMode && winHeight > winWidth);
   /* showSpeedMenu / showFitMenu / showSubPanel hoisted above for BackHandler */
   const [subLang, setSubLang]             = useState<"ar" | "en">("ar");
   const userSelectedSubLangRef            = useRef(false);
@@ -1316,9 +1331,10 @@ function ExpoRiftPlayer({
         /* Anime CDNs can deliver a first segment slowly. Allow 25s for startup,
            and 40s for a rebuffer; the 25s + 12s stall recovery remains the
            earlier guard for a player that claims to be playing but makes no progress. */
-        const loadTimeoutMs = animePlayback
-          ? (traceState.playingLogged ? 40_000 : 25_000)
-          : 18_000;
+        const loadTimeoutMs = resolveHybridLoadTimeoutMs({
+          hasStartedPlayback: traceState.playingLogged,
+          animePlayback,
+        });
         /* Repeated native loading notifications must not keep extending the
            Anime deadline indefinitely. Other player modes keep their prior behavior. */
         if (!animePlayback || !loadTimeoutRef.current) {
@@ -1332,7 +1348,7 @@ function ExpoRiftPlayer({
               `timeout_ms=${loadTimeoutMs}`,
             );
             console.warn(
-              `[RiftPlayer] ⏱ timeout (${Math.round(loadTimeoutMs / 1000)}s) — ${playableSources[srcIdx]?.label || "?"}`,
+              `[RiftPlayer] ⏱ timeout (${Math.round(loadTimeoutMs / 1000)}s) — ${playableSourcesRef.current[srcIdxRef.current]?.label || "?"}`,
             );
             setError(true);
             setBuffering(false);
@@ -1507,7 +1523,7 @@ function ExpoRiftPlayer({
          كان يُزيل الحماية من الـ black-screen بينما المشغّل لا يزال في loading.
          الـ timeout يُلغى فقط في: Master cleanup (unmount) أو statusChange نفسه. */
     };
-  }, [player, initialPosition, srcIdx, beginSeekRecovery, animePlayback]); // eslint-disable-line
+  }, [player, initialPosition, srcIdx, sourceReloadNonce, beginSeekRecovery, animePlayback]); // eslint-disable-line
   /* ✅ أُزيل playableSources من deps — كان يُعيد تسجيل الـ listeners عند كل وصول
      مصدر جديد مما يُلغي loadTimeoutRef الجاري ويُعطّل حماية الـ black-screen. */
 
@@ -1636,9 +1652,9 @@ function ExpoRiftPlayer({
   useEffect(() => {
     // Some signed CDN segments take 17+ seconds to arrive. Do not switch away
     // from a healthy source while that request is still within its normal range.
-    const STALL_TIMEOUT_MS = 25_000;
-    const STALL_RECOVERY_TIMEOUT_MS = 12_000;
     const id = setInterval(() => {
+      const { stallTimeoutMs: STALL_TIMEOUT_MS, stallRecoveryMs: STALL_RECOVERY_TIMEOUT_MS } =
+        resolveHybridStallTimings();
       if (AppState.currentState && AppState.currentState !== "active") {
         stallRef.current = { lastPos: positionRef.current, lastAt: 0 };
         return;
@@ -1848,6 +1864,30 @@ function ExpoRiftPlayer({
       return;
     }
 
+    /* ── ملف ترجمة محلي (file://) للتشغيل بلا إنترنت 100% ── */
+    if (rawUrl.startsWith("file://")) {
+      let localCancelled = false;
+      setSubOffset(0);
+      subOffsetRef.current = 0;
+      setSubLoading(true);
+      FileSystem.readAsStringAsync(rawUrl)
+        .then((text) => {
+          if (localCancelled) return;
+          const cues = parseVTT(text);
+          setLoadedCues(cues);
+          if (cues.length > 0) setSubOn(true);
+        })
+        .catch(() => {
+          if (!localCancelled) setLoadedCues([]);
+        })
+        .finally(() => {
+          if (!localCancelled && aliveRef.current) setSubLoading(false);
+        });
+      return () => {
+        localCancelled = true;
+      };
+    }
+
     /* ── حساب الـ URL الإنجليزي الخام (قبل أي ترجمة) ── */
     const base = getBaseUrl();
     // proxy-text only fixes CORS/referer; it does not translate. Treating it
@@ -2026,49 +2066,40 @@ function ExpoRiftPlayer({
     setIsFlipped(f => !f);
   }, []);
 
-  /* ─── Portrait / Landscape toggle (سلس بدون قفز الواجهة قبل دوران الشاشة الفعلي) ─── */
+  /* ─── Portrait / Landscape toggle — تبديل فوري وسلس بدون تعتيم الأزرار أو تجميد السطح ─── */
   const togglePortrait = useCallback(() => {
     setShowFitMenu(false);
     setShowSpeedMenu(false);
-    if (hideTimer.current) clearTimeout(hideTimer.current);
-    if (rotationAnimTimerRef.current) clearTimeout(rotationAnimTimerRef.current);
-    isRotatingRef.current = true;
-    const nextPortrait = !isPortrait;
-    const triggerLock = () => {
-      if (onToggleOrientation) {
-        onToggleOrientation();
-      } else {
-        requestOrientation(
-          nextPortrait
-            ? ScreenOrientation.OrientationLock.PORTRAIT_UP
-            : ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT,
-        );
-      }
-    };
-    controlsOpacity.stopAnimation();
-    Animated.timing(controlsOpacity, {
-      toValue: 0.08,
-      duration: 85,
-      easing: Easing.out(Easing.quad),
-      useNativeDriver: true,
-    }).start(() => {
-      triggerLock();
-    });
-    rotationAnimTimerRef.current = setTimeout(() => {
+    if (hideTimer.current) {
+      clearTimeout(hideTimer.current);
+      hideTimer.current = null;
+    }
+    if (rotationAnimTimerRef.current) {
+      clearTimeout(rotationAnimTimerRef.current);
       rotationAnimTimerRef.current = null;
-      if (!aliveRef.current) return;
-      isRotatingRef.current = false;
-      measureSeekBar();
-      if (controlsVisibleRef.current) {
-        controlsOpacity.stopAnimation();
-        Animated.timing(controlsOpacity, {
-          toValue: 1,
-          duration: 180,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }).start();
-      }
-    }, 360);
+    }
+    isRotatingRef.current = false;
+    const nextPortrait = !isPortrait;
+    setIsPortrait(nextPortrait);
+
+    // Ensure controls remain crisp at full opacity across the orientation transition.
+    isHidingControlsRef.current = false;
+    controlsVisibleRef.current = true;
+    controlsAtFullOpacityRef.current = true;
+    setShowControls(true);
+    controlsOpacity.stopAnimation();
+    controlsOpacity.setValue(1);
+
+    if (onToggleOrientation) {
+      onToggleOrientation(nextPortrait);
+    } else {
+      requestOrientation(
+        nextPortrait
+          ? ScreenOrientation.OrientationLock.PORTRAIT_UP
+          : ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT,
+      );
+    }
+    schedHideRef.current?.();
   }, [isPortrait, onToggleOrientation, requestOrientation, controlsOpacity]);
 
   /* ─── Screenshot ─── */
@@ -2128,33 +2159,26 @@ function ExpoRiftPlayer({
   }, [showControls]);
 
   /* ─── Orientation change listener + live geometry sync ─── */
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (tvMode || !winWidth || !winHeight) return;
     const geomPortrait = winHeight > winWidth;
     setIsPortrait(prev => (prev === geomPortrait ? prev : geomPortrait));
+    if (controlsVisibleRef.current && !isHidingControlsRef.current && !controlsAtFullOpacityRef.current) {
+      controlsAtFullOpacityRef.current = true;
+      controlsOpacity.stopAnimation();
+      controlsOpacity.setValue(1);
+    }
+    const raf = requestAnimationFrame(() => {
+      if (aliveRef.current) measureSeekBar();
+    });
     const remeasureTimer = setTimeout(() => {
-      if (!aliveRef.current) return;
-      measureSeekBar();
-      if (isRotatingRef.current) {
-        isRotatingRef.current = false;
-        if (rotationAnimTimerRef.current) {
-          clearTimeout(rotationAnimTimerRef.current);
-          rotationAnimTimerRef.current = null;
-        }
-        if (controlsVisibleRef.current) {
-          controlsOpacity.stopAnimation();
-          Animated.timing(controlsOpacity, {
-            toValue: 1,
-            duration: 190,
-            easing: Easing.out(Easing.cubic),
-            useNativeDriver: true,
-          }).start();
-          schedHideRef.current?.();
-        }
-      }
-    }, 60);
-    return () => clearTimeout(remeasureTimer);
-  }, [winWidth, winHeight, tvMode, controlsOpacity]);
+      if (aliveRef.current) measureSeekBar();
+    }, 90);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(remeasureTimer);
+    };
+  }, [winWidth, winHeight, tvMode, controlsOpacity, measureSeekBar]);
 
   useEffect(() => {
     const detect = async () => {
@@ -2426,6 +2450,7 @@ function ExpoRiftPlayer({
       hideTimer.current = null;
     }
     isHidingControlsRef.current = true;
+    controlsAtFullOpacityRef.current = false;
     controlsOpacity.stopAnimation();
     Animated.timing(controlsOpacity, {
       toValue: 0,
@@ -2461,18 +2486,19 @@ function ExpoRiftPlayer({
       revealHintTimer.current = null;
     }
     if (showTvRevealHint) setShowTvRevealHint(false);
-    // إذا كانت الأدوات ظاهرة بالفعل وليست قيد الإخفاء، نعيد ضبط المؤقت فقط بدون إعادة تشغيل الأنميشن
-    if (controlsVisibleRef.current && !isHidingControlsRef.current) {
+    // إذا كانت الأدوات ظاهرة بالفعل وبكامل سطوعها وليست قيد الإخفاء، نعيد ضبط المؤقت فقط
+    if (controlsVisibleRef.current && !isHidingControlsRef.current && controlsAtFullOpacityRef.current) {
       schedHide();
       return;
     }
     isHidingControlsRef.current = false;
     controlsVisibleRef.current = true;
+    controlsAtFullOpacityRef.current = true;
     setShowControls(true);
     controlsOpacity.stopAnimation();
     Animated.timing(controlsOpacity, {
       toValue: 1,
-      duration: 165,
+      duration: 150,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();
@@ -3582,10 +3608,11 @@ function ExpoRiftPlayer({
     const translateY = subSettings.verticalOffset || 0;
     if (pos === "top")    return { top: showControls ? (tvMode ? 114 : 92) : 20, bottom: undefined, transform: [{ translateY }] };
     if (pos === "center") return { top: "45%" as any, bottom: undefined, transform: [{ translateY }] };
+    const extraClearance = hardsubOverlap ? (showControls ? 12 : 14) : 0;
     return {
-      bottom: showControls
+      bottom: (showControls
         ? (tvMode ? 132 : isPortrait ? 104 : 92)
-        : (tvMode ? 36 : isPortrait ? 28 : 20),
+        : (tvMode ? 36 : isPortrait ? 28 : 20)) + extraClearance,
       top: undefined,
       transform: [{ translateY }],
     };
@@ -3606,8 +3633,6 @@ function ExpoRiftPlayer({
     <View ref={rootViewRef} style={[s.root, isFlipped && { transform: [{ rotate: "180deg" }] }]}>
       <StatusBar hidden />
       <Animated.View
-        renderToHardwareTextureAndroid={true}
-        shouldRasterizeIOS={true}
         style={[
           StyleSheet.absoluteFill,
           { opacity: entryFadeAnim, transform: [{ scale: entryScaleAnim }] },
@@ -3678,9 +3703,13 @@ function ExpoRiftPlayer({
                   color: subSettings.color,
                   fontFamily: fontName,
                   fontWeight: isSys ? (subSettings.extraBold ? "900" : subSettings.bold ? "700" : "400") : undefined,
-                  backgroundColor: !subtitleShadowOnly && subSettings.bgOpacity > 0
-                    ? `rgba(0,0,0,${subSettings.bgOpacity})`
-                    : "transparent",
+                  backgroundColor: (() => {
+                    const effectiveBg = hardsubOverlap
+                      ? Math.max(subSettings.bgOpacity, 0.90)
+                      : (!subtitleShadowOnly ? subSettings.bgOpacity : 0);
+                    return effectiveBg > 0 ? `rgba(0,0,0,${effectiveBg})` : "transparent";
+                  })(),
+                  ...(hardsubOverlap ? { paddingHorizontal: 12, paddingVertical: 3, borderRadius: 6, overflow: "hidden" as const } : {}),
                   textShadowColor: shadowColor,
                   textShadowRadius: shadowRadius,
                   textShadowOffset: { width: 0, height: 1.5 },
@@ -4447,68 +4476,71 @@ function ExpoRiftPlayer({
                         />
                       </Pressable>
 
-                      {!tvMode && Boolean(onDownloadCurrent) && (
-                        <Pressable
-                          onPress={() => {
-                            if (controlsVisibleRef.current && !isHidingControlsRef.current) {
-                              schedHide();
-                            } else {
-                              fadeIn();
+                      {!tvMode && Boolean(onDownloadCurrent) && (() => {
+                        const rawProg = Number(downloadProgress || 0);
+                        const normPct = Math.max(0, Math.min(100, Math.round(rawProg > 0 && rawProg <= 1 ? rawProg * 100 : rawProg)));
+                        return (
+                          <Pressable
+                            onPress={() => {
+                              if (controlsVisibleRef.current && !isHidingControlsRef.current) {
+                                schedHide();
+                              } else {
+                                fadeIn();
+                              }
+                              const showToast = (text: string, tone: "info" | "done" = "info") => {
+                                if (downloadToastTimerRef.current) clearTimeout(downloadToastTimerRef.current);
+                                setDownloadToast({ text, tone });
+                                downloadToastTimerRef.current = setTimeout(() => {
+                                  downloadToastTimerRef.current = null;
+                                  if (aliveRef.current) setDownloadToast(null);
+                                }, 2200);
+                              };
+                              if (downloadState === "done") {
+                                showToast("تم تنزيل هذه الحلقة مسبقاً", "done");
+                                return;
+                              }
+                              if (downloadState === "downloading") {
+                                showToast(normPct > 0 ? `جاري التنزيل في الخلفية (${normPct}%)` : "جاري التنزيل في الخلفية...", "info");
+                                return;
+                              }
+                              const qLabel = downloadQualityLabel ? ` • ${downloadQualityLabel}` : "";
+                              showToast(`بدأ التنزيل في التطبيق${qLabel}`, "info");
+                              onDownloadCurrent?.();
+                            }}
+                            style={[
+                              s.bottomIconCircle,
+                              downloadState === "downloading" && s.bottomDownloadActive,
+                              downloadState === "done" && s.bottomDownloadDone,
+                              downloadState === "error" && s.bottomDownloadError,
+                            ]}
+                            hitSlop={10}
+                            accessibilityRole="button"
+                            accessibilityLabel={
+                              downloadState === "done"
+                                ? "تم تنزيل الحلقة"
+                                : downloadState === "downloading"
+                                  ? "جاري تنزيل الحلقة"
+                                  : "تنزيل الحلقة"
                             }
-                            const showToast = (text: string, tone: "info" | "done" = "info") => {
-                              if (downloadToastTimerRef.current) clearTimeout(downloadToastTimerRef.current);
-                              setDownloadToast({ text, tone });
-                              downloadToastTimerRef.current = setTimeout(() => {
-                                downloadToastTimerRef.current = null;
-                                if (aliveRef.current) setDownloadToast(null);
-                              }, 2200);
-                            };
-                            if (downloadState === "done") {
-                              showToast("تم تنزيل هذه الحلقة مسبقاً", "done");
-                              return;
-                            }
-                            if (downloadState === "downloading") {
-                              const pct = Math.max(0, Math.min(100, Math.round(downloadProgress || 0)));
-                              showToast(pct > 0 ? `جاري التنزيل في الخلفية (${pct}%)` : "جاري التنزيل في الخلفية...", "info");
-                              return;
-                            }
-                            const qLabel = downloadQualityLabel ? ` • ${downloadQualityLabel}` : "";
-                            showToast(`بدأ التنزيل في التطبيق${qLabel}`, "info");
-                            onDownloadCurrent?.();
-                          }}
-                          style={[
-                            s.bottomIconCircle,
-                            downloadState === "downloading" && s.bottomDownloadActive,
-                            downloadState === "done" && s.bottomDownloadDone,
-                            downloadState === "error" && s.bottomDownloadError,
-                          ]}
-                          hitSlop={10}
-                          accessibilityRole="button"
-                          accessibilityLabel={
-                            downloadState === "done"
-                              ? "تم تنزيل الحلقة"
-                              : downloadState === "downloading"
-                                ? "جاري تنزيل الحلقة"
-                                : "تنزيل الحلقة"
-                          }
-                        >
-                          {downloadState === "downloading" ? (
-                            Math.round(downloadProgress || 0) > 0 ? (
-                              <Text style={s.downloadPctText}>
-                                {Math.min(99, Math.round(downloadProgress || 0))}%
-                              </Text>
+                          >
+                            {downloadState === "downloading" ? (
+                              normPct > 0 ? (
+                                <Text style={s.downloadPctText}>
+                                  {Math.min(99, normPct)}%
+                                </Text>
+                              ) : (
+                                <ActivityIndicator size="small" color="#ddd6fe" />
+                              )
+                            ) : downloadState === "done" ? (
+                              <Ionicons name="checkmark" size={20} color="#6ee7b7" />
+                            ) : downloadState === "error" ? (
+                              <Ionicons name="refresh-outline" size={19} color="#fca5a5" />
                             ) : (
-                              <ActivityIndicator size="small" color="#ddd6fe" />
-                            )
-                          ) : downloadState === "done" ? (
-                            <Ionicons name="checkmark" size={20} color="#6ee7b7" />
-                          ) : downloadState === "error" ? (
-                            <Ionicons name="refresh-outline" size={19} color="#fca5a5" />
-                          ) : (
-                            <Ionicons name="download-outline" size={19} color="rgba(255,255,255,0.92)" />
-                          )}
-                        </Pressable>
-                      )}
+                              <Ionicons name="download-outline" size={19} color="rgba(255,255,255,0.92)" />
+                            )}
+                          </Pressable>
+                        );
+                      })()}
                     </View>
 
                     {/* أقصى اليمين السفلي الفعلي: تمدد الشاشة + السرعة */}
@@ -5279,6 +5311,7 @@ const s = StyleSheet.create({
     fontSize: 13,
     fontFamily: "Cairo_700Bold",
   },
+
   downloadToastWrap: {
     position: "absolute",
     top: 24,

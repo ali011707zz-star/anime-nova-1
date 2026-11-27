@@ -71,3 +71,15 @@ test("AW episode navigation stops at both real catalogue boundaries", () => {
   assert.equal(getAdjacentAwEpisode(seasons, episodes, 2, 4, 1), null);
   assert.equal(getAdjacentAwEpisode(seasons, episodes, 0, 2, 1), null);
 });
+
+test("AW source normalization excludes StreamTape (ST) rows from AW dubbed", () => {
+  const sources = normalizeAwWatchSources([
+    { name: "Pixeldrain", quality: "1080p", rawUrl: "https://pixeldrain.com/api/file/AbC123" },
+    { name: "ST", quality: "1080p", rawUrl: "https://streamtape.com/e/xyz/movie.mp4" },
+    { name: "StreamTape", quality: "720p", rawUrl: "/api/anime/video-proxy?url=https%3A%2F%2Fstreamtape.to%2Fv%2Fabc" },
+    { name: "Mediafire", quality: "720p", rawUrl: "/api/aw-dubbed/mf-stream?link=https%3A%2F%2Fmediafire.com%2Ffile%2Fabc" },
+  ], "https://nova.example");
+  assert.equal(sources.length, 2);
+  assert.equal(sources[0].serverName, "Pixeldrain");
+  assert.equal(sources[1].serverName, "Mediafire");
+});

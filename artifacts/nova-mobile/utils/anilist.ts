@@ -165,6 +165,8 @@ export const EPISODE_COUNT_QUERY = `
 query EpisodeCount($id: Int!) {
   Media(id: $id, type: ANIME) {
     episodes
+    countryOfOrigin
+    synonyms
     nextAiringEpisode { episode }
   }
 }`;

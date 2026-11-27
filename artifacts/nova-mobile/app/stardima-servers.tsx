@@ -15,7 +15,10 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { TvPressable, isTvDevice, tvFocusStyle, useTvMetrics } from "@/utils/tv";
 import { getBaseUrl } from "@/utils/api";
+import { reconcileDownloadButtonStates } from "@/utils/downloadIntegrityLogic.mjs";
 import { getAuthToken, getDownloadToken } from "@/utils/secureApi";
+import { resolveMediaFireDirectOnPhone } from "@/utils/directClientExtractor";
+import { resolveDirectInternalMp4Download } from "@/utils/hybridStreamLogic.mjs";
 import { ensureWatchAccess } from "@/utils/adPolicy";
 import { getWatchContentId } from "@/context/AppContext";
 import {
@@ -257,23 +260,26 @@ export default function StardimaServersScreen() {
     return () => controller.abort();
   }, [loadServers, retryKey]);
 
-  /* ── Sync Active & Completed Downloads ── */
+  /* ── Sync Active & Completed Downloads (verified against getDownloads) ── */
   useEffect(() => {
+    let cancelled = false;
     const sync = () => {
+      const activeStatusByKey: Record<string, string> = {};
+      const allKeys: string[] = [];
       for (const server of servers) {
         const sId = String(server.id || "");
         if (!sId) continue;
+        allKeys.push(sId);
         const siteKey = `stardima_${sId}`;
         const activeDl = getActiveSiteDownload(numericAnimeId, numericEp, siteKey);
         if (activeDl) {
-          setDlStates((p) => ({
-            ...p,
-            [sId]: activeDl.status === "error" ? "error" : "downloading",
-          }));
+          activeStatusByKey[sId] = activeDl.status;
           setDlProgress((p) => ({ ...p, [sId]: Math.round(activeDl.progress * 100) }));
         }
       }
       getDownloads().then((list) => {
+        if (cancelled) return;
+        const completedKeys = new Set<string>();
         for (const server of servers) {
           const sId = String(server.id || "");
           if (!sId) continue;
@@ -281,13 +287,25 @@ export default function StardimaServersScreen() {
           const qualityLabel = String(server.quality || "720p").trim();
           const dlId = makeDownloadId(numericAnimeId, numericEp, siteKey, qualityLabel);
           if (list.some((d) => d.id === dlId)) {
-            setDlStates((p) => ({ ...p, [sId]: "done" }));
+            completedKeys.add(sId);
           }
         }
+        setDlStates((prev) =>
+          reconcileDownloadButtonStates({
+            prevStates: prev,
+            activeStatusByKey,
+            completedKeys,
+            allKeys,
+          }),
+        );
       }).catch(() => {});
     };
     sync();
-    return subscribeActiveDownloads(sync);
+    const unsub = subscribeActiveDownloads(sync);
+    return () => {
+      cancelled = true;
+      unsub();
+    };
   }, [servers, numericAnimeId, numericEp]);
 
   const handleDownloadServer = useCallback(async (server: CatalogServer, downloadMode: "internal" | "adm" = "internal") => {
@@ -345,16 +363,49 @@ export default function StardimaServersScreen() {
         return;
       }
 
+      const siteKey = `stardima_${serverId}`;
+      let candidateUrl = rawStreamUrl;
+      let candidateRawUrl = data.rawUrl || data.streamUrl || rawStreamUrl;
+      let candidateHeaders: Record<string, string> | undefined;
+
+      if (data.mediaType !== "hls") {
+        const mfCandidate = [candidateUrl, candidateRawUrl].find(
+          (u): u is string =>
+            typeof u === "string" &&
+            (u.includes("/api/aw-dubbed/mf-stream") ||
+              /https?:\/\/(?:www\.)?mediafire\.com\/(?:file|view|download)\//i.test(u)),
+        );
+        if (mfCandidate) {
+          const mfDirect = await resolveMediaFireDirectOnPhone(mfCandidate, base);
+          if (mfDirect?.url) {
+            candidateUrl = mfDirect.url;
+            candidateRawUrl = mfDirect.url;
+            candidateHeaders = mfDirect.headers;
+          }
+        }
+      }
+
+      const directMp4 = resolveDirectInternalMp4Download({
+        url: candidateUrl,
+        rawUrl: candidateRawUrl,
+        mediaType: data.mediaType,
+        site: siteKey,
+        provider: "stardima",
+        headers: candidateHeaders,
+        baseUrl: base,
+      });
+
       const [authToken, downloadToken] = await Promise.all([
         getAuthToken(),
         getDownloadToken(),
       ]);
 
-      const downloadUrl = data.mediaType === "hls" && !rawStreamUrl.includes("/api/anime/download-mp4")
-        ? `${base}/api/anime/download-mp4?url=${encodeURIComponent(rawStreamUrl)}${downloadToken ? `&dlToken=${encodeURIComponent(downloadToken)}` : ""}`
-        : rawStreamUrl;
+      const downloadUrl = directMp4.isDirect && directMp4.url
+        ? directMp4.url
+        : data.mediaType === "hls" && !rawStreamUrl.includes("/api/anime/download-mp4")
+          ? `${base}/api/anime/download-mp4?site=${encodeURIComponent(siteKey)}&url=${encodeURIComponent(rawStreamUrl)}${downloadToken ? `&dlToken=${encodeURIComponent(downloadToken)}` : ""}`
+          : rawStreamUrl;
 
-      const siteKey = `stardima_${serverId}`;
       const qualityLabel = String(server.quality || "720p").trim();
 
       setDlStates((p) => ({ ...p, [serverId]: "downloading" }));
@@ -370,6 +421,8 @@ export default function StardimaServersScreen() {
         url: downloadUrl,
         authToken: authToken ?? undefined,
         downloadToken: downloadToken ?? undefined,
+        headers: directMp4.isDirect ? directMp4.headers : undefined,
+        hlsManifestUrl: data.mediaType === "hls" ? rawStreamUrl : undefined,
       });
     } catch {
       setDlStates((p) => ({ ...p, [serverId]: "error" }));
@@ -897,32 +950,32 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  content: { padding: 14, paddingBottom: 80, gap: 12 },
+  content: { paddingHorizontal: 12, paddingTop: 10, paddingBottom: 80, gap: 8 },
   infoCard: {
     flexDirection: ROW_RTL,
-    alignItems: "flex-start",
-    gap: 14,
-    padding: 14,
-    borderRadius: 18,
+    alignItems: "center",
+    gap: 11,
+    padding: 10,
+    borderRadius: 15,
     borderWidth: 1,
   },
   infoPosterWrap: {
-    width: 72,
-    height: 102,
+    width: 56,
+    height: 80,
     position: "relative",
     alignItems: "center",
     justifyContent: "center",
   },
   infoPosterGlow: {
     position: "absolute",
-    width: 80,
-    height: 110,
-    borderRadius: 20,
+    width: 62,
+    height: 86,
+    borderRadius: 14,
   },
   posterThumb: {
-    width: 72,
-    height: 102,
-    borderRadius: 12,
+    width: 56,
+    height: 80,
+    borderRadius: 10,
     borderWidth: 1,
   },
   infoTextWrap: {
@@ -959,8 +1012,8 @@ const styles = StyleSheet.create({
   },
   intro: {
     fontFamily: "Cairo_400Regular",
-    fontSize: 12,
-    lineHeight: 20,
+    fontSize: 10.5,
+    lineHeight: 16,
     textAlign: "center",
   },
   qualitySection: { gap: 8 },
@@ -990,9 +1043,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    minHeight: 52,
+    minHeight: 48,
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 8,
     gap: 8,
   },
   serverRowBorder: {
@@ -1002,10 +1055,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 10,
+    paddingHorizontal: 11,
+    paddingVertical: 5,
+    borderRadius: 9,
     backgroundColor: "#10b981",
+    flexShrink: 0,
   },
   playActionText: {
     color: "#ffffff",

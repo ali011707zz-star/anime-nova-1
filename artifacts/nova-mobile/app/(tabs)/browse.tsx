@@ -7,28 +7,28 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { getBaseUrl } from "@/utils/api";
-import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
+import { isTvDevice, tvFocusStyle, TvFocusGuideView, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { useTvFocusMemory } from "@/utils/tvFocus";
 import { getGridColumnCount } from "@/components/AnimeCard";
 import { AnimeFilterSheet, type AnimeFilterOption } from "@/components/AnimeFilterSheet";
 import { useColors } from "@/hooks/useColors";
 import { getKnownArabicAnimeTitle } from "@/utils/arabicAnimeTitles";
+import { filterReleasedBrowseMedia, formatMediaTitleHierarchy } from "@/utils/donghuaLogic.mjs";
 import type { ThemePalette } from "@/constants/colors";
 
 function useBrowseTheme() {
   const colors = useColors();
-  const { deviceScale } = useTvMetrics();
-  const { width, height } = useWindowDimensions();
-  const { tv: tvMode } = useTvMetrics();
+  const { deviceScale, tv: tvMode } = useTvMetrics();
   const g = useMemo(() => createBrowseStyles(colors, deviceScale, tvMode), [colors, deviceScale, tvMode]);
-  return { colors, g, deviceScale };
+  return { colors, g, deviceScale, tvMode };
 }
 
 /* ── Data ── */
 interface AnimeResult {
   id: number;
   idSource?: "mal" | "kitsu" | string;
-  title: { romaji: string; english?: string };
+  countryOfOrigin?: string;
+  title: { romaji: string; english?: string; native?: string };
   title_ar?: string;
   coverImage: { large: string; extraLarge?: string };
   averageScore?: number;
@@ -113,31 +113,35 @@ const BLOCKED = new Set(["Hentai"]);
 function coverUrl(id: number) { return `https://img.anili.st/media/${id}`; }
 
 /* ── Genre badge card with authentic anime artwork + vector fallback ── */
-function GenreCard({
+type BrowseStyles = ReturnType<typeof createBrowseStyles>;
+
+const GenreCard = React.memo(function GenreCard({
   item,
   onPress,
   columns,
   horizontal = false,
+  g,
+  tvMode,
 }: {
   item: typeof GENRES_WITH_COVERS[0];
   liveCoverUrl?: string;
   onPress: () => void;
   columns: number;
   horizontal?: boolean;
+  g: BrowseStyles;
+  tvMode: boolean;
 }) {
-  const { g } = useBrowseTheme();
-  const { width, height } = useWindowDimensions();
-  const { tv: tvMode } = useTvMetrics();
   const [imgErr, setImgErr] = useState(false);
 
   return (
     <Pressable
       onPress={onPress}
       focusable={tvMode}
+      nativeFocusOnly
       style={({ focused }) => [
         g.genreCard,
         horizontal ? g.horizontalGenreCard : { flex: 1 / columns },
-        tvMode && { borderRadius: horizontal ? 10 : 12, padding: 1.5 },
+        tvMode && { borderRadius: horizontal ? 10 : 12, borderWidth: 2, borderColor: "transparent", padding: 1.5 },
         tvMode && tvFocusStyle(focused),
       ]}
     >
@@ -177,36 +181,38 @@ function GenreCard({
       </View>
     </Pressable>
   );
-}
+});
 
 /* ── Anime card ── */
-function AnimeCard({
+const AnimeCard = React.memo(function AnimeCard({
   anime,
-  onPress,
-  columns,
+  onPressAnime,
+  cardW,
+  cardH,
   hasTVPreferredFocus,
-  onFocus,
+  onFocusAnime,
+  g,
+  tvMode,
 }: {
   anime: AnimeResult;
-  onPress: () => void;
-  columns: number;
+  onPressAnime: (anime: AnimeResult) => void;
+  cardW: number;
+  cardH: number;
   hasTVPreferredFocus?: boolean;
-  onFocus?: () => void;
+  onFocusAnime?: (id: number) => void;
+  g: BrowseStyles;
+  tvMode: boolean;
 }) {
-  const { g } = useBrowseTheme();
-  const { width, height } = useWindowDimensions();
-  const { tv: tvMode } = useTvMetrics();
-  const gridW = Math.min(Math.max(width - 24, 280), tvMode ? 1100 : 900);
-  const cardW = Math.max(88, Math.floor((gridW - 24 - 10 * (columns - 1)) / columns));
-  const cardH = Math.round(cardW * 1.44);
   const fmt = anime.format ? FORMAT_AR[anime.format] : null;
   const isFilm = anime.format === "MOVIE";
+  const posterUri = anime.coverImage?.large || anime.coverImage?.extraLarge || "";
   return (
     <Pressable
-      onPress={onPress}
+      onPress={() => onPressAnime(anime)}
       focusable={tvMode}
+      nativeFocusOnly
       hasTVPreferredFocus={hasTVPreferredFocus}
-      onFocus={onFocus}
+      onFocus={onFocusAnime ? () => onFocusAnime(anime.id) : undefined}
       style={({ focused }) => [
         g.card,
         { width: cardW, height: cardH, flex: 0, borderRadius: tvMode ? 16 : 13 },
@@ -215,9 +221,9 @@ function AnimeCard({
       ]}
     >
       <View style={[g.cardWrap, tvMode && g.tvCardWrap, { width: "100%", height: "100%", aspectRatio: undefined }]}>
-        {anime.coverImage?.large ? (
+        {posterUri ? (
           <Image
-            source={{ uri: tvMode ? anime.coverImage.extraLarge || anime.coverImage.large : anime.coverImage.large }}
+            source={{ uri: posterUri }}
             style={g.cardImg}
             resizeMethod="resize"
             fadeDuration={tvMode ? 0 : 100}
@@ -237,8 +243,42 @@ function AnimeCard({
           </View>
         ) : null}
         {(() => {
-          const enTitle = anime.title?.english || anime.title?.romaji || "";
           const arTitle = anime.title_ar || getKnownArabicAnimeTitle(anime.id, anime.title?.english, anime.title?.romaji);
+          if (anime.countryOfOrigin === "CN") {
+            const h = formatMediaTitleHierarchy({
+              english: anime.title?.english,
+              romaji: anime.title?.romaji,
+              native: anime.title?.native,
+              arabic: arTitle,
+            });
+            return (
+              <View style={g.cardBottom}>
+                <Text
+                  style={[g.cardTitle, { writingDirection: "ltr", textAlign: "left", color: "#fff" }]}
+                  numberOfLines={2}
+                >
+                  {h.primary}
+                </Text>
+                {h.arabic ? (
+                  <Text
+                    numberOfLines={1}
+                    style={[g.cardTitleAr, { color: "rgba(255,255,255,0.88)", fontSize: tvMode ? 11.5 : 9.5, lineHeight: tvMode ? 16 : 13 }]}
+                  >
+                    {h.arabic}
+                  </Text>
+                ) : null}
+                {h.original ? (
+                  <Text
+                    numberOfLines={1}
+                    style={[g.cardTitle, { writingDirection: "ltr", textAlign: "left", color: "rgba(255,255,255,0.65)", fontSize: tvMode ? 10 : 8, lineHeight: tvMode ? 14 : 11 }]}
+                  >
+                    {h.original}
+                  </Text>
+                ) : null}
+              </View>
+            );
+          }
+          const enTitle = anime.title?.english || anime.title?.romaji || "";
           return (
             <View style={g.cardBottom}>
               <Text
@@ -261,7 +301,7 @@ function AnimeCard({
       </View>
     </Pressable>
   );
-}
+});
 
 /* ── Genre query to get a cover image ── */
 const GENRE_COVER_QUERY = (genre: string) => `
@@ -269,20 +309,20 @@ query { Page(page:1,perPage:1) {
   media(type:ANIME,genre:"${genre}",sort:[POPULARITY_DESC]){id coverImage{large}}
 }}`;
 
-const BROWSE_QUERY = (sort: string, format: string, season: string, year: string, genre: string, status: string) => `
+const BROWSE_QUERY = (sort: string, format: string, season: string, year: string, genre: string, status: string, country: "JP" | "CN" = "JP") => `
 query ($page: Int) {
   Page(page: $page, perPage: 30) {
-    media(type:ANIME, countryOfOrigin:"JP", isAdult:false, genre_not_in:["Hentai"], sort:[${sort || "POPULARITY_DESC"}]${format ? `, format:${format}` : ""}${season ? `, season:${season}` : ""}${year ? `, seasonYear:${year}` : ""}${genre ? `, genre:"${genre}"` : ""}${status ? `, status:${status}` : ""}) {
-      id title { romaji english } coverImage { large extraLarge } averageScore episodes format status startDate { year } genres
+    media(type:ANIME, countryOfOrigin:"${country}", isAdult:false, genre_not_in:["Hentai"], sort:[${sort || "POPULARITY_DESC"}]${format ? `, format:${format}` : ""}${season ? `, season:${season}` : ""}${year ? `, seasonYear:${year}` : ""}${genre ? `, genre:"${genre}"` : ""}${status ? `, status:${status}` : `, status_not_in:[NOT_YET_RELEASED,CANCELLED]`}) {
+      id countryOfOrigin title { romaji english native } coverImage { large extraLarge } averageScore episodes format status startDate { year } genres
     }
   }
 }`;
 
-const SEARCH_QUERY = (sort: string, format: string, season: string, year: string, genre: string, status: string) => `
+const SEARCH_QUERY = (sort: string, format: string, season: string, year: string, genre: string, status: string, country: "JP" | "CN" = "JP") => `
 query ($search: String!) {
   Page(page: 1, perPage: 30) {
-    media(search: $search, type: ANIME, isAdult: false, genre_not_in:["Hentai","Ecchi"], sort:[SEARCH_MATCH,${sort || "POPULARITY_DESC"}]${format ? `,format:${format}` : ""}${season ? `,season:${season}` : ""}${year ? `,seasonYear:${year}` : ""}${genre ? `,genre:"${genre}"` : ""}${status ? `,status:${status}` : ""}) {
-      id title { romaji english } coverImage { large } averageScore episodes format status startDate { year } genres
+    media(search: $search, type: ANIME, countryOfOrigin:"${country}", isAdult: false, genre_not_in:["Hentai","Ecchi"], sort:[SEARCH_MATCH,${sort || "POPULARITY_DESC"}]${format ? `,format:${format}` : ""}${season ? `,season:${season}` : ""}${year ? `,seasonYear:${year}` : ""}${genre ? `,genre:"${genre}"` : ""}${status ? `,status:${status}` : `,status_not_in:[NOT_YET_RELEASED,CANCELLED]`}) {
+      id countryOfOrigin title { romaji english native } coverImage { large } averageScore episodes format status startDate { year } genres
     }
   }
 }`;
@@ -305,6 +345,14 @@ const ARABIC_SEARCH_ALIASES: Record<string, string> = {
   "جوجوتسو": "Jujutsu Kaisen",
   "سولو ليفلينج": "Solo Leveling",
   "بلاك كلوفر": "Black Clover",
+  "سول لاند": "Douluo Dalu",
+  "معركة عبر السماء": "Doupo Cangqiong",
+  "الخالد المتمرد": "Xian Ni",
+  "النجم المبتلع": "Tunshi Xingkong",
+  "عالم مثالي": "Wanmei Shijie",
+  "لينك كليك": "Shiguang Dailiren",
+  "ارادة ابدية": "Yi Nian Yong Heng",
+  "إرادة أبدية": "Yi Nian Yong Heng",
 };
 
 function translateSearchQuery(value: string): string {
@@ -329,6 +377,7 @@ export default function BrowseScreen() {
     season?: string;
     year?: string;
     status?: string;
+    tab?: string;
   }>();
   const router = useRouter();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
@@ -338,6 +387,8 @@ export default function BrowseScreen() {
   const gridColumns = getGridColumnCount(width, height);
   const genreColumns = tvMode ? 3 : 2;
   const gridWidth = Math.min(Math.max(width - 24, 0), tvMode ? 1100 : 900);
+  const gridCardW = Math.max(88, Math.floor((Math.max(gridWidth, 280) - 24 - 10 * (gridColumns - 1)) / gridColumns));
+  const gridCardH = Math.round(gridCardW * 1.44);
   const filterRailWidth = Math.min(Math.max(width - 24, 0), tvMode ? 1100 : 900);
 
   const routeValue = (value: string | string[] | undefined) =>
@@ -348,7 +399,10 @@ export default function BrowseScreen() {
   const routeYear = routeValue(routeParams.year);
   const routeStatus = routeValue(routeParams.status);
 
+  const routeTab = routeValue(routeParams.tab);
+  const [browseSection, setBrowseSection] = useState<"anime" | "donghua">(routeTab === "donghua" ? "donghua" : "anime");
   const [view, setView] = useState<"genres" | "list">("list");
+  const activeCountry: "JP" | "CN" = browseSection === "donghua" ? "CN" : "JP";
   const [activeGenre, setActiveGenre] = useState(routeValue(routeParams.genre));
   const [activeGenreAr, setActiveGenreAr] = useState(routeValue(routeParams.genreAr));
   const [format, setFormat] = useState(FORMAT_OPTIONS.some(opt => opt.value === routeFormat) ? routeFormat : "");
@@ -369,7 +423,8 @@ export default function BrowseScreen() {
   const [searchLoading, setSearchLoading] = useState(false);
 
   const listRef = useRef<FlatList<AnimeResult>>(null);
-  const { preferredKey, ready, rememberFocus } = useTvFocusMemory("browse");
+  const { preferredKey, ready, rememberFocus } = useTvFocusMemory(`browse:${browseSection}`);
+  const userInteractedHeaderRef = useRef(false);
   const genRef = useRef(0);
   const searchAbortRef = useRef<AbortController | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -387,7 +442,10 @@ export default function BrowseScreen() {
     setYear(/^\d{4}$/.test(routeYear) ? routeYear : "");
     setStatus(["RELEASING", "FINISHED"].includes(routeStatus) ? routeStatus : "");
     setView("list");
-  }, [routeParams.genre, routeParams.genreAr, routeParams.format, routeParams.sort, routeParams.season, routeParams.year, routeParams.status]);
+    userInteractedHeaderRef.current = false;
+    if (routeValue(routeParams.tab) === "donghua") setBrowseSection("donghua");
+    else if (routeValue(routeParams.tab) === "anime" || routeParams.genre || routeParams.format || routeParams.season || routeParams.year || routeParams.status || routeParams.sort) setBrowseSection("anime");
+  }, [routeParams.genre, routeParams.genreAr, routeParams.format, routeParams.sort, routeParams.season, routeParams.year, routeParams.status, routeParams.tab]);
 
   /* Every genre already has a dedicated, verified unique cover in GENRES_WITH_COVERS */
 
@@ -404,28 +462,32 @@ export default function BrowseScreen() {
       const r = await fetch(`${getBaseUrl()}/api/anilist`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-            query: BROWSE_QUERY(sort, format, season, year, activeGenre, status),
+            query: BROWSE_QUERY(sort, format, season, year, activeGenre, status, activeCountry),
           variables: { page: p },
         }),
         signal: ctrl.signal,
       });
       const d = await r.json();
       if (genRef.current !== gen || ctrl.signal.aborted) return;
-      const results: AnimeResult[] = (d.data?.Page?.media || [])
+      const rawResults: AnimeResult[] = (d.data?.Page?.media || [])
         .filter((a: AnimeResult) => !(a.genres || []).some(gx => BLOCKED.has(gx)));
+      const results: AnimeResult[] = filterReleasedBrowseMedia(rawResults, {
+        currentYear: CUR_YEAR,
+        allowUnreleased: Boolean(status),
+      });
       if (reset) setItems(results);
       else setItems(prev => {
         const ids = new Set(prev.map(i => i.id));
         return [...prev, ...results.filter(i => !ids.has(i.id))];
       });
       setPage(p);
-      setHasMore(results.length === 30);
+      setHasMore(rawResults.length === 30);
     } catch (e: any) {
       if (e?.name === "AbortError") return;
     } finally {
       if (genRef.current === gen && !ctrl.signal.aborted) setLoading(false);
     }
-  }, [sort, format, season, year, activeGenre, status]);
+  }, [sort, format, season, year, activeGenre, status, activeCountry]);
 
   useEffect(() => {
     if (view !== "list") return;
@@ -434,7 +496,7 @@ export default function BrowseScreen() {
     listRef.current?.scrollToOffset({ offset: 0, animated: false });
     setPage(1); setHasMore(true);
     loadItems(1, true);
-  }, [view, sort, format, season, year, activeGenre, status]);
+  }, [view, sort, format, season, year, activeGenre, status, activeCountry]);
 
   useEffect(() => {
     searchAbortRef.current?.abort();
@@ -455,7 +517,7 @@ export default function BrowseScreen() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            query: SEARCH_QUERY(sort, format, season, year, activeGenre, status),
+            query: SEARCH_QUERY(sort, format, season, year, activeGenre, status, activeCountry),
             variables: { search: translated },
           }),
           signal: ctrl.signal,
@@ -463,8 +525,12 @@ export default function BrowseScreen() {
         if (!r.ok) throw new Error(`search ${r.status}`);
         const d = await r.json();
         if (!ctrl.signal.aborted && requestId === searchRequestRef.current) {
-          setSearchItems((d.data?.Page?.media || [])
-            .filter((a: AnimeResult) => !(a.genres || []).some(gx => BLOCKED.has(gx))));
+          const rawSearch = (d.data?.Page?.media || [])
+            .filter((a: AnimeResult) => !(a.genres || []).some(gx => BLOCKED.has(gx)));
+          setSearchItems(filterReleasedBrowseMedia(rawSearch, {
+            currentYear: CUR_YEAR,
+            allowUnreleased: Boolean(status),
+          }));
         }
       } catch (e: any) {
         if (e?.name !== "AbortError" && !ctrl.signal.aborted && requestId === searchRequestRef.current) setSearchItems([]);
@@ -476,7 +542,7 @@ export default function BrowseScreen() {
       if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
       ctrl.abort();
     };
-  }, [search, sort, format, season, year, activeGenre, status]);
+  }, [search, sort, format, season, year, activeGenre, status, activeCountry]);
 
   function openGenre(genre: string, ar: string) {
     setActiveGenre(genre); setActiveGenreAr(ar);
@@ -498,206 +564,361 @@ export default function BrowseScreen() {
     : season ? SEASON_OPTIONS.find(s => s.value === season)?.label.replace(/.*? /, "") || "تصفح"
     : "تصفح";
 
+  const handlePressAnime = useCallback((anime: AnimeResult) => {
+    router.push(
+      `/anime/${anime.id}?title=${encodeURIComponent(anime.title.romaji)}&english=${encodeURIComponent(anime.title.english || "")}${anime.idSource ? `&src=${encodeURIComponent(anime.idSource)}` : ""}`
+    );
+  }, [router]);
+
+  const handleFocusAnime = useCallback((id: number) => {
+    userInteractedHeaderRef.current = false;
+    rememberFocus(String(id));
+  }, [rememberFocus]);
+
+  const hasPreferredGridCard = Boolean(
+    tvMode &&
+    !userInteractedHeaderRef.current &&
+    ready &&
+    preferredKey &&
+    filteredItems.some((it) => String(it.id) === preferredKey)
+  );
+  const preferSwitcherSection = Boolean(
+    tvMode &&
+    !userInteractedHeaderRef.current &&
+    !hasPreferredGridCard
+  );
+
   return (
     <View style={[g.container, { paddingTop: topPad }]}>
       {/* ── Header (Unified across Phone, iPad & TV) ── */}
-      <View style={[g.header, tvMode && width >= 700 && g.tvHeader]}>
-        <View style={g.mobileHeaderRow}>
+      <View style={[g.header, tvMode && width >= 700 && g.tvHeader, tvMode && { overflow: "visible" }]}>
+        <TvFocusGuideView autoFocus={false} style={[g.mobileHeaderRow, tvMode && { overflow: "visible" }]}>
           <View style={g.mobileTitleGroup}>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="رجوع"
               focusable={tvMode}
+              nativeFocusOnly
+              onFocus={() => { userInteractedHeaderRef.current = true; }}
               onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)}
-              style={g.mobileBackButton}
+              style={({ focused }) => [
+                g.mobileBackButton,
+                tvMode && { width: 38, height: 38, borderWidth: 2.5 },
+                tvMode && tvFocusStyle(focused),
+              ]}
             >
-              <Ionicons name="chevron-forward" size={19} color={colors.textPrimary} />
+              <Ionicons name="chevron-forward" size={tvMode ? 21 : 19} color={colors.textPrimary} />
             </Pressable>
             <Text
               numberOfLines={1}
               adjustsFontSizeToFit
               minimumFontScale={0.8}
-              style={[g.mobileTitle, { flexShrink: 1 }]}
+              style={[g.mobileTitle, tvMode && { fontSize: 17 }, { flexShrink: 1 }]}
             >
               {activeGenreAr || "المكتبة والتصفح"}
             </Text>
           </View>
-          <View style={g.mobileActions}>
+          <View style={[g.mobileActions, tvMode && { gap: 6, overflow: "visible" }]}>
             <View style={g.modeSwitch}>
               <Pressable
                 focusable={tvMode}
+                nativeFocusOnly
+                onFocus={() => { userInteractedHeaderRef.current = true; }}
                 onPress={() => router.push("/(tabs)/search" as any)}
-                style={g.modeButton}
+                style={({ focused }) => [
+                  g.modeButton,
+                  tvMode && { minHeight: 34, paddingHorizontal: 10, borderWidth: 2, borderColor: "transparent" },
+                  tvMode && tvFocusStyle(focused),
+                ]}
               >
-                <Ionicons name="search" size={13} color={colors.textMuted} />
-                <Text style={g.modeButtonText}>بحث</Text>
+                <Ionicons name="search" size={tvMode ? 15 : 13} color={colors.textMuted} />
+                <Text style={[g.modeButtonText, tvMode && { fontSize: 12 }]}>بحث</Text>
               </Pressable>
               <Pressable
                 focusable={tvMode}
+                nativeFocusOnly
+                onFocus={() => { userInteractedHeaderRef.current = true; }}
                 onPress={() => setView("list")}
-                style={[g.modeButton, view === "list" && g.modeButtonActive]}
+                style={({ focused }) => [
+                  g.modeButton,
+                  view === "list" && g.modeButtonActive,
+                  tvMode && { minHeight: 34, paddingHorizontal: 10, borderWidth: 2, borderColor: "transparent" },
+                  tvMode && tvFocusStyle(focused),
+                ]}
               >
-                <Ionicons name="compass-outline" size={13} color={view === "list" ? colors.buttonText : colors.textMuted} />
-                <Text style={[g.modeButtonText, view === "list" && g.modeButtonTextActive]}>تصفح</Text>
+                <Ionicons name="compass-outline" size={tvMode ? 15 : 13} color={view === "list" ? colors.buttonText : colors.textMuted} />
+                <Text style={[g.modeButtonText, tvMode && { fontSize: 12 }, view === "list" && g.modeButtonTextActive]}>تصفح</Text>
               </Pressable>
             </View>
             <Pressable
               accessibilityLabel="التصنيفات"
               focusable={tvMode}
+              nativeFocusOnly
+              onFocus={() => { userInteractedHeaderRef.current = true; }}
               onPress={() => setView(view === "genres" ? "list" : "genres")}
-              style={[g.mobileFilterButton, view === "genres" && g.genreToggleBtnActive]}
+              style={({ focused }) => [
+                g.mobileFilterButton,
+                view === "genres" && g.genreToggleBtnActive,
+                tvMode && { width: 38, height: 38, borderWidth: 2.5 },
+                tvMode && tvFocusStyle(focused),
+              ]}
             >
-              <Ionicons name="grid-outline" size={16} color={view === "genres" ? colors.accent : colors.textPrimary} />
+              <Ionicons name="grid-outline" size={tvMode ? 18 : 16} color={view === "genres" ? colors.accent : colors.textPrimary} />
             </Pressable>
             <Pressable
               accessibilityLabel="فتح الفلاتر"
               focusable={tvMode}
+              nativeFocusOnly
+              onFocus={() => { userInteractedHeaderRef.current = true; }}
               onPress={() => setFilterVisible(true)}
-              style={[g.mobileFilterButton, hasFilters && g.mobileFilterButtonActive]}
+              style={({ focused }) => [
+                g.mobileFilterButton,
+                hasFilters && g.mobileFilterButtonActive,
+                tvMode && { width: 38, height: 38, borderWidth: 2.5 },
+                tvMode && tvFocusStyle(focused),
+              ]}
             >
-              <Ionicons name="options-outline" size={17} color={hasFilters ? colors.buttonText : colors.textPrimary} />
+              <Ionicons name="options-outline" size={tvMode ? 19 : 17} color={hasFilters ? colors.buttonText : colors.textPrimary} />
             </Pressable>
             {hasFilters ? (
               <Pressable
                 accessibilityLabel="مسح الفلاتر"
                 focusable={tvMode}
+                nativeFocusOnly
+                onFocus={() => { userInteractedHeaderRef.current = true; }}
                 onPress={clearAll}
-                style={g.clearBtn}
+                style={({ focused }) => [
+                  g.clearBtn,
+                  tvMode && { minHeight: 38, paddingHorizontal: 12, borderWidth: 2.5 },
+                  tvMode && tvFocusStyle(focused),
+                ]}
               >
-                <Ionicons name="close" size={14} color={colors.destructive} />
-                <Text style={g.clearBtnText}>مسح</Text>
+                <Ionicons name="close" size={tvMode ? 16 : 14} color={colors.destructive} />
+                <Text style={[g.clearBtnText, tvMode && { fontSize: 12 }]}>مسح</Text>
               </Pressable>
             ) : null}
           </View>
-        </View>
+        </TvFocusGuideView>
+
+        {/* ── Section Switcher: الأنمي | دونغهوا ── */}
+        <TvFocusGuideView autoFocus={false} style={{ flexDirection: ROW_RTL, gap: 8, marginTop: 8, overflow: "visible" }}>
+          <Pressable
+            focusable={tvMode}
+            nativeFocusOnly
+            hasTVPreferredFocus={preferSwitcherSection && browseSection === "anime"}
+            onFocus={() => { userInteractedHeaderRef.current = true; }}
+            onPress={() => {
+              userInteractedHeaderRef.current = true;
+              if (browseSection !== "anime") { setItems([]); setSearchItems([]); setBrowseSection("anime"); }
+            }}
+            style={({ focused }) => [
+              {
+                flex: 1,
+                alignItems: "center",
+                justifyContent: "center",
+                paddingVertical: tvMode ? 9 : 7,
+                paddingHorizontal: 10,
+                borderRadius: 10,
+                borderWidth: tvMode ? 2.5 : 1,
+                backgroundColor: browseSection === "anime" ? colors.accent : colors.card,
+                borderColor: browseSection === "anime" ? colors.accent : colors.border,
+              },
+              tvMode && tvFocusStyle(focused),
+            ]}
+          >
+            <Text
+              numberOfLines={1}
+              maxFontSizeMultiplier={1.15}
+              style={{
+                fontSize: tvMode ? 14.5 : 12.5,
+                fontFamily: "Cairo_700Bold",
+                color: browseSection === "anime" ? colors.buttonText : colors.textPrimary,
+              }}
+            >
+              الأنمي
+            </Text>
+          </Pressable>
+          <Pressable
+            focusable={tvMode}
+            nativeFocusOnly
+            hasTVPreferredFocus={preferSwitcherSection && browseSection === "donghua"}
+            onFocus={() => { userInteractedHeaderRef.current = true; }}
+            onPress={() => {
+              userInteractedHeaderRef.current = true;
+              if (browseSection !== "donghua") { setItems([]); setSearchItems([]); setBrowseSection("donghua"); }
+            }}
+            style={({ focused }) => [
+              {
+                flex: 1,
+                alignItems: "center",
+                justifyContent: "center",
+                paddingVertical: tvMode ? 9 : 7,
+                paddingHorizontal: 10,
+                borderRadius: 10,
+                borderWidth: tvMode ? 2.5 : 1,
+                backgroundColor: browseSection === "donghua" ? colors.accent : colors.card,
+                borderColor: browseSection === "donghua" ? colors.accent : colors.border,
+              },
+              tvMode && tvFocusStyle(focused),
+            ]}
+          >
+            <Text
+              numberOfLines={1}
+              maxFontSizeMultiplier={1.15}
+              style={{
+                fontSize: tvMode ? 14.5 : 12.5,
+                fontFamily: "Cairo_700Bold",
+                color: browseSection === "donghua" ? colors.buttonText : colors.textPrimary,
+              }}
+            >
+              دونغهوا
+            </Text>
+          </Pressable>
+        </TvFocusGuideView>
 
         <Pressable
           focusable={tvMode}
+          nativeFocusOnly
+          onFocus={() => { userInteractedHeaderRef.current = true; }}
           onPress={() => setFilterVisible(true)}
-          style={g.mobileSortButton}
+          style={({ focused }) => [
+            g.mobileSortButton,
+            tvMode && { minHeight: 36, borderWidth: 2.5 },
+            tvMode && tvFocusStyle(focused),
+          ]}
         >
-          <Ionicons name="options-outline" size={16} color={colors.textSecondary} />
-          <Text numberOfLines={1} style={g.mobileSortText}>
+          <Ionicons name="options-outline" size={tvMode ? 17 : 16} color={colors.textSecondary} />
+          <Text numberOfLines={1} style={[g.mobileSortText, tvMode && { fontSize: 13 }]}>
             {SORT_OPTIONS.find((option) => option.value === sort)?.label || "الأكثر شعبية"}
             {format ? ` · ${FORMAT_AR[format] || format}` : ""}
             {season ? ` · ${SEASON_OPTIONS.find((s) => s.value === season)?.label || season}` : ""}
             {year ? ` · ${year}` : ""}
           </Text>
-          <Ionicons name="chevron-down" size={16} color={colors.textSecondary} />
+          <Ionicons name="chevron-down" size={tvMode ? 17 : 16} color={colors.textSecondary} />
         </Pressable>
 
-        <ScrollView
-        focusable={false}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={g.mobileGenreRail}
-          contentContainerStyle={g.mobileGenreRailContent}
-        >
-          {GENRES_WITH_COVERS.map((item) => (
-            <GenreCard
-              key={item.genre}
-              item={item}
-              liveCoverUrl={genreCovers[item.genre]}
-              columns={genreColumns}
-              horizontal
-              onPress={() => openGenre(item.genre, item.ar)}
-            />
-          ))}
-        </ScrollView>
+        <TvFocusGuideView autoFocus={false} style={{ overflow: "visible" }}>
+          <ScrollView
+            focusable={false}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={g.mobileGenreRail}
+            contentContainerStyle={[g.mobileGenreRailContent, tvMode && { paddingVertical: 6 }]}
+          >
+            {GENRES_WITH_COVERS.map((item) => (
+              <GenreCard
+                key={item.genre}
+                item={item}
+                liveCoverUrl={genreCovers[item.genre]}
+                columns={genreColumns}
+                horizontal
+                g={g}
+                tvMode={tvMode}
+                onPress={() => openGenre(item.genre, item.ar)}
+              />
+            ))}
+          </ScrollView>
+        </TvFocusGuideView>
       </View>
 
       {/* ── Genre grid ── */}
       {view === "genres" && (
-        <FlatList
-          data={GENRES_WITH_COVERS}
-          style={{ width: gridWidth, alignSelf: "center" }}
-          key={`genres-${genreColumns}`}
-          keyExtractor={item => item.genre}
-          numColumns={genreColumns}
-          contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 6, paddingBottom: 88 }}
-          columnWrapperStyle={{ gap: 10, marginBottom: 10 }}
-          showsVerticalScrollIndicator={false}
-          initialNumToRender={6}
-          maxToRenderPerBatch={3}
-          updateCellsBatchingPeriod={50}
-          windowSize={5}
-           removeClippedSubviews={false}
-          renderItem={({ item }) => (
-            <GenreCard
-              item={item}
-              liveCoverUrl={genreCovers[item.genre]}
-              columns={genreColumns}
-              onPress={() => openGenre(item.genre, item.ar)}
-            />
-          )}
-        />
+        <TvFocusGuideView autoFocus={false} style={{ flex: 1 }}>
+          <FlatList
+            data={GENRES_WITH_COVERS}
+            style={{ width: gridWidth, alignSelf: "center" }}
+            key={`genres-${genreColumns}`}
+            keyExtractor={item => item.genre}
+            numColumns={genreColumns}
+            contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 6, paddingBottom: 88 }}
+            columnWrapperStyle={{ gap: 10, marginBottom: 10 }}
+            showsVerticalScrollIndicator={false}
+            initialNumToRender={12}
+            maxToRenderPerBatch={9}
+            updateCellsBatchingPeriod={40}
+            windowSize={7}
+            removeClippedSubviews={false}
+            renderItem={({ item }) => (
+              <GenreCard
+                item={item}
+                liveCoverUrl={genreCovers[item.genre]}
+                columns={genreColumns}
+                g={g}
+                tvMode={tvMode}
+                onPress={() => openGenre(item.genre, item.ar)}
+              />
+            )}
+          />
+        </TvFocusGuideView>
       )}
 
       {/* ── Anime list ── */}
       {view === "list" && (
-        <>
+        <TvFocusGuideView autoFocus={false} style={{ flex: 1 }}>
           {listLoading && filteredItems.length === 0 ? (
             <View style={g.center}>
               <ActivityIndicator color={colors.accent} size="large" />
             </View>
           ) : (
-            <FlatList
-              ref={listRef}
-              data={filteredItems}
-              style={{ width: gridWidth, alignSelf: "center" }}
-              key={`anime-grid-${gridColumns}`}
-              keyExtractor={(item, i) => `${item.id}-${i}`}
-              numColumns={gridColumns}
-              contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 6, paddingBottom: 88 }}
-              columnWrapperStyle={{ gap: 10, marginBottom: 10 }}
-              showsVerticalScrollIndicator={false}
-              initialNumToRender={6}
-              maxToRenderPerBatch={3}
-              updateCellsBatchingPeriod={50}
-              windowSize={5}
-               removeClippedSubviews={false}
-               onEndReached={() => { if (!search.trim() && hasMore && !loading) loadItems(page + 1, false); }}
-              onEndReachedThreshold={0.4}
-              ListEmptyComponent={
-                 !listLoading ? (
-                  <View style={g.center}>
-                    <Ionicons name="film" size={48} color={colors.textMuted} />
-                    <Text style={g.emptyText}>لا توجد أنميات بهذه الفلاتر</Text>
+            <>
+              <View style={[g.resultsHeading, { width: gridWidth, alignSelf: "center", paddingHorizontal: 12, paddingTop: 6, paddingBottom: 4 }]}>
+                <Text style={[g.resultsHeadingText, tvMode && { fontSize: 13 }]}>
+                  {search.trim() ? "نتائج البحث" : browseSection === "donghua" ? "قائمة الدونغهوا" : "قائمة الأنمي"} ({filteredItems.length} عمل)
+                </Text>
+              </View>
+              <FlatList
+                ref={listRef}
+                data={filteredItems}
+                style={{ width: gridWidth, alignSelf: "center" }}
+                key={`anime-grid-${browseSection}-${gridColumns}`}
+                keyExtractor={(item, i) => `${item.id}-${i}`}
+                numColumns={gridColumns}
+                contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 4, paddingBottom: 88 }}
+                columnWrapperStyle={{ gap: 10, marginBottom: 10 }}
+                showsVerticalScrollIndicator={false}
+                getItemLayout={(_data, rowIndex) => ({
+                  length: gridCardH + 10,
+                  offset: (gridCardH + 10) * rowIndex,
+                  index: rowIndex,
+                })}
+                initialNumToRender={tvMode ? 15 : 9}
+                maxToRenderPerBatch={tvMode ? 10 : 6}
+                updateCellsBatchingPeriod={40}
+                windowSize={tvMode ? 7 : 5}
+                removeClippedSubviews={false}
+                onEndReached={() => { if (!search.trim() && hasMore && !loading) loadItems(page + 1, false); }}
+                onEndReachedThreshold={0.4}
+                ListEmptyComponent={
+                  !listLoading ? (
+                    <View style={g.center}>
+                      <Ionicons name="film" size={48} color={colors.textMuted} />
+                      <Text style={g.emptyText}>{browseSection === "donghua" ? "لا توجد أعمال دونغهوا بهذه الفلاتر" : "لا توجد أنميات بهذه الفلاتر"}</Text>
+                    </View>
+                  ) : null
+                }
+                ListFooterComponent={listLoading && filteredItems.length > 0 ? (
+                  <View style={{ padding: 20, alignItems: "center" }}>
+                    <ActivityIndicator color={colors.accent} />
                   </View>
-                ) : null
-              }
-              ListHeaderComponent={(
-                <View style={g.resultsHeading}>
-                  <Text style={g.resultsHeadingText}>
-                    {search.trim() ? "نتائج البحث" : "قائمة الأنمي"} ({filteredItems.length} عمل)
-                  </Text>
-                </View>
-              )}
-               ListFooterComponent={listLoading && filteredItems.length > 0 ? (
-                <View style={{ padding: 20, alignItems: "center" }}>
-                  <ActivityIndicator color={colors.accent} />
-                </View>
-              ) : null}
-              renderItem={({ item, index }) => (
-                <AnimeCard
-                  anime={item}
-                  columns={gridColumns}
-                  hasTVPreferredFocus={
-                    tvMode &&
-                    ready &&
-                    Boolean(preferredKey && preferredKey === String(item.id))
-                  }
-                  onFocus={() => {
-                    rememberFocus(String(item.id));
-                  }}
-                  onPress={() => router.push(
-                    `/anime/${item.id}?title=${encodeURIComponent(item.title.romaji)}&english=${encodeURIComponent(item.title.english || "")}${item.idSource ? `&src=${encodeURIComponent(item.idSource)}` : ""}`
-                  )}
-                />
-              )}
-            />
+                ) : null}
+                renderItem={({ item }) => (
+                  <AnimeCard
+                    anime={item}
+                    cardW={gridCardW}
+                    cardH={gridCardH}
+                    g={g}
+                    tvMode={tvMode}
+                    hasTVPreferredFocus={
+                      hasPreferredGridCard && preferredKey === String(item.id)
+                    }
+                    onFocusAnime={handleFocusAnime}
+                    onPressAnime={handlePressAnime}
+                  />
+                )}
+              />
+            </>
           )}
-        </>
+        </TvFocusGuideView>
       )}
       <AnimeFilterSheet
         visible={filterVisible}

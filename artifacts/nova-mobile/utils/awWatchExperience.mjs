@@ -27,12 +27,38 @@ export function normalizeAwWatchSources(rows, baseUrl) {
     const quality = String(row?.quality || "720p").trim() || "720p";
     const serverName = String(row?.name || row?.server || "").trim();
     if (!rawUrl || !serverName) return [];
+    const lowerName = serverName.toLowerCase();
+    const lowerUrl = rawUrl.toLowerCase();
+    if (
+      lowerName === "st" ||
+      lowerName.includes("streamtape") ||
+      lowerUrl.includes("streamtape.com") ||
+      lowerUrl.includes("streamtape.to") ||
+      lowerUrl.includes("streamtape.net")
+    ) {
+      return [];
+    }
 
     try {
       const url = new URL(rawUrl, base);
       if (url.protocol !== "http:" && url.protocol !== "https:") return [];
       const qualityKey = qualityBucket(quality);
       serverNumber += 1;
+      const deliveryMode = typeof row?.deliveryMode === "string" ? row.deliveryMode : undefined;
+      const clientExtract =
+        row?.clientExtract && typeof row.clientExtract === "object" && typeof row.clientExtract.embedUrl === "string"
+          ? {
+              embedUrl: row.clientExtract.embedUrl,
+              referer: typeof row.clientExtract.referer === "string" ? row.clientExtract.referer : "",
+              ...(row.clientExtract.hostKind === "okru" || row.clientExtract.hostKind === "standard"
+                ? { hostKind: row.clientExtract.hostKind }
+                : {}),
+            }
+          : undefined;
+      const headers =
+        row?.headers && typeof row.headers === "object" && !Array.isArray(row.headers)
+          ? row.headers
+          : undefined;
       return [{
         pickerKey: `aw-${serverNumber}-${qualityKey}`,
         serverNumber,
@@ -40,6 +66,9 @@ export function normalizeAwWatchSources(rows, baseUrl) {
         quality,
         qualityKey,
         url: url.toString(),
+        ...(deliveryMode ? { deliveryMode } : {}),
+        ...(clientExtract ? { clientExtract } : {}),
+        ...(headers ? { headers } : {}),
       }];
     } catch {
       return [];

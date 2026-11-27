@@ -21,6 +21,7 @@ import { useColors } from "@/hooks/useColors";
 import { anilistQuery } from "@/utils/anilist";
 import {
   fetchLatestEpisodes,
+  getLatestEpisodeRoute,
   normalizeLatestEpisodeItem,
   type LatestEpisodeItem,
 } from "@/utils/latestEpisodes";

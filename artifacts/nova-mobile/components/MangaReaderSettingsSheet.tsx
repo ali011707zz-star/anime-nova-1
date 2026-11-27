@@ -181,6 +181,7 @@ export function MangaReaderSettingsSheet({
       transparent
       animationType="slide"
       statusBarTranslucent
+      supportedOrientations={["portrait", "portrait-upside-down", "landscape", "landscape-left", "landscape-right"]}
       onRequestClose={onClose}
     >
       <View style={styles.overlay}>

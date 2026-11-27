@@ -18,12 +18,13 @@ import { startMobileWatchAnalytics } from "@/utils/analytics";
 import { ensureWatchAccess } from "@/utils/adPolicy";
 import { RewardedAdPrompt } from "@/components/RewardedAdPrompt";
 import { useWatchPlayerOrientation } from "@/utils/watchOrientation";
+import { buildHybridPlayerSource, buildVpsProxyFallbackUrl, isOwnVpsProxyUrl } from "@/utils/hybridStreamLogic.mjs";
 
 const { width: W, height: H } = Dimensions.get("window");
 
 /* ── Types ── */
 type Quality = "1080p FHD" | "720p HD" | "360p SD";
-type Screen = "loading" | "picker" | "native" | "external" | "embed" | "resolving" | "webplayer";
+type Screen = "picker" | "native" | "external" | "embed" | "webplayer";
 
 interface AnimSrc {
   url?: string;
@@ -291,7 +292,11 @@ function getAnimTag(label: string): string {
 }
 
 /* ── Source row ── */
-function SrcRow({ src, idx, onPlay }: { src: AnimSrc; idx: number; onPlay: (s: AnimSrc) => void }) {
+function getAnimSrcKey(s: AnimSrc): string {
+  return s.proxyUrl || s.directUrl || s.url || s.site || "";
+}
+
+function SrcRow({ src, idx, isBusy, onPlay }: { src: AnimSrc; idx: number; isBusy?: boolean; onPlay: (s: AnimSrc) => void }) {
   const q = getSrcQuality(src);
   const qs = QUALITY_STYLE[q];
   const { tv: tvMode } = useTvMetrics();
@@ -299,10 +304,11 @@ function SrcRow({ src, idx, onPlay }: { src: AnimSrc; idx: number; onPlay: (s: A
   const isEmbed = isEmbedSrc(src);
   const tag = getAnimTag(label);
   const hasSub = !!src.subtitleUrl;
+  const isFailed = src.status === "fail";
 
   return (
-    <Pressable onPress={() => onPlay(src)} focusable={tvMode}
-      style={({ focused }) => [w.srcRow, tvMode && w.tvSrcRow, tvMode && tvFocusStyle(focused)]}
+    <Pressable onPress={() => onPlay(src)} disabled={isBusy} focusable={tvMode}
+      style={({ focused }) => [w.srcRow, tvMode && w.tvSrcRow, isFailed && { opacity: 0.6 }, tvMode && tvFocusStyle(focused)]}
       accessibilityRole="button"
       accessibilityLabel={`تشغيل سيرفر ${idx + 1} بجودة ${Q_SHORT[q]}`}>
       <View style={[w.srcIcon, tvMode && w.tvSrcIcon, { backgroundColor: qs.badge, borderColor: qs.border }]}>
@@ -310,7 +316,7 @@ function SrcRow({ src, idx, onPlay }: { src: AnimSrc; idx: number; onPlay: (s: A
       </View>
       <View style={{ flex: 1, minWidth: 0 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-          <Text style={[w.srcNum, tvMode && w.tvSrcNum]}>سيرفر {idx + 1}</Text>
+          <Text style={[w.srcNum, tvMode && w.tvSrcNum, isFailed && { color: "#f87171" }]}>سيرفر {idx + 1}</Text>
           <View style={[w.srcTag, tvMode && w.tvSrcTag]}><Text style={[w.srcTagText, tvMode && w.tvSrcTagText]}>{tag}</Text></View>
           {hasSub && <View style={[w.srcSubBadge, tvMode && w.tvSrcSubBadge]}><Text style={[w.srcSubText, tvMode && w.tvSrcSubText]}>ترجمة</Text></View>}
         </View>
@@ -320,8 +326,14 @@ function SrcRow({ src, idx, onPlay }: { src: AnimSrc; idx: number; onPlay: (s: A
           <Text style={[w.srcQText, tvMode && w.tvSrcQText, { color: qs.text }]}>{Q_SHORT[q]}</Text>
         </View>
         <View style={[w.srcPlayBtn, tvMode && w.tvSrcPlayBtn]}>
-          <Ionicons name="play" size={tvMode ? 18 : 10} color="#fff" />
-          <Text style={[w.srcPlayText, tvMode && w.tvSrcPlayText]}>تشغيل</Text>
+          {isBusy ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <>
+              <Ionicons name="play" size={tvMode ? 18 : 10} color="#fff" />
+              <Text style={[w.srcPlayText, tvMode && w.tvSrcPlayText]}>{isFailed ? "أعد المحاولة" : "تشغيل"}</Text>
+            </>
+          )}
         </View>
       </View>
     </Pressable>
@@ -383,6 +395,8 @@ export default function AnimationWatchScreen() {
   const [sources, setSources]     = useState<AnimSrc[]>([]);
   const [loading, setLoading]     = useState(true);
   const [playingSrc, setPlayingSrc] = useState<AnimSrc | null>(null);
+  const [resolvingSrc, setResolvingSrc] = useState<AnimSrc | null>(null);
+  const [busySrcKey, setBusySrcKey] = useState<string | null>(null);
   const [resumeTime, setResumeTime] = useState(0);
   const [globalArSubUrl, setGlobalArSubUrl] = useState<string | undefined>();
   const [globalEnSubUrl, setGlobalEnSubUrl] = useState<string | undefined>();
@@ -497,7 +511,9 @@ export default function AnimationWatchScreen() {
     setLoading(true);
     setSources([]);
     seenKeys.current.clear();
-    setScreen("loading");
+    setResolvingSrc(null);
+    setBusySrcKey(null);
+    setScreen("picker");
 
     abortRef.current?.abort();
     abortRef.current = new AbortController();
@@ -516,7 +532,7 @@ export default function AnimationWatchScreen() {
       });
       if (!response.ok) {
         setLoading(false);
-        setScreen(s => s === "loading" ? "picker" : s);
+        setScreen("picker");
         return;
       }
       if (!response.body) throw new Error("No body");
@@ -563,7 +579,7 @@ export default function AnimationWatchScreen() {
             } else if (isDone) {
               setLoading(false);
               setSources(prev => {
-                setTimeout(() => setScreen(s => s === "loading" ? "picker" : s), 0);
+                
                 if (animSrcCacheKey && freshSrcs.length > 0) {
                   AsyncStorage.setItem(animSrcCacheKey, JSON.stringify({ sources: freshSrcs, ts: Date.now() })).catch(() => {});
                 }
@@ -576,19 +592,15 @@ export default function AnimationWatchScreen() {
     } catch (e: any) {
       if (e?.name !== "AbortError") {
         setLoading(false);
-        setScreen(s => s === "loading" ? "picker" : s);
+        setScreen("picker");
       } else {
         /* AbortError من مهلة الأمان (40s) — لا تترك الشاشة عالقة، انتقل لـ picker */
         setLoading(false);
-        setScreen(s => s === "loading" ? "picker" : s);
+        setScreen("picker");
       }
     } finally {
       clearTimeout(clientTimeout);
       setLoading(false);
-      setSources(prev => {
-        if (prev.length === 0) setTimeout(() => setScreen(s => s === "loading" ? "picker" : s), 0);
-        return prev;
-      });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tmdbId, type, ep, season, titleStr, animSrcCacheKey]);
@@ -600,15 +612,6 @@ export default function AnimationWatchScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tmdbId, type, ep, season]);
 
-  /* ── 22-second timeout — انتقل للـ picker بدلاً من الانتظار إلى الأبد ── */
-  useEffect(() => {
-    const timeout = setTimeout(() => {
-      setScreen(s => s === "loading" ? "picker" : s);
-      setLoading(false);
-    }, 22000);
-    return () => clearTimeout(timeout);
-  }, [tmdbId, ep, season]);
-
   const pickerOpenedAtRef = useRef(Date.now());
   useEffect(() => {
     if (screen === "picker") {
@@ -619,7 +622,13 @@ export default function AnimationWatchScreen() {
   /* ── Resolve and play only the selected source ── */
   const playSrc = useCallback(async (src: AnimSrc) => {
     if (tvMode && Date.now() - pickerOpenedAtRef.current < 750) return;
-    if (!(await ensureWatchAccess())) return;
+    const key = getAnimSrcKey(src);
+    setResolvingSrc(null);
+    setBusySrcKey(key);
+    if (!(await ensureWatchAccess())) {
+      setBusySrcKey(null);
+      return;
+    }
     let next = src;
     if (src.site && !src.isEmbed) {
       try {
@@ -650,34 +659,87 @@ export default function AnimationWatchScreen() {
         if (!isValidAnimUrl(getPlayUrl(next))) throw new Error("resolve_invalid_url");
         setSources(prev => prev.map(item => item.site === src.site ? { ...item, ...next } : item));
       } catch {
+        setBusySrcKey(null);
         setSources(prev => prev.map(item => item.site === src.site ? { ...item, status: "fail" } : item));
         setScreen("picker");
         return;
       }
     }
-
     setPlayingSrc(next);
     if (isDirectPlayable(next)) {
+      setBusySrcKey(null);
       /* WebView+hls.js: الجهاز يجلب segments مباشرةً بـ IP سكني → لا حجب CDN */
       setScreen("webplayer");
       return;
     }
-    if (needsHiddenResolve(next)) { setScreen("resolving"); return; }
-    setScreen("embed");
-  }, [titleStr, type, tmdbId, season, ep]);
+    if (needsHiddenResolve(next)) {
+      /* استخراج صامت عبر WebView مخفي داخل المنتقي دون شاشات تحميل منبثقة */
+      setResolvingSrc(next);
+      return;
+    }
+    setBusySrcKey(null);
+    if (Platform.OS === "web") {
+      setScreen("embed");
+      return;
+    }
+    setSources(prev => prev.map(item => getAnimSrcKey(item) === key ? { ...item, status: "fail" } : item));
+    setPlayingSrc(null);
+    setScreen("picker");
+  }, [titleStr, type, tmdbId, season, ep, tvMode]);
 
   /* ── نتيجة استخراج WebView المخفي ── */
   const handleHiddenResolved = useCallback((stream: ResolvedStream) => {
-    setPlayingSrc(prev => {
-      if (!prev) return prev;
-      return { ...prev, directUrl: stream.url, url: stream.url, isEmbed: false, headers: stream.headers || prev.headers, directType: stream.type };
+    const baseSrc = resolvingSrc || playingSrc;
+    setResolvingSrc(null);
+    setBusySrcKey(null);
+    if (!baseSrc) return;
+    const base = getBaseUrl();
+    const preservedProxy = buildVpsProxyFallbackUrl({
+      directUrl: stream.url,
+      existingProxyUrl: resolveUrl(baseSrc.proxyUrl || baseSrc.url, base),
+      referer: stream.headers?.Referer || stream.headers?.referer || baseSrc.headers?.Referer,
+      baseUrl: base,
+      contentType: stream.type,
+    }) || undefined;
+    const updated: AnimSrc = {
+      ...baseSrc,
+      directUrl: stream.url,
+      url: stream.url,
+      proxyUrl: preservedProxy,
+      isEmbed: false,
+      headers: stream.headers || baseSrc.headers,
+      directType: stream.type,
+      status: "ok",
+    };
+    const key = getAnimSrcKey(baseSrc);
+    setSources(prev => {
+      const idx = prev.findIndex(item => getAnimSrcKey(item) === key);
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = updated;
+        return copy;
+      }
+      return [updated, ...prev];
     });
+    setPlayingSrc(updated);
     setScreen("native");
-  }, []);
+  }, [playingSrc, resolvingSrc]);
 
   const handleHiddenFailed = useCallback(() => {
-    setScreen("embed");
-  }, []);
+    const failedTarget = resolvingSrc || playingSrc;
+    setResolvingSrc(null);
+    setBusySrcKey(null);
+    if (Platform.OS === "web") {
+      setScreen("embed");
+      return;
+    }
+    if (failedTarget) {
+      const key = getAnimSrcKey(failedTarget);
+      setSources(prev => prev.map(item => getAnimSrcKey(item) === key ? { ...item, status: "fail" } : item));
+    }
+    setPlayingSrc(null);
+    setScreen("picker");
+  }, [playingSrc, resolvingSrc]);
 
   /* ── Group sources by quality ── */
   const { directSrcs, embedSrcs } = useMemo(() => {
@@ -712,9 +774,18 @@ export default function AnimationWatchScreen() {
          إذا لم يوجد directUrl نستخدم url الذي قد يكون proxyUrl — سيفشل من VPS IP
          لكن قد ينجح من IP الجهاز (residential). */
       const rawUrl = resolveUrl(s.directUrl || s.url || "", base);
+      const dormantProxy = buildVpsProxyFallbackUrl({
+        directUrl: rawUrl,
+        existingProxyUrl: resolveUrl(s.proxyUrl || s.url, base),
+        referer: s.headers?.Referer || s.headers?.referer,
+        baseUrl: base,
+        contentType: s.directType,
+        site: s.site,
+      }) || undefined;
       const resolvedSubUrl = s.subtitleUrl ? resolveUrl(s.subtitleUrl, base) : activeSubUrl;
       return {
         url: rawUrl,
+        ...(dormantProxy && dormantProxy !== rawUrl ? { proxyUrl: dormantProxy } : {}),
         label: s.label || "مصدر",
         quality: getSrcQuality(s),
         /* headers (Referer/Origin) — AnimHlsPlayer يُضيفها لكل طلب HLS عبر makeFetchLoader */
@@ -736,22 +807,22 @@ export default function AnimationWatchScreen() {
       const resolvedSubUrl = wantsNoSub ? undefined : (s.subtitleUrl
         ? resolveUrl(s.subtitleUrl, base)
         : activeSubUrl);
-      const proxyUrl = s.proxyUrl || s.directUrl || s.url || "";
-      /* directFallback: رابط CDN خام (بدون /api/) يُرسَل من IP الجهاز مع headers */
-      const rawDirect = s.directUrl && !s.directUrl.startsWith("/api/") ? s.directUrl : null;
-      const proxyResolved = resolveUrl(proxyUrl, base);
-      const directResolved = rawDirect ? resolveUrl(rawDirect, base) : null;
-      const hasFallback = directResolved && directResolved !== proxyResolved;
+      const proxyCandidate = resolveUrl(s.proxyUrl || s.url || "", base);
+      const rawDirect = s.directUrl && !isOwnVpsProxyUrl(s.directUrl) ? resolveUrl(s.directUrl, base) : null;
+      const primaryUrl = rawDirect || proxyCandidate;
       const cdnHeaders = s.headers && Object.keys(s.headers).length > 0 ? s.headers : undefined;
-      return {
-        url: proxyResolved,
+      return buildHybridPlayerSource({
+        url: primaryUrl,
+        existingProxyUrl: proxyCandidate && proxyCandidate !== primaryUrl ? proxyCandidate : undefined,
+        headers: isOwnVpsProxyUrl(primaryUrl) ? undefined : cdnHeaders,
+        referer: cdnHeaders?.Referer || cdnHeaders?.referer,
+        baseUrl: base,
+        contentType: s.directType === "mp4" ? "progressive" : (s.directType === "hls" ? "hls" : undefined),
+        site: s.site,
         label: lbl || "مصدر",
         quality: getSrcQuality(s) as PlayerSource["quality"],
         subtitleUrl: resolvedSubUrl,
-        /* لا نمرّر headers للـ proxy — VPS يُضيفها server-side للـ CDN */
-        /* directFallback يحمل headers لأن ExoPlayer يُرسلها مع كل طلب segment */
-        ...(hasFallback ? { directFallback: { url: directResolved!, ...(cdnHeaders ? { headers: cdnHeaders } : {}) } } : {}),
-      };
+      });
     }).filter(s => !!s.url);
   }, [directSrcs, globalArSubUrl, globalEnSubUrl, subLang]);
 
@@ -787,57 +858,6 @@ export default function AnimationWatchScreen() {
       router.replace("/(tabs)/animations" as any);
     }
   }, [screen, tmdbId, type, season, router, progressKey]);
-
-  /* ═══════════════════ LOADING SCREEN ═══════════════════ */
-  if (screen === "loading") {
-    return (
-      <View style={[w.container]}>
-        {/* Blurred backdrop */}
-        {posterUrl ? (
-          <Image source={{ uri: posterUrl }} style={[StyleSheet.absoluteFill, { opacity: 0.13 }]}
-            blurRadius={Platform.OS === "ios" ? 28 : 10} resizeMode="cover" />
-        ) : null}
-        <LinearGradient
-          colors={["rgba(7,7,13,0.90)", "rgba(12,8,24,0.60)", "rgba(7,7,13,0.95)"]}
-          style={StyleSheet.absoluteFill} />
-
-        {/* Back button */}
-        <Pressable onPress={handleBack} style={[w.loadBackBtn, { top: topPad + 4 }]}>
-          <Ionicons name="chevron-back" size={20} color="rgba(255,255,255,0.65)" style={{ transform: [{ scaleX: -1 }] }} />
-        </Pressable>
-
-        {/* Center content */}
-        <View style={w.loadCard}>
-          <Text style={w.loadPrayerText}>اللهم صلِّ وسلِّم على نبينا محمد ﷺ</Text>
-
-          {/* Poster */}
-          <View style={w.loadPosterWrap}>
-            {posterUrl ? (
-              <AnimPosterImg uri={posterUrl} type={type} />
-            ) : (
-              <View style={[w.loadPosterImg, w.loadPosterPlaceholder]}>
-                <Ionicons name="film" size={36} color="rgba(139,92,246,0.4)" />
-              </View>
-            )}
-          </View>
-
-          {/* Episode/movie badge only — no title text (poster already shows it) */}
-          <View style={w.loadEpBadge}>
-            <Ionicons name={type === "movie" ? "film" : "tv"} size={10} color="#a78bfa" />
-            <Text style={w.loadEpBadgeText}>
-              {type === "movie" ? "فيلم" : `الموسم ${season} • الحلقة ${ep}`}
-            </Text>
-          </View>
-
-          {/* Spinner */}
-          <View style={{ alignItems: "center", gap: 10 }}>
-            <SpinRing />
-            <Text style={w.loadHintNew}>⏳ جاري تجهيز الحلقة، قد يستغرق ذلك بضع ثوانٍ. شكراً لصبرك.</Text>
-          </View>
-        </View>
-      </View>
-    );
-  }
 
   /* ═══════════════════ ANIM HLS PLAYER — WebView+hls.js (المشغّل الرئيسي) ═══════════════════
      الجهاز يجلب الـ segments مباشرةً بـ IP سكني → CDN يسمح (لا حجب datacenter VPS).
@@ -992,56 +1012,8 @@ export default function AnimationWatchScreen() {
     );
   }
 
-  /* ══════════════ RESOLVING (WebView مخفي — لا يُعرض للمستخدم) ══════════════ */
-  if (screen === "resolving" && playingSrc) {
-    const resolveUrl2 = getPlayUrl(playingSrc);
-    return (
-      <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 14 }}>
-        <Pressable onPress={() => setScreen("picker")} style={[w.videoBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
-          <Ionicons name="arrow-back" size={18} color="#fff" style={{ transform: [{ scaleX: -1 }] }} />
-        </Pressable>
-        <SpinRing />
-        <Text style={{ fontSize: 13, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.45)", textAlign: "center" }}>
-          ⏳ جاري تجهيز المصدر…
-        </Text>
-        {resolveUrl2 ? (
-          <HiddenResolverWebView
-            pageUrl={resolveUrl2}
-            onResolved={handleHiddenResolved}
-            onFailed={handleHiddenFailed}
-          />
-        ) : null}
-      </View>
-    );
-  }
-
   /* ═══════════════════ EMBED / WebView ═══════════════════ */
-  if (screen === "embed" && playingSrc) {
-    const embedUrl = getPlayUrl(playingSrc);
-    if (Platform.OS === "web") {
-      return (
-        <View style={[w.container, { alignItems: "center", justifyContent: "center", gap: 16 }]}>
-          <Pressable onPress={() => setScreen("picker")} style={[w.videoBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
-            <Ionicons name="arrow-back" size={18} color="#fff" style={{ transform: [{ scaleX: -1 }] }} />
-          </Pressable>
-          <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
-            <Ionicons name="tv-outline" size={36} color="rgba(139,92,246,0.7)" />
-          </View>
-          <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: 16, textAlign: "center" }}>
-            {playingSrc?.directType === "hls" ? "بث HLS يحتاج التطبيق الأصلي" : "هذا المصدر يحتاج التطبيق الأصلي"}
-          </Text>
-          <Text style={{ color: "rgba(255,255,255,0.45)", fontFamily: "Cairo_400Regular", fontSize: 13, textAlign: "center", paddingHorizontal: 32 }}>
-            {playingSrc?.directType === "hls"
-              ? "بروتوكول HLS غير مدعوم في متصفح الويب — حمّل التطبيق للمشاهدة"
-              : "مصدر الإطار لا يدعم تشغيل الويب مباشرةً"}
-          </Text>
-          <Pressable onPress={() => setScreen("picker")} style={{ marginTop: 4 }}>
-            <Text style={{ color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular", fontSize: 13 }}>العودة للمصادر</Text>
-          </Pressable>
-        </View>
-      );
-    }
-    // Native: no WebView — show info card
+  if (screen === "embed" && playingSrc && Platform.OS === "web") {
     return (
       <View style={[w.container, { alignItems: "center", justifyContent: "center", gap: 16 }]}>
         <Pressable onPress={() => setScreen("picker")} style={[w.videoBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
@@ -1051,7 +1023,7 @@ export default function AnimationWatchScreen() {
           <Ionicons name="tv-outline" size={36} color="rgba(139,92,246,0.7)" />
         </View>
         <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: 16, textAlign: "center" }}>
-          هذا المصدر يحتاج التطبيق الأصلي
+          {playingSrc?.directType === "hls" ? "بث HLS يحتاج التطبيق الأصلي" : "هذا المصدر يحتاج التطبيق الأصلي"}
         </Text>
         <Pressable onPress={() => setScreen("picker")} style={{ marginTop: 4 }}>
           <Text style={{ color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular", fontSize: 13 }}>العودة للمصادر</Text>
@@ -1059,8 +1031,6 @@ export default function AnimationWatchScreen() {
       </View>
     );
   }
-
-  /* EZV Player removed — Rift Player is the only internal player */
 
   /* ═══════════════════ SOURCE PICKER ═══════════════════ */
   const totalDirect = directSrcs.length;
@@ -1195,7 +1165,7 @@ export default function AnimationWatchScreen() {
               <View style={w.srcSection}>
                 {srcs.map((src, i) => {
                   const idx = globalIdx++;
-                  return <SrcRow key={idx} src={src} idx={idx} onPlay={playSrc} />;
+                  return <SrcRow key={idx} src={src} idx={idx} isBusy={busySrcKey === getAnimSrcKey(src)} onPlay={playSrc} />;
                 })}
               </View>
             </View>
@@ -1212,7 +1182,7 @@ export default function AnimationWatchScreen() {
             <View style={w.srcSection}>
               {embedSrcs.map((src, i) => {
                 const idx = globalIdx++;
-                return <SrcRow key={idx} src={src} idx={idx} onPlay={playSrc} />;
+                return <SrcRow key={idx} src={src} idx={idx} isBusy={busySrcKey === getAnimSrcKey(src)} onPlay={playSrc} />;
               })}
             </View>
           </View>
@@ -1245,6 +1215,16 @@ export default function AnimationWatchScreen() {
           </View>
         )}
       </ScrollView>
+      {resolvingSrc && getPlayUrl(resolvingSrc) ? (
+        <View style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" }}>
+          <HiddenResolverWebView
+            pageUrl={getPlayUrl(resolvingSrc)}
+            refererOverride={resolvingSrc.headers?.Referer}
+            onResolved={handleHiddenResolved}
+            onFailed={handleHiddenFailed}
+          />
+        </View>
+      ) : null}
 
     </View>
   );

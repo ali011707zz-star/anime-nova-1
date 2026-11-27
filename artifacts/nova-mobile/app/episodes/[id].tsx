@@ -277,20 +277,17 @@ async function saveCommentCounts(animeId: string, counts: Record<number, number>
 }
 
 /* ── Episode thumbnail row ── */
-function EpisodeRow({
-  n, anime, epByNumber, episodeTitlesAr, watched, commentCount, onToggleWatched, onWatch, onComment,
-  onFocus,
+const EpisodeRow = React.memo(function EpisodeRow({
+  n, index, anime, epByNumber, episodeTitlesAr, watched, commentCount, colors, ep_s, tvMode,
+  onToggleWatched, onWatch, onComment, onFocusEpisode,
   hasTVPreferredFocus = false,
 }: {
-  n: number; anime: any; epByNumber: Map<number, any>; episodeTitlesAr: Record<number, string>; watched: boolean; commentCount: number;
+  n: number; index: number; anime: any; epByNumber: Map<number, any>; episodeTitlesAr: Record<number, string>; watched: boolean; commentCount: number;
+  colors: ReturnType<typeof useColors>; ep_s: ReturnType<typeof createEpStyles>; tvMode: boolean;
   onToggleWatched: (n: number) => void; onWatch: (n: number) => void; onComment: (n: number) => void;
-  onFocus?: () => void;
+  onFocusEpisode?: (n: number, index: number) => void;
   hasTVPreferredFocus?: boolean;
 }) {
-  const colors = useColors();
-  const ep_s = useMemo(() => createEpStyles(colors), [colors]);
-  const { width, height } = useWindowDimensions();
-  const { tv: tvMode } = useTvMetrics();
   const ep = epByNumber.get(n);
   const isFiller = ep?.filler === true;
   const thumb = ep?.images?.jpg?.image_url || anime?.bannerImage || anime?.coverImage?.large;
@@ -306,8 +303,9 @@ function EpisodeRow({
       <Pressable
         onPress={() => onWatch(n)}
         focusable={tvMode}
+        nativeFocusOnly
         hasTVPreferredFocus={hasTVPreferredFocus}
-        onFocus={onFocus}
+        onFocus={() => onFocusEpisode?.(n, index)}
         style={({ focused, pressed }) => [
           ep_s.episodeMain,
           tvMode && ep_s.tvEpisodeMain,
@@ -318,7 +316,7 @@ function EpisodeRow({
         {/* Thumbnail on physical right */}
         <View style={[ep_s.thumbWrap, tvMode && ep_s.tvThumbWrap]}>
           {thumb ? (
-            <Image source={{ uri: thumb }} style={ep_s.thumb} resizeMode="cover" />
+            <Image source={{ uri: thumb }} style={ep_s.thumb} resizeMode="cover" resizeMethod="resize" fadeDuration={tvMode ? 0 : 100} />
           ) : (
             <View style={[ep_s.thumb, ep_s.thumbFallback]} />
           )}
@@ -362,8 +360,9 @@ function EpisodeRow({
         {/* Comment button */}
         <Pressable
           onPress={() => onComment(n)}
-          onFocus={onFocus}
+          onFocus={() => onFocusEpisode?.(n, index)}
           focusable={tvMode}
+          nativeFocusOnly
           style={({ focused }) => [ep_s.commentBtn, tvMode && ep_s.tvSmallButton, tvMode && tvFocusStyle(focused)]}
           accessibilityRole="button"
           accessibilityLabel={`تعليقات الحلقة ${n}`}
@@ -379,8 +378,9 @@ function EpisodeRow({
         {/* Eye toggle */}
         <Pressable
           onPress={() => onToggleWatched(n)}
-          onFocus={onFocus}
+          onFocus={() => onFocusEpisode?.(n, index)}
           focusable={tvMode}
+          nativeFocusOnly
           style={({ focused }) => [ep_s.eyeBtn, watched && ep_s.eyeBtnWatched, tvMode && ep_s.tvSmallButton, tvMode && tvFocusStyle(focused)]}
           accessibilityRole="button"
           accessibilityLabel={watched ? `إلغاء مشاهدة الحلقة ${n}` : `تحديد الحلقة ${n} كمشاهدة`}
@@ -390,7 +390,7 @@ function EpisodeRow({
       </View>
     </View>
   );
-}
+});
 
 const _episodesMemoryCache: Map<string, { anime: any; seasons: any[] }> =
   (globalThis as any).__novaAnimeEpisodesCache ||
@@ -743,10 +743,15 @@ export default function EpisodeListScreen() {
     router.push(`/watch?anime=${selectedAnimeId}&ep=${n}${t ? `&title=${t}` : ""}${eng ? `&english=${eng}` : ""}${fmt ? `&format=${fmt}` : ""}${et}${totalParam}${coverParam}${arParam}`);
   }
 
-  function openComments(n: number) {
+  const openComments = useCallback((n: number) => {
     const t = encodeURIComponent(selectedAnime?.title?.romaji || "");
     router.push(`/comments?animeId=${selectedAnimeId}&title=${t}&ep=${n}` as any);
-  }
+  }, [router, selectedAnime, selectedAnimeId]);
+  const handleFocusEpisode = useCallback((n: number, index: number) => {
+    if (!tvMode) return;
+    rememberFocus(String(n));
+    scrollToFocusedIndex(index);
+  }, [tvMode, rememberFocus, scrollToFocusedIndex]);
 
   const total = useMemo(() => {
     if (!selectedAnime) return 0;
@@ -871,6 +876,7 @@ export default function EpisodeListScreen() {
         <Pressable
           onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")}
           focusable={tvMode}
+          nativeFocusOnly
           accessibilityRole="button"
           accessibilityLabel="رجوع"
           style={({ focused }) => [ep_s.topBarBack, tvMode && ep_s.tvTopBarBack, tvMode && tvFocusStyle(focused)]}
@@ -889,6 +895,7 @@ export default function EpisodeListScreen() {
         <Pressable
           onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")}
           focusable={tvMode}
+          nativeFocusOnly
           accessibilityRole="button"
           accessibilityLabel="رجوع"
           style={({ focused }) => [ep_s.topBarBack, tvMode && ep_s.tvTopBarBack, tvMode && tvFocusStyle(focused)]}
@@ -908,6 +915,7 @@ export default function EpisodeListScreen() {
         <Pressable
           onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")}
           focusable={tvMode}
+          nativeFocusOnly
           hasTVPreferredFocus={tvMode && ready && (!preferredKey || preferredKey === "back")}
           onFocus={() => { if (tvMode) rememberFocus("back"); }}
           accessibilityRole="button"
@@ -957,6 +965,7 @@ export default function EpisodeListScreen() {
               <Pressable
                 onPress={scrollToTop}
                 focusable={tvMode}
+                nativeFocusOnly
                 style={({ focused, pressed }) => [ep_s.topBarJumpBtn, tvMode && tvFocusStyle(focused), pressed && { opacity: 0.8 }]}
                 accessibilityRole="button"
                 accessibilityLabel="التمرير للأعلى"
@@ -966,6 +975,7 @@ export default function EpisodeListScreen() {
               <Pressable
                 onPress={scrollToBottom}
                 focusable={tvMode}
+                nativeFocusOnly
                 style={({ focused, pressed }) => [ep_s.topBarJumpBtn, tvMode && tvFocusStyle(focused), pressed && { opacity: 0.8 }]}
                 accessibilityRole="button"
                 accessibilityLabel="التمرير للأسفل"
@@ -978,6 +988,7 @@ export default function EpisodeListScreen() {
                   episodeListRef.current?.scrollToOffset({ offset: 0, animated: false });
                 }}
                 focusable={tvMode}
+                nativeFocusOnly
                 testID="anime-episode-sort"
                 accessibilityRole="button"
                 accessibilityLabel={`ترتيب الحلقات: ${sortOrder === "asc" ? "الأقدم أولاً" : "الأحدث أولاً"}`}
@@ -1090,6 +1101,7 @@ export default function EpisodeListScreen() {
                           episodeListRef.current?.scrollToOffset({ offset: 0, animated: false });
                         }}
                         focusable={tvMode}
+                        nativeFocusOnly
                         testID={`anime-season-${season?.id}`}
                         accessibilityRole="button"
                         accessibilityLabel={`الموسم ${index + 1}${episodeCount === null ? "" : `، ${episodeCount} حلقة`}`}
@@ -1127,6 +1139,7 @@ export default function EpisodeListScreen() {
                 <Pressable
                   onPress={() => watchEp(continueEpisode)}
                   focusable={tvMode}
+                  nativeFocusOnly
                   hasTVPreferredFocus={tvMode && ready && shouldFocusContinue}
                   onFocus={() => {
                     if (tvMode) {
@@ -1192,6 +1205,7 @@ export default function EpisodeListScreen() {
                         episodeListRef.current?.scrollToOffset({ offset: 0, animated: false });
                       }}
                       focusable={tvMode}
+                      nativeFocusOnly
                       accessibilityRole="button"
                       accessibilityLabel={option.start === null
                         ? `كل الحلقات، ${total}`
@@ -1247,19 +1261,19 @@ export default function EpisodeListScreen() {
               renderItem={({ item: n, index }) => (
                 <EpisodeRow
                   n={n}
+                  index={index}
                   anime={selectedAnime}
                   epByNumber={epByNumber}
                   episodeTitlesAr={episodeTitlesAr}
                   watched={watched.has(n)}
                   commentCount={commentCounts[n] || 0}
+                  colors={colors}
+                  ep_s={ep_s}
+                  tvMode={tvMode}
                   onToggleWatched={toggleWatched}
                   onWatch={watchEp}
                   onComment={openComments}
-                  onFocus={() => {
-                    if (!tvMode) return;
-                    rememberFocus(String(n));
-                    scrollToFocusedIndex(index);
-                  }}
+                  onFocusEpisode={handleFocusEpisode}
                   hasTVPreferredFocus={tvMode && ready && preferredKey === String(n)}
                 />
               )}

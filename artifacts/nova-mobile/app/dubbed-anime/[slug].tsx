@@ -25,6 +25,7 @@ import { EpisodeAlertBell } from "@/components/EpisodeAlertBell";
 import { getWatchlistStatusMeta, WatchlistStatus } from "@/utils/watchlistStatus";
 import { getWatchContentId, useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
+import { getPrimaryCtaMetrics } from "@/utils/responsiveUiLogic.mjs";
 import type { ThemePalette } from "@/constants/colors";
 import { getBaseUrl } from "@/utils/api";
 import { proxyPosterUrl } from "@/utils/media";
@@ -807,30 +808,47 @@ export default function DubbedAnimeDetailScreen() {
             hasTVPreferredFocus={tvMode}
             testID={tvMode ? "nova-tv-preferred-focus" : undefined}
             onFocus={() => rememberDetailFocus("watch")}
-            style={({ focused }) => [
-              d.watchBtn,
-              tvMode && d.tvWatchBtn,
-              { width: "100%" },
-              tvMode && tvFocusStyle(focused),
-            ]}
+            style={({ focused }) => {
+              const cta = getPrimaryCtaMetrics({ width, tvMode });
+              return [
+                d.watchBtn,
+                {
+                  width: "100%",
+                  maxWidth: cta.maxWidth,
+                  alignSelf: cta.maxWidth ? "center" : undefined,
+                  minHeight: cta.minHeight,
+                  borderRadius: cta.borderRadius,
+                  paddingHorizontal: cta.paddingHorizontal,
+                  paddingVertical: cta.paddingVertical,
+                },
+                tvMode && tvFocusStyle(focused),
+              ];
+            }}
           >
-            <View style={d.watchBtnRight}>
-              <View style={[d.watchBtnIcon, tvMode && d.tvWatchBtnIcon]}>
-                <Ionicons name="play" size={18} color="#fff" style={{ marginLeft: 2 }} />
-              </View>
-              <View style={d.watchBtnTextWrap}>
-                <Text style={[d.watchBtnText, tvMode && d.tvButtonText]}>
-                  {lastWatched?.ep ? `متابعة المشاهدة (الحلقة ${lastWatched.ep})` : "مشاهدة الآن"}
-                </Text>
-                <Text style={d.watchBtnSub}>تصفح الحلقات والمواسم وابدأ المشاهدة فوراً</Text>
-              </View>
-            </View>
-            <View style={d.watchBtnEpPill}>
-              <Ionicons name="chevron-back" size={13} color="#fff" />
-              <Text style={d.watchBtnEpPillText}>
-                {totalEpisodesCount > 0 ? `${totalEpisodesCount} حلقة` : "الحلقات"}
-              </Text>
-            </View>
+            {(() => {
+              const cta = getPrimaryCtaMetrics({ width, tvMode });
+              return (
+                <>
+                  <View style={[d.watchBtnRight, { gap: cta.gap }]}>
+                    <View style={[d.watchBtnIcon, { width: cta.iconBoxSize, height: cta.iconBoxSize, borderRadius: cta.iconBoxRadius }]}>
+                      <Ionicons name="play" size={cta.iconSize} color="#fff" style={{ marginLeft: 2 }} />
+                    </View>
+                    <View style={d.watchBtnTextWrap}>
+                      <Text style={[d.watchBtnText, { fontSize: cta.titleSize, lineHeight: cta.titleLineHeight }]} numberOfLines={1}>
+                        {lastWatched?.ep ? `متابعة المشاهدة (الحلقة ${lastWatched.ep})` : "مشاهدة الآن"}
+                      </Text>
+                      <Text style={[d.watchBtnSub, { fontSize: cta.subSize, lineHeight: cta.subLineHeight }]} numberOfLines={1}>تصفح الحلقات والمواسم وابدأ المشاهدة فوراً</Text>
+                    </View>
+                  </View>
+                  <View style={[d.watchBtnEpPill, { paddingHorizontal: cta.pillPadH, paddingVertical: cta.pillPadV, borderRadius: cta.pillRadius }]}>
+                    <Ionicons name="chevron-back" size={12} color="#fff" />
+                    <Text style={[d.watchBtnEpPillText, { fontSize: cta.pillTextSize }]}>
+                      {totalEpisodesCount > 0 ? `${totalEpisodesCount} حلقة` : "الحلقات"}
+                    </Text>
+                  </View>
+                </>
+              );
+            })()}
           </Pressable>
         </View>
 
