@@ -11,7 +11,7 @@ import { Stack, usePathname, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect, useRef, useState } from "react";
-import { Animated, AppState, BackHandler, Dimensions, I18nManager, Image, Platform, StatusBar, StyleSheet, Text, TextInput, View } from "react-native";
+import { Animated, AppState, BackHandler, Dimensions, Easing, I18nManager, Image, Platform, StatusBar, StyleSheet, Text, TextInput, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import * as ScreenOrientation from "expo-screen-orientation";
@@ -407,44 +407,185 @@ function PushRegistrationBridge({ disabled }: { disabled: boolean }) {
   return null;
 }
 
+const SPLASH_WORLDS = [
+  { label: "أفلام", color: "#F59E0B" },
+  { label: "مسلسلات", color: "#38BDF8" },
+  { label: "أنميشن", color: "#C084FC" },
+  { label: "مدبلج", color: "#34D399" },
+] as const;
+
 function BrandSplash() {
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const scaleAnim = useRef(new Animated.Value(0.92)).current;
+  const slideAnim = useRef(new Animated.Value(12)).current;
+  const glowPulse = useRef(new Animated.Value(0)).current;
+  const loaderAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 420,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(scaleAnim, {
+        toValue: 1,
+        duration: 480,
+        easing: Easing.out(Easing.back(1.15)),
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 440,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    const pulseLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(glowPulse, {
+          toValue: 1,
+          duration: 1400,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(glowPulse, {
+          toValue: 0,
+          duration: 1400,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+
+    const loaderLoop = Animated.loop(
+      Animated.timing(loaderAnim, {
+        toValue: 1,
+        duration: 1250,
+        easing: Easing.inOut(Easing.quad),
+        useNativeDriver: true,
+      }),
+    );
+
+    pulseLoop.start();
+    loaderLoop.start();
+    return () => {
+      pulseLoop.stop();
+      loaderLoop.stop();
+    };
+  }, [fadeAnim, glowPulse, loaderAnim, scaleAnim, slideAnim]);
+
+  const pulseScale = glowPulse.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.96, 1.08],
+  });
+  const pulseOpacity = glowPulse.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.78, 1],
+  });
+  const loaderTranslateX = loaderAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-84, 156],
+  });
+
   return (
     <LinearGradient
-      colors={["#05030D", "#11051F", "#09090B"]}
-      start={{ x: 0.15, y: 0 }}
-      end={{ x: 0.9, y: 1 }}
+      colors={["#050408", "#140D06", "#0D0914", "#050408"]}
+      locations={[0, 0.38, 0.74, 1]}
+      start={{ x: 0.12, y: 0 }}
+      end={{ x: 0.88, y: 1 }}
       style={styles.brandSplash}
     >
-      <View style={styles.brandGlow} />
-      <Animated.View style={styles.brandContent}>
-        <Image
-          source={require("../assets/images/icon.png")}
-          style={styles.brandLogo}
-          resizeMode="contain"
-          accessibilityLabel="شعار NOVA FILM"
-        />
-        <Text style={styles.brandName}>NOVA <Text style={{ color: "#F59E0B" }}>FILM</Text></Text>
-        <Text style={styles.brandTagline}>منصة الأفلام والمسلسلات والأنميشن</Text>
-        <View style={styles.brandFeatures}>
-          <View style={styles.brandFeature}>
-            <Ionicons name="play" size={11} color="#F59E0B" />
-            <Text style={styles.brandFeatureText}>شاهد</Text>
-          </View>
-          <View style={styles.brandFeatureDivider} />
-          <View style={styles.brandFeature}>
-            <Ionicons name="bookmark" size={11} color="#F59E0B" />
-            <Text style={styles.brandFeatureText}>احفظ</Text>
-          </View>
-          <View style={styles.brandFeatureDivider} />
-          <View style={styles.brandFeature}>
-            <Ionicons name="download" size={11} color="#F59E0B" />
-            <Text style={styles.brandFeatureText}>حمّل</Text>
-          </View>
+      {/* Multi-layered soft cinema-gold ambient aura (smooth on Android without hard circle edges) */}
+      <View pointerEvents="none" style={styles.brandAuraLayerOuter} />
+      <View pointerEvents="none" style={styles.brandAuraGold} />
+      <View pointerEvents="none" style={styles.brandAuraAmber} />
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.brandAuraCore,
+          { opacity: pulseOpacity, transform: [{ scale: pulseScale }] },
+        ]}
+      />
+
+      {/* Subtle cinema starlight accents */}
+      <View pointerEvents="none" style={[styles.brandStar, { top: "18%", left: "16%", width: 3, height: 3, opacity: 0.5 }]} />
+      <View pointerEvents="none" style={[styles.brandStar, { top: "24%", right: "18%", width: 4, height: 4, backgroundColor: "#FDE68A", opacity: 0.6 }]} />
+      <View pointerEvents="none" style={[styles.brandStar, { top: "34%", left: "11%", width: 2.5, height: 2.5, backgroundColor: "#F59E0B", opacity: 0.45 }]} />
+      <View pointerEvents="none" style={[styles.brandStar, { bottom: "26%", right: "14%", width: 3, height: 3, backgroundColor: "#FBBF24", opacity: 0.42 }]} />
+      <View pointerEvents="none" style={[styles.brandStar, { bottom: "22%", left: "20%", width: 2.5, height: 2.5, opacity: 0.35 }]} />
+
+      <Animated.View
+        style={[
+          styles.brandContent,
+          {
+            opacity: fadeAnim,
+            transform: [{ scale: scaleAnim }, { translateY: slideAnim }],
+          },
+        ]}
+      >
+        <View style={styles.brandLogoHalo}>
+          <LinearGradient
+            colors={["rgba(253, 230, 138, 0.92)", "rgba(245, 158, 11, 0.85)", "rgba(217, 119, 6, 0.58)"]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.brandLogoRim}
+          >
+            <View style={styles.brandLogoClip}>
+              <Image
+                source={require("../assets/images/icon.png")}
+                style={styles.brandLogo}
+                resizeMode="cover"
+                accessibilityLabel="شعار NOVA FILM"
+              />
+            </View>
+          </LinearGradient>
         </View>
+
+        <Text style={styles.brandName}>
+          NOVA <Text style={styles.brandNameAccent}>FILM</Text>
+        </Text>
+
+        <LinearGradient
+          colors={["rgba(245, 158, 11, 0)", "#FDE68A", "#F59E0B", "rgba(245, 158, 11, 0)"]}
+          start={{ x: 0, y: 0.5 }}
+          end={{ x: 1, y: 0.5 }}
+          style={styles.brandAccentLine}
+        />
+
+        <Text style={styles.brandTagline}>عالمك المتكامل للأفلام والمسلسلات</Text>
+
+        <View style={styles.brandWorldsRow}>
+          {SPLASH_WORLDS.map((world) => (
+            <View key={world.label} style={styles.brandWorldChip}>
+              <View style={[styles.brandWorldDot, { backgroundColor: world.color }]} />
+              <Text style={styles.brandWorldText}>{world.label}</Text>
+            </View>
+          ))}
+        </View>
+
         <View style={styles.brandLoader}>
-          <View style={styles.brandLoaderFill} />
+          <Animated.View
+            style={[
+              styles.brandLoaderBeamWrap,
+              { transform: [{ translateX: loaderTranslateX }] },
+            ]}
+          >
+            <LinearGradient
+              colors={["rgba(245, 158, 11, 0)", "#FDE68A", "#F59E0B", "rgba(245, 158, 11, 0)"]}
+              start={{ x: 0, y: 0.5 }}
+              end={{ x: 1, y: 0.5 }}
+              style={styles.brandLoaderBeam}
+            />
+          </Animated.View>
         </View>
       </Animated.View>
+
+      <View pointerEvents="none" style={styles.brandFooter}>
+        <Text style={styles.brandFooterText}>بث مباشر FHD  •  تحميل أوفلاين</Text>
+      </View>
     </LinearGradient>
   );
 }
@@ -454,79 +595,164 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#09090B",
+    backgroundColor: "#050408",
+    overflow: "hidden",
+  },
+  brandAuraLayerOuter: {
+    position: "absolute",
+    width: 440,
+    height: 440,
+    borderRadius: 220,
+    backgroundColor: "rgba(245, 158, 11, 0.045)",
+  },
+  brandAuraGold: {
+    position: "absolute",
+    width: 300,
+    height: 300,
+    borderRadius: 150,
+    top: "18%",
+    right: -70,
+    backgroundColor: "rgba(251, 191, 36, 0.055)",
+  },
+  brandAuraAmber: {
+    position: "absolute",
+    width: 280,
+    height: 280,
+    borderRadius: 140,
+    bottom: "16%",
+    left: -75,
+    backgroundColor: "rgba(217, 119, 6, 0.045)",
+  },
+  brandAuraCore: {
+    position: "absolute",
+    width: 240,
+    height: 240,
+    borderRadius: 120,
+    backgroundColor: "rgba(245, 158, 11, 0.095)",
+  },
+  brandStar: {
+    position: "absolute",
+    borderRadius: 99,
+    backgroundColor: "#FFFFFF",
   },
   brandContent: {
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 28,
+    paddingHorizontal: 24,
+  },
+  brandLogoHalo: {
+    width: 192,
+    height: 192,
+    borderRadius: 48,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(24, 17, 10, 0.58)",
+    borderWidth: 1,
+    borderColor: "rgba(245, 158, 11, 0.26)",
+    marginBottom: 24,
+  },
+  brandLogoRim: {
+    width: 176,
+    height: 176,
+    borderRadius: 42,
+    padding: 2,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  brandLogoClip: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 40,
+    overflow: "hidden",
+    backgroundColor: "#171412",
+    alignItems: "center",
+    justifyContent: "center",
   },
   brandLogo: {
-    width: 238,
-    height: 238,
-    borderRadius: 44,
-    marginBottom: 22,
+    width: 192,
+    height: 192,
   },
   brandName: {
     color: "#FFFFFF",
-    fontSize: 27,
-    letterSpacing: 4,
+    fontSize: 28,
+    letterSpacing: 4.5,
     fontWeight: "800",
     textAlign: "center",
   },
+  brandNameAccent: {
+    color: "#F59E0B",
+  },
+  brandAccentLine: {
+    width: 112,
+    height: 2,
+    borderRadius: 2,
+    marginTop: 11,
+    marginBottom: 11,
+  },
   brandTagline: {
-    color: "#FDE68A",
-    fontSize: 13,
-    fontFamily: "Cairo_600SemiBold",
-    marginTop: 7,
+    color: "rgba(254, 243, 199, 0.92)",
+    fontSize: 13.5,
+    fontFamily: "Cairo_700Bold",
     textAlign: "center",
   },
-  brandFeatures: {
+  brandWorldsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 18,
+  },
+  brandWorldChip: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 11,
-    marginTop: 18,
-    paddingHorizontal: 13,
-    paddingVertical: 7,
-    borderRadius: 20,
-    backgroundColor: "rgba(245,158,11,0.12)",
+    gap: 5,
+    paddingHorizontal: 11,
+    paddingVertical: 5,
+    borderRadius: 99,
+    backgroundColor: "rgba(255, 255, 255, 0.055)",
     borderWidth: 1,
-    borderColor: "rgba(245,158,11,0.28)",
+    borderColor: "rgba(253, 230, 138, 0.15)",
   },
-  brandFeature: { flexDirection: "row", alignItems: "center", gap: 4 },
-  brandFeatureText: {
-    color: "rgba(255,255,255,0.68)",
-    fontSize: 11,
+  brandWorldDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  brandWorldText: {
+    color: "rgba(241, 245, 249, 0.9)",
+    fontSize: 11.5,
     fontFamily: "Cairo_600SemiBold",
   },
-  brandFeatureDivider: {
-    width: 1,
-    height: 13,
-    backgroundColor: "rgba(245,158,11,0.28)",
-  },
-  brandGlow: {
-    position: "absolute",
-    width: 330,
-    height: 330,
-    borderRadius: 165,
-    backgroundColor: "rgba(245, 158, 11, 0.14)",
-    shadowColor: "#F59E0B",
-    shadowOpacity: 0.9,
-    shadowRadius: 80,
-  },
   brandLoader: {
-    width: 118,
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: "rgba(255,255,255,0.12)",
+    width: 152,
+    height: 3.5,
+    borderRadius: 3,
+    backgroundColor: "rgba(255, 255, 255, 0.10)",
     overflow: "hidden",
     marginTop: 28,
   },
-  brandLoaderFill: {
-    width: "62%",
+  brandLoaderBeamWrap: {
+    width: 82,
     height: "100%",
-    borderRadius: 2,
-    backgroundColor: "#F59E0B",
+  },
+  brandLoaderBeam: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 3,
+  },
+  brandFooter: {
+    position: "absolute",
+    bottom: 34,
+    left: 24,
+    right: 24,
+    alignItems: "center",
+  },
+  brandFooterText: {
+    color: "rgba(212, 212, 216, 0.52)",
+    fontSize: 11,
+    fontFamily: "Cairo_600SemiBold",
+    letterSpacing: 0.4,
   },
   blockedScreen: {
     flex: 1,
