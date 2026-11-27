@@ -65,7 +65,7 @@ const NAV_MAIN: NavItem[] = [
 ];
 
 const NAV_LIBRARY: NavItem[] = [
-  { icon: "heart", label: "المفضلة",      route: "/(tabs)/library", showChevron: false, color: "#f43f5e" },
+  { icon: "bookmark", label: "قائمتي",       route: "/(tabs)/library", showChevron: false, color: "#8B5CF6" },
   { icon: "time",  label: "سجل المشاهدة", route: "/(tabs)/library", showChevron: false, color: "#f59e0b" },
 ];
 

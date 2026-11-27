@@ -12,7 +12,13 @@ import * as Notifications from "expo-notifications";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
 import { recordSuccessfulDownload } from "./adPolicy";
+import { getBaseUrl } from "./baseUrl";
 import { getAuthToken, getDownloadToken } from "./secureApi";
+import {
+  collectExternalSubtitleCandidates,
+  extractSubtitleTracksFromHlsManifest,
+  subtitleTrackPathForVideo,
+} from "./offlineSubtitleLogic.mjs";
 import {
   enqueueNativeDownload,
   forgetNativeDownload,
@@ -31,6 +37,12 @@ const MOBILE_CLIENT_ID = "nova-anime-mobile-v1";
 const MOBILE_PACKAGE_NAME = "com.nova.anime";
 const MOBILE_VERSION = Constants.expoConfig?.version || "1.0.0";
 
+export interface OfflineSubtitleTrack {
+  lang: string;
+  label: string;
+  localPath: string;
+}
+
 export interface DownloadItem {
   id: string;
   animeId: number;
@@ -41,6 +53,7 @@ export interface DownloadItem {
   quality: string;
   localPath: string;
   subtitleLocalPath?: string;
+  subtitleTracks?: OfflineSubtitleTrack[];
   fileSize: number;
   downloadedAt: number;
   galleryAssetId?: string;
@@ -77,6 +90,8 @@ export interface StartDownloadParams {
   authToken?: string | null;
   downloadToken?: string | null;
   subtitleUrl?: string;
+  englishSubtitleUrl?: string;
+  subtitleTracks?: Array<{ lang: string; label?: string; url: string }>;
   /** Original/proxied HLS manifest used to discover an embedded subtitle track. */
   hlsManifestUrl?: string;
   headers?: Record<string, string>;
@@ -108,6 +123,8 @@ type PersistedActive = Omit<ActiveDownload, "cancelFn"> & {
   url: string;
   localPath: string;
   subtitleUrl?: string;
+  englishSubtitleUrl?: string;
+  subtitleTracks?: Array<{ lang: string; label?: string; url: string }>;
   hlsManifestUrl?: string;
   headers?: Record<string, string>;
   resumeState?: ResumeState;
@@ -231,6 +248,28 @@ export async function isDownloaded(
   return null;
 }
 
+async function deleteSubtitleSidecars(
+  item: Pick<DownloadItem, "localPath" | "subtitleLocalPath" | "subtitleTracks">,
+): Promise<void> {
+  const paths = new Set<string>();
+  if (item.subtitleLocalPath) paths.add(item.subtitleLocalPath);
+  if (Array.isArray(item.subtitleTracks)) {
+    for (const tr of item.subtitleTracks) {
+      if (tr?.localPath) paths.add(tr.localPath);
+    }
+  }
+  if (item.localPath && !item.localPath.endsWith("/index.m3u8")) {
+    const uri = localFileUri(item.localPath);
+    paths.add(subtitleTrackPathForVideo(uri, "ar"));
+    paths.add(subtitleTrackPathForVideo(uri, "en"));
+    const stem = uri.replace(/\.[^./]+$/, "");
+    if (stem) paths.add(`${stem}.vtt`);
+  }
+  await Promise.allSettled(
+    Array.from(paths).map((p) => FileSystem.deleteAsync(p, { idempotent: true })),
+  );
+}
+
 export async function deleteDownload(item: DownloadItem): Promise<void> {
   if (item.localPath.endsWith("/index.m3u8")) {
     const dir = item.localPath.slice(0, -"/index.m3u8".length);
@@ -238,9 +277,7 @@ export async function deleteDownload(item: DownloadItem): Promise<void> {
   } else {
     try { await FileSystem.deleteAsync(item.localPath, { idempotent: true }); } catch {}
   }
-  if (item.subtitleLocalPath) {
-    try { await FileSystem.deleteAsync(item.subtitleLocalPath, { idempotent: true }); } catch {}
-  }
+  await deleteSubtitleSidecars(item);
   const items = await getDownloads();
   await saveDownloads(items.filter((entry) => entry.id !== item.id));
 }
@@ -303,10 +340,10 @@ export async function saveDownloadToGallery(item: DownloadItem): Promise<Downloa
 export async function clearAllDownloads(): Promise<void> {
   const items = await getDownloads();
   await Promise.allSettled(items.flatMap((item) => [
-    FileSystem.deleteAsync(item.localPath, { idempotent: true }),
-    item.subtitleLocalPath
-      ? FileSystem.deleteAsync(item.subtitleLocalPath, { idempotent: true })
-      : Promise.resolve(),
+    item.localPath.endsWith("/index.m3u8")
+      ? FileSystem.deleteAsync(item.localPath.slice(0, -"/index.m3u8".length), { idempotent: true })
+      : FileSystem.deleteAsync(item.localPath, { idempotent: true }),
+    deleteSubtitleSidecars(item),
   ]));
   await AsyncStorage.removeItem(DOWNLOADS_KEY);
 }
@@ -332,6 +369,8 @@ function persistActive(): void {
     url: entry.params.url,
     localPath: entry.localPath,
     subtitleUrl: entry.params.subtitleUrl,
+    englishSubtitleUrl: entry.params.englishSubtitleUrl,
+    subtitleTracks: entry.params.subtitleTracks,
     hlsManifestUrl: entry.params.hlsManifestUrl,
     headers: entry.params.headers,
     resumeState: entry.resumeState,
@@ -694,12 +733,14 @@ function subtitleToVtt(url: string, body: string): string {
 }
 
 async function fetchSubtitleResponse(url: string, params: StartDownloadParams): Promise<string> {
-  const response = await fetch(url, {
-    headers: {
-      ...requestHeaders(params),
-      Accept: "application/vnd.apple.mpegurl, text/vtt, application/x-subrip, text/plain, */*",
-    },
-  });
+  const isSubNovaApi = /\/api\/(?:anime|animation|film)\//i.test(url);
+  const subHeaders = isSubNovaApi
+    ? requestHeaders({ ...params, url })
+    : {
+        ...directCdnHeaders(params),
+        Accept: "application/vnd.apple.mpegurl, text/vtt, application/x-subrip, text/plain, */*",
+      };
+  const response = await fetch(url, { headers: subHeaders });
   if (!response.ok) throw new Error(`subtitle ${response.status}`);
   return response.text();
 }
@@ -724,6 +765,8 @@ function nativeMetadata(entry: RuntimeDownload): Record<string, unknown> {
     quality: entry.quality,
     url: entry.params.url,
     subtitleUrl: entry.params.subtitleUrl,
+    englishSubtitleUrl: entry.params.englishSubtitleUrl,
+    subtitleTracks: entry.params.subtitleTracks,
     hlsManifestUrl: entry.params.hlsManifestUrl,
     headers: entry.params.headers,
   };
@@ -828,98 +871,169 @@ async function beginNativeDownload(entry: RuntimeDownload): Promise<void> {
   }
 }
 
+async function materializeHlsSubtitleRendition(
+  subtitleUrl: string,
+  params: StartDownloadParams,
+): Promise<string> {
+  const subtitleBody = await fetchSubtitleResponse(subtitleUrl, params);
+  if (!subtitleBody.includes("#EXTM3U")) return subtitleBody;
+  const segments = subtitleBody
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"))
+    .map((line) => resolvePlaylistUrl(line, subtitleUrl));
+  if (segments.length === 0) return "";
+  const chunks = await Promise.all(segments.map((segment) => fetchSubtitleResponse(segment, params)));
+  const cues = chunks
+    .map((chunk) => chunk.replace(/^\uFEFF?WEBVTT[^\n]*\n?/i, "").trim())
+    .filter(Boolean);
+  if (!cues.length) return "";
+  return `WEBVTT\n\n${cues.join("\n\n")}\n`;
+}
+
 /**
- * Finds the first subtitle rendition in an HLS master and materializes an
- * HLS WebVTT media playlist into one offline VTT file. A direct subtitle URL
- * still wins, so provider-specific subtitle behavior remains unchanged.
+ * Extracts all Arabic and English subtitle renditions from an HLS master playlist
+ * (supporting multi-hop master -> child playlists) and materializes them to WebVTT.
  */
-async function discoverHlsSubtitle(
+async function discoverHlsSubtitles(
   manifestUrl: string,
   params: StartDownloadParams,
-): Promise<{ url: string; body: string } | null> {
+): Promise<Array<{ lang: string; label: string; url: string; body: string }>> {
   let currentUrl = manifestUrl;
   for (let depth = 0; depth < 3; depth += 1) {
     const body = await fetchSubtitleResponse(currentUrl, params);
-    const lines = body.replace(/\r/g, "").split("\n").map((line) => line.trim());
-    const rendition = lines.find((line) =>
-      line.startsWith("#EXT-X-MEDIA:") && /TYPE=SUBTITLES/i.test(line) && parseM3u8Attributes(line).URI,
-    );
-    if (rendition) {
-      const attrs = parseM3u8Attributes(rendition);
-      const subtitleUrl = resolvePlaylistUrl(attrs.URI, currentUrl);
-      const subtitleBody = await fetchSubtitleResponse(subtitleUrl, params);
-      if (!subtitleBody.includes("#EXTM3U")) return { url: subtitleUrl, body: subtitleBody };
-      const segments = subtitleBody
-        .replace(/\r/g, "")
-        .split("\n")
-        .map((line) => line.trim())
-        .filter((line) => line && !line.startsWith("#"))
-        .map((line) => resolvePlaylistUrl(line, subtitleUrl));
-      const chunks = await Promise.all(segments.map((segment) => fetchSubtitleResponse(segment, params)));
-      const cues = chunks
-        .map((chunk) => chunk.replace(/^\uFEFF?WEBVTT[^\n]*\n?/i, "").trim())
-        .filter(Boolean);
-      if (!cues.length) return null;
-      return { url: subtitleUrl, body: `WEBVTT\n\n${cues.join("\n\n")}\n` };
+    const renditions = extractSubtitleTracksFromHlsManifest(body, currentUrl);
+    if (renditions.length > 0) {
+      const wanted = renditions.filter((r) => r.lang === "ar" || r.lang === "en");
+      const targets = wanted.length > 0 ? wanted : renditions.slice(0, 2);
+      const resolved: Array<{ lang: string; label: string; url: string; body: string }> = [];
+      const seenLangs = new Set<string>();
+      for (const r of targets) {
+        if (seenLangs.has(r.lang)) continue;
+        try {
+          const text = await materializeHlsSubtitleRendition(r.url, params);
+          if (text) {
+            seenLangs.add(r.lang);
+            resolved.push({ lang: r.lang, label: r.label, url: r.url, body: text });
+          }
+        } catch {}
+      }
+      if (resolved.length > 0) return resolved;
     }
 
-    const child = lines.find((line) => line && !line.startsWith("#") && /\.(?:m3u8)(?:[?#]|$)/i.test(line));
-    if (!child) return null;
+    const lines = body.replace(/\r/g, "").split("\n").map((line) => line.trim());
+    const child = lines.find((line) => line && !line.startsWith("#") && /\.(?:m3u8|txt)(?:[?#]|$)/i.test(line));
+    if (!child) return [];
     currentUrl = resolvePlaylistUrl(child, currentUrl);
   }
-  return null;
+  return [];
+}
+
+function normalizeFetchedSubtitleToVtt(subtitleUrl: string, body: string): string {
+  let vtt = body;
+  try {
+    const payload = JSON.parse(body) as {
+      cues?: Array<{ timing?: string; text?: string }>;
+    };
+    if (Array.isArray(payload.cues)) {
+      vtt = [
+        "WEBVTT",
+        "",
+        ...payload.cues.flatMap((cue, index) => [
+          String(index + 1),
+          cue.timing || "00:00:00.000 --> 00:00:01.000",
+          cue.text || "",
+          "",
+        ]),
+      ].join("\n");
+    }
+  } catch {
+    /* Direct VTT/SRT/ASS responses are already usable text. */
+  }
+  return subtitleToVtt(subtitleUrl, vtt);
 }
 
 async function attachSubtitleSidecar(entry: RuntimeDownload): Promise<void> {
-  if (!entry.params.subtitleUrl && !entry.params.hlsManifestUrl) return;
+  const hasExplicit = Boolean(
+    entry.params.subtitleUrl ||
+    entry.params.englishSubtitleUrl ||
+    entry.params.subtitleTracks?.length,
+  );
+  if (!hasExplicit && !entry.params.hlsManifestUrl) return;
 
   try {
-    let subtitleUrl = entry.params.subtitleUrl;
-    let body = "";
-    if (subtitleUrl) body = await fetchSubtitleResponse(subtitleUrl, entry.params);
-    else if (entry.params.hlsManifestUrl) {
-      const discovered = await discoverHlsSubtitle(entry.params.hlsManifestUrl, entry.params);
-      subtitleUrl = discovered?.url;
-      body = discovered?.body || "";
-    }
-    if (!subtitleUrl || !body) return;
+    const base = getBaseUrl() || undefined;
+    const savedByLang = new Map<string, { lang: string; label: string; vtt: string }>();
 
-    let vtt = body;
-    try {
-      const payload = JSON.parse(body) as {
-        cues?: Array<{ timing?: string; text?: string }>;
-      };
-      if (Array.isArray(payload.cues)) {
-        vtt = [
-          "WEBVTT",
-          "",
-          ...payload.cues.flatMap((cue, index) => [
-            String(index + 1),
-            cue.timing || "00:00:00.000 --> 00:00:01.000",
-            cue.text || "",
-            "",
-          ]),
-        ].join("\n");
+    const candidates = collectExternalSubtitleCandidates({
+      subtitleUrl: entry.params.subtitleUrl,
+      englishSubtitleUrl: entry.params.englishSubtitleUrl,
+      subtitleTracks: entry.params.subtitleTracks,
+      baseUrl: base,
+      site: entry.site,
+    });
+
+    await Promise.allSettled(
+      candidates.map(async (cand) => {
+        if (savedByLang.has(cand.lang)) return;
+        try {
+          const body = await fetchSubtitleResponse(cand.url, entry.params);
+          const vtt = normalizeFetchedSubtitleToVtt(cand.url, body);
+          if (vtt.includes("-->") && !savedByLang.has(cand.lang)) {
+            savedByLang.set(cand.lang, { lang: cand.lang, label: cand.label, vtt });
+          }
+        } catch {}
+      }),
+    );
+
+    if (entry.params.hlsManifestUrl && (!savedByLang.has("ar") || !savedByLang.has("en"))) {
+      const discovered = await discoverHlsSubtitles(entry.params.hlsManifestUrl, entry.params).catch(() => []);
+      for (const tr of discovered) {
+        if (savedByLang.has(tr.lang)) continue;
+        const vtt = normalizeFetchedSubtitleToVtt(tr.url, tr.body);
+        if (vtt.includes("-->")) {
+          savedByLang.set(tr.lang, {
+            lang: tr.lang,
+            label: tr.label || (tr.lang === "ar" ? "عربي" : "English"),
+            vtt,
+          });
+        }
       }
-    } catch {
-      /* Direct VTT/SRT/ASS responses are already usable text. */
     }
-    vtt = subtitleToVtt(subtitleUrl, vtt);
-    if (!vtt.includes("-->")) return;
 
-    /* Keep one canonical extension so the current native player can attach
-       the sidecar without adding a second subtitle engine. */
-    const subtitlePath = entry.localPath.endsWith(".m3u8") ? `${entry.localPath.slice(0, -5)}.vtt` : `${entry.localPath.slice(0, -4)}.vtt`;
-    await FileSystem.writeAsStringAsync(subtitlePath, vtt);
+    if (savedByLang.size === 0) return;
 
+    const videoUri = localFileUri(entry.localPath);
+    const writtenTracks: OfflineSubtitleTrack[] = [];
+    const ordered = Array.from(savedByLang.values()).sort((a, b) => {
+      const rank = (l: string) => (l === "ar" ? 0 : l === "en" ? 1 : 2);
+      return rank(a.lang) - rank(b.lang);
+    });
+
+    for (const tr of ordered) {
+      const targetPath = subtitleTrackPathForVideo(videoUri, tr.lang);
+      await FileSystem.writeAsStringAsync(targetPath, tr.vtt);
+      writtenTracks.push({
+        lang: tr.lang,
+        label: tr.label || (tr.lang === "ar" ? "عربي" : tr.lang === "en" ? "English" : tr.lang),
+        localPath: targetPath,
+      });
+    }
+
+    const primaryTrack = writtenTracks.find((t) => t.lang === "ar") || writtenTracks[0];
     const items = await getDownloads();
     const saved = items.find((item) => item.id === entry.id);
     if (!saved) {
-      await FileSystem.deleteAsync(subtitlePath, { idempotent: true });
+      await Promise.allSettled(writtenTracks.map((t) => FileSystem.deleteAsync(t.localPath, { idempotent: true })));
       return;
     }
     await saveDownloads(items.map((item) => item.id === entry.id
-      ? { ...item, subtitleLocalPath: subtitlePath }
+      ? {
+          ...item,
+          subtitleLocalPath: primaryTrack.localPath,
+          subtitleTracks: writtenTracks,
+        }
       : item));
   } catch {
     /* Subtitle retrieval is best-effort and must never delay video completion. */
@@ -971,7 +1085,10 @@ async function saveCompleted(entry: RuntimeDownload, overrideBytes?: number): Pr
   };
   const existing = await getDownloads();
   await saveDownloads([...existing.filter((old) => old.id !== entry.id), item]);
-  void attachSubtitleSidecar(entry);
+  await Promise.race([
+    attachSubtitleSidecar(entry).catch(() => {}),
+    wait(14_000),
+  ]);
   /* The ad counter is updated only after the verified non-empty file has
      been persisted. The server deduplicates the anime/episode pair. */
   void recordSuccessfulDownload(entry.animeId, entry.ep);
@@ -1315,7 +1432,7 @@ function enqueueDownload(
         FileSystem.deleteAsync(dir, { idempotent: true }).catch(() => {});
       } else {
         FileSystem.deleteAsync(entry.localPath, { idempotent: true }).catch(() => {});
-        FileSystem.deleteAsync(`${entry.localPath.slice(0, -4)}.vtt`, { idempotent: true }).catch(() => {});
+        void deleteSubtitleSidecars({ localPath: entry.localPath });
       }
     },
   };
@@ -1403,7 +1520,9 @@ export async function restoreInterruptedDownloads(): Promise<void> {
         authToken: restoredToken,
         downloadToken: restoredDownloadToken,
         subtitleUrl: record.subtitleUrl,
-         hlsManifestUrl: record.hlsManifestUrl,
+        englishSubtitleUrl: record.englishSubtitleUrl,
+        subtitleTracks: record.subtitleTracks,
+        hlsManifestUrl: record.hlsManifestUrl,
         headers: record.headers,
       };
       const savedResumeState = record.resumeState
@@ -1465,6 +1584,8 @@ async function restoreNativeDownloads(): Promise<void> {
       authToken: restoredToken,
       downloadToken: restoredDownloadToken,
       subtitleUrl: metadata.subtitleUrl ? String(metadata.subtitleUrl) : undefined,
+      englishSubtitleUrl: metadata.englishSubtitleUrl ? String(metadata.englishSubtitleUrl) : undefined,
+      subtitleTracks: Array.isArray(metadata.subtitleTracks) ? metadata.subtitleTracks as StartDownloadParams["subtitleTracks"] : undefined,
       hlsManifestUrl: metadata.hlsManifestUrl ? String(metadata.hlsManifestUrl) : undefined,
       headers: metadata.headers && typeof metadata.headers === "object"
         ? metadata.headers as Record<string, string>

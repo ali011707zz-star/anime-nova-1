@@ -1,5 +1,6 @@
 import { getBaseUrl } from "./baseUrl";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { type WatchlistStatus, normalizeWatchlistStatus } from "./watchlistStatus";
 
 export type TmdbMediaType = "movie" | "tv";
 export type FilmMediaType = "movie" | "series" | "animation";
@@ -106,6 +107,7 @@ export type FilmSummary = {
   seasonsCount?: number;
   releaseDayIndex?: number;
   scheduleNote?: string;
+  watchStatus?: WatchlistStatus;
 };
 
 export type FavoriteFilmItem = FilmSummary;
@@ -214,6 +216,7 @@ export function normalizeFilmSummary(raw: any): FilmSummary {
     audioLabel: String(raw?.audioLabel || "مترجم"),
     categoryLabel: String(raw?.categoryLabel || (tmdbType === "tv" ? "مسلسلات أجنبية" : "أفلام أجنبية")),
     genres: Array.isArray(raw?.genres) ? raw.genres : [],
+    watchStatus: normalizeWatchlistStatus(raw?.watchStatus),
   };
 }
 
@@ -307,6 +310,18 @@ export async function toggleFavoriteFilm(item: FilmSummary): Promise<FilmSummary
   const next = exists
     ? list.filter((x) => !(x.id === normalized.id && x.tmdbType === normalized.tmdbType))
     : [normalized, ...list].slice(0, 120);
+  await AsyncStorage.setItem(FAVORITES_KEY, JSON.stringify(next));
+  await AsyncStorage.setItem(FAVORITE_IDS_KEY, JSON.stringify(next.map((x) => x.id)));
+  return next;
+}
+
+export async function setFilmWatchStatus(item: FilmSummary, status: WatchlistStatus): Promise<FilmSummary[]> {
+  const normalized = normalizeFilmSummary({ ...item, watchStatus: status });
+  const list = await loadFavoriteFilms();
+  const existingIdx = list.findIndex((x) => x.id === normalized.id && x.tmdbType === normalized.tmdbType);
+  const next = existingIdx >= 0
+    ? list.map((x, i) => (i === existingIdx ? { ...x, ...normalized, watchStatus: status } : x))
+    : [{ ...normalized, watchStatus: status }, ...list].slice(0, 120);
   await AsyncStorage.setItem(FAVORITES_KEY, JSON.stringify(next));
   await AsyncStorage.setItem(FAVORITE_IDS_KEY, JSON.stringify(next.map((x) => x.id)));
   return next;

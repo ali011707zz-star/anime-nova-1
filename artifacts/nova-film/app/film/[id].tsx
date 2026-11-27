@@ -19,6 +19,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { SafePosterImage } from "@/components/SafePosterImage";
+import { WatchlistStatusModal } from "@/components/WatchlistStatusModal";
 import { YoutubeTrailerModal } from "@/components/YoutubeTrailerModal";
 import type { ThemePalette } from "@/constants/colors";
 import { useColors } from "@/hooks/useColors";
@@ -28,15 +29,22 @@ import {
   type FilmDetail,
   type FilmSummary,
   getImageSource,
-  loadFavoriteFilmIds,
+  loadFavoriteFilms,
   loadSavedCast,
   loadUserRating,
   loadWatchedMap,
   makeEpisodeKey,
+  removeFavoriteFilm,
   saveUserRating,
-  toggleFavoriteFilm,
+  setFilmWatchStatus,
   toggleSavedCastMember,
 } from "@/utils/filmCatalog";
+import { getPrimaryCtaMetrics } from "@/utils/responsiveUiLogic.mjs";
+import {
+  type WatchlistStatus,
+  getWatchlistStatusMeta,
+  resolveWatchlistStatus,
+} from "@/utils/watchlistStatus";
 import { TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
 import { tvFocusStyle } from "@/utils/tvFocus";
 
@@ -124,7 +132,8 @@ export default function FilmDetailScreen() {
   const [showRating, setShowRating] = useState(false);
   const [showTrailer, setShowTrailer] = useState(false);
 
-  const [favIds, setFavIds] = useState<number[]>([]);
+  const [favorites, setFavorites] = useState<FilmSummary[]>([]);
+  const [showWatchlist, setShowWatchlist] = useState(false);
   const [watchedMap, setWatchedMap] = useState<Record<string, boolean>>({});
   const [myRating, setMyRating] = useState<number>(0);
   const [savedCastIds, setSavedCastIds] = useState<Set<number>>(new Set());
@@ -142,12 +151,19 @@ export default function FilmDetailScreen() {
       loadWatchedMap()
         .then((m) => setWatchedMap(m))
         .catch(() => {});
+      loadFavoriteFilms()
+        .then((list) => setFavorites(list))
+        .catch(() => {});
     }, []),
   );
 
   useEffect(() => {
-    if (!showRating && !showTrailer) return;
+    if (!showRating && !showTrailer && !showWatchlist) return;
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (showWatchlist) {
+        setShowWatchlist(false);
+        return true;
+      }
       if (showTrailer) {
         setShowTrailer(false);
         return true;
@@ -159,7 +175,7 @@ export default function FilmDetailScreen() {
       return false;
     });
     return () => sub.remove();
-  }, [showRating, showTrailer]);
+  }, [showRating, showTrailer, showWatchlist]);
 
   useEffect(() => {
     let active = true;
@@ -194,13 +210,13 @@ export default function FilmDetailScreen() {
 
     (async () => {
       try {
-        const [fIds, savedCast, warnRaw] = await Promise.all([
-          loadFavoriteFilmIds(),
+        const [favList, savedCast, warnRaw] = await Promise.all([
+          loadFavoriteFilms(),
           loadSavedCast(),
           AsyncStorage.getItem(`nova-film-adult-warn-${filmId}`),
         ]);
         if (!active) return;
-        setFavIds(fIds);
+        setFavorites(favList);
         setSavedCastIds(new Set(savedCast.map((x) => x.id)));
         if (warnRaw === "1") setWarnDismissed(true);
 
@@ -228,12 +244,32 @@ export default function FilmDetailScreen() {
 
 // Trailer orientation is owned cleanly by YoutubeTrailerModal
 
-  const isFav = detail ? favIds.includes(detail.id) : false;
+  const savedFilmEntry = detail
+    ? favorites.find((f) => f.id === detail.id && f.tmdbType === detail.tmdbType)
+    : undefined;
+  const isFav = Boolean(savedFilmEntry);
+  const currentWatchStatus = savedFilmEntry
+    ? resolveWatchlistStatus(savedFilmEntry.watchStatus)
+    : undefined;
+  const watchStatusMeta = savedFilmEntry
+    ? getWatchlistStatusMeta(currentWatchStatus)
+    : null;
 
-  const handleFavorite = useCallback(async () => {
+  const handleSelectWatchStatus = useCallback(
+    async (status: WatchlistStatus) => {
+      if (!detail) return;
+      const next = await setFilmWatchStatus(detail, status);
+      setFavorites(next);
+      setShowWatchlist(false);
+    },
+    [detail],
+  );
+
+  const handleRemoveFromWatchlist = useCallback(async () => {
     if (!detail) return;
-    const next = await toggleFavoriteFilm(detail);
-    setFavIds(next.map((x) => x.id));
+    const next = await removeFavoriteFilm(detail.id, detail.tmdbType);
+    setFavorites(next);
+    setShowWatchlist(false);
   }, [detail]);
 
   const submitRating = useCallback(
@@ -439,18 +475,7 @@ export default function FilmDetailScreen() {
             colors={["rgba(11,11,20,0.1)", "rgba(11,11,20,0.45)", colors.background]}
             style={StyleSheet.absoluteFill}
           />
-          <Pressable
-            onPress={handleFavorite}
-            focusable={tvMode}
-            onFocus={() => rememberDetailFocus("favoriteTop")}
-            style={({ focused }) => [d.favBtn, tvMode && d.tvBackBtn, tvMode && tvFocusStyle(focused)]}
-          >
-            <Ionicons
-              name={isFav ? "heart" : "heart-outline"}
-              size={18}
-              color={isFav ? "#F43F5E" : "#fff"}
-            />
-          </Pressable>
+
         </View>
 
         {/* ── Cover + Main Info ── */}
@@ -546,27 +571,72 @@ export default function FilmDetailScreen() {
             hasTVPreferredFocus={tvMode && lastDetailFocusRef.current === "watch"}
             onFocus={() => rememberDetailFocus("watch")}
             testID={tvMode ? "nova-tv-preferred-focus" : undefined}
-            style={({ focused }) => [d.watchBtn, tvMode && d.tvWatchBtn, tvMode && tvFocusStyle(focused)]}
+            style={({ focused }) => {
+              const cta = getPrimaryCtaMetrics({ width, tvMode });
+              return [
+                d.watchBtn,
+                {
+                  width: "100%",
+                  maxWidth: cta.maxWidth,
+                  alignSelf: cta.maxWidth ? "center" : undefined,
+                  minHeight: cta.minHeight,
+                  borderRadius: cta.borderRadius,
+                  paddingHorizontal: cta.paddingHorizontal,
+                  paddingVertical: cta.paddingVertical,
+                },
+                tvMode && tvFocusStyle(focused),
+              ];
+            }}
           >
-            <View style={d.watchBtnRight}>
-              <View style={[d.watchBtnIcon, tvMode && d.tvWatchBtnIcon]}>
-                <Ionicons name="play" size={18} color="#fff" style={{ marginLeft: 2 }} />
-              </View>
-              <View style={d.watchBtnTextWrap}>
-                <Text style={[d.watchBtnText, tvMode && d.tvButtonText]}>مشاهدة الآن</Text>
-                <Text style={d.watchBtnSub}>
-                  {isSeries
-                    ? "تصفح المواسم والحلقات وابدأ المشاهدة فوراً"
-                    : "اختر السيرفر والجودة وابدأ المشاهدة فوراً"}
-                </Text>
-              </View>
-            </View>
-            <View style={d.watchBtnEpPill}>
-              <Text style={d.watchBtnEpText}>
-                {isSeries ? `${totalEpisodesCount} حلقة` : "فيلم كامل"}
-              </Text>
-              <Ionicons name="chevron-back" size={13} color="#fff" />
-            </View>
+            {(() => {
+              const cta = getPrimaryCtaMetrics({ width, tvMode });
+              return (
+                <>
+                  <View style={[d.watchBtnRight, { gap: cta.gap }]}>
+                    <View
+                      style={[
+                        d.watchBtnIcon,
+                        {
+                          width: cta.iconBoxSize,
+                          height: cta.iconBoxSize,
+                          borderRadius: cta.iconBoxRadius,
+                        },
+                      ]}
+                    >
+                      <Ionicons name="play" size={cta.iconSize} color="#fff" style={{ marginLeft: 2 }} />
+                    </View>
+                    <View style={d.watchBtnTextWrap}>
+                      <Text style={[d.watchBtnText, { fontSize: cta.titleSize, lineHeight: cta.titleLineHeight }]}>
+                        مشاهدة الآن
+                      </Text>
+                      <Text
+                        style={[d.watchBtnSub, { fontSize: cta.subSize, lineHeight: cta.subLineHeight }]}
+                        numberOfLines={1}
+                      >
+                        {isSeries
+                          ? "تصفح المواسم والحلقات وابدأ المشاهدة فوراً"
+                          : "اختر السيرفر والجودة وابدأ المشاهدة فوراً"}
+                      </Text>
+                    </View>
+                  </View>
+                  <View
+                    style={[
+                      d.watchBtnEpPill,
+                      {
+                        paddingHorizontal: cta.pillPadH,
+                        paddingVertical: cta.pillPadV,
+                        borderRadius: cta.pillRadius,
+                      },
+                    ]}
+                  >
+                    <Text style={[d.watchBtnEpText, { fontSize: cta.pillTextSize }]}>
+                      {isSeries ? `${totalEpisodesCount} حلقة` : "فيلم كامل"}
+                    </Text>
+                    <Ionicons name="chevron-back" size={13} color="#fff" />
+                  </View>
+                </>
+              );
+            })()}
           </Pressable>
         </View>
 
@@ -608,12 +678,12 @@ export default function FilmDetailScreen() {
                 ),
             },
             {
-              icon: "heart-outline",
-              activeIcon: "heart",
-              label: "المفضلة",
+              icon: watchStatusMeta ? watchStatusMeta.icon : "bookmark-outline",
+              activeIcon: watchStatusMeta ? watchStatusMeta.activeIcon : "bookmark",
+              label: watchStatusMeta ? watchStatusMeta.shortLabel : "قائمتي",
               active: isFav,
-              activeColor: "#EF4444",
-              onPress: handleFavorite,
+              activeColor: watchStatusMeta ? watchStatusMeta.color : "#8B5CF6",
+              onPress: () => setShowWatchlist(true),
             },
             {
               icon: "star-outline",
@@ -1109,6 +1179,19 @@ export default function FilmDetailScreen() {
           </View>
         </Modal>
       )}
+
+      <WatchlistStatusModal
+        visible={showWatchlist}
+        title={detail.titleAr || detail.titleEn}
+        thumbnail={detail.posterUrl || undefined}
+        currentStatus={currentWatchStatus}
+        isSaved={isFav}
+        onSelect={(status) => {
+          void handleSelectWatchStatus(status);
+        }}
+        onRemove={isFav ? () => { void handleRemoveFromWatchlist(); } : undefined}
+        onClose={() => setShowWatchlist(false)}
+      />
     </View>
   );
 }

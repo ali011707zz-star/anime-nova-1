@@ -4,7 +4,6 @@ import {
   Text,
   View,
   FlatList,
-  Pressable,
   Platform,
   TextInput,
   ScrollView,
@@ -17,6 +16,7 @@ import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { SafePosterImage } from "@/components/SafePosterImage";
+import { WatchlistStatusModal } from "@/components/WatchlistStatusModal";
 import {
   FilmPlaybackProgress,
   FavoriteFilmItem,
@@ -25,9 +25,20 @@ import {
   loadFavoriteFilms,
   removeFavoriteFilm,
   removeFilmPlaybackProgress,
+  setFilmWatchStatus,
   loadSavedCast,
   toggleSavedCastMember,
 } from "@/utils/filmCatalog";
+import { tvFocusStyle, TvPressable as Pressable, useTvMetrics } from "@/utils/tv";
+import {
+  WATCHLIST_STATUSES,
+  type WatchlistFilter,
+  type WatchlistStatus,
+  countByWatchlistStatus,
+  filterByWatchlistStatus,
+  getWatchlistStatusMeta,
+  resolveWatchlistStatus,
+} from "@/utils/watchlistStatus";
 
 const TABS = [
   { label: "متابعة", icon: "play-circle" as const },
@@ -40,6 +51,7 @@ export default function LibraryScreen() {
   const C = useColors();
   const s = useMemo(() => createStyles(C), [C]);
   const insets = useSafeAreaInsets();
+  const { isTv: tvMode } = useTvMetrics();
   const [activeTab, setActiveTab] = useState(0);
   const [history, setHistory] = useState<FilmPlaybackProgress[]>([]);
   const [favorites, setFavorites] = useState<FavoriteFilmItem[]>([]);
@@ -47,6 +59,8 @@ export default function LibraryScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<WatchlistFilter>("all");
+  const [editingFav, setEditingFav] = useState<FavoriteFilmItem | null>(null);
   const [selectedGenre, setSelectedGenre] = useState<string | null>(null);
   const [selectedYear, setSelectedYear] = useState<string | null>(null);
 
@@ -83,7 +97,16 @@ export default function LibraryScreen() {
   const removeFavorite = async (id: number) => {
     const next = await removeFavoriteFilm(id);
     setFavorites(next);
+    setEditingFav(null);
   };
+
+  const setFavoriteStatus = async (item: FavoriteFilmItem, status: WatchlistStatus) => {
+    const next = await setFilmWatchStatus(item, status);
+    setFavorites(next);
+    setEditingFav(null);
+  };
+
+  const statusCounts = useMemo(() => countByWatchlistStatus(favorites), [favorites]);
 
   const removeCast = async (member: SavedFilmCastMember) => {
     const res = await toggleSavedCastMember(member);
@@ -132,7 +155,7 @@ export default function LibraryScreen() {
   }, [history, searchQuery]);
 
   const filteredFavorites = useMemo(() => {
-    return favorites.filter((f) => {
+    return filterByWatchlistStatus(favorites, statusFilter).filter((f) => {
       const q = searchQuery.toLowerCase();
       const titleStr = f.title || f.titleAr || "";
       const enStr = f.englishTitle || f.titleEn || "";
@@ -142,7 +165,7 @@ export default function LibraryScreen() {
       const matchYear = !selectedYear || String(f.year) === selectedYear;
       return matchQuery && matchGenre && matchYear;
     });
-  }, [favorites, searchQuery, selectedGenre, selectedYear]);
+  }, [favorites, statusFilter, searchQuery, selectedGenre, selectedYear]);
 
   const filteredCast = useMemo(() => {
     if (!searchQuery.trim()) return savedCast;
@@ -274,7 +297,8 @@ export default function LibraryScreen() {
             return (
               <Pressable
                 key={t.label}
-                style={[s.tab, isActive && s.tabActive]}
+                focusable={tvMode}
+                style={({ focused }) => [s.tab, isActive && s.tabActive, tvMode && tvFocusStyle(focused)]}
                 onPress={() => {
                   setActiveTab(i);
                   setSelectedGenre(null);
@@ -318,6 +342,65 @@ export default function LibraryScreen() {
             </Pressable>
           )}
         </View>
+
+        {activeTab === 2 && (
+          <ScrollView
+            horizontal
+            focusable={false}
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={s.filtersRow}
+          >
+            <Pressable
+              focusable={tvMode}
+              onPress={() => setStatusFilter("all")}
+              style={({ focused }) => [
+                s.filterChip,
+                s.statusChip,
+                statusFilter === "all" && { backgroundColor: C.accentSurface, borderColor: C.accent },
+                tvMode && tvFocusStyle(focused),
+              ]}
+            >
+              <Text
+                style={[
+                  s.filterChipText,
+                  { color: statusFilter === "all" ? C.accent : C.textSecondary },
+                ]}
+              >
+                الكل ({statusCounts.all})
+              </Text>
+            </Pressable>
+            {WATCHLIST_STATUSES.map((st) => {
+              const active = statusFilter === st.id;
+              return (
+                <Pressable
+                  key={st.id}
+                  focusable={tvMode}
+                  onPress={() => setStatusFilter(st.id)}
+                  style={({ focused }) => [
+                    s.filterChip,
+                    s.statusChip,
+                    active && { backgroundColor: st.bg, borderColor: st.border },
+                    tvMode && tvFocusStyle(focused),
+                  ]}
+                >
+                  <Ionicons
+                    name={active ? st.activeIcon : st.icon}
+                    size={12}
+                    color={active ? st.color : C.textSecondary}
+                  />
+                  <Text
+                    style={[
+                      s.filterChipText,
+                      { color: active ? st.color : C.textSecondary },
+                    ]}
+                  >
+                    {st.label} ({statusCounts[st.id]})
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        )}
 
         {activeTab === 2 && (allGenres.length > 0 || allYears.length > 0) && (
           <ScrollView
@@ -466,64 +549,80 @@ export default function LibraryScreen() {
               icon="bookmark-outline"
               title="لا توجد أعمال محفوظة"
               sub={
-                searchQuery || selectedGenre || selectedYear
+                searchQuery || selectedGenre || selectedYear || statusFilter !== "all"
                   ? "لا توجد نتائج مطابقة للبحث أو الفلتر"
-                  : "أضف أفلامك ومسلسلاتك المفضلة بالضغط على زر القلب في صفحة التفاصيل"
+                  : "أضف أفلامك ومسلسلاتك بالضغط على زر قائمتي في صفحة التفاصيل"
               }
               C={C}
               s={s}
             />
           }
-          renderItem={({ item }) => (
-            <Pressable
-              style={({ pressed }) => [
-                s.favCard,
-                { opacity: pressed ? 0.85 : 1 },
-              ]}
-              onPress={() =>
-                router.push({
-                  pathname: "/film/[id]",
-                  params: { id: String(item.id) },
-                })
-              }
-            >
-              <View style={s.favImgContainer}>
-                <SafePosterImage
-                  uri={item.poster || item.posterUrl}
-                  fallbackUris={[item.posterUrl, item.poster]}
-                  style={s.favImg}
-                  resizeMode="cover"
-                  iconSize={24}
-                />
-                <LinearGradient
-                  colors={[
-                    "rgba(0,0,0,0.6)",
-                    "transparent",
-                    "rgba(0,0,0,0.8)",
-                  ]}
-                  style={StyleSheet.absoluteFill}
-                />
-                <Pressable
-                  style={s.favHeart}
-                  onPress={() => removeFavorite(item.id)}
-                  hitSlop={8}
-                >
-                  <Ionicons name="heart" size={16} color={C.accent} />
-                </Pressable>
-                {(item.rating || item.imdbRating) ? (
-                  <View style={s.favScore}>
-                    <Ionicons name="star" size={10} color={"#FBBF24"} />
-                    <Text style={s.favScoreText}>
-                      {(item.rating || item.imdbRating).toFixed(1)}
+          renderItem={({ item }) => {
+            const stMeta = getWatchlistStatusMeta(item.watchStatus);
+            return (
+              <Pressable
+                focusable={tvMode}
+                style={({ focused, pressed }) => [
+                  s.favCard,
+                  { opacity: pressed ? 0.85 : 1 },
+                  tvMode && tvFocusStyle(focused),
+                ]}
+                onPress={() =>
+                  router.push({
+                    pathname: "/film/[id]",
+                    params: { id: String(item.id), type: item.tmdbType },
+                  })
+                }
+              >
+                <View style={s.favImgContainer}>
+                  <SafePosterImage
+                    uri={item.poster || item.posterUrl}
+                    fallbackUris={[item.posterUrl, item.poster]}
+                    style={s.favImg}
+                    resizeMode="cover"
+                    iconSize={24}
+                  />
+                  <LinearGradient
+                    colors={[
+                      "rgba(0,0,0,0.6)",
+                      "transparent",
+                      "rgba(0,0,0,0.8)",
+                    ]}
+                    style={StyleSheet.absoluteFill}
+                  />
+                  <Pressable
+                    focusable={tvMode}
+                    style={({ focused }) => [
+                      s.favStatusBadge,
+                      { backgroundColor: "rgba(9,9,11,0.84)", borderColor: stMeta.border },
+                      tvMode && tvFocusStyle(focused),
+                    ]}
+                    onPress={(e: any) => {
+                      e?.stopPropagation?.();
+                      setEditingFav(item);
+                    }}
+                    hitSlop={8}
+                  >
+                    <Ionicons name={stMeta.activeIcon} size={11} color={stMeta.color} />
+                    <Text style={[s.favStatusText, { color: stMeta.color }]} numberOfLines={1}>
+                      {stMeta.shortLabel}
                     </Text>
-                  </View>
-                ) : null}
-              </View>
-              <Text style={s.favTitle} numberOfLines={2}>
-                {item.title || item.titleAr}
-              </Text>
-            </Pressable>
-          )}
+                  </Pressable>
+                  {(item.rating || item.imdbRating) ? (
+                    <View style={s.favScore}>
+                      <Ionicons name="star" size={10} color={"#FBBF24"} />
+                      <Text style={s.favScoreText}>
+                        {(item.rating || item.imdbRating).toFixed(1)}
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
+                <Text style={s.favTitle} numberOfLines={2}>
+                  {item.title || item.titleAr}
+                </Text>
+              </Pressable>
+            );
+          }}
         />
       )}
 
@@ -623,6 +722,19 @@ export default function LibraryScreen() {
           )}
         />
       )}
+
+      <WatchlistStatusModal
+        visible={Boolean(editingFav)}
+        title={editingFav ? (editingFav.titleAr || editingFav.titleEn || editingFav.title || "") : ""}
+        thumbnail={editingFav?.posterUrl || editingFav?.poster || undefined}
+        currentStatus={editingFav ? resolveWatchlistStatus(editingFav.watchStatus) : undefined}
+        isSaved={Boolean(editingFav)}
+        onSelect={(status: WatchlistStatus) => {
+          if (editingFav) void setFavoriteStatus(editingFav, status);
+        }}
+        onRemove={editingFav ? () => void removeFavorite(editingFav.id) : undefined}
+        onClose={() => setEditingFav(null)}
+      />
     </View>
   );
 }
@@ -762,6 +874,11 @@ const createStyles = (C: ReturnType<typeof useColors>) =>
       backgroundColor: C.card,
       borderWidth: 1,
       borderColor: C.border,
+    },
+    statusChip: {
+      flexDirection: "row-reverse",
+      alignItems: "center",
+      gap: 5,
     },
     filterChipActive: {
       backgroundColor: C.accentSurface,
@@ -904,6 +1021,23 @@ const createStyles = (C: ReturnType<typeof useColors>) =>
       backgroundColor: "rgba(0,0,0,0.6)",
       alignItems: "center",
       justifyContent: "center",
+    },
+    favStatusBadge: {
+      position: "absolute",
+      top: 6,
+      left: 6,
+      flexDirection: "row-reverse",
+      alignItems: "center",
+      gap: 4,
+      paddingHorizontal: 7,
+      paddingVertical: 3,
+      borderRadius: 8,
+      borderWidth: 1,
+      zIndex: 4,
+    },
+    favStatusText: {
+      fontSize: 9.5,
+      fontFamily: "Cairo_700Bold",
     },
     favScore: {
       position: "absolute",

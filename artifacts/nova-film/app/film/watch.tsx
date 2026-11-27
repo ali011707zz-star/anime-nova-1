@@ -145,6 +145,7 @@ export default function FilmWatchScreen() {
   const [scanning, setScanning] = useState<boolean>(true);
   const [statusMsg, setStatusMsg] = useState<string>("جاري فحص السيرفرات المتاحة...");
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
+  const [activePlayerSrcIdx, setActivePlayerSrcIdx] = useState<number>(0);
   const [screen, setScreen] = useState<"picker" | "player">("picker");
   const [failedUrls, setFailedUrls] = useState<Record<string, boolean>>({});
   const [pickerFocusKey, setPickerFocusKey] = useState<string>("");
@@ -421,16 +422,36 @@ export default function FilmWatchScreen() {
   }, [detail?.realTmdbId, detail?.titleEn, detail?.titleAr, filmId, tmdbType, currentSeason, currentEpNum, subtitles.length]);
 
   // Convert FilmStreamSource[] to RiftPlayer PlayerSource[]
+  const resolveSubTrackUrl = useCallback((raw?: string) => {
+    if (!raw) return undefined;
+    return raw.startsWith("http") ? raw : `${getBaseUrl()}${raw}`;
+  }, []);
+
   const selectedSubTrack = useMemo(() => {
     return subtitles.find((t) => t.lang === "ar") || subtitles[0] || null;
   }, [subtitles]);
 
-  const arSubTrackUrl = useMemo(() => {
-    if (!selectedSubTrack?.url) return undefined;
-    return selectedSubTrack.url.startsWith("http")
-      ? selectedSubTrack.url
-      : `${getBaseUrl()}${selectedSubTrack.url}`;
-  }, [selectedSubTrack]);
+  const arSubTrackUrl = useMemo(
+    () => resolveSubTrackUrl(selectedSubTrack?.url),
+    [selectedSubTrack, resolveSubTrackUrl],
+  );
+
+  const enSubTrackUrl = useMemo(() => {
+    const enTrack = subtitles.find((t) => t.lang === "en");
+    return resolveSubTrackUrl(enTrack?.url);
+  }, [subtitles, resolveSubTrackUrl]);
+
+  const externalSubTracks = useMemo(() => {
+    const out: Array<{ lang: string; label?: string; url: string }> = [];
+    const seen = new Set<string>();
+    for (const tr of subtitles) {
+      const abs = resolveSubTrackUrl(tr.url);
+      if (!abs || seen.has(tr.lang)) continue;
+      seen.add(tr.lang);
+      out.push({ lang: tr.lang, label: tr.label, url: abs });
+    }
+    return out;
+  }, [subtitles, resolveSubTrackUrl]);
 
   const arSubIsNativeArabic = useMemo(() => {
     return selectedSubTrack?.lang === "ar";
@@ -467,12 +488,14 @@ export default function FilmWatchScreen() {
                 ? src.subtitleUrl
                 : `${getBaseUrl()}${src.subtitleUrl}`
               : undefined,
+        subtitleTracks: (isHardsub ? externalSubTracks.filter((t) => t.lang !== "ar") : externalSubTracks)
+          .map((t) => ({ lang: t.lang, label: t.label, url: t.url })),
         isArabic: isHardsub ? true : arSubIsNativeArabic,
         hardsubbed: isHardsub,
         headers: src.headers,
       };
     });
-  }, [sources, arSubTrackUrl, arSubIsNativeArabic]);
+  }, [sources, arSubTrackUrl, arSubIsNativeArabic, externalSubTracks]);
 
   const orderedPlaySources = useMemo(() => {
     if (playerSources.length === 0) return [];
@@ -493,6 +516,7 @@ export default function FilmWatchScreen() {
         ? [picked, ...list.filter((_, i) => i !== index)]
         : list;
       setSelectedIndex(index);
+      setActivePlayerSrcIdx(0);
       setSessionPlaySources(ordered);
       setScreen("player");
       void toggleEpisodeWatched(filmId, currentSeason, currentEpNum, tmdbType, true)
@@ -567,13 +591,15 @@ export default function FilmWatchScreen() {
           downloadToken,
           headers: src.headers,
           subtitleUrl: isHardsub ? undefined : arSubTrackUrl,
-          hlsManifestUrl: isHls && !isHardsub ? playUrl : undefined,
+          englishSubtitleUrl: enSubTrackUrl,
+          subtitleTracks: isHardsub ? externalSubTracks.filter((t) => t.lang !== "ar") : externalSubTracks,
+          hlsManifestUrl: isHls ? playUrl : undefined,
         });
       } catch {
         setDownloadStates((prev) => ({ ...prev, [stateKey]: "error" }));
       }
     },
-    [downloadStates, filmId, currentEpNum, displayTitle, coverUrl, arSubTrackUrl],
+    [downloadStates, filmId, currentEpNum, displayTitle, coverUrl, arSubTrackUrl, enSubTrackUrl, externalSubTracks],
   );
 
   // Group sources by quality bucket matching Anime NOVA watch.tsx
@@ -593,13 +619,46 @@ export default function FilmWatchScreen() {
   /* ══════════════ RIFT PLAYER (Original Glassy v5 Player) ══════════════ */
   const activePlayerSources = useMemo(() => {
     const baseList = sessionPlaySources.length > 0 ? sessionPlaySources : orderedPlaySources;
-    if (!arSubTrackUrl) return baseList;
     return baseList.map((ps) => {
       if (ps.hardsubbed) return ps;
-      if (ps.subtitleUrl && !/rezesubs\.com/i.test(ps.subtitleUrl) && ps.subtitleUrl.includes("/api/film/sub-vtt")) return ps;
-      return { ...ps, subtitleUrl: arSubTrackUrl, isArabic: arSubIsNativeArabic };
+      const nextTracks = externalSubTracks.length > 0 ? externalSubTracks : ps.subtitleTracks;
+      const existingOk =
+        Boolean(ps.subtitleUrl) &&
+        !/rezesubs\.com/i.test(ps.subtitleUrl || "") &&
+        (ps.subtitleUrl || "").includes("/api/film/sub-vtt");
+      const nextSubUrl = existingOk ? ps.subtitleUrl : (arSubTrackUrl || ps.subtitleUrl);
+      return {
+        ...ps,
+        subtitleUrl: nextSubUrl,
+        subtitleTracks: nextTracks,
+        isArabic: nextSubUrl === arSubTrackUrl ? arSubIsNativeArabic : ps.isArabic,
+      };
     });
-  }, [sessionPlaySources, orderedPlaySources, arSubTrackUrl, arSubIsNativeArabic]);
+  }, [sessionPlaySources, orderedPlaySources, arSubTrackUrl, arSubIsNativeArabic, externalSubTracks]);
+
+  const playingDownloadMeta = useMemo(() => {
+    if (screen !== "player") return null;
+    const currentPs = activePlayerSources[activePlayerSrcIdx] || activePlayerSources[0];
+    if (!currentPs?.url || currentPs.url.startsWith("file://")) return null;
+    const matchIdx = sources.findIndex((s) => resolveFilmPlayableUrl(s) === currentPs.url);
+    const srcIdxInList = matchIdx >= 0 ? matchIdx : selectedIndex;
+    const src = sources[srcIdxInList];
+    if (!src) return null;
+    const qk = normalizeQualityBucket(src);
+    const siteTag = serverShortTag(src, srcIdxInList);
+    return {
+      src,
+      idx: srcIdxInList,
+      stateKey: `${siteTag}:${qk}`,
+      qualityLabel: `${qk} · ${siteTag}`,
+    };
+  }, [screen, activePlayerSources, activePlayerSrcIdx, sources, selectedIndex]);
+
+  const handleDownloadCurrentPlaying = useCallback(() => {
+    if (!playingDownloadMeta) return;
+    void handleDownloadSource(playingDownloadMeta.src, playingDownloadMeta.idx);
+  }, [playingDownloadMeta, handleDownloadSource]);
+
   if (screen === "player" && activePlayerSources.length > 0) {
     return (
       <RiftPlayer
@@ -623,6 +682,11 @@ export default function FilmWatchScreen() {
         onNextEpisode={canGoNextEpisode ? handleNextEpisode : undefined}
         onPrevEpisode={canGoPrevEpisode ? handlePrevEpisode : undefined}
         onEpisodeSelect={tmdbType === "tv" ? handleEpisodeSelect : undefined}
+        onSourceChange={setActivePlayerSrcIdx}
+        onDownloadCurrent={playingDownloadMeta ? handleDownloadCurrentPlaying : undefined}
+        downloadState={playingDownloadMeta ? (downloadStates[playingDownloadMeta.stateKey] || "idle") : "idle"}
+        downloadProgress={playingDownloadMeta ? (downloadProgress[playingDownloadMeta.stateKey] ?? 0) : 0}
+        downloadQualityLabel={playingDownloadMeta?.qualityLabel}
       />
     );
   }

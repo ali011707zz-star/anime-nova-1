@@ -271,9 +271,15 @@ function DownloadCard({
             <Ionicons name="folder-outline" size={9} color={colors.textMuted} />
             <Text style={s.badgeText}>{formatFileSize(item.fileSize)}</Text>
           </View>
-          {item.subtitleLocalPath && (
+          {(item.subtitleLocalPath || (item.subtitleTracks?.length ?? 0) > 0) && (
             <View style={[s.badge, { borderColor: colors.success + "40" }]}>
-              <Text style={[s.badgeText, { color: colors.success }]}>ترجمة</Text>
+              <Text style={[s.badgeText, { color: colors.success }]}>
+                {(item.subtitleTracks?.length ?? 0) > 1
+                  ? "ترجمة عربي/إنجليزي"
+                  : item.subtitleTracks?.[0]?.lang === "en"
+                    ? "ترجمة EN"
+                    : "ترجمة"}
+              </Text>
             </View>
           )}
         </View>
@@ -422,6 +428,11 @@ function LocalPlayer({ item, onClose }: { item: DownloadItem; onClose: () => voi
     quality: (item.quality as any) || "720p HD",
     contentType: isOfflineHls ? "hls" : "progressive",
     subtitleUrl: item.subtitleLocalPath ? toFileUri(item.subtitleLocalPath) : undefined,
+    subtitleTracks: item.subtitleTracks?.map((tr) => ({
+      lang: tr.lang,
+      label: tr.label,
+      url: toFileUri(tr.localPath),
+    })),
     isArabic: true,
   };
   return (

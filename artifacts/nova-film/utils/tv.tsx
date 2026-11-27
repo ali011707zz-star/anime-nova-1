@@ -3,6 +3,7 @@ import React from "react";
 import {
   DeviceEventEmitter,
   Dimensions,
+  findNodeHandle,
   Platform,
   Pressable,
   View,
@@ -25,19 +26,22 @@ let hardwareDpadDetected = false;
 let cachedHardwareTv: boolean | null = null;
 const tvListeners = new Set<() => void>();
 let activeClearFocusFn: (() => void) | null = null;
+let activeFocusNodeTag: number | null = null;
 
-export function claimTvFocus(clearFn: () => void) {
+export function claimTvFocus(clearFn: () => void, nodeTag?: number | null) {
   if (activeClearFocusFn && activeClearFocusFn !== clearFn) {
     try {
       activeClearFocusFn();
     } catch {}
   }
   activeClearFocusFn = clearFn;
+  activeFocusNodeTag = typeof nodeTag === "number" ? nodeTag : null;
 }
 
 export function releaseTvFocus(clearFn: () => void) {
   if (activeClearFocusFn === clearFn) {
     activeClearFocusFn = null;
+    activeFocusNodeTag = null;
   }
 }
 
@@ -85,10 +89,12 @@ if (Platform.OS === "android") {
         notifyTvListeners();
       }
     });
-    DeviceEventEmitter.addListener("novaTvFocusChanged", () => {
-      if (activeClearFocusFn) {
+    DeviceEventEmitter.addListener("novaTvFocusChanged", (evt: any) => {
+      const nextTag = typeof evt?.viewTag === "number" ? evt.viewTag : null;
+      if (activeClearFocusFn && (nextTag === null || activeFocusNodeTag === null || nextTag !== activeFocusNodeTag)) {
         const fn = activeClearFocusFn;
         activeClearFocusFn = null;
+        activeFocusNodeTag = null;
         try {
           fn();
         } catch {}
@@ -183,6 +189,33 @@ export function isTvDevice(_width?: number, _height?: number): boolean {
   return detectAndroidTvHardware();
 }
 
+/**
+ * True when Android MainActivity's native GPU foreground focus ring is actively
+ * drawing the single yellow TV focus outline. When active, JS must NOT draw a
+ * second yellow border or double-scroll horizontal rails.
+ */
+export function isNativeTvRingActive(): boolean {
+  ensureTvOverrideHydrated();
+  if (Platform.OS !== "android") return false;
+  if (currentTvOverride === "off") return false;
+  return hardwareDpadDetected || detectAndroidTvHardware();
+}
+
+function subscribeTvStore(listener: () => void): () => void {
+  tvListeners.add(listener);
+  return () => {
+    tvListeners.delete(listener);
+  };
+}
+
+let lastAnyTvFocusAt = 0;
+
+function getTvCombinedSnapshot(): number {
+  const tvBit = isTvDevice() ? 1 : 0;
+  const ringBit = isNativeTvRingActive() ? 2 : 0;
+  return tvBit | ringBit;
+}
+
 let activeFullScreenOverlay = false;
 const overlayListeners = new Set<() => void>();
 
@@ -228,7 +261,7 @@ try {
  * and background color without triggering Android elevation shadow artifacts.
  */
 export function tvFocusStyle(focused: boolean, isWhite?: boolean): ViewStyle {
-  if (!focused) return {};
+  if (!focused || isNativeTvRingActive()) return {};
   const white = typeof isWhite === "boolean" ? isWhite : activeThemeIsWhite;
   if (white) {
     return {
@@ -241,16 +274,43 @@ export function tvFocusStyle(focused: boolean, isWhite?: boolean): ViewStyle {
 }
 
 export const TV_FOCUS_VIEWABILITY_CONFIG = {
-  itemVisiblePercentThreshold: 65,
+  itemVisiblePercentThreshold: 85,
 };
 
-/** Scroll a virtualized list smoothly when D-pad focus reaches an item. */
+/**
+ * Scroll a virtualized list smoothly ONLY when D-pad focus moves to an item
+ * that is partially or fully off-screen. Keeping already-visible items fixed
+ * prevents horizontal row drift when moving vertically across poster rows on TV.
+ */
 export function useTvListFocusScroll<T>(
   listRef: React.RefObject<FlatList<T> | null>,
   viewPosition = 0.35,
 ) {
   const rafRef = React.useRef<number | null>(null);
   const lastIndexRef = React.useRef<number>(-1);
+  const viewableSetRef = React.useRef<Set<number>>(new Set());
+  const minViewableRef = React.useRef<number>(0);
+  const maxViewableRef = React.useRef<number>(4);
+
+  const onViewableItemsChanged = React.useRef(
+    ({ viewableItems }: { viewableItems: Array<{ index: number | null; isViewable?: boolean }> }) => {
+      const next = new Set<number>();
+      let minIdx = Number.POSITIVE_INFINITY;
+      let maxIdx = -1;
+      for (const item of viewableItems) {
+        if (typeof item.index === "number" && item.index >= 0) {
+          next.add(item.index);
+          if (item.index < minIdx) minIdx = item.index;
+          if (item.index > maxIdx) maxIdx = item.index;
+        }
+      }
+      if (next.size > 0) {
+        viewableSetRef.current = next;
+        minViewableRef.current = minIdx;
+        maxViewableRef.current = maxIdx;
+      }
+    },
+  ).current;
 
   React.useEffect(() => {
     return () => {
@@ -261,12 +321,33 @@ export function useTvListFocusScroll<T>(
   }, []);
 
   const scrollToFocusedIndex = React.useCallback((index: number) => {
+    if (isNativeTvRingActive()) return;
     if (!listRef?.current || typeof index !== "number" || index < 0) return;
-    if (lastIndexRef.current === index) return;
+
+    const prevIndex = lastIndexRef.current;
     lastIndexRef.current = index;
+
+    // Never scroll horizontally if the focused card is already fully visible!
+    const viewable = viewableSetRef.current;
+    if (viewable.size > 0) {
+      if (viewable.has(index)) return;
+    } else if (index <= 3) {
+      return;
+    }
+
+    if (prevIndex === index) return;
+
+    // Scroll minimally toward the revealed edge instead of violently re-centering
+    let edgePosition = viewPosition;
+    if (viewable.size > 0) {
+      if (index > maxViewableRef.current) edgePosition = 0.85;
+      else if (index < minViewableRef.current) edgePosition = 0.12;
+    }
+
     if (rafRef.current !== null) {
       cancelAnimationFrame(rafRef.current);
     }
+
     rafRef.current = requestAnimationFrame(() => {
       rafRef.current = null;
       if (!listRef?.current) return;
@@ -274,7 +355,7 @@ export function useTvListFocusScroll<T>(
         listRef.current.scrollToIndex({
           index,
           animated: true,
-          viewPosition,
+          viewPosition: edgePosition,
         });
       } catch {
         try {
@@ -288,7 +369,7 @@ export function useTvListFocusScroll<T>(
   }, [listRef, viewPosition]);
 
   return {
-    onViewableItemsChanged: undefined,
+    onViewableItemsChanged,
     viewabilityConfig: TV_FOCUS_VIEWABILITY_CONFIG,
     scrollToFocusedIndex,
   };
@@ -298,17 +379,19 @@ type TvPressableState = PressableStateCallbackType & { focused: boolean };
 
 type TvPressableProps = Omit<PressableProps, "style"> & {
   style?: StyleProp<ViewStyle> | ((state: TvPressableState) => StyleProp<ViewStyle>);
+  nativeFocusOnly?: boolean;
   onKeyDown?: (event: any) => void;
-  nextFocusLeft?: number;
-  nextFocusRight?: number;
   nextFocusUp?: number;
   nextFocusDown?: number;
+  nextFocusLeft?: number;
+  nextFocusRight?: number;
 };
 
 export const TvPressable = React.forwardRef<View, TvPressableProps>(function TvPressable(
   {
     style,
     children,
+    nativeFocusOnly = false,
     hasTVPreferredFocus = false,
     focusable,
     onFocus,
@@ -317,17 +400,27 @@ export const TvPressable = React.forwardRef<View, TvPressableProps>(function TvP
   }: TvPressableProps,
   ref: React.ForwardedRef<View>,
 ) {
-  const [tv, setTv] = React.useState<boolean>(() => isTvDevice());
+  const tvFlags = React.useSyncExternalStore(subscribeTvStore, getTvCombinedSnapshot, getTvCombinedSnapshot);
+  const tv = (tvFlags & 1) !== 0;
+  const nativeRing = (tvFlags & 2) !== 0;
+  const needsJsFocusState = !nativeRing || (!nativeFocusOnly && (typeof style === "function" || typeof children === "function"));
   const [focused, setFocused] = React.useState<boolean>(false);
   const innerRef = React.useRef<View | null>(null);
+  const nodeTagRef = React.useRef<number | null>(null);
+  const focusedRef = React.useRef(false);
+  const mountedAtRef = React.useRef<number>(Date.now());
 
   const clearSelfFocus = React.useCallback(() => {
-    setFocused(false);
+    focusedRef.current = false;
+    setFocused((prev) => (prev ? false : prev));
   }, []);
 
   const setCombinedRef = React.useCallback(
     (node: View | null) => {
-      innerRef.current = node;
+      if (innerRef.current !== node) {
+        innerRef.current = node;
+        nodeTagRef.current = null;
+      }
       if (typeof ref === "function") {
         ref(node);
       } else if (ref) {
@@ -338,14 +431,7 @@ export const TvPressable = React.forwardRef<View, TvPressableProps>(function TvP
   );
 
   React.useEffect(() => {
-    const sync = () => {
-      const next = isTvDevice();
-      setTv((prev: boolean) => (prev !== next ? next : prev));
-    };
-    sync();
-    tvListeners.add(sync);
     return () => {
-      tvListeners.delete(sync);
       releaseTvFocus(clearSelfFocus);
     };
   }, [clearSelfFocus]);
@@ -355,6 +441,9 @@ export const TvPressable = React.forwardRef<View, TvPressableProps>(function TvP
   React.useEffect(() => {
     if (!tv || !hasTVPreferredFocus || isDisabled) return;
     const t1 = setTimeout(() => {
+      if (focusedRef.current) return;
+      // Do not hijack focus if user already navigated elsewhere after this component mounted.
+      if (lastAnyTvFocusAt > mountedAtRef.current) return;
       try {
         (innerRef.current as any)?.focus?.();
       } catch {}
@@ -377,27 +466,51 @@ export const TvPressable = React.forwardRef<View, TvPressableProps>(function TvP
       android_disableSound={false}
       android_ripple={tv ? null : props.android_ripple}
       onFocus={(event: any) => {
-        claimTvFocus(clearSelfFocus);
-        setFocused(true);
+        focusedRef.current = true;
+        lastAnyTvFocusAt = Date.now();
+        if (needsJsFocusState) {
+          if (nodeTagRef.current === null && innerRef.current) {
+            nodeTagRef.current = findNodeHandle(innerRef.current);
+          }
+          claimTvFocus(clearSelfFocus, nodeTagRef.current);
+          setFocused(true);
+        }
         onFocus?.(event);
       }}
       onBlur={(event: any) => {
-        releaseTvFocus(clearSelfFocus);
-        setFocused(false);
+        focusedRef.current = false;
+        if (needsJsFocusState) {
+          releaseTvFocus(clearSelfFocus);
+          setFocused(false);
+        }
         onBlur?.(event);
       }}
       style={(state: PressableStateCallbackType) => {
-        const isFocused = Boolean(focused || (state as any)?.focused);
+        if (!tv) {
+          const baseStyle = typeof style === "function" ? style({ ...state, focused: false } as any) : style;
+          return state.pressed ? [baseStyle, { opacity: 0.85 }] : baseStyle;
+        }
+        // Strictly use tracked focus state (never stale RN state.focused) to prevent duplicate rings
+        const isFocused = needsJsFocusState ? focused : false;
         const baseStyle = typeof style === "function" ? style({ ...state, focused: isFocused }) : style;
+        if (nativeRing) {
+          return state.pressed ? [baseStyle, { opacity: 0.85 }] : baseStyle;
+        }
         return [
-          tv && { borderWidth: 1.5, borderColor: "transparent" },
+          { borderWidth: 1.5, borderColor: "transparent" },
           baseStyle,
-          tv && isFocused && tvFocusStyle(true),
+          isFocused && tvFocusStyle(true),
           state.pressed && { opacity: 0.85 },
         ];
       }}
     >
-      {children}
+      {typeof children === "function"
+        ? (state: PressableStateCallbackType) =>
+            (children as any)({
+              ...state,
+              focused: tv ? focused : false,
+            })
+        : children}
     </Pressable>
   );
 });
@@ -415,7 +528,6 @@ export function tvLayout(width: number, height: number) {
   const hPad = tv && wide ? 32 : wide ? 24 : 16;
   return {
     tv,
-    isTv: tv,
     contentWidth: tv && wide ? Math.min(Math.max(width - 64, 0), 1440) : width,
     horizontalPadding: hPad,
     controlHeight: tv && wide ? 48 : 42,
@@ -467,21 +579,26 @@ export function useTvMetrics() {
   const { width, height } = useWindowDimensions();
   const tv = overrideMode === "on" ? true : overrideMode === "off" ? false : isTvDevice(width, height);
   const isTablet = !tv && Math.min(width, height) >= 600;
-  const deviceScale = getDeviceScale(width, height);
-  const size = (phoneValue: number, tvValue?: number) =>
-    responsiveScale(phoneValue, width, tv, tvValue);
+  const deviceScale = React.useMemo(() => getDeviceScale(width, height), [width, height]);
+  const size = React.useCallback(
+    (phoneValue: number, tvValue?: number) => responsiveScale(phoneValue, width, tv, tvValue),
+    [width, tv],
+  );
 
-  return {
-    width,
-    height,
-    tv,
-    isTv: tv,
-    isTablet,
-    deviceScale,
-    size,
-    horizontalPadding: size(16, 28),
-    controlTarget: size(40, 48),
-  };
+  return React.useMemo(
+    () => ({
+      width,
+      height,
+      tv,
+      isTv: tv,
+      isTablet,
+      deviceScale,
+      size,
+      horizontalPadding: size(16, 28),
+      controlTarget: size(40, 48),
+    }),
+    [width, height, tv, isTablet, deviceScale, size],
+  );
 }
 
 export const tvReadable = {

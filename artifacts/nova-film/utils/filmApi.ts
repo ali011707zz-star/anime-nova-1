@@ -1,4 +1,5 @@
 import { resolveVixSrcClient } from "./vixsrcClient";
+import { extractDirectStreamOnPhone, type ClientExtractDescriptor } from "./directClientExtractor";
 import { Image } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "./baseUrl";
@@ -362,7 +363,7 @@ export async function streamFilmSources(params: {
 }): Promise<FilmServerLink[]> {
   const base = getBaseUrl();
   const mediaType: TmdbMediaType = params.tmdbType || params.type || "movie";
-  const cacheKey = `film-srcs-v5-${mediaType}-${params.tmdbId}-s${params.season}-e${params.episode}`;
+  const cacheKey = `film-srcs-v6-${mediaType}-${params.tmdbId}-s${params.season}-e${params.episode}`;
 
   const collected: FilmServerLink[] = [];
   const seen = new Set<string>();
@@ -418,10 +419,12 @@ export async function streamFilmSources(params: {
     season: String(params.season),
     ep: String(params.episode),
     title: params.title,
+    clientExtract: "1",
   });
 
   let idxCounter = 0;
   let discoveredRealTmdbId: number | null = params.realTmdbId ? Number(params.realTmdbId) : null;
+  const pendingExtracts: Promise<void>[] = [];
 
   const processLineBatch = (chunkText: string, state: { currentEvent: string }) => {
     const lines = chunkText.split("\n");
@@ -448,7 +451,32 @@ export async function streamFilmSources(params: {
           }
         } else if (ev === "status" && data.msg) {
           params.onStatus?.(String(data.msg));
-        } else if (ev === "source" || (!ev && (data.url || data.directUrl || data.proxyUrl))) {
+        } else if (ev === "source" || (!ev && (data.url || data.directUrl || data.proxyUrl || data.clientExtract?.embedUrl))) {
+          if (data.clientExtract && typeof data.clientExtract.embedUrl === "string" && data.clientExtract.embedUrl) {
+            const desc: ClientExtractDescriptor = data.clientExtract;
+            const extractIdx = idxCounter++;
+            const job = extractDirectStreamOnPhone(desc, params.signal)
+              .then((extracted) => {
+                if (!extracted?.url || params.signal?.aborted) return;
+                const mergedRaw = {
+                  ...data,
+                  url: extracted.url,
+                  directUrl: extracted.url,
+                  type: extracted.type,
+                  kind: extracted.type === "hls" ? "hls" : "direct",
+                  isEmbed: false,
+                  headers: {
+                    ...(data.headers && typeof data.headers === "object" ? data.headers : {}),
+                    ...extracted.headers,
+                  },
+                };
+                const norm = normalizeServerFromSSE(mergedRaw, extractIdx, base);
+                if (norm) emitUnique(norm);
+              })
+              .catch(() => {});
+            pendingExtracts.push(job);
+            continue;
+          }
           const normalized = normalizeServerFromSSE(data, idxCounter++, base);
           if (!normalized) continue;
           emitUnique(normalized);
@@ -487,6 +515,9 @@ export async function streamFilmSources(params: {
     // Graceful stop on network abort/timeout
   }
 
+  if (pendingExtracts.length > 0) {
+    await Promise.allSettled(pendingExtracts);
+  }
   if (vixPromise) {
     await vixPromise;
   }

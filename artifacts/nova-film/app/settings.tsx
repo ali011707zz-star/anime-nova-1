@@ -2121,8 +2121,8 @@ export default function SettingsScreen() {
   const handleClearFavorites = () => openConfirm({
     open: true,
     title: "مسح قائمة المحفوظات",
-    desc: `سيتم حذف ${savedCount} عمل من مفضّلتك بشكل نهائي.`,
-    confirmLabel: "امسح المفضّلة",
+    desc: `سيتم حذف ${savedCount} عمل من قائمتك بشكل نهائي.`,
+    confirmLabel: "امسح قائمتي",
     danger: true,
     onConfirm: async () => {
       await Promise.all([clearFavorites(), clearAllFilmFavorites()]);
