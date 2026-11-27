@@ -204,6 +204,7 @@ import {
   filterReleasedBrowseMedia,
   formatMediaTitleHierarchy,
   rankDonghuaCatalogCandidates,
+  parseGdrivePlayerEmbedHtml,
 } from "./donghuaLogic.mjs";
 
 test("isAllowedSlotForDonghua blocks fuzzy Arabic-anime scrapers (AF/AW/SA/FX/AD1/AD2) and allows DX 1/DX 2/KW/MP/RE", () => {
@@ -254,4 +255,69 @@ test("rankDonghuaCatalogCandidates returns multiple ranked matches and rejects m
   const ik = rankDonghuaCatalogCandidates(items, ["The Daily Life of the Immortal King Season 2"]);
   assert.equal(ik.length, 1);
   assert.equal(ik[0].slug, "immortal-king-2");
+});
+
+test("parseGdrivePlayerEmbedHtml decodes XOR payload to live HLS URL", () => {
+  const key = "gdpkey123";
+  const payload = `jwplayer.key="x";var HLS="hlsplaylist.php?s=abc&idhls=xyz.m3u8";`;
+  let xored = "";
+  for (let i = 0; i < payload.length; i++) {
+    xored += String.fromCharCode(payload.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+  }
+  const b64 = Buffer.from(xored, "latin1").toString("base64");
+  const html = `<script>(function(){var k="${key}",b=atob("${b64}"),o="";})();</script>`;
+  const res = parseGdrivePlayerEmbedHtml(html, "https://gdriveplayer.to/embed2.php?link=123");
+  assert.equal(res.hlsUrl, "https://gdriveplayer.to/hlsplaylist.php?s=abc&idhls=xyz.m3u8");
+});
+
+test("parseDonghuaDetailHtml parses range episodes like 1 to 3 without turning them into #13", () => {
+  const html = `
+    <h1 class="entry-title">Renegade Immortal</h1>
+    <div class="eplister"><ul>
+      <li><a href="https://animekhor.org/renegade-immortal-episode-4/"><div class="epl-num">4</div><div class="epl-title">Episode 4</div></a></li>
+      <li><a href="https://animekhor.org/renegade-immortal-episode-1-to-3/"><div class="epl-num">1 to 3</div><div class="epl-title">Episode 1 to 3</div></a></li>
+    </ul></div>
+  `;
+  const detail = parseDonghuaDetailHtml(html, "animekhor", "https://animekhor.org/anime/renegade-immortal/");
+  assert.equal(detail.episodes.length, 2);
+  const rangeEp = detail.episodes.find((e) => e.numberLabel === "1 to 3");
+  assert.equal(rangeEp.number, 1);
+  assert.equal(rangeEp.rangeEnd, 3);
+  assert.equal(pickDonghuaEpisodeByNumber(detail.episodes, 1)?.url, "https://animekhor.org/renegade-immortal-episode-1-to-3/");
+  assert.equal(pickDonghuaEpisodeByNumber(detail.episodes, 2)?.url, "https://animekhor.org/renegade-immortal-episode-1-to-3/");
+  assert.equal(pickDonghuaEpisodeByNumber(detail.episodes, 3)?.url, "https://animekhor.org/renegade-immortal-episode-1-to-3/");
+  assert.equal(pickDonghuaEpisodeByNumber([{ number: 86, numberLabel: "86", title: "Ep 86", date: "", url: "https://x/86" }], 1), null);
+});
+
+test("rankDonghuaCatalogCandidates matches bracketed English titles and rejects Movie type hijacks", () => {
+  const items = [
+    { id: "ak:1", source: "animekhor", slug: "s1", url: "https://animekhor.org/anime/renegade-immortal-battle-of-gods/", title: "Renegade Immortal: Battle of Gods", poster: "", status: "Completed", type: "Movie" },
+    { id: "ak:2", source: "animekhor", slug: "s2", url: "https://animekhor.org/anime/renegade-immortal/", title: "Renegade Immortal", poster: "", status: "Ongoing", type: "ONA" },
+  ];
+  const ranked = rankDonghuaCatalogCandidates(items, ["Renegade Immortal"]);
+  assert.equal(ranked[0]?.url, "https://animekhor.org/anime/renegade-immortal/");
+
+  const ftmItems = [
+    { id: "ak:3", source: "animekhor", slug: "ftm", url: "https://animekhor.org/anime/quanzhi-fashi/", title: "Quanzhi Fashi [Full-Time Magister]", poster: "", status: "Completed", type: "ONA" },
+  ];
+  const rankedFtm = rankDonghuaCatalogCandidates(ftmItems, ["Full-Time Magister"]);
+  assert.equal(rankedFtm.length, 1);
+  assert.equal(rankedFtm[0]?.slug, "ftm");
+});
+
+test("parseDonghuaEpisodeMirrors classifies gdriveplayer and filters Portuguese/Turkish/Spanish/Italian mirrors", () => {
+  const mk = (url, label) => `<option value="${Buffer.from(`<iframe src="${url}"></iframe>`).toString("base64")}">${label}</option>`;
+  const html = [
+    mk("https://gdriveplayer.to/embed2.php?link=pt", "Portuguese"),
+    mk("https://gdriveplayer.to/embed2.php?link=en", "English"),
+    mk("https://filelions.online/v/abc", "All Sub Player FileLion"),
+  ].join("");
+  const mirrors = parseDonghuaEpisodeMirrors(html);
+  assert.equal(mirrors.length, 3);
+  assert.equal(mirrors[0].host, "gdriveplayer");
+  assert.equal(mirrors[0].isIndoOnly, true);
+  assert.equal(mirrors[1].host, "gdriveplayer");
+  assert.equal(mirrors[1].isIndoOnly, false);
+  assert.equal(mirrors[2].host, "direct_embed");
+  assert.equal(mirrors[2].isIndoOnly, false);
 });

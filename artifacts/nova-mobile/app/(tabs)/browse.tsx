@@ -244,55 +244,34 @@ const AnimeCard = React.memo(function AnimeCard({
         ) : null}
         {(() => {
           const arTitle = anime.title_ar || getKnownArabicAnimeTitle(anime.id, anime.title?.english, anime.title?.romaji);
-          if (anime.countryOfOrigin === "CN") {
-            const h = formatMediaTitleHierarchy({
-              english: anime.title?.english,
-              romaji: anime.title?.romaji,
-              native: anime.title?.native,
-              arabic: arTitle,
-            });
-            return (
-              <View style={g.cardBottom}>
-                <Text
-                  style={[g.cardTitle, { writingDirection: "ltr", textAlign: "left", color: "#fff" }]}
-                  numberOfLines={2}
-                >
-                  {h.primary}
-                </Text>
-                {h.arabic ? (
-                  <Text
-                    numberOfLines={1}
-                    style={[g.cardTitleAr, { color: "rgba(255,255,255,0.88)", fontSize: tvMode ? 11.5 : 9.5, lineHeight: tvMode ? 16 : 13 }]}
-                  >
-                    {h.arabic}
-                  </Text>
-                ) : null}
-                {h.original ? (
-                  <Text
-                    numberOfLines={1}
-                    style={[g.cardTitle, { writingDirection: "ltr", textAlign: "left", color: "rgba(255,255,255,0.65)", fontSize: tvMode ? 10 : 8, lineHeight: tvMode ? 14 : 11 }]}
-                  >
-                    {h.original}
-                  </Text>
-                ) : null}
-              </View>
-            );
-          }
-          const enTitle = anime.title?.english || anime.title?.romaji || "";
+          const h = formatMediaTitleHierarchy({
+            english: anime.title?.english,
+            romaji: anime.title?.romaji,
+            native: anime.title?.native,
+            arabic: arTitle,
+          });
           return (
             <View style={g.cardBottom}>
               <Text
-                style={arTitle ? g.cardTitleAr : [g.cardTitle, { writingDirection: "ltr", color: "#fff" }]}
+                style={[g.cardTitle, { writingDirection: "ltr", textAlign: "left", color: "#fff" }]}
                 numberOfLines={2}
               >
-                {arTitle || enTitle}
+                {h.primary}
               </Text>
-              {arTitle && enTitle && arTitle.trim() !== enTitle.trim() ? (
+              {h.arabic ? (
                 <Text
                   numberOfLines={1}
-                  style={[g.cardTitle, { writingDirection: "ltr", textAlign: "right", color: "rgba(255,255,255,0.72)", fontSize: tvMode ? 11 : 8.5, lineHeight: tvMode ? 15 : 12 }]}
+                  style={[g.cardTitleAr, { color: "rgba(255,255,255,0.88)", fontSize: tvMode ? 11.5 : 9.5, lineHeight: tvMode ? 16 : 13 }]}
                 >
-                  {enTitle}
+                  {h.arabic}
+                </Text>
+              ) : null}
+              {h.original ? (
+                <Text
+                  numberOfLines={1}
+                  style={[g.cardTitle, { writingDirection: "ltr", textAlign: "left", color: "rgba(255,255,255,0.65)", fontSize: tvMode ? 10 : 8, lineHeight: tvMode ? 14 : 11 }]}
+                >
+                  {h.original}
                 </Text>
               ) : null}
             </View>

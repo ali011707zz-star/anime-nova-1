@@ -1,4 +1,4 @@
-export type DonghuaSourceId = "animexin" | "animekhor";
+export type DonghuaSourceId = "animexin" | "animekhor" | "donghuastream";
 
 export interface DonghuaCatalogItem {
   id: string;
@@ -13,6 +13,8 @@ export interface DonghuaCatalogItem {
 
 export interface DonghuaEpisodeItem {
   number: number;
+  rangeEnd?: number;
+  isMovie?: boolean;
   numberLabel: string;
   title: string;
   date: string;
@@ -35,7 +37,16 @@ export interface DonghuaDetail {
 export interface DonghuaMirror {
   label: string;
   embedUrl: string;
-  host: "dailymotion_allsub" | "dailymotion" | "okru" | "odysee" | "streamruby" | "rumble" | "other";
+  host:
+    | "dailymotion_allsub"
+    | "dailymotion"
+    | "okru"
+    | "gdriveplayer"
+    | "odysee"
+    | "streamruby"
+    | "direct_embed"
+    | "rumble"
+    | "other";
   isIndoOnly: boolean;
   isMultiSub: boolean;
   isHardsubEng: boolean;
@@ -62,6 +73,10 @@ export function parseStreamRubyEmbedHtml(html: string): {
   m3u8: string | null;
   tracks: { url: string; label: string; isArabic: boolean; isEnglish: boolean }[];
 };
+export function parseGdrivePlayerEmbedHtml(
+  html: string,
+  embedUrl?: string
+): { hlsUrl: string | null; mp4Url: string | null };
 export function extractDailymotionVideoId(embedUrl: string): string | null;
 export function parseDailymotionMetadata(json: any): {
   arabicSubUrl: string | null;
@@ -79,7 +94,8 @@ export function matchDonghuaCatalogItemByTitle(
 ): DonghuaCatalogItem | null;
 export function pickDonghuaEpisodeByNumber(
   episodes: DonghuaEpisodeItem[],
-  episodeNumber: number
+  episodeNumber: number,
+  opts?: { preferMovie?: boolean; rejectMovie?: boolean }
 ): DonghuaEpisodeItem | null;
 export function normalizeAndSortSubtitleCues<T extends { start: number; end: number; text: string }>(
   cues: T[]

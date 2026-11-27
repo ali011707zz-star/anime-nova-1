@@ -540,8 +540,7 @@ export default function AnimeDetailScreen() {
   }
 
   const arabicTitle = anime?.title_ar || anime?.synonyms?.find((value: string) => /[\u0600-\u06FF]/.test(value)) || getKnownArabicAnimeTitle(anime?.id, anime?.title?.english, anime?.title?.romaji) || autoTitleAr || undefined;
-  const isDonghua = anime?.countryOfOrigin === "CN";
-  const donghuaTitles = isDonghua && anime
+  const mediaTitles = anime
     ? formatMediaTitleHierarchy({
         english: anime.title?.english,
         romaji: anime.title?.romaji,
@@ -643,7 +642,7 @@ export default function AnimeDetailScreen() {
           <Ionicons name="chevron-forward" size={tvMode ? 20 : 20} color={colors.textPrimary} />
         </Pressable>
         <Text style={[d.topBarTitle, tvMode && d.tvTopBarTitle]} numberOfLines={1}>
-          {donghuaTitles?.primary || arabicTitle || anime.title?.english || anime.title?.romaji || "تفاصيل الأنمي"}
+          {mediaTitles?.primary || anime.title?.english || anime.title?.romaji || arabicTitle || "تفاصيل الأنمي"}
         </Text>
         <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 6 }}>
           {anime.status ? (
@@ -695,34 +694,21 @@ export default function AnimeDetailScreen() {
             resizeMode="cover"
           />
           <View style={d.infoText}>
-            {donghuaTitles ? (
-              <>
-                <Text style={[d.titleMain, tvMode && d.tvTitleMain, { writingDirection: "ltr", textAlign: "left" }]} numberOfLines={2}>
-                  {donghuaTitles.primary || "عنوان غير متاح"}
+            <>
+              <Text style={[d.titleMain, tvMode && d.tvTitleMain, { writingDirection: "ltr", textAlign: "left" }]} numberOfLines={2}>
+                {mediaTitles?.primary || anime.title?.english || anime.title?.romaji || "عنوان غير متاح"}
+              </Text>
+              {mediaTitles?.arabic ? (
+                <Text style={[d.titleArabic, tvMode && d.tvTitleArabic, { writingDirection: "rtl", textAlign: "right" }]} numberOfLines={1}>
+                  {mediaTitles.arabic}
                 </Text>
-                {donghuaTitles.arabic ? (
-                  <Text style={[d.titleArabic, tvMode && d.tvTitleArabic, { writingDirection: "rtl", textAlign: "right" }]} numberOfLines={1}>
-                    {donghuaTitles.arabic}
-                  </Text>
-                ) : null}
-                {donghuaTitles.original ? (
-                  <Text style={[d.titleNative, { writingDirection: "ltr", textAlign: "left" }]} numberOfLines={1}>
-                    {donghuaTitles.original}
-                  </Text>
-                ) : null}
-              </>
-            ) : (
-              <>
-                <Text style={[d.titleMain, d.titleArabicMain, tvMode && d.tvTitleMain]} numberOfLines={2}>
-                  {arabicTitle || anime.title?.english || anime.title?.romaji || "عنوان غير متاح"}
+              ) : null}
+              {mediaTitles?.original ? (
+                <Text style={[d.titleNative, { writingDirection: "ltr", textAlign: "left" }]} numberOfLines={1}>
+                  {mediaTitles.original}
                 </Text>
-                {(anime.title?.english || anime.title?.romaji) ? (
-                  <Text style={[d.titleArabic, tvMode && d.tvTitleArabic, { writingDirection: "ltr", textAlign: "left" }]} numberOfLines={1}>
-                    {anime.title?.english || anime.title?.romaji}
-                  </Text>
-                ) : null}
-              </>
-            )}
+              ) : null}
+            </>
             <View style={d.badgeRow}>
               {formatText ? (
                 <View style={[d.badge, d.badgeDefault]}>
@@ -1072,9 +1058,9 @@ export default function AnimeDetailScreen() {
                         const relAr = n.title_ar || getKnownArabicAnimeTitle(n.id, n.title?.english, n.title?.romaji);
                         return (
                           <>
-                            <Text style={d.relTitle} numberOfLines={2}>{relAr || relEn || "عنوان غير متاح"}</Text>
+                            <Text style={[d.relTitle, { writingDirection: "ltr", textAlign: "left" }]} numberOfLines={2}>{relEn || relAr || "عنوان غير متاح"}</Text>
                             {relAr && relEn && relAr.trim() !== relEn.trim() ? (
-                              <Text style={d.relSubtitle} numberOfLines={1}>{relEn}</Text>
+                              <Text style={[d.relSubtitle, { writingDirection: "rtl", textAlign: "right" }]} numberOfLines={1}>{relAr}</Text>
                             ) : null}
                           </>
                         );
@@ -1116,9 +1102,9 @@ export default function AnimeDetailScreen() {
                         const simAr = rec.title_ar || getKnownArabicAnimeTitle(rec.id, rec.title?.english, rec.title?.romaji);
                         return (
                           <>
-                            <Text style={d.simTitle} numberOfLines={2}>{simAr || simEn || "عنوان غير متاح"}</Text>
+                            <Text style={[d.simTitle, { writingDirection: "ltr", textAlign: "left" }]} numberOfLines={2}>{simEn || simAr || "عنوان غير متاح"}</Text>
                             {simAr && simEn && simAr.trim() !== simEn.trim() ? (
-                              <Text style={d.simSubtitle} numberOfLines={1}>{simEn}</Text>
+                              <Text style={[d.simSubtitle, { writingDirection: "rtl", textAlign: "right" }]} numberOfLines={1}>{simAr}</Text>
                             ) : null}
                           </>
                         );

@@ -648,7 +648,7 @@ export default function HomeScreen() {
                         ]}
                         numberOfLines={1}
                       >
-                        {h.titleAr || getKnownArabicAnimeTitle(h.animeId, h.english, h.title) || h.english || h.title}
+                        {h.english || h.title || h.titleAr || getKnownArabicAnimeTitle(h.animeId, h.english, h.title)}
                       </Text>
                       <View style={styles.historyResumeRow}>
                         <Text style={[styles.historyPercent, { fontSize: Math.max(7.5, Math.round(8.5 * hScale)) }]}>
@@ -833,23 +833,35 @@ export default function HomeScreen() {
                         const epArRaw = ep.titleAr || ep.title_ar || (!ep.dubbedKind ? getKnownArabicAnimeTitle(ep.animeId || ep.anilistId, ep.english || ep.name, ep.romaji || ep.name) : ep.name);
                         const epAr = typeof epArRaw === "string" ? epArRaw : "";
                         const epEn = String(ep.english || ep.romaji || ep.name || "");
+                        const primaryEpTitle = ep.dubbedKind ? (epAr || epEn || ep.name) : (epEn || epAr || ep.name);
+                        const secondaryEpTitle = ep.dubbedKind
+                          ? (epEn && epEn.trim() !== primaryEpTitle.trim() ? epEn : "")
+                          : (epAr && epAr.trim() !== primaryEpTitle.trim() ? epAr : "");
                         return (
                           <LinearGradient colors={["transparent", "rgba(0,0,0,0.95)"]} style={todayEpStyles.grad}>
-                            <Text style={todayEpStyles.title} numberOfLines={2}>{epAr || ep.name}</Text>
-                            {epAr && epEn && epAr.trim() !== epEn.trim() ? (
+                            <Text
+                              style={[
+                                todayEpStyles.title,
+                                !ep.dubbedKind && { writingDirection: "ltr", textAlign: "left" },
+                              ]}
+                              numberOfLines={2}
+                            >
+                              {primaryEpTitle}
+                            </Text>
+                            {secondaryEpTitle ? (
                               <Text
                                 style={{
-                                  color: "rgba(255,255,255,0.72)",
+                                  color: "rgba(255,255,255,0.78)",
                                   fontSize: isTvLayout ? 11 : 8.5,
                                   lineHeight: isTvLayout ? 15 : 12,
                                   fontFamily: "Cairo_600SemiBold",
                                   textAlign: "right",
-                                  writingDirection: "ltr",
+                                  writingDirection: ep.dubbedKind ? "ltr" : "rtl",
                                   marginTop: 1,
                                 }}
                                 numberOfLines={1}
                               >
-                                {epEn}
+                                {secondaryEpTitle}
                               </Text>
                             ) : null}
                           </LinearGradient>
