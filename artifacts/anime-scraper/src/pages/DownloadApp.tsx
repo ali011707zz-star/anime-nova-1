@@ -64,9 +64,18 @@ const REAL_SCREENSHOTS: AppScreenItem[] = [
     image: "/app-screens/screen-detail.png?v=2",
   },
   {
+    id: "donghua",
+    title: "قسم الدونغهوا الجديد (الأنمي الصيني)",
+    subtitle: "أقوى أعمال الدونغهوا الصينية (To Be Hero X، Link Click، Lord of Mysteries، The King's Avatar) بسيرفرات مباشرة مخصصة (DX 1 / DX 2 / DX 3) وترجمة عربية واضحة",
+    category: "anime",
+    tag: "قسم الدونغهوا · جديد",
+    tagColor: "#a855f7",
+    image: "/app-screens/screen-donghua.jpg?v=3",
+  },
+  {
     id: "browse",
     title: "المكتبة والتصفح والفلترة",
-    subtitle: "تصفح حسب التصنيفات المصورة (مغامرة، أكشن، كوميديا، فانتازيا) والفلترة حسب الأكثر شعبية والسنة",
+    subtitle: "تصفح الأنمي والدونغهوا حسب التصنيفات المصورة والترتيب الثلاثي للعناوين (إنجليزي، عربي، أصلي) مع فلترة متقدمة",
     category: "anime",
     tag: "تصفح متقدم",
     tagColor: "#7c3aed",
@@ -89,6 +98,24 @@ const REAL_SCREENSHOTS: AppScreenItem[] = [
     tag: "مانهوا ملونة",
     tagColor: "#059669",
     image: "/app-screens/screen-manhwa.png?v=2",
+  },
+  {
+    id: "dubbed-anime",
+    title: "مكتبة الأنمي المدبلج للعربية (+193 عمل)",
+    subtitle: "أشهر الأنميات المدبلجة للعربية (فريرن، يوميات الصيدلانية، كايجو رقم 8، دراغون بول سوبر، ماشيل، السلايم، موشوكو تينسي) بفرز سريع ومواسم كاملة",
+    category: "dubbed",
+    tag: "أنمي مدبلج · جديد",
+    tagColor: "#14b8a6",
+    image: "/app-screens/screen-dubbed-anime.jpg?v=3",
+  },
+  {
+    id: "cartoon2",
+    title: "كرتون مدبلج 2 — أحدث أعمال 2026",
+    subtitle: "مكتبة إضافية متجددة تضم أحدث أفلام ومسلسلات الكرتون والأنيميشن المدبلج والمترجم لعام 2026 مع تصفية فورية بين الأفلام والمسلسلات",
+    category: "dubbed",
+    tag: "كرتون مدبلج 2 · جديد",
+    tagColor: "#f59e0b",
+    image: "/app-screens/screen-cartoon2.jpg?v=3",
   },
   {
     id: "spacetoon",
@@ -122,81 +149,81 @@ const REAL_SCREENSHOTS: AppScreenItem[] = [
 const ALL_FEATURES = [
   {
     number: "01",
-    icon: BookOpen,
-    title: "مكتبة المانجا والمانهوا الحصرية",
+    icon: Sparkles,
+    title: "قسم الدونغهوا (الأنمي الصيني) الجديد",
     description:
-      "قسم متكامل وحصري للتطبيق يضم آلاف الفصول من المانجا اليابانية والمانهوا الكورية الملونة (المستمرة والمكتملة) مع قارئ مدمج فائق السرعة وبحث فوري.",
+      "مكتبة مستقلة لأقوى أعمال الدونغهوا الصينية مع 3 سيرفرات مخصصة سريعة (DX 1 و DX 2 و DX 3)، وترجمة عربية واضحة مرفوعة لتجنب التداخل، مع ترتيب عناوين ثلاثي (إنجليزي، عربي، أصلي).",
     highlights: [
-      "قارئ عمودي سلس (Webtoon) وتقليب صفحات",
-      "مانهوا ملونة ومانجا مترجمة بدقة عالية",
-      "تصفح حسب المستمرة والمكتملة وبدون إعلانات",
+      "سيرفرات دونغهوا مباشرة مخصصة للتشغيل والتنزيل",
+      "معالجة ذكية للترجمة العربية فوق الترجمة المدمجة",
+      "تصفح وفلترة كاملة بدون أعمال مستقبلية غير صادرة",
     ],
-    accent: "#10b981",
+    accent: "#a855f7",
   },
   {
     number: "02",
-    icon: Tv,
-    title: "نسخة تلفاز أندرويد (Android TV) احترافية",
+    icon: Film,
+    title: "أنمي مدبلج (+193)، كرتون مدبلج 2، وسبيستون",
     description:
-      "نسخة مصممة خصيصاً للشاشات الذكية وأجهزة TV Box، تدعم التنقل السلس بالريموت (D-Pad) في جميع القوائم والفلاتر والشخصيات، مع تسجيل دخول فوري عبر رمز QR.",
+      "توسعة ضخمة لقسم المدبلج تضم أكثر من 193 أنمي مدبلج للعربية، وقسم «كرتون مدبلج 2» لأحدث أفلام ومسلسلات 2026، بالإضافة إلى مكتبة سبيستون والكرتون والأنيميشن العالمي.",
+    highlights: [
+      "أكثر من 193 أنمي مدبلج (فريرن، الصيدلانية، كايجو 8)",
+      "قسم كرتون مدبلج 2 بأحدث إنتاجات 2026 أفلاماً ومسلسلات",
+      "أفلام المحقق كونان ومسلسلات سبيستون الحصرية",
+    ],
+    accent: "#14b8a6",
+  },
+  {
+    number: "03",
+    icon: WifiOff,
+    title: "تنزيل مباشر لجميع الأقسام وسيرفرات HLS",
+    description:
+      "حمّل الحلقات مباشرة على هاتفك من جميع الأقسام (الأنمي، الدونغهوا، المدبلج، الكرتون) مع دعم تنزيل سيرفرات البث السريع (HLS و MP4) وحفظ الترجمة العربية بضغطة زر داخل المشغل.",
+    highlights: [
+      "دعم كامل لتنزيل سيرفرات HLS و MP4 مباشرة من الهاتف",
+      "زر تنزيل سريع داخل المشغل بجانب الصوت",
+      "حفظ تلقائي للترجمة العربية للمشاهدة أوفلاين",
+    ],
+    accent: "#ec4899",
+  },
+  {
+    number: "04",
+    icon: FastForward,
+    title: "بث مباشر فائق السرعة ومشغل مطوّر",
+    description:
+      "بث مباشر من هاتفك للسيرفرات بدون بطء أو تقطيع، مع تبديل فوري وسلس بين الوضع الأفقي والعمودي، وأزرار تخطي المقدمة والنهاية واستئناف المشاهدة التلقائي.",
+    highlights: [
+      "بدء تشغيل فوري وبث مباشر بجودة 1080p FHD",
+      "تبديل سلس بين الوضع الأفقي والعمودي بدون تجمّد",
+      "تخطي المقدمة والنهاية واستئناف من نفس الثانية",
+    ],
+    accent: "#0284c7",
+  },
+  {
+    number: "05",
+    icon: Tv,
+    title: "نسخة تلفاز أندرويد (Android TV) فائقة الاستجابة",
+    description:
+      "تحسين شامل لسرعة استجابة الريموت (D-Pad) في كامل التطبيق وجميع الأقسام بما فيها الدونغهوا والمدبلج، مع مؤشر تركيز واضح وتسجيل دخول فوري عبر رمز QR.",
     highlights: [
       `تحميل فوري عبر Downloader بالكود: ${DOWNLOADER_CODE}`,
-      "مؤشر تركيز واضح في التصفح والفلتر والشخصيات",
+      "استجابة فائقة للريموت ومؤشر تركيز في كل الأقسام",
       "تسجيل دخول بحساب Google عبر مسح QR بالهاتف",
     ],
     accent: "#06b6d4",
   },
   {
-    number: "03",
-    icon: FastForward,
-    title: "مشغل ذكي + تخطي المقدمة والنهاية",
-    description:
-      "مشغل فيديو مدمج يدعم أكثر من 10 سيرفرات بث سريعة بجودات حتى 1080p، مع أزرار تخطي المقدمة (Skip Intro) وتخطي النهاية أعلى شريط التقدم مباشرة.",
-    highlights: [
-      "تخطي المقدمة والنهاية بضغطة زر واحدة",
-      "استئناف المشاهدة من نفس الثانية التي توقفت عندها",
-      "تبديل سلس بين السيرفرات والجودات",
-    ],
-    accent: "#0284c7",
-  },
-  {
-    number: "04",
-    icon: Film,
-    title: "سبيستون، كرتون مدبلج، وأنيميشن عالمي",
-    description:
-      "ثلاثة أقسام ضخمة وحصرية في التطبيق تجمع لك مسلسلات وأفلام سبيستون، الكرتون العربي المدبلج والمترجم، وأفلام الأنيميشن العالمية في مكان واحد.",
-    highlights: [
-      "سلسلة أفلام المحقق كونان ومسلسلات سبيستون",
-      "كرتون عربي وعالمي بمواسم كاملة",
-      "أفلام ومسلسلات أنيميشن مدبلجة ومترجمة",
-    ],
-    accent: "#8b5cf6",
-  },
-  {
-    number: "05",
-    icon: WifiOff,
-    title: "قسم تنزيلاتي للمشاهدة بدون إنترنت",
-    description:
-      "حمّل الحلقات المفضلة على جهازك بجودات متعددة وتابع مشاهدتها في أي وقت ومن أي مكان عبر قسم «تنزيلاتي» المزود بمدير ملفات منظم وسريع.",
-    highlights: [
-      "تنزيل مباشر للحلقات داخل التطبيق",
-      "حفظ وتنظيم الحلقات المحمّلة",
-      "مشاهدة أوفلاين كاملة بدون استهلاك بيانات",
-    ],
-    accent: "#ec4899",
-  },
-  {
     number: "06",
-    icon: Bell,
-    title: "تعليقات، تقييمات، وإشعارات فورية",
+    icon: BookOpen,
+    title: "مكتبة المانجا والمانهوا الملونة + الإشعارات",
     description:
-      "تفاعل مع مجتمع محبي الأنمي، أضف تقييمك وتعليقك على الحلقات، واستقبل إشعارات فورية على هاتفك عند الرد على تعليقك أو نزول حلقة جديدة.",
+      "آلاف الفصول من المانجا اليابانية والمانهوا الكورية الملونة بقارئ عمودي (Webtoon) مخصص وسريع بدون إعلانات، مع مزامنة قائمتي وتنبيهات فورية للحلقات والردود.",
     highlights: [
-      "إشعارات فورية على الهاتف عند الرد على تعليقك",
+      "قارئ عمودي سلس مخصص للمانهوا الملونة والمانجا",
       "مزامنة قائمتي وسجل المشاهدة عبر حساب Google",
-      "تعدد المظاهر (الوضع الفاتح، الداكن، AMOLED)",
+      "إشعارات فورية للحلقات الجديدة وتعدد المظاهر",
     ],
-    accent: "#f59e0b",
+    accent: "#10b981",
   },
 ];
 
@@ -222,12 +249,16 @@ export default function DownloadApp({ onBack }: { onBack?: () => void }) {
     };
   }, []);
 
+  const getScreenById = (id: string) =>
+    REAL_SCREENSHOTS.find((item) => item.id === id) || REAL_SCREENSHOTS[0];
+
   const heroScreens = [
-    REAL_SCREENSHOTS[0], // Home
-    REAL_SCREENSHOTS[3], // Manga
-    REAL_SCREENSHOTS[4], // Manhwa
-    REAL_SCREENSHOTS[5], // Spacetoon
-    REAL_SCREENSHOTS[1], // Detail
+    getScreenById("donghua"),
+    getScreenById("dubbed-anime"),
+    getScreenById("cartoon2"),
+    getScreenById("home"),
+    getScreenById("manga"),
+    getScreenById("manhwa"),
   ];
 
   const activeHeroShot = heroScreens[heroPreviewIndex] || REAL_SCREENSHOTS[0];
@@ -265,7 +296,7 @@ export default function DownloadApp({ onBack }: { onBack?: () => void }) {
     >
       <SEO
         title="تحميل تطبيق أنمي نوفا APK v1.0.10 للأندرويد والتلفاز | Anime NOVA"
-        description="حمّل تطبيق أنمي نوفا الرسمي (Anime NOVA APK v1.0.10) مجاناً للأندرويد وشاشات Android TV (كود Downloader: 2576388) لمشاهدة الأنمي والمانجا وسبيستون بدون إعلانات."
+        description="حمّل تطبيق أنمي نوفا الرسمي (Anime NOVA APK v1.0.10) مجاناً للأندرويد وشاشات Android TV (كود Downloader: 2576388) لمشاهدة الأنمي، الدونغهوا، +193 أنمي مدبلج، كرتون مدبلج 2، والمانجا والمانهوا ببث مباشر وتنزيل أوفلاين بدون إعلانات."
         path="/app"
       />
       {/* ── Standalone Top Bar (Independent from Web App) ── */}
@@ -292,6 +323,14 @@ export default function DownloadApp({ onBack }: { onBack?: () => void }) {
 
           {/* Zone 2: Clean Single-Line Anchor Links */}
           <nav className="hidden md:flex items-center gap-7 text-xs sm:text-sm font-bold">
+            <a
+              href="#whats-new"
+              className={`transition-colors whitespace-nowrap shrink-0 ${
+                lightMode ? "text-purple-700 hover:text-purple-900" : "text-purple-300 hover:text-white"
+              }`}
+            >
+              الجديد في التحديث
+            </a>
             <a
               href="#screens"
               className={`transition-colors whitespace-nowrap shrink-0 ${
@@ -390,7 +429,7 @@ export default function DownloadApp({ onBack }: { onBack?: () => void }) {
             </div>
 
             <h1 className="text-[32px] sm:text-[46px] lg:text-[50px] font-black leading-[1.18] tracking-tight">
-              تطبيق انمي نوفا الرسمي — كل الأنمي والمانجا وسبيستون في{" "}
+              تطبيق انمي نوفا الرسمي — الأنمي والدونغهوا والمدبلج والمانجا في{" "}
               <span className="text-transparent bg-clip-text bg-gradient-to-l from-[#06b6d4] via-[#0284c7] to-[#7c3aed]">
                 أنمي نوفا
               </span>
@@ -401,15 +440,19 @@ export default function DownloadApp({ onBack }: { onBack?: () => void }) {
                 lightMode ? "text-slate-600" : "text-slate-300"
               }`}
             >
-              تطبيقك العربي الشامل لمشاهدة وتحميل الأنمي المترجم والمدبلج، وقراءة آلاف فصول{" "}
+              تطبيقك العربي الشامل لمشاهدة وتحميل الأنمي المترجم و
               <strong className={lightMode ? "text-slate-900" : "text-white"}>
-                المانجا اليابانية والمانهوا الملونة
+                قسم الدونغهوا (الأنمي الصيني) الجديد
               </strong>
-              ، مع مكتبة ضخمة لمسلسلات وأفلام{" "}
+              ، ومكتبة{" "}
               <strong className={lightMode ? "text-slate-900" : "text-white"}>
-                سبيستون والكرتون والأنيميشن
+                +193 أنمي مدبلج وكرتون مدبلج 2 وسبيستون
+              </strong>
+              ، مع آلاف فصول{" "}
+              <strong className={lightMode ? "text-slate-900" : "text-white"}>
+                المانجا والمانهوا الملونة
               </strong>{" "}
-              بجودة فائقة وبدون إعلانات مزعجة — يعمل بكفاءة على الهواتف وشاشات التلفاز الذكية.
+              وبث مباشر وتنزيل سريع لجميع الأقسام وسيرفرات HLS على الهاتف وشاشات التلفاز الذكية.
             </p>
 
             {/* Primary Download Buttons */}
@@ -559,10 +602,10 @@ export default function DownloadApp({ onBack }: { onBack?: () => void }) {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 text-center">
             <div>
               <p className="text-2xl sm:text-3xl font-black tabular-nums text-[#0284c7] dark:text-cyan-400">
-                +6,500
+                +7,500
               </p>
               <p className={`text-xs sm:text-sm font-bold mt-1 ${lightMode ? "text-slate-600" : "text-slate-400"}`}>
-                أنمي، سبيستون، وكرتون مدبلج
+                أنمي، دونغهوا، ومدبلج عربي
               </p>
             </div>
             <div>
@@ -576,7 +619,7 @@ export default function DownloadApp({ onBack }: { onBack?: () => void }) {
             <div>
               <p className="text-2xl sm:text-3xl font-black tabular-nums">1080p FHD</p>
               <p className={`text-xs sm:text-sm font-bold mt-1 ${lightMode ? "text-slate-600" : "text-slate-400"}`}>
-                جودة فائقة + تخطي المقدمة والنهاية
+                بث مباشر + تنزيل MP4 و HLS لكل الأقسام
               </p>
             </div>
             <div>
@@ -587,6 +630,116 @@ export default function DownloadApp({ onBack }: { onBack?: () => void }) {
                 كود Downloader الرسمي للتلفاز
               </p>
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── WHAT'S NEW SHOWCASE (3 NEW SECTIONS + MAJOR UPGRADES) ── */}
+      <section
+        id="whats-new"
+        className={`py-16 px-4 sm:px-6 border-b transition-colors ${
+          lightMode ? "bg-gradient-to-b from-white to-[#F4F6FA] border-slate-200/80" : "bg-[#0A0E17] border-white/[0.07]"
+        }`}
+      >
+        <div className="max-w-7xl mx-auto">
+          <div className="text-center max-w-3xl mx-auto mb-10 space-y-2.5">
+            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-purple-500/12 border border-purple-500/25 text-xs font-extrabold text-purple-600 dark:text-purple-300">
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>أحدث الإضافات والتحديثات داخل التطبيق · v{APP_VERSION}</span>
+            </div>
+            <h2 className="text-2xl sm:text-4xl font-black leading-tight">
+              أقسام جديدة كلياً وتطوير شامل للبث المباشر والتنزيل
+            </h2>
+            <p className={`text-xs sm:text-base font-semibold leading-relaxed ${lightMode ? "text-slate-600" : "text-slate-300"}`}>
+              أضفنا قسم الدونغهوا المستقل ومكتبة الأنمي المدبلج (+193 عمل) وقسم كرتون مدبلج 2، مع تسريع البث المباشر من الهاتف وتفعيل التنزيل المباشر لجميع الأقسام وسيرفرات HLS.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+            {[
+              getScreenById("donghua"),
+              getScreenById("dubbed-anime"),
+              getScreenById("cartoon2"),
+            ].map((shot) => (
+              <div
+                key={shot.id}
+                onClick={() => setLightboxShot(shot)}
+                className={`group cursor-pointer rounded-3xl p-5 border flex flex-col items-center text-center transition-all hover:-translate-y-1.5 ${
+                  lightMode
+                    ? "bg-white border-slate-200/90 shadow-md hover:shadow-xl"
+                    : "bg-[#111622] border-white/[0.09] hover:border-purple-400/40 shadow-2xl"
+                }`}
+              >
+                <div className="w-full max-w-[270px] rounded-[28px] p-2 bg-[#161922] border-[3px] border-[#2D3343] shadow-xl">
+                  <div className="w-12 h-1 rounded-full bg-white/15 mx-auto mb-1.5" />
+                  <div className="relative rounded-[20px] overflow-hidden bg-[#0B0F17]">
+                    <img
+                      src={shot.image}
+                      alt={shot.title}
+                      loading="lazy"
+                      className="w-full h-auto block transition-transform duration-300 group-hover:scale-[1.02]"
+                    />
+                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                      <span className="opacity-0 group-hover:opacity-100 transition-opacity px-3 py-1.5 rounded-xl bg-black/80 text-white text-[11px] font-bold flex items-center gap-1.5 shadow-lg">
+                        <ZoomIn className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>معاينة بالحجم الكامل</span>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-4 space-y-1.5 px-1">
+                  <span className="inline-block text-[11px] font-extrabold" style={{ color: shot.tagColor }}>
+                    {shot.tag}
+                  </span>
+                  <h3 className="text-base sm:text-lg font-black">{shot.title}</h3>
+                  <p className={`text-xs font-semibold leading-relaxed ${lightMode ? "text-slate-600" : "text-slate-400"}`}>
+                    {shot.subtitle}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {[
+              {
+                title: "بث مباشر فائق السرعة",
+                desc: "تشغيل الحلقات مباشرة من الهاتف بأقل زمن استجابة وبدون تقطيع على جميع الجودات.",
+                color: "#06b6d4",
+              },
+              {
+                title: "تنزيل مباشر MP4 و HLS",
+                desc: "تفعيل التنزيل المباشر لجميع الأقسام وسيرفرات HLS مع حفظ الترجمة العربية للمشاهدة أوفلاين.",
+                color: "#ec4899",
+              },
+              {
+                title: "مشغل سلس وبدون تجمّد",
+                desc: "تبديل فوري وناعم بين الوضع الأفقي والعمودي، مع رفع الترجمة العربية فوق الترجمة المدمجة.",
+                color: "#a855f7",
+              },
+              {
+                title: "استجابة فائقة للتلفاز",
+                desc: "تحسين كبير لسرعة استجابة الريموت ومؤشر التركيز (D-Pad) في جميع الأقسام والدونغهوا.",
+                color: "#14b8a6",
+              },
+            ].map((item, idx) => (
+              <div
+                key={idx}
+                className={`rounded-2xl p-4 border text-right ${
+                  lightMode
+                    ? "bg-white border-slate-200/90 shadow-sm"
+                    : "bg-[#111622] border-white/[0.08]"
+                }`}
+              >
+                <div className="flex items-center gap-2 font-black text-sm mb-1.5">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" style={{ color: item.color }} />
+                  <span>{item.title}</span>
+                </div>
+                <p className={`text-xs font-semibold leading-relaxed ${lightMode ? "text-slate-600" : "text-slate-400"}`}>
+                  {item.desc}
+                </p>
+              </div>
+            ))}
           </div>
         </div>
       </section>
@@ -610,10 +763,10 @@ export default function DownloadApp({ onBack }: { onBack?: () => void }) {
             }`}
           >
             {[
-              { id: "all", label: "الكل (8 شاشات)" },
-              { id: "anime", label: "الأنمي والتصفح" },
+              { id: "all", label: "الكل (11 شاشة)" },
+              { id: "anime", label: "الأنمي والدونغهوا" },
+              { id: "dubbed", label: "المدبلج وسبيستون" },
               { id: "manga", label: "المانجا والمانهوا" },
-              { id: "dubbed", label: "سبيستون والمدبلج" },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -753,7 +906,7 @@ export default function DownloadApp({ onBack }: { onBack?: () => void }) {
           {/* Dual Phone Preview: Manga + Manhwa Original Screenshots (Uncropped) */}
           <div className="lg:col-span-6 grid grid-cols-2 gap-3 sm:gap-5 items-start">
             <div
-              onClick={() => setLightboxShot(REAL_SCREENSHOTS[3])}
+              onClick={() => setLightboxShot(getScreenById("manga"))}
               className="w-full rounded-[26px] p-2 bg-[#161922] border-[3px] border-[#2D3343] shadow-2xl cursor-pointer transition-transform hover:-translate-y-1.5"
             >
               <div className="w-10 h-1 rounded-full bg-white/15 mx-auto mb-1.5" />
@@ -768,7 +921,7 @@ export default function DownloadApp({ onBack }: { onBack?: () => void }) {
             </div>
 
             <div
-              onClick={() => setLightboxShot(REAL_SCREENSHOTS[4])}
+              onClick={() => setLightboxShot(getScreenById("manhwa"))}
               className="w-full rounded-[26px] p-2 bg-[#161922] border-[3px] border-[#2D3343] shadow-2xl cursor-pointer transition-transform hover:-translate-y-1.5 mt-4 sm:mt-6"
             >
               <div className="w-10 h-1 rounded-full bg-white/15 mx-auto mb-1.5" />

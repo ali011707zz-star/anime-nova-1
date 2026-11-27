@@ -1,0 +1,77 @@
+name: 🌐 نشر تحديث الموقع وصفحة التطبيق (Web)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'artifacts/anime-scraper/src/**'
+      - 'artifacts/anime-scraper/public/**'
+      - 'artifacts/anime-scraper/index.html'
+      - 'artifacts/anime-scraper/vite.config.ts'
+
+jobs:
+  deploy-web:
+    name: Build & Deploy Web Frontend on VPS
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 🌐 Build @workspace/anime-scraper on VPS (preserving APKs)
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          command_timeout: 8m
+          script: |
+            set -euo pipefail
+            export PATH="$HOME/.local/share/pnpm:$HOME/.pnpm-global/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+            if [ -s "$HOME/.nvm/nvm.sh" ]; then
+              . "$HOME/.nvm/nvm.sh"
+            fi
+            APP_DIR="/opt/anime-nova"
+            exec 9>/tmp/nova-vps-deploy.lock
+            flock -x 9
+
+            cd "$APP_DIR"
+            PUB_DIR="$APP_DIR/artifacts/anime-scraper/public"
+            DIST_DIR="$APP_DIR/artifacts/anime-scraper/dist/public"
+            APK_BAK="/tmp/nova-apk-preserve-$$"
+            mkdir -p "$APK_BAK"
+
+            # Preserve all live APK binaries before git reset / vite emptyOutDir
+            for dir in "$DIST_DIR" "$PUB_DIR"; do
+              if [ -d "$dir" ]; then
+                find "$dir" -maxdepth 1 -type f -name '*.apk' -exec cp -p {} "$APK_BAK/" \; 2>/dev/null || true
+              fi
+            done
+            echo "💾 Preserved APKs:"
+            ls -lh "$APK_BAK" || true
+
+            git fetch origin main
+            git reset --hard origin/main
+
+            # Ensure public/ doesn't copy huge APKs twice during vite build; restore them cleanly right after
+            find "$PUB_DIR" -maxdepth 1 -type f -name '*.apk' -delete 2>/dev/null || true
+
+            echo "🔧 Building @workspace/anime-scraper..."
+            pnpm --filter @workspace/anime-scraper run build
+
+            # Restore preserved APK binaries into BOTH public/ and dist/public/
+            if ls "$APK_BAK"/*.apk >/dev/null 2>&1; then
+              mkdir -p "$PUB_DIR" "$DIST_DIR"
+              for f in "$APK_BAK"/*.apk; do
+                base="$(basename "$f")"
+                install -m 0644 "$f" "$PUB_DIR/$base"
+                install -m 0644 "$f" "$DIST_DIR/$base"
+              done
+            fi
+            rm -rf "$APK_BAK"
+
+            echo "✅ Verifying live /app assets and APK links..."
+            curl -fsSI "https://animenovaa.duckdns.org/app" | head -n 3
+            curl -fsSI "https://animenovaa.duckdns.org/app-screens/screen-donghua.jpg" | head -n 3
+            curl -fsSI "https://animenovaa.duckdns.org/app-screens/screen-dubbed-anime.jpg" | head -n 3
+            curl -fsSI "https://animenovaa.duckdns.org/app-screens/screen-cartoon2.jpg" | head -n 3
+            curl -fsSI "https://animenovaa.duckdns.org/nova.apk" | head -n 3
