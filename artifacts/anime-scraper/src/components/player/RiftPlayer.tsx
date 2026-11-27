@@ -22,6 +22,18 @@ import {
 } from "lucide-react";
 
 // Kawaii & browser-direct CDN detectors live in @/lib/webStreamRouting.mjs
+function setDocumentNoReferrer(enabled: boolean) {
+  try {
+    let meta = document.querySelector<HTMLMetaElement>('meta[name="referrer"]');
+    if (!meta) {
+      if (!enabled) return;
+      meta = document.createElement("meta");
+      meta.name = "referrer";
+      document.head.appendChild(meta);
+    }
+    meta.content = enabled ? "no-referrer" : "strict-origin-when-cross-origin";
+  } catch { /* ignore */ }
+}
 
 /* ─────────────────────────────────────── helpers ─── */
 function fmtTime(s: number) {
@@ -564,8 +576,9 @@ export default function RiftPlayer({
     const isCorsDirectCdn = isBrowserDirectMediaUrl(src);
     if (isCorsDirectCdn && !isKawaiiHlsUrl(src)) {
       // MP4/non-HLS: native <video> element streams directly without VPS relay.
-      // kawaii CDN: no-Referer=200, wrong-Referer=403 — browser sends page URL as Referer by default.
-      v.referrerPolicy = isKawaiiCdn ? "no-referrer" : "";
+      // kawaii CDN: no-Referer=200, wrong-Referer=403. HTMLVideoElement lacks referrerPolicy
+      // in Chromium, so toggle <meta name="referrer" content="no-referrer"> on document.head.
+      setDocumentNoReferrer(isKawaiiCdn);
       v.src = src; v.load();
       let done = false;
       const cleanup = () => { done = true; clearTimeout(t); v.removeEventListener("loadedmetadata", onMd); v.removeEventListener("error", onEd); };
@@ -576,7 +589,7 @@ export default function RiftPlayer({
       v.addEventListener("error", onEd, { once: true });
       return;
     }
-    v.referrerPolicy = "";
+    setDocumentNoReferrer(false);
     // kawaii m3u8: CORS * allows direct hls.js load — falls through to Hls.isSupported() block below
 
     const isPreProxied = isPreProxiedDirectVideoUrl(src);
@@ -593,7 +606,7 @@ export default function RiftPlayer({
       const cleanup = () => { done = true; clearTimeout(t); v.removeEventListener("loadedmetadata", onM); v.removeEventListener("error", onE); };
       const onM = () => { if (done) return; cleanup(); setLoading(false); v.play().catch(() => {}); showControls(); };
       const onE = () => { if (done) return; cleanup(); fireOnFail(); };
-      const t = setTimeout(() => { if (done) return; v.src = ""; onE(); }, 20000);
+      const t = setTimeout(() => { if (done) return; v.src = ""; onE(); }, 35000);
       v.addEventListener("loadedmetadata", onM, { once: true });
       v.addEventListener("error", onE, { once: true });
       return;
@@ -788,6 +801,7 @@ export default function RiftPlayer({
     return () => {
       if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
       /* Stop audio/video immediately on unmount to prevent background playback */
+      setDocumentNoReferrer(false);
       const v = videoRef.current;
       if (v) { try { v.pause(); v.src = ""; v.load(); } catch {} }
       if (hideRef.current) clearTimeout(hideRef.current);

@@ -43,18 +43,17 @@ test("Kawaii MP4 plays directly with no-referrer AND includes VPS proxy fallback
   assert.ok(plan.fallbackUrls[0].includes("kawaiianime.cc"));
 });
 
-test("Pixeldrain (AW) and MediaFire CDN (FX) play directly with proxy backup and are NOT iframes", () => {
+test("Pixeldrain routes via VPS proxy (browsers get 403 ORB) while MediaFire CDN plays directly", () => {
   const pdUrl = "https://pixeldrain.com/api/file/J4kxXwYY";
   const mfUrl = "https://download1075.mediafire.com/abc123/xyz456/Episode1.mp4";
-  assert.equal(isBrowserDirectMediaUrl(pdUrl, { site: "animewitcher" }), true);
+  assert.equal(isBrowserDirectMediaUrl(pdUrl, { site: "animewitcher" }), false);
   assert.equal(isBrowserNonIframeMediaUrl(pdUrl), true);
   assert.equal(isBrowserDirectMediaUrl(mfUrl, { site: "anifox" }), true);
   assert.equal(isBrowserNonIframeMediaUrl(mfUrl), true);
 
   const pdPlan = buildWebPlaybackCandidates({ site: "animewitcher", directUrl: pdUrl, directType: "mp4" });
-  assert.equal(pdPlan.primaryUrl, pdUrl);
-  assert.equal(pdPlan.isDirect, true);
-  assert.equal(pdPlan.fallbackUrls.length, 1);
+  assert.ok(pdPlan.primaryUrl.startsWith("/api/anime/video-proxy?"));
+  assert.equal(pdPlan.isDirect, false);
 
   const mfPlan = buildWebPlaybackCandidates({ site: "anifox", directUrl: mfUrl, directType: "mp4" });
   assert.equal(mfPlan.primaryUrl, mfUrl);

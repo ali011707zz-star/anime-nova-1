@@ -40,6 +40,8 @@ const VPS_ONLY_HOSTS = [
   "tapecontent.net",
   "sendvid.com",
   "mp4upload.com",
+  "pixeldrain.com",
+  "pixeldrain.net",
 ];
 
 const KAWAII_CDN_HOSTS = new Set([
@@ -171,12 +173,6 @@ export function isBrowserDirectMediaUrl(url, opts = {}) {
   }
 
   if (isKawaiiCdnUrl(clean)) return true;
-  if (
-    (host === "pixeldrain.com" || host === "pixeldrain.net" || host.endsWith(".pixeldrain.com")) &&
-    /^\/api\/file\/[a-zA-Z0-9_-]+$/i.test(path)
-  ) {
-    return true;
-  }
   if (/^download\d*\.mediafire\.com$/i.test(host) && path.length > 8) return true;
   if (host === "drive.google.com" || host.endsWith(".googleusercontent.com")) return true;
   if (hostMatches(host, "okcdn.ru") || hostMatches(host, "userapi.com") || hostMatches(host, "vkvideo.ru")) {
@@ -198,6 +194,7 @@ export function isBrowserNonIframeMediaUrl(url) {
   if (clean.startsWith("/")) return true;
   if (isOwnVpsProxyUrl(clean) || isPreProxiedDirectVideoUrl(clean)) return true;
   if (isBrowserDirectMediaUrl(clean)) return true;
+  if (/^https?:\/\/(?:www\.)?pixeldrain\.(?:com|net)\/api\/file\/[a-zA-Z0-9_-]+/i.test(clean)) return true;
   if (clean.includes("streamtape.com") || clean.includes("sendvid.com")) return true;
   if (clean.includes("missourimonster-vyla.hf.space")) return true;
   if (/\.(m3u8|mp4|mkv|webm|ts)([?#]|$)/i.test(clean)) return true;
