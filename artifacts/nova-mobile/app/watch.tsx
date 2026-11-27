@@ -26,6 +26,7 @@ import {
   subscribeActiveDownloads,
   getActiveDownloadsSnapshot,
   cancelActiveDownload,
+  getDownloads,
 } from "@/utils/downloadManager";
 import { openIsolatedPlayer } from "@/lib/isolatedPlayer";
 import { DownloadMethodModal } from "@/components/DownloadMethodModal";
@@ -2510,7 +2511,31 @@ export default function WatchScreen() {
       });
     };
     sync(); // قراءة فورية عند mount
-    return subscribeActiveDownloads(sync);
+    // فحص التنزيلات المكتملة سابقاً على الجهاز لإظهار علامة الصح فوراً داخل المشغّل والمنتقي
+    let alive = true;
+    void getDownloads().then((saved) => {
+      if (!alive || !saved?.length) return;
+      const doneKeys = saved
+        .filter((d) => d.animeId === animeIdNum && d.ep === epNum)
+        .map((d) => `${d.site}:${downloadQualityKey(d.quality)}`);
+      if (doneKeys.length === 0) return;
+      setDownloadStates((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        for (const k of doneKeys) {
+          if (next[k] !== "downloading" && next[k] !== "done") {
+            next[k] = "done";
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+    }).catch(() => {});
+    const unsub = subscribeActiveDownloads(sync);
+    return () => {
+      alive = false;
+      unsub();
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anime, epNum]);
 
@@ -3052,6 +3077,82 @@ export default function WatchScreen() {
     );
   }, [availableSlots, isAwDubbed]);
 
+  /* ── تنزيل المصدر النشط حالياً داخل المشغّل (نفس السيرفر ونفس الجودة فقط — داخلياً في التطبيق) ── */
+  const playingDownloadMeta = useMemo(() => {
+    if (screen !== "native" || !playingSrc || !isDirectPlayable(playingSrc)) return null;
+    const rawUrl = getPlayUrl(playingSrc);
+    if (!rawUrl || rawUrl.startsWith("file://")) return null;
+    const base = getBaseUrl();
+    const headers = playingSrc.headers || extractProxyHeaders(rawUrl);
+    const proxyUrl = isAwDubbed
+      ? resolveUrl(rawUrl, base)
+      : ensureVpsProxy(rawUrl, headers, base, playingSrc.directType === "hls");
+    if (!proxyUrl) return null;
+    const site = isAwDubbed
+      ? (playingSrc.awPickerKey || playingSrc.site || "animewitcher")
+      : (playingSrc.site || "");
+    const quality = getSrcQuality(playingSrc);
+    const qualityKey = downloadQualityKey(quality);
+    const stateKey = `${site}:${qualityKey}`;
+    const isHlsDownload = playingSrc.directType === "hls" || isHlsMediaUrl(proxyUrl);
+    const serverApproved = isAwDubbed || DOWNLOAD_SOURCE_SITES.has(site);
+    // إذا كان رابطاً مباشراً (MP4) أو من المصادر المعتمدة للتحويل الداخلي، يسمح بالتنزيل
+    if (!serverApproved && isHlsDownload) return null;
+    const subRaw = (isAwDubbed || subtitlesDisabledForSite(site))
+      ? undefined
+      : (playingSrc.subtitleUrl || globalSubUrl);
+    const subtitleUrl = normalizeProviderSubtitleUrl(site, subRaw, base);
+    const downloadUrl = (DOWNLOAD_SUBTITLE_SITES.has(site) || isHlsDownload)
+      ? buildEmbeddedDownloadUrl(site, proxyUrl, subtitleUrl, base)
+      : proxyUrl;
+    return {
+      site,
+      quality,
+      qualityKey,
+      stateKey,
+      headers,
+      proxyUrl,
+      subtitleUrl,
+      isHlsDownload,
+      downloadUrl,
+    };
+  }, [screen, playingSrc, isAwDubbed, globalSubUrl]);
+
+  const handleDownloadCurrentPlaying = useCallback(async () => {
+    if (!playingDownloadMeta) return;
+    const { site, quality, stateKey, headers, proxyUrl, subtitleUrl, isHlsDownload, downloadUrl } = playingDownloadMeta;
+    const currentState = downloadStates[stateKey] || "idle";
+    if (currentState === "downloading" || currentState === "done") return;
+    try {
+      const [token, downloadToken] = await Promise.all([getAuthToken(), getDownloadToken()]);
+      const numericId = isAwDubbed
+        ? Math.abs(Array.from(awSeries || titleStr).reduce((acc, ch) => ((acc << 5) - acc) + ch.charCodeAt(0), 0)) || 900001
+        : (parseInt(anime || "0", 10) || 0);
+      if (isMountedRef.current) {
+        setDownloadStates(prev => ({ ...prev, [stateKey]: "downloading" }));
+        setDownloadProgress(prev => ({ ...prev, [stateKey]: 0 }));
+      }
+      await startGlobalDownload({
+        animeId: numericId,
+        ep: epNum,
+        title: displayTitle,
+        cover: coverUrl,
+        site,
+        quality,
+        url: downloadUrl,
+        authToken: token,
+        downloadToken,
+        headers,
+        subtitleUrl,
+        hlsManifestUrl: isHlsDownload ? proxyUrl : undefined,
+      });
+    } catch {
+      if (isMountedRef.current) {
+        setDownloadStates(prev => ({ ...prev, [stateKey]: "error" }));
+      }
+    }
+  }, [playingDownloadMeta, downloadStates, isAwDubbed, awSeries, titleStr, anime, epNum, displayTitle, coverUrl]);
+
   /* ── مرّر المصدر الذي اختاره المستخدم فقط إلى المشغّل.
      لا نضمّ بقية المصادر هنا، حتى لا يحوّل auto-advance فشل المصدر إلى KW/MP. ── */
   const playerSources = useMemo((): PlayerSource[] => {
@@ -3171,6 +3272,10 @@ export default function WatchScreen() {
         onNextEpisode={canGoNextEpisode ? onRiftNextEpisode : undefined}
         onPrevEpisode={canGoPrevEpisode ? onRiftPrevEpisode : undefined}
         onEpisodeSelect={onRiftEpisodeSelect}
+        onDownloadCurrent={playingDownloadMeta ? () => { void handleDownloadCurrentPlaying(); } : undefined}
+        downloadState={playingDownloadMeta ? (downloadStates[playingDownloadMeta.stateKey] || "idle") : "idle"}
+        downloadProgress={playingDownloadMeta ? (downloadProgress[playingDownloadMeta.stateKey] ?? 0) : 0}
+        downloadQualityLabel={playingDownloadMeta?.quality}
       />
     );
   }

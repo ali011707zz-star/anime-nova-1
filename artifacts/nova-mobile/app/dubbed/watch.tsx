@@ -1491,6 +1491,10 @@ export default function DubbedWatchScreen() {
 
   /* ── RiftPlayer Screen ── */
   if (screen === "player" && sources.length > 0) {
+    const activeSlot = selectedSlotKey ? slots.find((s) => s.key === selectedSlotKey) : undefined;
+    const rawDlState = activeSlot ? (dlStates[activeSlot.key] || "idle") : "idle";
+    const mappedDlState: "idle" | "downloading" | "done" | "error" =
+      rawDlState === "fetching" ? "downloading" : rawDlState;
     return (
       <>
         <RewardedAdPrompt />
@@ -1506,6 +1510,10 @@ export default function DubbedWatchScreen() {
           onError={retryAfterPlaybackError}
           onNextEpisode={nextEpRef ? () => navigateToEpisode(nextEpRef) : undefined}
           onPrevEpisode={prevEpRef ? () => navigateToEpisode(prevEpRef) : undefined}
+          onDownloadCurrent={activeSlot ? () => { void handleDownloadSlot(activeSlot, "internal"); } : undefined}
+          downloadState={mappedDlState}
+          downloadProgress={activeSlot ? (dlProgress[activeSlot.key] ?? 0) : 0}
+          downloadQualityLabel={activeSlot?.quality}
         />
       </>
     );

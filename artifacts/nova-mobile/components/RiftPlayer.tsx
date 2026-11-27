@@ -200,6 +200,14 @@ type Props = {
   onError?: () => void;
   /** Use anime-specific buffering and seek handling; other catalogs stay unchanged. */
   animePlayback?: boolean;
+  /** تنزيل الحلقة الحالية داخلياً بنفس السيرفر والجودة المشغّلة حالياً */
+  onDownloadCurrent?: () => void;
+  /** حالة تنزيل المصدر النشط حالياً */
+  downloadState?: "idle" | "downloading" | "done" | "error";
+  /** نسبة تقدّم التنزيل (0..100) */
+  downloadProgress?: number;
+  /** وسم الجودة/السيرفر لعرضه في إشعار بدء التنزيل */
+  downloadQualityLabel?: string;
 };
 
 /**
@@ -480,6 +488,10 @@ function ExpoRiftPlayer({
   totalEps = 0,
   episodeTitle,
   onError,
+  onDownloadCurrent,
+  downloadState = "idle",
+  downloadProgress = 0,
+  downloadQualityLabel,
 }: Props) {
   // Theme updates affect controls only; the video surface remains black.
   const colors = useColors();
@@ -664,6 +676,7 @@ function ExpoRiftPlayer({
   const [showUnlock, setShowUnlock]     = useState(false);
   const [contentFit, setContentFit]     = useState<"contain" | "cover" | "fill">("contain");
   const [screenshotSaved, setScreenshotSaved] = useState(false);
+  const [downloadToast, setDownloadToast] = useState<{ text: string; tone: "info" | "done" } | null>(null);
   const [isFlipped, setIsFlipped]       = useState(false);
   /* ─── Subtitle state ─── */
   const [subOn, setSubOn]               = useState(subEnabled);
@@ -895,6 +908,7 @@ function ExpoRiftPlayer({
   const replayTimeoutRef         = useRef<ReturnType<typeof setTimeout> | null>(null);
   const manualSeekErrorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const screenshotSavedTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const downloadToastTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
   /* طلبات الشبكة المرتبطة بالمصدر الحالي — تُلغى قبل تبديل الحلقة أو إغلاقها. */
   const subtitleAbortRef         = useRef<AbortController | null>(null);
   const whisperAbortRef          = useRef<AbortController | null>(null);
@@ -1076,6 +1090,7 @@ function ExpoRiftPlayer({
              feedbackTimer/tapTimer/longPressTimer/unlockTimer/postSeekTimer: setState بعد unmount */
       if (replayTimeoutRef.current) { clearTimeout(replayTimeoutRef.current); replayTimeoutRef.current = null; }
       if (screenshotSavedTimerRef.current) { clearTimeout(screenshotSavedTimerRef.current); screenshotSavedTimerRef.current = null; }
+      if (downloadToastTimerRef.current) { clearTimeout(downloadToastTimerRef.current); downloadToastTimerRef.current = null; }
       if (feedbackTimer.current) { clearTimeout(feedbackTimer.current); feedbackTimer.current = null; }
       if (tapTimer.current) { clearTimeout(tapTimer.current); tapTimer.current = null; }
       if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
@@ -3626,6 +3641,21 @@ function ExpoRiftPlayer({
         </View>
       )}
 
+      {downloadToast && (
+        <View style={s.downloadToastWrap} pointerEvents="none">
+          <View style={[s.downloadToastBadge, downloadToast.tone === "done" && s.downloadToastBadgeDone]}>
+            <Ionicons
+              name={downloadToast.tone === "done" ? "checkmark-circle" : "cloud-download-outline"}
+              size={17}
+              color={downloadToast.tone === "done" ? "#86efac" : "#ddd6fe"}
+            />
+            <Text style={[s.downloadToastText, downloadToast.tone === "done" && s.downloadToastTextDone]}>
+              {downloadToast.text}
+            </Text>
+          </View>
+        </View>
+      )}
+
       {/* ── Subtitle overlay ── */}
       {subOn && activeCue && (
         <View
@@ -4416,6 +4446,69 @@ function ExpoRiftPlayer({
                           color={isMuted ? PLAYER_MUTED_ICON : "rgba(255,255,255,0.92)"}
                         />
                       </Pressable>
+
+                      {!tvMode && Boolean(onDownloadCurrent) && (
+                        <Pressable
+                          onPress={() => {
+                            if (controlsVisibleRef.current && !isHidingControlsRef.current) {
+                              schedHide();
+                            } else {
+                              fadeIn();
+                            }
+                            const showToast = (text: string, tone: "info" | "done" = "info") => {
+                              if (downloadToastTimerRef.current) clearTimeout(downloadToastTimerRef.current);
+                              setDownloadToast({ text, tone });
+                              downloadToastTimerRef.current = setTimeout(() => {
+                                downloadToastTimerRef.current = null;
+                                if (aliveRef.current) setDownloadToast(null);
+                              }, 2200);
+                            };
+                            if (downloadState === "done") {
+                              showToast("تم تنزيل هذه الحلقة مسبقاً", "done");
+                              return;
+                            }
+                            if (downloadState === "downloading") {
+                              const pct = Math.max(0, Math.min(100, Math.round(downloadProgress || 0)));
+                              showToast(pct > 0 ? `جاري التنزيل في الخلفية (${pct}%)` : "جاري التنزيل في الخلفية...", "info");
+                              return;
+                            }
+                            const qLabel = downloadQualityLabel ? ` • ${downloadQualityLabel}` : "";
+                            showToast(`بدأ التنزيل في التطبيق${qLabel}`, "info");
+                            onDownloadCurrent?.();
+                          }}
+                          style={[
+                            s.bottomIconCircle,
+                            downloadState === "downloading" && s.bottomDownloadActive,
+                            downloadState === "done" && s.bottomDownloadDone,
+                            downloadState === "error" && s.bottomDownloadError,
+                          ]}
+                          hitSlop={10}
+                          accessibilityRole="button"
+                          accessibilityLabel={
+                            downloadState === "done"
+                              ? "تم تنزيل الحلقة"
+                              : downloadState === "downloading"
+                                ? "جاري تنزيل الحلقة"
+                                : "تنزيل الحلقة"
+                          }
+                        >
+                          {downloadState === "downloading" ? (
+                            Math.round(downloadProgress || 0) > 0 ? (
+                              <Text style={s.downloadPctText}>
+                                {Math.min(99, Math.round(downloadProgress || 0))}%
+                              </Text>
+                            ) : (
+                              <ActivityIndicator size="small" color="#ddd6fe" />
+                            )
+                          ) : downloadState === "done" ? (
+                            <Ionicons name="checkmark" size={20} color="#6ee7b7" />
+                          ) : downloadState === "error" ? (
+                            <Ionicons name="refresh-outline" size={19} color="#fca5a5" />
+                          ) : (
+                            <Ionicons name="download-outline" size={19} color="rgba(255,255,255,0.92)" />
+                          )}
+                        </Pressable>
+                      )}
                     </View>
 
                     {/* أقصى اليمين السفلي الفعلي: تمدد الشاشة + السرعة */}
@@ -5186,6 +5279,42 @@ const s = StyleSheet.create({
     fontSize: 13,
     fontFamily: "Cairo_700Bold",
   },
+  downloadToastWrap: {
+    position: "absolute",
+    top: 24,
+    left: 16,
+    right: 16,
+    alignItems: "center",
+    zIndex: 62,
+  },
+  downloadToastBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: "rgba(22, 16, 46, 0.94)",
+    borderWidth: 1,
+    borderColor: "rgba(167, 139, 250, 0.55)",
+    shadowColor: "#000",
+    shadowOpacity: 0.45,
+    shadowRadius: 10,
+    elevation: 10,
+  },
+  downloadToastBadgeDone: {
+    backgroundColor: "rgba(16, 40, 28, 0.94)",
+    borderColor: "rgba(134, 239, 172, 0.55)",
+  },
+  downloadToastText: {
+    color: "#ede9fe",
+    fontSize: 12.5,
+    fontFamily: "Cairo_700Bold",
+  },
+  downloadToastTextDone: {
+    color: "#bbf7d0",
+  },
 
   /* Spinner — top area of screen */
   errorWrap:   { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", gap: 14, zIndex: 20, backgroundColor: "rgba(0,0,0,0.92)" },
@@ -5803,6 +5932,24 @@ const s = StyleSheet.create({
     backgroundColor: "rgba(12,12,24,0.62)", borderWidth: 1, borderColor: "rgba(255,255,255,0.20)",
     alignItems: "center", justifyContent: "center",
     position: "relative",
+  },
+  bottomDownloadActive: {
+    backgroundColor: "rgba(139,92,246,0.30)",
+    borderColor: "rgba(196,181,253,0.65)",
+  },
+  bottomDownloadDone: {
+    backgroundColor: "rgba(16,185,129,0.24)",
+    borderColor: "rgba(110,231,183,0.62)",
+  },
+  bottomDownloadError: {
+    backgroundColor: "rgba(239,68,68,0.24)",
+    borderColor: "rgba(252,165,165,0.58)",
+  },
+  downloadPctText: {
+    color: "#ede9fe",
+    fontSize: 10.5,
+    fontFamily: "Cairo_700Bold",
+    includeFontPadding: false,
   },
   tvBottomIconCircle: {
     width: 54, height: 54, borderRadius: 18,
