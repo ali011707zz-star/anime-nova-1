@@ -519,7 +519,6 @@ export default function HomeScreen() {
             <SectionHeader
               onSeeAll={() => router.push("/(tabs)/library")}
               focusable={isTvLayout && sectionFocusable}
-                    nativeFocusOnly
               onFocus={handleSectionFocus}
               seeAllLabel="السجل الكامل"
             >
@@ -691,7 +690,6 @@ export default function HomeScreen() {
             <SectionHeader
               onSeeAll={() => router.push((activeLatestTab === "manga" ? "/manga" : "/latest") as any)}
               focusable={isTvLayout && sectionFocusable}
-                    nativeFocusOnly
               onFocus={handleSectionFocus}
             >
               <View style={styles.sectionRightRow}>
@@ -1013,7 +1011,6 @@ export default function HomeScreen() {
               <SectionHeader
                 onSeeAll={currentTab.onSeeAll}
                 focusable={isTvLayout && sectionFocusable}
-                    nativeFocusOnly
                 onFocus={handleSectionFocus}
               >
                 <View style={styles.sectionRightRow}>
@@ -1125,7 +1122,6 @@ export default function HomeScreen() {
               onSeeAll={() => router.push("/(tabs)/news" as any)}
               seeAllLabel="عرض المزيد"
               focusable={isTvLayout && sectionFocusable}
-                    nativeFocusOnly
               onFocus={handleSectionFocus}
             >
               <View style={styles.sectionRightRow}>
@@ -1288,7 +1284,6 @@ export default function HomeScreen() {
             <SectionHeader
               onSeeAll={() => router.push({ pathname: "/aw-dubbed" as any, params: { tab: activeDubbedTab } })}
               focusable={isTvLayout && sectionFocusable}
-                    nativeFocusOnly
               onFocus={handleSectionFocus}
             >
               <View style={styles.sectionRightRow}>
@@ -1775,7 +1770,6 @@ export default function HomeScreen() {
               <SectionHeader
                 onSeeAll={() => router.push({ pathname: "/manga" as any, params: { tab: isManhwaView ? "manhwa" : "all" } })}
                 focusable={isTvLayout && sectionFocusable}
-                    nativeFocusOnly
                 onFocus={handleSectionFocus}
               >
                 <View style={styles.sectionRightRow}>
