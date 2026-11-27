@@ -1322,7 +1322,7 @@ export default function WatchScreen() {
       return changed ? next : curr;
     });
     setSources((curr) => {
-      const filtered = curr.filter((src) => isAllowedSlotForDonghua(src.site));
+      const filtered = curr.filter((src) => isAllowedSlotForDonghua(src.site || ""));
       return filtered.length === curr.length ? curr : filtered;
     });
   }, [isDonghuaOrigin]);

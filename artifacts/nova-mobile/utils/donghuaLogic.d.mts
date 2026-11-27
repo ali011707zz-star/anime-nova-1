@@ -85,7 +85,7 @@ export function normalizeAndSortSubtitleCues<T extends { start: number; end: num
   cues: T[]
 ): { start: number; end: number; text: string }[];
 export const DONGHUA_EXCLUDED_ANIME_SITES: ReadonlySet<string>;
-export function isAllowedSlotForDonghua(site: string): boolean;
+export function isAllowedSlotForDonghua(site?: string): boolean;
 export function filterReleasedBrowseMedia<T extends { status?: string | null; startDate?: { year?: number | null } | null }>(
   items: T[],
   opts?: { currentYear?: number; allowUnreleased?: boolean }
