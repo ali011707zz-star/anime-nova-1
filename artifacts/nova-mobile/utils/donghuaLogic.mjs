@@ -532,22 +532,86 @@ function extractSeasonNum(s) {
 /**
  * Match AniList Donghua titles/synonyms against parsed catalog items from AX or AK.
  */
-export function matchDonghuaCatalogItemByTitle(items, candidateTitles = []) {
-  if (!Array.isArray(items) || items.length === 0) return null;
+export const DONGHUA_EXCLUDED_ANIME_SITES = new Set([
+  "animewitcher",
+  "animeify",
+  "sanime",
+  "anifox",
+  "anime4up2_hard",
+  "anime4up2",
+]);
+
+/**
+ * Returns false for unverified fuzzy-matched Arabic-anime scrapers (AF/AW/SA/FX/AD1/AD2)
+ * which open unrelated Japanese anime episodes when browsing Chinese Donghua.
+ */
+export function isAllowedSlotForDonghua(site) {
+  const s = String(site || "").trim().toLowerCase();
+  if (!s) return false;
+  return !DONGHUA_EXCLUDED_ANIME_SITES.has(s);
+}
+
+/**
+ * Filters out unreleased / future-year (e.g. 2027) or cancelled titles unless explicitly requested.
+ */
+export function filterReleasedBrowseMedia(items, opts = {}) {
+  if (!Array.isArray(items)) return [];
+  const allowUnreleased = Boolean(opts.allowUnreleased);
+  if (allowUnreleased) return items;
+  const currentYear = Number(opts.currentYear) || new Date().getFullYear();
+  return items.filter((item) => {
+    const st = String(item?.status || "").trim().toUpperCase();
+    if (st === "NOT_YET_RELEASED" || st === "CANCELLED") return false;
+    const yr = Number(item?.startDate?.year || 0);
+    if (yr > currentYear) return false;
+    return true;
+  });
+}
+
+/**
+ * Formats media titles in clean 3-tier hierarchy:
+ * 1) primary: English (fallback Romaji -> Arabic)
+ * 2) arabic: Arabic title if present and distinct from primary
+ * 3) original: Romaji / Native original title if distinct from primary
+ */
+export function formatMediaTitleHierarchy({ english, romaji, native, arabic } = {}) {
+  const en = String(english || "").trim();
+  const ro = String(romaji || "").trim();
+  const nat = String(native || "").trim();
+  const ar = String(arabic || "").trim();
+
+  const primary = en || ro || ar || nat;
+  const arabicOut = ar && ar.toLowerCase() !== primary.toLowerCase() ? ar : "";
+
+  const origParts = [];
+  if (ro && ro.toLowerCase() !== primary.toLowerCase()) origParts.push(ro);
+  if (nat && nat.toLowerCase() !== primary.toLowerCase() && nat.toLowerCase() !== ro.toLowerCase()) {
+    origParts.push(nat);
+  }
+  const original = origParts.join(" · ");
+
+  return { primary, arabic: arabicOut, original };
+}
+
+/**
+ * Rank AniList Donghua titles/synonyms against parsed catalog items from AX or AK.
+ * Returns candidates sorted best-first (score >= 75) so callers can skip empty (0-episode) entries.
+ */
+export function rankDonghuaCatalogCandidates(items, candidateTitles = []) {
+  if (!Array.isArray(items) || items.length === 0) return [];
   const targets = candidateTitles
     .map((t) => ({ raw: String(t || ""), norm: normMatchText(t), season: extractSeasonNum(t) }))
     .filter((t) => t.norm.length >= 2);
-  if (targets.length === 0) return null;
+  if (targets.length === 0) return [];
 
-  let best = null;
-  let bestScore = -Infinity;
-
+  const ranked = [];
   for (const item of items) {
     const itemNorm = normMatchText(item?.title || "");
     if (!itemNorm) continue;
     const itemSeason = extractSeasonNum(item?.title || "");
     const itemTokens = new Set(itemNorm.split(" ").filter((w) => w.length >= 2));
 
+    let bestItemScore = -Infinity;
     for (const target of targets) {
       let score = 0;
       if (itemNorm === target.norm) {
@@ -566,30 +630,35 @@ export function matchDonghuaCatalogItemByTitle(items, candidateTitles = []) {
         score += Math.round(coverage * 90 + precision * 35);
       }
 
-      // Season alignment bonus/penalty
       if (target.season > 0 && itemSeason > 0) {
-        score += target.season === itemSeason ? 45 : -60;
+        score += target.season === itemSeason ? 45 : -75;
       } else if (target.season === 0 && itemSeason > 1) {
-        score -= 35;
+        score -= 70;
       }
-      // Avoid matching a Movie when searching a regular series (unless target says Movie)
+
       const targetMovie = /\bmovie\b|\bfilm\b/i.test(target.raw);
       const itemMovie = /\bmovie\b|\bfilm\b/i.test(item?.title || "");
-      if (targetMovie !== itemMovie) score -= 45;
+      if (targetMovie !== itemMovie) score -= 200;
 
-      if (score > bestScore) {
-        bestScore = score;
-        best = item;
-      }
+      if (score > bestItemScore) bestItemScore = score;
+    }
+
+    if (bestItemScore >= 75) {
+      ranked.push({ item, score: bestItemScore });
     }
   }
 
-  return bestScore >= 75 ? best : null;
+  ranked.sort((a, b) => b.score - a.score);
+  return ranked.map((r) => r.item);
 }
 
 /**
- * Pick exact episode from parsed Donghua detail episodes list.
+ * Match AniList Donghua titles/synonyms against parsed catalog items from AX or AK.
  */
+export function matchDonghuaCatalogItemByTitle(items, candidateTitles = []) {
+  return rankDonghuaCatalogCandidates(items, candidateTitles)[0] || null;
+}
+
 export function pickDonghuaEpisodeByNumber(episodes, episodeNumber) {
   if (!Array.isArray(episodes) || episodes.length === 0) return null;
   const target = Math.max(1, Math.floor(Number(episodeNumber) || 1));

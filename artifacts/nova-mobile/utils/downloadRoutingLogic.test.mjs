@@ -64,6 +64,14 @@ test("shouldUseNativeDownloadManager allows direct external MP4 CDNs on Android"
     true,
   );
   assert.equal(
+    shouldUseNativeDownloadManager({
+      platformOs: "android",
+      hasNativeModule: true,
+      url: "https://vd672.okcdn.ru/?expires=1795&srcAg=CHROME_ANDROID&id=123",
+    }),
+    false,
+  );
+  assert.equal(
     isHlsDownloadCandidate({
       url: "https://animenovaa.duckdns.org/api/anime/download-mp4?url=x",
       hlsManifestUrl: "https://cdn.example.com/playlist.m3u8",

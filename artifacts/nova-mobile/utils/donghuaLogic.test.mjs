@@ -198,3 +198,60 @@ test("normalizeAndSortSubtitleCues sorts out-of-order ASS cues and keeps ranges 
   assert.equal(sorted[1].start, 5);
   assert.equal(sorted[2].start, 10);
 });
+import {
+  DONGHUA_EXCLUDED_ANIME_SITES,
+  isAllowedSlotForDonghua,
+  filterReleasedBrowseMedia,
+  formatMediaTitleHierarchy,
+  rankDonghuaCatalogCandidates,
+} from "./donghuaLogic.mjs";
+
+test("isAllowedSlotForDonghua blocks fuzzy Arabic-anime scrapers (AF/AW/SA/FX/AD1/AD2) and allows DX 1/DX 2/KW/MP/RE", () => {
+  assert.equal(isAllowedSlotForDonghua("animeify"), false);
+  assert.equal(isAllowedSlotForDonghua("animewitcher"), false);
+  assert.equal(isAllowedSlotForDonghua("sanime"), false);
+  assert.equal(isAllowedSlotForDonghua("anifox"), false);
+  assert.equal(isAllowedSlotForDonghua("anime4up2_hard"), false);
+  assert.equal(isAllowedSlotForDonghua("anime4up2"), false);
+  assert.equal(isAllowedSlotForDonghua("donghua_ax"), true);
+  assert.equal(isAllowedSlotForDonghua("donghua_ak"), true);
+  assert.equal(isAllowedSlotForDonghua("kawaii"), true);
+  assert.equal(isAllowedSlotForDonghua("megaplay"), true);
+  assert.equal(isAllowedSlotForDonghua("reflix"), true);
+});
+
+test("filterReleasedBrowseMedia excludes NOT_YET_RELEASED, CANCELLED, and future 2027 titles", () => {
+  const input = [
+    { id: 1, status: "RELEASING", startDate: { year: 2025 } },
+    { id: 2, status: "NOT_YET_RELEASED", startDate: { year: 2027 } },
+    { id: 3, status: "FINISHED", startDate: { year: 2027 } },
+    { id: 4, status: "CANCELLED", startDate: { year: 2024 } },
+  ];
+  const released = filterReleasedBrowseMedia(input, { currentYear: 2026 });
+  assert.deepEqual(released.map((x) => x.id), [1]);
+  assert.equal(filterReleasedBrowseMedia(input, { allowUnreleased: true }).length, 4);
+});
+
+test("formatMediaTitleHierarchy orders English primary, Arabic middle, Original bottom", () => {
+  const h = formatMediaTitleHierarchy({
+    english: "Lord of Mysteries",
+    romaji: "Guimi Zhi Zhu: Xiaochou Pian",
+    native: "诡秘之主",
+    arabic: "لورد الغوامض",
+  });
+  assert.equal(h.primary, "Lord of Mysteries");
+  assert.equal(h.arabic, "لورد الغوامض");
+  assert.equal(h.original, "Guimi Zhi Zhu: Xiaochou Pian · 诡秘之主");
+});
+
+test("rankDonghuaCatalogCandidates returns multiple ranked matches and rejects movie hijacks", () => {
+  const items = [
+    { id: "ax:1", source: "animexin", slug: "kings-avatar-movie", url: "u1", title: "The King's Avatar Movie For The Glory", poster: "", status: "", type: "Movie" },
+    { id: "ak:2", source: "animekhor", slug: "immortal-king-2", url: "u2", title: "The Daily Life of the Immortal King Season 2", poster: "", status: "", type: "ONA" },
+  ];
+  const ka = rankDonghuaCatalogCandidates(items, ["The King's Avatar"]);
+  assert.equal(ka.length, 0);
+  const ik = rankDonghuaCatalogCandidates(items, ["The Daily Life of the Immortal King Season 2"]);
+  assert.equal(ik.length, 1);
+  assert.equal(ik[0].slug, "immortal-king-2");
+});

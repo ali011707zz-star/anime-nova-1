@@ -13,6 +13,7 @@ import { getGridColumnCount } from "@/components/AnimeCard";
 import { AnimeFilterSheet, type AnimeFilterOption } from "@/components/AnimeFilterSheet";
 import { useColors } from "@/hooks/useColors";
 import { getKnownArabicAnimeTitle } from "@/utils/arabicAnimeTitles";
+import { filterReleasedBrowseMedia, formatMediaTitleHierarchy } from "@/utils/donghuaLogic.mjs";
 import type { ThemePalette } from "@/constants/colors";
 
 function useBrowseTheme() {
@@ -28,7 +29,8 @@ function useBrowseTheme() {
 interface AnimeResult {
   id: number;
   idSource?: "mal" | "kitsu" | string;
-  title: { romaji: string; english?: string };
+  countryOfOrigin?: string;
+  title: { romaji: string; english?: string; native?: string };
   title_ar?: string;
   coverImage: { large: string; extraLarge?: string };
   averageScore?: number;
@@ -237,8 +239,42 @@ function AnimeCard({
           </View>
         ) : null}
         {(() => {
-          const enTitle = anime.title?.english || anime.title?.romaji || "";
           const arTitle = anime.title_ar || getKnownArabicAnimeTitle(anime.id, anime.title?.english, anime.title?.romaji);
+          if (anime.countryOfOrigin === "CN") {
+            const h = formatMediaTitleHierarchy({
+              english: anime.title?.english,
+              romaji: anime.title?.romaji,
+              native: anime.title?.native,
+              arabic: arTitle,
+            });
+            return (
+              <View style={g.cardBottom}>
+                <Text
+                  style={[g.cardTitle, { writingDirection: "ltr", textAlign: "left", color: "#fff" }]}
+                  numberOfLines={2}
+                >
+                  {h.primary}
+                </Text>
+                {h.arabic ? (
+                  <Text
+                    numberOfLines={1}
+                    style={[g.cardTitleAr, { color: "rgba(255,255,255,0.88)", fontSize: tvMode ? 11.5 : 9.5, lineHeight: tvMode ? 16 : 13 }]}
+                  >
+                    {h.arabic}
+                  </Text>
+                ) : null}
+                {h.original ? (
+                  <Text
+                    numberOfLines={1}
+                    style={[g.cardTitle, { writingDirection: "ltr", textAlign: "left", color: "rgba(255,255,255,0.65)", fontSize: tvMode ? 10 : 8, lineHeight: tvMode ? 14 : 11 }]}
+                  >
+                    {h.original}
+                  </Text>
+                ) : null}
+              </View>
+            );
+          }
+          const enTitle = anime.title?.english || anime.title?.romaji || "";
           return (
             <View style={g.cardBottom}>
               <Text
@@ -272,8 +308,8 @@ query { Page(page:1,perPage:1) {
 const BROWSE_QUERY = (sort: string, format: string, season: string, year: string, genre: string, status: string, country: "JP" | "CN" = "JP") => `
 query ($page: Int) {
   Page(page: $page, perPage: 30) {
-    media(type:ANIME, countryOfOrigin:"${country}", isAdult:false, genre_not_in:["Hentai"], sort:[${sort || "POPULARITY_DESC"}]${format ? `, format:${format}` : ""}${season ? `, season:${season}` : ""}${year ? `, seasonYear:${year}` : ""}${genre ? `, genre:"${genre}"` : ""}${status ? `, status:${status}` : ""}) {
-      id title { romaji english } coverImage { large extraLarge } averageScore episodes format status startDate { year } genres
+    media(type:ANIME, countryOfOrigin:"${country}", isAdult:false, genre_not_in:["Hentai"], sort:[${sort || "POPULARITY_DESC"}]${format ? `, format:${format}` : ""}${season ? `, season:${season}` : ""}${year ? `, seasonYear:${year}` : ""}${genre ? `, genre:"${genre}"` : ""}${status ? `, status:${status}` : `, status_not_in:[NOT_YET_RELEASED,CANCELLED]`}) {
+      id countryOfOrigin title { romaji english native } coverImage { large extraLarge } averageScore episodes format status startDate { year } genres
     }
   }
 }`;
@@ -281,8 +317,8 @@ query ($page: Int) {
 const SEARCH_QUERY = (sort: string, format: string, season: string, year: string, genre: string, status: string, country: "JP" | "CN" = "JP") => `
 query ($search: String!) {
   Page(page: 1, perPage: 30) {
-    media(search: $search, type: ANIME, countryOfOrigin:"${country}", isAdult: false, genre_not_in:["Hentai","Ecchi"], sort:[SEARCH_MATCH,${sort || "POPULARITY_DESC"}]${format ? `,format:${format}` : ""}${season ? `,season:${season}` : ""}${year ? `,seasonYear:${year}` : ""}${genre ? `,genre:"${genre}"` : ""}${status ? `,status:${status}` : ""}) {
-      id title { romaji english } coverImage { large } averageScore episodes format status startDate { year } genres
+    media(search: $search, type: ANIME, countryOfOrigin:"${country}", isAdult: false, genre_not_in:["Hentai","Ecchi"], sort:[SEARCH_MATCH,${sort || "POPULARITY_DESC"}]${format ? `,format:${format}` : ""}${season ? `,season:${season}` : ""}${year ? `,seasonYear:${year}` : ""}${genre ? `,genre:"${genre}"` : ""}${status ? `,status:${status}` : `,status_not_in:[NOT_YET_RELEASED,CANCELLED]`}) {
+      id countryOfOrigin title { romaji english native } coverImage { large } averageScore episodes format status startDate { year } genres
     }
   }
 }`;
@@ -425,15 +461,19 @@ export default function BrowseScreen() {
       });
       const d = await r.json();
       if (genRef.current !== gen || ctrl.signal.aborted) return;
-      const results: AnimeResult[] = (d.data?.Page?.media || [])
+      const rawResults: AnimeResult[] = (d.data?.Page?.media || [])
         .filter((a: AnimeResult) => !(a.genres || []).some(gx => BLOCKED.has(gx)));
+      const results: AnimeResult[] = filterReleasedBrowseMedia(rawResults, {
+        currentYear: CUR_YEAR,
+        allowUnreleased: Boolean(status),
+      });
       if (reset) setItems(results);
       else setItems(prev => {
         const ids = new Set(prev.map(i => i.id));
         return [...prev, ...results.filter(i => !ids.has(i.id))];
       });
       setPage(p);
-      setHasMore(results.length === 30);
+      setHasMore(rawResults.length === 30);
     } catch (e: any) {
       if (e?.name === "AbortError") return;
     } finally {
@@ -477,8 +517,12 @@ export default function BrowseScreen() {
         if (!r.ok) throw new Error(`search ${r.status}`);
         const d = await r.json();
         if (!ctrl.signal.aborted && requestId === searchRequestRef.current) {
-          setSearchItems((d.data?.Page?.media || [])
-            .filter((a: AnimeResult) => !(a.genres || []).some(gx => BLOCKED.has(gx))));
+          const rawSearch = (d.data?.Page?.media || [])
+            .filter((a: AnimeResult) => !(a.genres || []).some(gx => BLOCKED.has(gx)));
+          setSearchItems(filterReleasedBrowseMedia(rawSearch, {
+            currentYear: CUR_YEAR,
+            allowUnreleased: Boolean(status),
+          }));
         }
       } catch (e: any) {
         if (e?.name !== "AbortError" && !ctrl.signal.aborted && requestId === searchRequestRef.current) setSearchItems([]);
@@ -589,7 +633,7 @@ export default function BrowseScreen() {
         <View style={{ flexDirection: ROW_RTL, gap: 8, marginTop: 8 }}>
           <Pressable
             focusable={tvMode}
-            onPress={() => setBrowseSection("anime")}
+            onPress={() => { if (browseSection !== "anime") { setItems([]); setSearchItems([]); setBrowseSection("anime"); } }}
             style={({ focused }) => [
               {
                 flex: 1,
@@ -619,7 +663,7 @@ export default function BrowseScreen() {
           </Pressable>
           <Pressable
             focusable={tvMode}
-            onPress={() => setBrowseSection("donghua")}
+            onPress={() => { if (browseSection !== "donghua") { setItems([]); setSearchItems([]); setBrowseSection("donghua"); } }}
             style={({ focused }) => [
               {
                 flex: 1,
@@ -740,14 +784,14 @@ export default function BrowseScreen() {
                  !listLoading ? (
                   <View style={g.center}>
                     <Ionicons name="film" size={48} color={colors.textMuted} />
-                    <Text style={g.emptyText}>لا توجد أنميات بهذه الفلاتر</Text>
+                    <Text style={g.emptyText}>{browseSection === "donghua" ? "لا توجد أعمال دونغهوا بهذه الفلاتر" : "لا توجد أنميات بهذه الفلاتر"}</Text>
                   </View>
                 ) : null
               }
               ListHeaderComponent={(
                 <View style={g.resultsHeading}>
                   <Text style={g.resultsHeadingText}>
-                    {search.trim() ? "نتائج البحث" : "قائمة الأنمي"} ({filteredItems.length} عمل)
+                    {search.trim() ? "نتائج البحث" : browseSection === "donghua" ? "قائمة الدونغهوا" : "قائمة الأنمي"} ({filteredItems.length} عمل)
                   </Text>
                 </View>
               )}

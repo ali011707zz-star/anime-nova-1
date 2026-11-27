@@ -4,7 +4,7 @@
  * ترجمة + إعدادات ترجمة كاملة + قفل + تدوير + لقطة شاشة + زر إغلاق
  * سحب شريط + إيماءات + تخطي + سرعة + وضع عرض
  */
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons, MaterialIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { StatusBar } from "expo-status-bar";
@@ -14,13 +14,19 @@ import { VolumeManager } from "../lib/volume-manager";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator, Alert, Animated, AppState, DeviceEventEmitter, Dimensions, Easing, I18nManager, InteractionManager, Linking, Platform,
-  BackHandler, findNodeHandle, PanResponder, ScrollView, StyleSheet, Text, View, useWindowDimensions,
+  BackHandler, findNodeHandle, PanResponder, Pressable as RNPressable, ScrollView, StyleSheet, Text, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system";
-import { getBaseUrl } from "@/utils/api";
 import { convertSubtitleToVtt, normalizeAndSortSubtitleCues } from "@/utils/donghuaLogic.mjs";
+import {
+  getHybridBufferProfile,
+  resolveHybridLoadTimeoutMs,
+  resolveHybridStallTimings,
+  type ProxyFallbackDescriptor,
+} from "@/utils/hybridStreamLogic.mjs";
+import { getBaseUrl } from "@/utils/api";
 import { secureFetch } from "@/utils/secureApi";
 import { isNativeTvRingActive, TvPressable, useTvMetrics } from "@/utils/tv";
 import { useColors } from "@/hooks/useColors";
@@ -30,19 +36,6 @@ import {
   resolveSkipTimes,
   validateSkipInterval,
 } from "@/lib/skipTimes.mjs";
-import {
-  getHybridBufferProfile,
-  resolveHybridLoadTimeoutMs,
-  resolveHybridStallTimings,
-  type ProxyFallbackDescriptor,
-} from "@/utils/hybridStreamLogic.mjs";
-import {
-  SEEK_BURST_DEBOUNCE_MS,
-  SEEK_BURST_RESET_MS,
-  computeBurstSeekTarget,
-  evaluateLockedScreenTap,
-  evaluateSlideUnlock,
-} from "@/utils/playerGestureLogic.mjs";
 
 const { width: W, height: H } = Dimensions.get("window");
 const PLAYER_CONTROL_ICON = "rgba(255,255,255,0.90)";
@@ -150,8 +143,6 @@ function logPlaybackStage(url: string | undefined, stage: string, detail = ""): 
 }
 
 function getPlaybackBufferOptions(_animePlayback: boolean): BufferOptions {
-  /* 32s forward buffer + 1.8s playback resume threshold prevents 1080p micro-stall
-     loops while keeping startup fast. */
   return getHybridBufferProfile();
 }
 
@@ -214,6 +205,8 @@ type Props = {
   onError?: () => void;
   /** Use anime-specific buffering and seek handling; other catalogs stay unchanged. */
   animePlayback?: boolean;
+  /** Overlay opaque backdrop and raise bottom offset slightly when source has burned-in Chinese subs. */
+  hardsubOverlap?: boolean;
 };
 
 /**
@@ -491,6 +484,7 @@ function ExpoRiftPlayer({
   subEnabled = false,
   autoPlayNext = true,
   animePlayback = false,
+  hardsubOverlap = false,
   /* Unknown totals must be fail-closed. A synthetic 999 allowed automatic
      and manual navigation into episodes that do not exist. */
   totalEps = 0,
@@ -505,32 +499,50 @@ function ExpoRiftPlayer({
   const timelineStartEdge: "left" | "right" = timelineNativeRTL ? "right" : "left";
   const timelineEndEdge: "left" | "right" = timelineNativeRTL ? "left" : "right";
   const insets = useSafeAreaInsets();
-  const { width: screenW } = useWindowDimensions();
-  const screenWRef = useRef(screenW);
-  screenWRef.current = screenW;
-  const { tv: tvMode } = useTvMetrics();
+  const { tv: tvMode, width: winWidth, height: winHeight } = useTvMetrics();
+  const winSizeRef = useRef({ width: winWidth || W, height: winHeight || H });
+  winSizeRef.current = { width: winWidth || W, height: winHeight || H };
+  const [showSpeedMenu, setShowSpeedMenu] = useState(false);
+  const [showFitMenu, setShowFitMenu]     = useState(false);
+  const [showSubPanel, setShowSubPanel]   = useState(false);
+  const menuOpenRef = useRef(false);
+  menuOpenRef.current = showSpeedMenu || showFitMenu || showSubPanel;
 
-  /* أثناء فحص المصادر، زر الرجوع في الهاتف يجب أن يعيد المستخدم إلى
-     منتقي السيرفرات داخل نفس شاشة الحلقة، لا إلى صفحة الحلقات. */
+  /* أثناء فحص المصادر، زر الرجوع في الهاتف/التلفاز يغلق أي قائمة مفتوحة أولاً قبل الخروج */
   useEffect(() => {
     if (Platform.OS !== "android") return;
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (showSubPanel) {
+        setShowSubPanel(false);
+        return true;
+      }
+      if (showFitMenu) {
+        suppressProgressAutoFocusUntilRef.current = Date.now() + 450;
+        setShowFitMenu(false);
+        if (tvMode) setTimeout(() => { try { (tvFitBtnRef.current as any)?.focus?.(); } catch {} }, 90);
+        return true;
+      }
+      if (showSpeedMenu) {
+        suppressProgressAutoFocusUntilRef.current = Date.now() + 450;
+        setShowSpeedMenu(false);
+        if (tvMode) setTimeout(() => { try { (tvSpeedBtnRef.current as any)?.focus?.(); } catch {} }, 90);
+        return true;
+      }
       onBack();
       return true;
     });
     return () => subscription.remove();
-  }, [onBack]);
+  }, [onBack, showSubPanel, showFitMenu, showSpeedMenu]);
 
+  /* ─── Source ─── */
   const playableSources = useMemo(() => {
     const seen = new Set<string>();
-    const out: PlayerSource[] = [];
-    for (const rawSource of sources) {
-      const effectiveUrl = rawSource?.url?.trim();
-      if (!isValidPlayerSourceUrl(effectiveUrl) || seen.has(effectiveUrl)) continue;
-      seen.add(effectiveUrl);
-      out.push(rawSource);
-    }
-    return out;
+    return sources.filter(source => {
+      const url = source?.url?.trim();
+      if (!isValidPlayerSourceUrl(url) || seen.has(url)) return false;
+      seen.add(url);
+      return true;
+    });
   }, [sources]);
   const safeInitialIndex = Math.min(
     Math.max(initialSourceIndex, 0),
@@ -539,8 +551,6 @@ function ExpoRiftPlayer({
   const [srcIdx, setSrcIdx]         = useState(safeInitialIndex);
   const srcIdxRef                   = useRef(safeInitialIndex);
   useEffect(() => { srcIdxRef.current = srcIdx; }, [srcIdx]);
-  const rawSourcesRef               = useRef(sources);
-  useEffect(() => { rawSourcesRef.current = sources; }, [sources]);
   const playableSourcesRef          = useRef(playableSources);
   useEffect(() => { playableSourcesRef.current = playableSources; }, [playableSources]);
   const currentSrc                  = playableSources[srcIdx];
@@ -608,8 +618,6 @@ function ExpoRiftPlayer({
   // Keep the normal overlay available on TV; its controls are enlarged below
   // and remain D-pad focusable through TvPressable.
   const [showControls, setShowControls] = useState(true);
-  const showControlsRef = useRef(true);
-  showControlsRef.current = showControls;
   const [showTvRevealHint, setShowTvRevealHint] = useState(false);
   const progressFocusedRef = useRef(false);
   const [isTvProgressFocused, setIsTvProgressFocused] = useState(false);
@@ -620,7 +628,49 @@ function ExpoRiftPlayer({
   const tvProgressLeftBumperRef = useRef<View | null>(null);
   const tvProgressRightBumperRef = useRef<View | null>(null);
   const tvProgressBlurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tvBackBtnRef = useRef<View | null>(null);
+  const tvCcBtnRef = useRef<View | null>(null);
+  const tvSeekBackBtnRef = useRef<View | null>(null);
+  const tvPlayBtnRef = useRef<View | null>(null);
+  const tvSeekFwdBtnRef = useRef<View | null>(null);
+  const tvLockBtnRef = useRef<View | null>(null);
+  const tvMuteBtnRef = useRef<View | null>(null);
+  const tvFitBtnRef = useRef<View | null>(null);
+  const tvSpeedBtnRef = useRef<View | null>(null);
   const [tvProgressHandles, setTvProgressHandles] = useState<{ left?: number; center?: number; right?: number }>({});
+  const [tvNavHandles, setTvNavHandles] = useState<{
+    back?: number;
+    cc?: number;
+    seekBack?: number;
+    play?: number;
+    seekFwd?: number;
+    lock?: number;
+    mute?: number;
+    fit?: number;
+    speed?: number;
+  }>({});
+  const tvFitOptionRefs = useRef<Array<View | null>>([null, null, null]);
+  const tvSpeedOptionRefs = useRef<Array<View | null>>([null, null, null, null, null, null]);
+  const [tvFitHandles, setTvFitHandles] = useState<Array<number | undefined>>([]);
+  const [tvSpeedHandles, setTvSpeedHandles] = useState<Array<number | undefined>>([]);
+  const lastNativeFocusTagRef = useRef<number | null>(null);
+  const suppressProgressAutoFocusUntilRef = useRef(0);
+  const controlsVisibleRef = useRef(true);
+  const isHidingControlsRef = useRef(false);
+  const playIntentRef = useRef(true);
+  const lastPlayToggleAtRef = useRef(0);
+  const btnSeekCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const btnSeekBurstStartRef = useRef<number | null>(null);
+  const rotationAnimTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isRotatingRef = useRef(false);
+  const lockLastTapRef = useRef(0);
+  const UNLOCK_TRACK_W = 256;
+  const UNLOCK_THUMB_SIZE = 46;
+  const UNLOCK_PAD = 5;
+  const MAX_UNLOCK_SLIDE = UNLOCK_TRACK_W - UNLOCK_THUMB_SIZE - UNLOCK_PAD * 2;
+  const unlockSlideX = useRef(new Animated.Value(0)).current;
+  const unlockRevealAnim = useRef(new Animated.Value(0)).current;
+  const isSlidingUnlockRef = useRef(false);
   const [showSpeedSheet, setShowSpeedSheet] = useState(false);
   const [showViewSheet, setShowViewSheet] = useState(false);
   const [showSubSheet, setShowSubSheet]   = useState(false);
@@ -674,7 +724,7 @@ function ExpoRiftPlayer({
   const feedbackTimer                 = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /* ─── Double tap ─── */
-  const [dblTap, setDblTap]           = useState<{ side: "L" | "R"; secs: number; id: number } | null>(null);
+  const [dblTap, setDblTap]           = useState<{ side: "L" | "R"; id: number } | null>(null);
 
   /* ─── Auto-play countdown ─── */
   const [autoCountdown, setAutoCountdown] = useState(0);
@@ -698,9 +748,7 @@ function ExpoRiftPlayer({
   /* ─── New UI state ─── */
   const [isMuted, setIsMuted]             = useState(false);
   const [isPortrait, setIsPortrait]       = useState(false);
-  const [showSpeedMenu, setShowSpeedMenu] = useState(false);
-  const [showFitMenu, setShowFitMenu]     = useState(false);
-  const [showSubPanel, setShowSubPanel]   = useState(false);
+  /* showSpeedMenu / showFitMenu / showSubPanel hoisted above for BackHandler */
   const [subLang, setSubLang]             = useState<"ar" | "en">("ar");
   const userSelectedSubLangRef            = useRef(false);
   const rawSubUrlRef      = useRef<string | null>(null); // original English VTT URL before translation
@@ -767,48 +815,12 @@ function ExpoRiftPlayer({
   const skipOutroDismissed = dismissedSkipRanges.key === skipScopeKey
     && dismissedSkipRanges.outro;
 
-  const SLIDE_UNLOCK_TRACK_W = 248;
-  const SLIDE_UNLOCK_THUMB_W = 46;
-  const SLIDE_UNLOCK_MAX_TRAVEL = SLIDE_UNLOCK_TRACK_W - SLIDE_UNLOCK_THUMB_W - 8;
-
-  /* ─── Animated values (all interpolations memoized once to avoid native-driver leaks on 4Hz ticks) ─── */
+  /* ─── Animated values ─── */
   const entryFadeAnim     = useRef(new Animated.Value(0)).current;
   const entryScaleAnim    = useRef(new Animated.Value(0.985)).current;
   const controlsOpacity   = useRef(new Animated.Value(1)).current;
-  const controlsScale     = useRef(
-    controlsOpacity.interpolate({ inputRange: [0, 1], outputRange: [0.988, 1] }),
-  ).current;
-  const orientationVeilOpacity = useRef(new Animated.Value(0)).current;
-  const orientationVeilPendingRef = useRef(false);
-  const unlockBarOpacity  = useRef(new Animated.Value(0)).current;
-  const slideUnlockX      = useRef(new Animated.Value(0)).current;
-  const slideUnlockPromptOpacity = useRef(
-    slideUnlockX.interpolate({
-      inputRange: [-SLIDE_UNLOCK_MAX_TRAVEL * 0.55, 0, SLIDE_UNLOCK_MAX_TRAVEL * 0.55],
-      outputRange: [0, 1, 0],
-      extrapolate: "clamp",
-    }),
-  ).current;
   const dblTapLeft        = useRef(new Animated.Value(0)).current;
-  const dblTapLeftOpacity = useRef(
-    dblTapLeft.interpolate({ inputRange: [0, 0.18, 0.72, 1], outputRange: [0, 0.96, 0.85, 0] }),
-  ).current;
-  const dblTapLeftScale   = useRef(
-    dblTapLeft.interpolate({ inputRange: [0, 0.25, 1], outputRange: [0.84, 1.04, 1.0] }),
-  ).current;
   const dblTapRight       = useRef(new Animated.Value(0)).current;
-  const dblTapRightOpacity = useRef(
-    dblTapRight.interpolate({ inputRange: [0, 0.18, 0.72, 1], outputRange: [0, 0.96, 0.85, 0] }),
-  ).current;
-  const dblTapRightScale  = useRef(
-    dblTapRight.interpolate({ inputRange: [0, 0.25, 1], outputRange: [0.84, 1.04, 1.0] }),
-  ).current;
-  const lastLockedTapRef  = useRef(0);
-  const seekBurstTargetRef = useRef<number | null>(null);
-  const seekBurstDeltaRef  = useRef(0);
-  const seekBurstCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const seekBurstResetTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const orientationSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const raf = requestAnimationFrame(() => {
@@ -1254,7 +1266,13 @@ function ExpoRiftPlayer({
     const isStale = () => switchGenerationRef.current !== myGen;
     const sub1 = player.addListener("playingChange", (e: any) => {
       if (!aliveRef.current || isStale()) return;
-      setIsPlaying(e.isPlaying ?? false);
+      const reported = Boolean(e.isPlaying);
+      if (Date.now() - lastPlayToggleAtRef.current < 420 && reported !== playIntentRef.current) {
+        return;
+      }
+      isPlayingRef.current = reported;
+      playIntentRef.current = reported;
+      setIsPlaying(reported);
       setBuffering(false);
       if (e.isPlaying && !playbackTraceStateRef.current.playingLogged) {
         playbackTraceStateRef.current.playingLogged = true;
@@ -1276,8 +1294,7 @@ function ExpoRiftPlayer({
         const traceState = playbackTraceStateRef.current;
         const isSeekLoading = !!seekRecoveryRef.current || !!pendingSeekRef.current;
         if (traceState.playingLogged && !isSeekLoading && !traceState.rebufferStartedAt) {
-          const nowMs = Date.now();
-          traceState.rebufferStartedAt = nowMs;
+          traceState.rebufferStartedAt = Date.now();
           traceState.rebufferCount += 1;
           logPlaybackStage(
             traceState.url,
@@ -1295,12 +1312,15 @@ function ExpoRiftPlayer({
             `elapsed_ms=${Date.now() - playbackTraceStateRef.current.assignedAt}`,
           );
         }
+        /* Anime CDNs can deliver a first segment slowly. Allow 25s for startup,
+           and 40s for a rebuffer; the 25s + 12s stall recovery remains the
+           earlier guard for a player that claims to be playing but makes no progress. */
         const loadTimeoutMs = resolveHybridLoadTimeoutMs({
           hasStartedPlayback: traceState.playingLogged,
           animePlayback,
         });
         /* Repeated native loading notifications must not keep extending the
-           deadline indefinitely when animePlayback is active. */
+           Anime deadline indefinitely. Other player modes keep their prior behavior. */
         if (!animePlayback || !loadTimeoutRef.current) {
           if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
           loadTimeoutRef.current = setTimeout(() => {
@@ -1614,8 +1634,8 @@ function ExpoRiftPlayer({
 
   /* ─── Progress polling ─── */
   useEffect(() => {
-    // Some signed CDN segments take 17+ seconds to arrive on final proxy.
-    // On direct playback with a dormant proxyFallback, switch silently much sooner.
+    // Some signed CDN segments take 17+ seconds to arrive. Do not switch away
+    // from a healthy source while that request is still within its normal range.
     const id = setInterval(() => {
       const { stallTimeoutMs: STALL_TIMEOUT_MS, stallRecoveryMs: STALL_RECOVERY_TIMEOUT_MS } =
         resolveHybridStallTimings();
@@ -1753,9 +1773,9 @@ function ExpoRiftPlayer({
                 if (!animePlayback || animePlaybackIntentRef.current) player.play();
               } catch {}
             } else {
+              console.warn(`[RiftPlayer] 🔴 stall persists after nudge — switching source`);
               stallRef.current = { lastPos: -1, lastAt: 0 };
               stallNudgeTriedRef.current = false;
-              console.warn(`[RiftPlayer] 🔴 stall persists after nudge — switching source`);
               setError(true);
               setBuffering(false);
             }
@@ -2030,61 +2050,50 @@ function ExpoRiftPlayer({
     setIsFlipped(f => !f);
   }, []);
 
-  /* ─── Portrait / Landscape toggle (lightweight veil synced to real layout dimension update) ─── */
-  const finishOrientationVeil = useCallback(() => {
-    orientationVeilPendingRef.current = false;
-    if (orientationSettleTimerRef.current) {
-      clearTimeout(orientationSettleTimerRef.current);
-      orientationSettleTimerRef.current = null;
-    }
-    orientationVeilOpacity.stopAnimation();
-    Animated.timing(orientationVeilOpacity, {
-      toValue: 0,
-      duration: 185,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-  }, [orientationVeilOpacity]);
-
-  useEffect(() => {
-    if (!orientationVeilPendingRef.current) return;
-    const raf = requestAnimationFrame(() => {
-      finishOrientationVeil();
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [screenW, finishOrientationVeil]);
-
+  /* ─── Portrait / Landscape toggle (سلس بدون قفز الواجهة قبل دوران الشاشة الفعلي) ─── */
   const togglePortrait = useCallback(() => {
+    setShowFitMenu(false);
+    setShowSpeedMenu(false);
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    if (rotationAnimTimerRef.current) clearTimeout(rotationAnimTimerRef.current);
+    isRotatingRef.current = true;
     const nextPortrait = !isPortrait;
-    if (orientationSettleTimerRef.current) {
-      clearTimeout(orientationSettleTimerRef.current);
-      orientationSettleTimerRef.current = null;
-    }
-    orientationVeilPendingRef.current = true;
-    orientationVeilOpacity.stopAnimation();
-    Animated.timing(orientationVeilOpacity, {
-      toValue: 0.52,
-      duration: 75,
+    const triggerLock = () => {
+      if (onToggleOrientation) {
+        onToggleOrientation();
+      } else {
+        requestOrientation(
+          nextPortrait
+            ? ScreenOrientation.OrientationLock.PORTRAIT_UP
+            : ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT,
+        );
+      }
+    };
+    controlsOpacity.stopAnimation();
+    Animated.timing(controlsOpacity, {
+      toValue: 0.08,
+      duration: 85,
       easing: Easing.out(Easing.quad),
       useNativeDriver: true,
     }).start(() => {
-      requestAnimationFrame(() => {
-        setIsPortrait(nextPortrait);
-        if (onToggleOrientation) {
-          onToggleOrientation();
-        } else {
-          requestOrientation(
-            nextPortrait
-              ? ScreenOrientation.OrientationLock.PORTRAIT_UP
-              : ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT,
-          );
-        }
-        orientationSettleTimerRef.current = setTimeout(() => {
-          finishOrientationVeil();
-        }, 240);
-      });
+      triggerLock();
     });
-  }, [isPortrait, onToggleOrientation, orientationVeilOpacity, requestOrientation, finishOrientationVeil]);
+    rotationAnimTimerRef.current = setTimeout(() => {
+      rotationAnimTimerRef.current = null;
+      if (!aliveRef.current) return;
+      isRotatingRef.current = false;
+      measureSeekBar();
+      if (controlsVisibleRef.current) {
+        controlsOpacity.stopAnimation();
+        Animated.timing(controlsOpacity, {
+          toValue: 1,
+          duration: 180,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }).start();
+      }
+    }, 360);
+  }, [isPortrait, onToggleOrientation, requestOrientation, controlsOpacity]);
 
   /* ─── Screenshot ─── */
   const rootViewRef = useRef<View>(null);
@@ -2142,7 +2151,35 @@ function ExpoRiftPlayer({
     }
   }, [showControls]);
 
-  /* ─── Orientation change listener ─── */
+  /* ─── Orientation change listener + live geometry sync ─── */
+  useEffect(() => {
+    if (tvMode || !winWidth || !winHeight) return;
+    const geomPortrait = winHeight > winWidth;
+    setIsPortrait(prev => (prev === geomPortrait ? prev : geomPortrait));
+    const remeasureTimer = setTimeout(() => {
+      if (!aliveRef.current) return;
+      measureSeekBar();
+      if (isRotatingRef.current) {
+        isRotatingRef.current = false;
+        if (rotationAnimTimerRef.current) {
+          clearTimeout(rotationAnimTimerRef.current);
+          rotationAnimTimerRef.current = null;
+        }
+        if (controlsVisibleRef.current) {
+          controlsOpacity.stopAnimation();
+          Animated.timing(controlsOpacity, {
+            toValue: 1,
+            duration: 190,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true,
+          }).start();
+          schedHideRef.current?.();
+        }
+      }
+    }, 60);
+    return () => clearTimeout(remeasureTimer);
+  }, [winWidth, winHeight, tvMode, controlsOpacity]);
+
   useEffect(() => {
     const detect = async () => {
       try {
@@ -2153,18 +2190,22 @@ function ExpoRiftPlayer({
         );
       } catch {}
     };
-    // Watch routes enter with a centrally requested landscape lock. Avoid a
-    // stale pre-lock orientation read changing the player layout on mount.
     if (!onToggleOrientation) detect();
     const sub = ScreenOrientation.addOrientationChangeListener((e) => {
       const o = e.orientationInfo.orientation;
-      setIsPortrait(
+      const nextP =
         o === ScreenOrientation.Orientation.PORTRAIT_UP ||
-        o === ScreenOrientation.Orientation.PORTRAIT_DOWN
-      );
-      /* A rotation invalidates absolute coordinates used by the seekbar. */
+        o === ScreenOrientation.Orientation.PORTRAIT_DOWN;
+      setIsPortrait(prev => (prev === nextP ? prev : nextP));
+      setTimeout(() => { if (aliveRef.current) measureSeekBar(); }, 120);
     });
-    return () => sub.remove();
+    return () => {
+      sub.remove();
+      if (rotationAnimTimerRef.current) {
+        clearTimeout(rotationAnimTimerRef.current);
+        rotationAnimTimerRef.current = null;
+      }
+    };
   }, [onToggleOrientation]);
 
   /* ─── Mute sync + initial maximum real volume ─── */
@@ -2403,31 +2444,39 @@ function ExpoRiftPlayer({
     }, 2200);
   }, []);
 
-  const hideControlsSmooth = useCallback((durationMs = 175) => {
+  const fadeOut = useCallback((durationMs = 175) => {
     if (hideTimer.current) {
       clearTimeout(hideTimer.current);
       hideTimer.current = null;
     }
-    showControlsRef.current = false;
-    setShowControls(false);
+    isHidingControlsRef.current = true;
     controlsOpacity.stopAnimation();
     Animated.timing(controlsOpacity, {
       toValue: 0,
       duration: durationMs,
-      easing: Easing.out(Easing.cubic),
+      easing: Easing.inOut(Easing.cubic),
       useNativeDriver: true,
     }).start(({ finished }) => {
-      if (!finished) return;
+      if (!finished || !isHidingControlsRef.current) return;
+      isHidingControlsRef.current = false;
+      controlsVisibleRef.current = false;
+      setShowControls(false);
+      setShowFitMenu(false);
+      setShowSpeedMenu(false);
       if (tvMode) showTvRevealHintBriefly();
     });
   }, [controlsOpacity, showTvRevealHintBriefly, tvMode]);
 
   const schedHide = useCallback(() => {
     if (hideTimer.current) clearTimeout(hideTimer.current);
+    if (menuOpenRef.current) return;
     hideTimer.current = setTimeout(() => {
-      hideControlsSmooth(260);
-    }, tvMode ? 6500 : 4500);
-  }, [hideControlsSmooth, tvMode]);
+      if (menuOpenRef.current) return;
+      fadeOut(280);
+    }, tvMode ? 6500 : 5000);
+  }, [fadeOut, tvMode]);
+  const schedHideRef = useRef<(() => void) | null>(null);
+  schedHideRef.current = schedHide;
 
   const fadeIn = useCallback(() => {
     if (hideTimer.current) clearTimeout(hideTimer.current);
@@ -2435,18 +2484,24 @@ function ExpoRiftPlayer({
       clearTimeout(revealHintTimer.current);
       revealHintTimer.current = null;
     }
-    setShowTvRevealHint(false);
-    showControlsRef.current = true;
+    if (showTvRevealHint) setShowTvRevealHint(false);
+    // إذا كانت الأدوات ظاهرة بالفعل وليست قيد الإخفاء، نعيد ضبط المؤقت فقط بدون إعادة تشغيل الأنميشن
+    if (controlsVisibleRef.current && !isHidingControlsRef.current) {
+      schedHide();
+      return;
+    }
+    isHidingControlsRef.current = false;
+    controlsVisibleRef.current = true;
     setShowControls(true);
     controlsOpacity.stopAnimation();
     Animated.timing(controlsOpacity, {
       toValue: 1,
-      duration: 160,
+      duration: 165,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();
     schedHide();
-  }, [controlsOpacity, schedHide]);
+  }, [controlsOpacity, schedHide, showTvRevealHint]);
   fadeInRef.current = fadeIn;
 
   /* أي حركة D-pad تعني أن المستخدم ما زال يتنقل بين أدوات المشغل.
@@ -2502,15 +2557,26 @@ function ExpoRiftPlayer({
 
   /* ─── Actions ─── */
   const togglePlay = useCallback(() => {
-    fadeIn();
-    const shouldPlay = animePlayback ? animePlaybackIntentRef.current : !!player.playing;
-    const nextShouldPlay = !shouldPlay;
+    if (controlsVisibleRef.current && !isHidingControlsRef.current) {
+      schedHide();
+    } else {
+      fadeIn();
+    }
+    const currentShouldPlay =
+      Date.now() - lastPlayToggleAtRef.current < 420
+        ? playIntentRef.current
+        : (animePlayback ? animePlaybackIntentRef.current : isPlayingRef.current);
+    const nextShouldPlay = !currentShouldPlay;
+    lastPlayToggleAtRef.current = Date.now();
+    playIntentRef.current = nextShouldPlay;
+    isPlayingRef.current = nextShouldPlay;
     if (animePlayback) animePlaybackIntentRef.current = nextShouldPlay;
+    setIsPlaying(nextShouldPlay);
     try {
       if (nextShouldPlay) player.play();
       else player.pause();
     } catch {}
-  }, [player, fadeIn, animePlayback]);
+  }, [player, fadeIn, schedHide, animePlayback]);
 
   const applySeek = useCallback((secs: number) => {
     const maxDuration = durationRef.current;
@@ -2538,9 +2604,9 @@ function ExpoRiftPlayer({
       const seekPlayer = player as typeof player & {
         seekTo?: (seconds: number, toleranceBefore?: number, toleranceAfter?: number) => void;
       };
-      if (typeof seekPlayer.seekTo === "function") {
+      if (animePlayback && typeof seekPlayer.seekTo === "function") {
         try {
-          seekPlayer.seekTo(target, 0.35, 0.35);
+          seekPlayer.seekTo(target, 0.5, 0.5);
         } catch {
           player.currentTime = target;
         }
@@ -2556,23 +2622,85 @@ function ExpoRiftPlayer({
     stallRef.current = { lastPos: target, lastAt: Date.now() + 2500 };
   }, [animePlayback, beginSeekRecovery, cancelSeekRecovery, player]);
   const seek = useCallback((secs: number) => {
-    fadeIn();
+    if (controlsVisibleRef.current && !isHidingControlsRef.current) {
+      schedHide();
+    } else {
+      fadeIn();
+    }
     applySeek(secs);
-  }, [applySeek, fadeIn]);
+  }, [applySeek, fadeIn, schedHide]);
   seekRef.current = seek;
+
+  /* تقديم/ترجيع مجمّع للأزرار (±10ث) — التكرار السريع يجمع الخطوات بسلاسة 60fps ويرسل seek واحد نظيف لـ ExoPlayer */
+  const stepSeekSmooth = useCallback((deltaSec: number) => {
+    const rawDur = durationRef.current || Number((player as any)?.duration) || 0;
+    if (!Number.isFinite(rawDur) || rawDur <= 0) return;
+    if (durationRef.current <= 0) durationRef.current = rawDur;
+    const now = Date.now();
+    const base = pendingSeekRef.current?.target ?? positionRef.current;
+    if (btnSeekBurstStartRef.current === null) {
+      btnSeekBurstStartRef.current = base;
+    }
+    const target = Math.min(Math.max(base + deltaSec, 0), rawDur);
+    const totalDelta = target - btnSeekBurstStartRef.current;
+
+    if (controlsVisibleRef.current && !isHidingControlsRef.current) {
+      schedHide();
+    } else {
+      fadeIn();
+    }
+    pendingSeekRef.current = { target, expiresAt: now + 8000 };
+    positionRef.current = target;
+    setPosition(target);
+    setPostSeekPct(target / rawDur);
+    setFeedback({ type: "seek", value: target, delta: totalDelta });
+    if (feedbackTimer.current) clearTimeout(feedbackTimer.current);
+    feedbackTimer.current = setTimeout(() => {
+      setFeedback(null);
+      btnSeekBurstStartRef.current = null;
+    }, 800);
+
+    if (btnSeekCommitTimerRef.current) clearTimeout(btnSeekCommitTimerRef.current);
+    btnSeekCommitTimerRef.current = setTimeout(() => {
+      btnSeekCommitTimerRef.current = null;
+      applySeek(target);
+    }, 165);
+  }, [applySeek, fadeIn, player, schedHide]);
 
   const tvHoldCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncTvProgressHandles = useCallback(() => {
     if (!tvMode) return;
     try {
       const center = findNodeHandle(tvProgressRef.current) ?? undefined;
+      const back = findNodeHandle(tvBackBtnRef.current) ?? undefined;
+      const cc = findNodeHandle(tvCcBtnRef.current) ?? undefined;
+      const seekBack = findNodeHandle(tvSeekBackBtnRef.current) ?? undefined;
+      const play = findNodeHandle(tvPlayBtnRef.current) ?? undefined;
+      const seekFwd = findNodeHandle(tvSeekFwdBtnRef.current) ?? undefined;
+      const lock = findNodeHandle(tvLockBtnRef.current) ?? undefined;
+      const mute = findNodeHandle(tvMuteBtnRef.current) ?? undefined;
+      const fit = findNodeHandle(tvFitBtnRef.current) ?? undefined;
+      const speed = findNodeHandle(tvSpeedBtnRef.current) ?? undefined;
       setTvProgressHandles(prev =>
         prev.center === center ? prev : { left: center, center, right: center }
       );
+      setTvNavHandles(prev => (
+        prev.back === back &&
+        prev.cc === cc &&
+        prev.seekBack === seekBack &&
+        prev.play === play &&
+        prev.seekFwd === seekFwd &&
+        prev.lock === lock &&
+        prev.mute === mute &&
+        prev.fit === fit &&
+        prev.speed === speed
+      ) ? prev : { back, cc, seekBack, play, seekFwd, lock, mute, fit, speed });
       if (center) {
         (tvProgressRef.current as any)?.setNativeProps?.({
           nextFocusLeft: center,
           nextFocusRight: center,
+          ...(play ? { nextFocusUp: play } : {}),
+          ...(lock ? { nextFocusDown: lock } : {}),
         });
       }
     } catch {}
@@ -2607,9 +2735,94 @@ function ExpoRiftPlayer({
     }
   }, [showControls]);
 
+  const syncTvMenuHandles = useCallback(() => {
+    if (!tvMode) return;
+    try {
+      const nextFit = [0, 1, 2].map(i => findNodeHandle(tvFitOptionRefs.current[i]) ?? undefined);
+      nextFit.forEach((h, i) => {
+        if (!h) return;
+        const up = i > 0 ? (nextFit[i - 1] ?? h) : h;
+        const down = i < nextFit.length - 1 ? (nextFit[i + 1] ?? h) : h;
+        (tvFitOptionRefs.current[i] as any)?.setNativeProps?.({
+          nextFocusUp: up,
+          nextFocusDown: down,
+          nextFocusLeft: h,
+          nextFocusRight: h,
+        });
+      });
+      setTvFitHandles(prev => (
+        prev.length === nextFit.length && prev.every((v, i) => v === nextFit[i]) ? prev : nextFit
+      ));
+      const nextSpeed = SPEEDS.map((_, i) => findNodeHandle(tvSpeedOptionRefs.current[i]) ?? undefined);
+      nextSpeed.forEach((h, i) => {
+        if (!h) return;
+        const up = i > 0 ? (nextSpeed[i - 1] ?? h) : h;
+        const down = i < nextSpeed.length - 1 ? (nextSpeed[i + 1] ?? h) : h;
+        (tvSpeedOptionRefs.current[i] as any)?.setNativeProps?.({
+          nextFocusUp: up,
+          nextFocusDown: down,
+          nextFocusLeft: h,
+          nextFocusRight: h,
+        });
+      });
+      setTvSpeedHandles(prev => (
+        prev.length === nextSpeed.length && prev.every((v, i) => v === nextSpeed[i]) ? prev : nextSpeed
+      ));
+    } catch {}
+  }, [tvMode]);
+
+  useEffect(() => {
+    if (!tvMode || (!showFitMenu && !showSpeedMenu)) return;
+    const t1 = setTimeout(syncTvMenuHandles, 25);
+    const t2 = setTimeout(syncTvMenuHandles, 110);
+    const tFocus = setTimeout(() => {
+      try {
+        if (showFitMenu) {
+          const fitIdx = contentFit === "contain" ? 0 : contentFit === "cover" ? 1 : 2;
+          (tvFitOptionRefs.current[fitIdx] as any)?.focus?.();
+        } else if (showSpeedMenu) {
+          const spIdx = Math.max(0, SPEEDS.indexOf(speed));
+          (tvSpeedOptionRefs.current[spIdx] as any)?.focus?.();
+        }
+      } catch {}
+    }, 55);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(tFocus);
+    };
+  }, [tvMode, showFitMenu, showSpeedMenu, syncTvMenuHandles]);
+
+  useEffect(() => {
+    if (!tvMode || !showControls || showFitMenu || showSpeedMenu || showSubPanel) return;
+    const t1 = setTimeout(syncTvProgressHandles, 45);
+    const t2 = setTimeout(syncTvProgressHandles, 180);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [tvMode, showControls, showFitMenu, showSpeedMenu, showSubPanel, syncTvProgressHandles]);
+
+  /* مزامنة التركيز الفعلي من نظام Android TV مباشرةً (يضمن معرفة توقف المؤشر على شريط التقدم حتى لو لم يُطلق Pressable.onFocus) */
+  useEffect(() => {
+    if (Platform.OS !== "android" || !tvMode) return;
+    const sub = DeviceEventEmitter.addListener("novaTvFocusChanged", (evt: any) => {
+      const nextTag = typeof evt?.viewTag === "number" ? evt.viewTag : null;
+      lastNativeFocusTagRef.current = nextTag;
+      const progressTag = findNodeHandle(tvProgressRef.current);
+      if (progressTag && nextTag === progressTag) {
+        markTvProgressFocused();
+      } else if (progressTag && nextTag !== progressTag && progressFocusedRef.current) {
+        markTvProgressBlurred();
+      }
+    });
+    return () => sub.remove();
+  }, [tvMode, markTvProgressFocused, markTvProgressBlurred]);
+
   const performTvStepSeek = useCallback((direction: 1 | -1, repeatCount = 0) => {
-    const maxDuration = durationRef.current;
+    const maxDuration = durationRef.current || duration || Number((player as any)?.duration) || 0;
     if (!Number.isFinite(maxDuration) || maxDuration <= 0) return;
+    if (durationRef.current <= 0) durationRef.current = maxDuration;
     const now = Date.now();
     const isRapid = repeatCount > 0 || (now - lastTvSeekExecAtRef.current < 450);
     lastTvSeekExecAtRef.current = now;
@@ -2619,12 +2832,16 @@ function ExpoRiftPlayer({
       tvSeekBurstStartRef.current = currentBase;
     }
 
-    const baseStep = seekDurationRef.current || 10;
+    const baseStep = Math.max(5, Number(seekDurationRef.current) || 10);
     const step = repeatCount > 8 ? baseStep * 3 : repeatCount > 3 ? baseStep * 2 : baseStep;
     const target = Math.min(Math.max(currentBase + direction * step, 0), maxDuration);
     const totalDelta = target - (tvSeekBurstStartRef.current ?? currentBase);
 
-    fadeIn();
+    if (controlsVisibleRef.current && !isHidingControlsRef.current) {
+      schedHide();
+    } else {
+      fadeIn();
+    }
     pendingSeekRef.current = { target, expiresAt: now + 8000 };
     positionRef.current = target;
     setPosition(target);
@@ -2637,20 +2854,17 @@ function ExpoRiftPlayer({
     }, 950);
 
     if (tvHoldCommitTimerRef.current) clearTimeout(tvHoldCommitTimerRef.current);
-    if (isRapid) {
-      tvHoldCommitTimerRef.current = setTimeout(() => {
-        tvHoldCommitTimerRef.current = null;
-        applySeek(target);
-      }, 170);
-    } else {
+    tvHoldCommitTimerRef.current = setTimeout(() => {
+      tvHoldCommitTimerRef.current = null;
       applySeek(target);
-    }
-  }, [applySeek, fadeIn]);
+    }, isRapid ? 180 : 120);
+  }, [applySeek, fadeIn, player, schedHide]);
 
   useEffect(() => {
     return () => {
       if (tvHoldCommitTimerRef.current) clearTimeout(tvHoldCommitTimerRef.current);
       if (tvProgressBlurTimerRef.current) clearTimeout(tvProgressBlurTimerRef.current);
+      if (btnSeekCommitTimerRef.current) clearTimeout(btnSeekCommitTimerRef.current);
     };
   }, []);
 
@@ -2706,19 +2920,19 @@ function ExpoRiftPlayer({
       const isRight = keyCode === 22 || keyCode === 90 || eventType === "right" || eventType === "fastforward";
       const isLeft = keyCode === 21 || keyCode === 89 || eventType === "left" || eventType === "rewind";
       if (isRight || isLeft) {
-        // Seek ONLY when controls are visible and cursor is stopped on the progress bar (شريط التقدم).
-        // Pressing Left/Right while controls are hidden must NOT change playback time.
-        if (showControls && progressFocusedRef.current) {
+        // Seek ONLY when controls are visible, no menu is open, and cursor is on the progress bar (شريط التقدم).
+        const progressTag = findNodeHandle(tvProgressRef.current);
+        const onProgressBar =
+          progressFocusedRef.current ||
+          (progressTag != null && lastNativeFocusTagRef.current === progressTag);
+        if (showControls && !menuOpenRef.current && onProgressBar) {
           const now = Date.now();
           if (now - lastTvSeekAtRef.current < 70) return;
           lastTvSeekAtRef.current = now;
           markTvProgressFocused();
           performTvStepSeek(isRight ? 1 : -1, repeatCount);
-          setTimeout(() => {
-            try { (tvProgressRef.current as any)?.focus?.(); } catch {}
-          }, 0);
-        } else if (showControls) {
-          fadeIn();
+        } else if (showControls && !menuOpenRef.current) {
+          schedHide();
         }
         return;
       }
@@ -2737,7 +2951,7 @@ function ExpoRiftPlayer({
     return () => {
       sub1.remove();
     };
-  }, [fadeIn, isLocked, markTvProgressFocused, performTvStepSeek, showControls, togglePlay]);
+  }, [fadeIn, isLocked, markTvProgressFocused, performTvStepSeek, schedHide, showControls, togglePlay]);
 
   /* seekSilent: نفس seek لكن بدون إظهار controls (للـ double-tap والـ gestures) */
   const seekSilentRef = useRef<(s: number) => void>(() => {});
@@ -2881,11 +3095,6 @@ function ExpoRiftPlayer({
         player.replace(toExpoVideoSource(nextSrc) as any);
       } catch (e) {
         console.warn("[RiftPlayer] player.replace() رمى استثناء:", e);
-        if (replaceSafetyTimerRef.current) {
-          clearTimeout(replaceSafetyTimerRef.current);
-          replaceSafetyTimerRef.current = null;
-        }
-        replaceInFlightRef.current = false;
         setError(true);
         setBuffering(false);
         if (replaceSafetyTimerRef.current) {
@@ -2947,76 +3156,15 @@ function ExpoRiftPlayer({
     }
   }, [whisperStatus, currentSrc?.url, anilistId, episode]);
 
-  /* ─── Smooth ±10s Burst Seek (accumulates rapid taps cleanly into 1 native seek) ─── */
-  const stepSeekBurst = useCallback((direction: 1 | -1, opts?: { silent?: boolean; side?: "L" | "R" }) => {
-    const maxDuration = durationRef.current;
-    if (!Number.isFinite(maxDuration) || maxDuration <= 0) return;
-
-    const { target, delta } = computeBurstSeekTarget({
-      currentPosition: positionRef.current,
-      pendingTarget: seekBurstTargetRef.current,
-      currentDelta: seekBurstDeltaRef.current,
-      direction,
-      stepSeconds: seekDurationRef.current || 10,
-      duration: maxDuration,
-    });
-    seekBurstTargetRef.current = target;
-    seekBurstDeltaRef.current = delta;
-
-    // Optimistic 0ms UI update on slider + timestamp
-    positionRef.current = target;
-    setPosition(target);
-    setPostSeekPct(target / maxDuration);
-
-    const side: "L" | "R" = opts?.side ?? (direction > 0 ? "R" : "L");
-    const anim = side === "L" ? dblTapLeft : dblTapRight;
-    setDblTap({ side, secs: Math.abs(delta), id: Date.now() });
-    anim.stopAnimation();
-    anim.setValue(0);
-    Animated.timing(anim, {
-      toValue: 1,
-      duration: 520,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start(({ finished }) => {
-      if (finished) setDblTap(null);
-    });
-
-    if (!opts?.silent && showControlsRef.current) {
-      schedHide();
-    }
-
-    if (seekBurstCommitTimerRef.current) clearTimeout(seekBurstCommitTimerRef.current);
-    seekBurstCommitTimerRef.current = setTimeout(() => {
-      seekBurstCommitTimerRef.current = null;
-      const finalTarget = seekBurstTargetRef.current;
-      if (finalTarget !== null) {
-        seekSilentRef.current(finalTarget);
-      }
-    }, SEEK_BURST_DEBOUNCE_MS);
-
-    if (seekBurstResetTimerRef.current) clearTimeout(seekBurstResetTimerRef.current);
-    seekBurstResetTimerRef.current = setTimeout(() => {
-      seekBurstResetTimerRef.current = null;
-      seekBurstTargetRef.current = null;
-      seekBurstDeltaRef.current = 0;
-    }, SEEK_BURST_RESET_MS);
-  }, [dblTapLeft, dblTapRight, schedHide]);
-
   /* ─── Double tap ripple ─── */
   const triggerDblTap = useCallback((side: "L" | "R") => {
-    stepSeekBurst(side === "R" ? 1 : -1, { silent: true, side });
-  }, [stepSeekBurst]);
-
-  // Clean up burst/orientation/unlock timers on unmount
-  useEffect(() => {
-    return () => {
-      if (seekBurstCommitTimerRef.current) clearTimeout(seekBurstCommitTimerRef.current);
-      if (seekBurstResetTimerRef.current) clearTimeout(seekBurstResetTimerRef.current);
-      if (orientationSettleTimerRef.current) clearTimeout(orientationSettleTimerRef.current);
-      if (unlockTimer.current) clearTimeout(unlockTimer.current);
-    };
-  }, []);
+    const anim = side === "L" ? dblTapLeft : dblTapRight;
+    setDblTap({ side, id: Date.now() });
+    anim.setValue(0);
+    Animated.timing(anim, { toValue: 1, duration: 600, useNativeDriver: true }).start(() => setDblTap(null));
+    /* seekSilent: لا نُظهر controls عند الـ double-tap */
+    seekSilent(side === "R" ? positionRef.current + seekDurationRef.current : positionRef.current - seekDurationRef.current);
+  }, [seekSilent, dblTapLeft, dblTapRight]);
 
   /* ─── Show feedback overlay ─── */
   const showFeedback = useCallback((fb: typeof feedback) => {
@@ -3034,7 +3182,8 @@ function ExpoRiftPlayer({
         return (ady > 8 && ady > adx * 1.3) || (adx > 10 && adx > ady * 1.3);
       },
       onPanResponderGrant: (evt, gs) => {
-        const side: "L" | "R" = evt.nativeEvent.pageX < screenWRef.current / 2 ? "L" : "R";
+        const curW = winSizeRef.current.width || W;
+        const side: "L" | "R" = evt.nativeEvent.pageX < curW / 2 ? "L" : "R";
         gestureSide.current = side;
         gestureTypeRef.current = null;
         gestureStartY.current = gs.y0;
@@ -3045,6 +3194,8 @@ function ExpoRiftPlayer({
       onPanResponderMove: (_, gs) => {
         const side = gestureSide.current;
         if (!side) return;
+        const curW = winSizeRef.current.width || W;
+        const curH = winSizeRef.current.height || H;
         if (!gestureTypeRef.current) {
           const adx = Math.abs(gs.dx), ady = Math.abs(gs.dy);
           if (adx < 8 && ady < 8) return;
@@ -3052,12 +3203,12 @@ function ExpoRiftPlayer({
             : side === "R" ? "vol" : "bri";
         }
         if (gestureTypeRef.current === "seek") {
-          const seekDelta = (gs.dx / W) * 120;
+          const seekDelta = (gs.dx / curW) * 120;
           const newPos = Math.max(0, Math.min(durationRef.current, gestureStartPosRef.current + seekDelta));
           setFeedback({ type: "seek", value: newPos, delta: seekDelta });
         } else if (gestureTypeRef.current === "vol") {
           /* السحب للأعلى يرفع الصوت — dy سالب عند الرفع → delta موجب */
-          const delta = -gs.dy / (H * 0.40);
+          const delta = -gs.dy / (curH * 0.40);
           const newVol = Math.max(0, Math.min(1, gestureStartVal.current + delta));
           volumeRef.current = newVol;
           setVolume(newVol);
@@ -3068,7 +3219,7 @@ function ExpoRiftPlayer({
           try { player.volume = 1; } catch {}
         } else {
           /* السحب للأعلى يرفع السطوع — dy سالب عند الرفع → delta موجب */
-          const delta = -gs.dy / (H * 0.40);
+          const delta = -gs.dy / (curH * 0.40);
           const newBri = Math.max(0.05, Math.min(1, gestureStartVal.current + delta));
           brightnessRef.current = newBri;
           setBrightness(newBri);
@@ -3078,8 +3229,9 @@ function ExpoRiftPlayer({
         }
       },
       onPanResponderRelease: (_, gs) => {
+        const curW = winSizeRef.current.width || W;
         if (gestureTypeRef.current === "seek") {
-          const seekDelta = (gs.dx / W) * 120;
+          const seekDelta = (gs.dx / curW) * 120;
           const newPos = Math.max(0, Math.min(durationRef.current, gestureStartPosRef.current + seekDelta));
           /* seekSilent: لا نُظهر controls عند إنهاء سحب الـ seek */
           seekSilentRef.current(newPos);
@@ -3231,8 +3383,16 @@ function ExpoRiftPlayer({
   }, [tvMode, inIntroRange, inOutroRange, isLocked, error, isEnded]);
 
   useEffect(() => {
+    if (showControls && !showSpeedMenu && !showFitMenu && !showSubPanel && !isLocked && !error && !isEnded) {
+      schedHide();
+    } else if (showSpeedMenu || showFitMenu || showSubPanel) {
+      if (hideTimer.current) clearTimeout(hideTimer.current);
+    }
+  }, [showControls, showSpeedMenu, showFitMenu, showSubPanel, isLocked, error, isEnded, schedHide]);
+
+  useEffect(() => {
     if (!tvMode || !showControls || isLocked || error || isEnded || inIntroRange || inOutroRange) return;
-    if (showSubSheet || showSpeedSheet || showViewSheet) return;
+    if (showSubPanel || showSpeedMenu || showFitMenu || showSubSheet || showSpeedSheet || showViewSheet) return;
     const focusProgress = () => {
       try {
         syncTvProgressHandles();
@@ -3245,128 +3405,141 @@ function ExpoRiftPlayer({
       clearTimeout(t1);
       clearTimeout(t2);
     };
-  }, [tvMode, showControls, isLocked, error, isEnded, inIntroRange, inOutroRange, showSubSheet, showSpeedSheet, showViewSheet, syncTvProgressHandles]);
+  }, [tvMode, showControls, isLocked, error, isEnded, inIntroRange, inOutroRange, showSubPanel, showSpeedMenu, showFitMenu, showSubSheet, showSpeedSheet, showViewSheet, syncTvProgressHandles]);
 
   const hideUnlockBarSmooth = useCallback(() => {
     if (unlockTimer.current) {
       clearTimeout(unlockTimer.current);
       unlockTimer.current = null;
     }
-    unlockBarOpacity.stopAnimation();
-    Animated.timing(unlockBarOpacity, {
+    Animated.timing(unlockRevealAnim, {
       toValue: 0,
-      duration: 200,
-      easing: Easing.out(Easing.cubic),
+      duration: 180,
+      easing: Easing.in(Easing.cubic),
       useNativeDriver: true,
     }).start(({ finished }) => {
-      if (finished) {
+      if (finished && !isSlidingUnlockRef.current) {
         setShowUnlock(false);
-        slideUnlockX.setValue(0);
+        unlockSlideX.setValue(0);
       }
     });
-  }, [slideUnlockX, unlockBarOpacity]);
+  }, [unlockRevealAnim, unlockSlideX]);
 
-  const scheduleHideUnlockBar = useCallback(() => {
+  const scheduleUnlockAutoHide = useCallback(() => {
     if (unlockTimer.current) clearTimeout(unlockTimer.current);
     unlockTimer.current = setTimeout(() => {
-      hideUnlockBarSmooth();
-    }, 4200);
+      if (!isSlidingUnlockRef.current) hideUnlockBarSmooth();
+    }, 4500);
   }, [hideUnlockBarSmooth]);
 
-  const handleLockScreen = useCallback(() => {
-    if (hideTimer.current) {
-      clearTimeout(hideTimer.current);
-      hideTimer.current = null;
-    }
+  const scheduleUnlockAutoHideRef = useRef(scheduleUnlockAutoHide);
+  scheduleUnlockAutoHideRef.current = scheduleUnlockAutoHide;
+
+  const completeUnlockRef = useRef<() => void>(() => {});
+  completeUnlockRef.current = () => {
     if (unlockTimer.current) {
       clearTimeout(unlockTimer.current);
       unlockTimer.current = null;
     }
-    lastLockedTapRef.current = 0;
-    showControlsRef.current = false;
-    setShowControls(false);
+    isSlidingUnlockRef.current = false;
+    lockLastTapRef.current = 0;
+    setIsLocked(false);
     setShowUnlock(false);
-    unlockBarOpacity.setValue(0);
-    slideUnlockX.setValue(0);
-    setIsLocked(true);
-  }, [slideUnlockX, unlockBarOpacity]);
+    unlockSlideX.setValue(0);
+    unlockRevealAnim.setValue(0);
+    fadeInRef.current?.();
+  };
 
-  const slideUnlockPan = useRef(
+  const unlockSlidePan = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, gs) => Math.abs(gs.dx) > 4,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderTerminationRequest: () => false,
       onPanResponderGrant: () => {
+        isSlidingUnlockRef.current = true;
         if (unlockTimer.current) {
           clearTimeout(unlockTimer.current);
           unlockTimer.current = null;
         }
-        slideUnlockX.stopAnimation();
+        unlockSlideX.stopAnimation();
       },
       onPanResponderMove: (_, gs) => {
-        const rtl = Platform.OS !== "web" && I18nManager.isRTL;
-        const res = evaluateSlideUnlock(gs.dx, SLIDE_UNLOCK_MAX_TRAVEL, rtl);
-        slideUnlockX.setValue(res.offsetPx);
+        const clamped = Math.max(0, Math.min(MAX_UNLOCK_SLIDE, gs.dx));
+        unlockSlideX.setValue(clamped);
       },
       onPanResponderRelease: (_, gs) => {
-        const rtl = Platform.OS !== "web" && I18nManager.isRTL;
-        const res = evaluateSlideUnlock(gs.dx, SLIDE_UNLOCK_MAX_TRAVEL, rtl);
-        if (res.unlocked) {
-          Animated.timing(slideUnlockX, {
-            toValue: rtl ? -SLIDE_UNLOCK_MAX_TRAVEL : SLIDE_UNLOCK_MAX_TRAVEL,
-            duration: 110,
+        const clamped = Math.max(0, Math.min(MAX_UNLOCK_SLIDE, gs.dx));
+        if (clamped >= MAX_UNLOCK_SLIDE * 0.68 || (gs.vx > 0.85 && clamped >= MAX_UNLOCK_SLIDE * 0.40)) {
+          Animated.timing(unlockSlideX, {
+            toValue: MAX_UNLOCK_SLIDE,
+            duration: 105,
+            easing: Easing.out(Easing.cubic),
             useNativeDriver: true,
           }).start(() => {
-            setIsLocked(false);
-            setShowUnlock(false);
-            slideUnlockX.setValue(0);
-            unlockBarOpacity.setValue(0);
-            lastLockedTapRef.current = 0;
-            fadeInRef.current?.();
+            completeUnlockRef.current();
           });
         } else {
-          Animated.spring(slideUnlockX, {
+          isSlidingUnlockRef.current = false;
+          Animated.spring(unlockSlideX, {
             toValue: 0,
             tension: 120,
-            friction: 11,
+            friction: 13,
             useNativeDriver: true,
           }).start();
-          scheduleHideUnlockBar();
+          scheduleUnlockAutoHideRef.current();
         }
       },
       onPanResponderTerminate: () => {
-        Animated.spring(slideUnlockX, {
+        isSlidingUnlockRef.current = false;
+        Animated.spring(unlockSlideX, {
           toValue: 0,
           tension: 120,
-          friction: 11,
+          friction: 13,
           useNativeDriver: true,
         }).start();
-        scheduleHideUnlockBar();
+        scheduleUnlockAutoHideRef.current();
       },
-    })
+    }),
   ).current;
 
   /* ─── Tap handler with double-tap detection ─── */
   const handleTap = useCallback((pageX: number) => {
     const now = Date.now();
     if (isLocked) {
-      const check = evaluateLockedScreenTap(lastLockedTapRef.current, now);
-      lastLockedTapRef.current = check.nextLastTapAt;
-      if (check.shouldReveal) {
-        slideUnlockX.setValue(0);
+      if (showUnlock) {
+        hideUnlockBarSmooth();
+        lockLastTapRef.current = 0;
+        return;
+      }
+      // إظهار شريط السحب لفتح القفل عند لمس الشاشة مرتين فقط
+      if (lockLastTapRef.current > 0 && now - lockLastTapRef.current < 420) {
+        lockLastTapRef.current = 0;
+        unlockSlideX.setValue(0);
+        unlockRevealAnim.setValue(0);
         setShowUnlock(true);
-        unlockBarOpacity.stopAnimation();
-        Animated.timing(unlockBarOpacity, {
+        Animated.timing(unlockRevealAnim, {
           toValue: 1,
-          duration: 180,
+          duration: 210,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: true,
         }).start();
-        scheduleHideUnlockBar();
+        scheduleUnlockAutoHide();
+      } else {
+        lockLastTapRef.current = now;
       }
       return;
     }
-    const side: "L" | "R" = pageX < screenWRef.current / 2 ? "L" : "R";
-    if (lastTap.current && now - lastTap.current.time < 280 && lastTap.current.side === side) {
+
+    if (showFitMenu || showSpeedMenu) {
+      setShowFitMenu(false);
+      setShowSpeedMenu(false);
+      schedHide();
+      return;
+    }
+
+    const curW = winSizeRef.current.width || W;
+    const side: "L" | "R" = pageX < curW / 2 ? "L" : "R";
+    if (lastTap.current && now - lastTap.current.time < 260 && lastTap.current.side === side) {
       if (tapTimer.current) { clearTimeout(tapTimer.current); tapTimer.current = null; }
       lastTap.current = null;
       triggerDblTap(side);
@@ -3376,21 +3549,22 @@ function ExpoRiftPlayer({
       tapTimer.current = setTimeout(() => {
         tapTimer.current = null;
         lastTap.current = null;
-        if (showControlsRef.current) {
-          hideControlsSmooth(180);
+        if (controlsVisibleRef.current && !isHidingControlsRef.current) {
+          fadeOut(160);
         } else {
           fadeIn();
         }
-      }, 155);
+      }, 145);
     }
-  }, [isLocked, triggerDblTap, fadeIn, hideControlsSmooth, scheduleHideUnlockBar, slideUnlockX, unlockBarOpacity]);
+  }, [isLocked, showUnlock, showFitMenu, showSpeedMenu, hideUnlockBarSmooth, scheduleUnlockAutoHide, unlockSlideX, unlockRevealAnim, triggerDblTap, fadeIn, fadeOut, schedHide]);
 
   /* ─── Long press: 2× speed ─── */
   const handleLongPress = useCallback(() => {
+    if (isLocked) return;
     prevSpeedRef.current = speed;
     setLongPressSpeed(true);
     try { player.playbackRate = 2; } catch {}
-  }, [speed, player]);
+  }, [isLocked, speed, player]);
 
   const handleLongPressRelease = useCallback(() => {
     if (!longPressSpeed) return;
@@ -3430,9 +3604,16 @@ function ExpoRiftPlayer({
   function subPositionStyle() {
     const pos = subSettings.position;
     const translateY = subSettings.verticalOffset || 0;
-    if (pos === "top")    return { top: showControls ? 70 : 20, bottom: undefined, transform: [{ translateY }] };
+    if (pos === "top")    return { top: showControls ? (tvMode ? 114 : 92) : 20, bottom: undefined, transform: [{ translateY }] };
     if (pos === "center") return { top: "45%" as any, bottom: undefined, transform: [{ translateY }] };
-    return { bottom: showControls ? 100 : 24, top: undefined, transform: [{ translateY }] };
+    const extraClearance = hardsubOverlap ? (showControls ? 12 : 14) : 0;
+    return {
+      bottom: (showControls
+        ? (tvMode ? 132 : isPortrait ? 104 : 92)
+        : (tvMode ? 36 : isPortrait ? 28 : 20)) + extraClearance,
+      top: undefined,
+      transform: [{ translateY }],
+    };
   }
 
   /* لا نرجع null عند غياب currentSrc — يظهر شاشة رمادية بيضاء.
@@ -3454,10 +3635,7 @@ function ExpoRiftPlayer({
         shouldRasterizeIOS={true}
         style={[
           StyleSheet.absoluteFill,
-          {
-            opacity: entryFadeAnim,
-            transform: [{ scale: entryScaleAnim }],
-          },
+          { opacity: entryFadeAnim, transform: [{ scale: entryScaleAnim }] },
         ]}
       >
       {/* ── Video ── */}
@@ -3510,9 +3688,13 @@ function ExpoRiftPlayer({
                   color: subSettings.color,
                   fontFamily: fontName,
                   fontWeight: isSys ? (subSettings.extraBold ? "900" : subSettings.bold ? "700" : "400") : undefined,
-                  backgroundColor: !subtitleShadowOnly && subSettings.bgOpacity > 0
-                    ? `rgba(0,0,0,${subSettings.bgOpacity})`
-                    : "transparent",
+                  backgroundColor: (() => {
+                    const effectiveBg = hardsubOverlap
+                      ? Math.max(subSettings.bgOpacity, 0.90)
+                      : (!subtitleShadowOnly ? subSettings.bgOpacity : 0);
+                    return effectiveBg > 0 ? `rgba(0,0,0,${effectiveBg})` : "transparent";
+                  })(),
+                  ...(hardsubOverlap ? { paddingHorizontal: 12, paddingVertical: 3, borderRadius: 6, overflow: "hidden" as const } : {}),
                   textShadowColor: shadowColor,
                   textShadowRadius: shadowRadius,
                   textShadowOffset: { width: 0, height: 1.5 },
@@ -3576,35 +3758,36 @@ function ExpoRiftPlayer({
         </View>
       )}
 
-      {/* ── Double tap / ±10s burst seek ripple — left ── */}
+      {/* ── Double tap ripple — left ── */}
       {dblTap?.side === "L" && (
         <Animated.View
           pointerEvents="none"
           style={[s.rippleLeft, {
-            opacity: dblTapLeftOpacity,
-            transform: [{ scale: dblTapLeftScale }],
+            opacity: dblTapLeft.interpolate({ inputRange: [0, 0.3, 1], outputRange: [0, 0.9, 0] }),
+            transform: [{ scale: dblTapLeft.interpolate({ inputRange: [0, 1], outputRange: [0.5, 2.2] }) }],
           }]}
         >
           <View style={s.rippleCircleL} />
           <View style={s.rippleLabel}>
             <Ionicons name="play-back" size={26} color="rgba(253,186,116,0.95)" />
-            <Text style={[s.rippleSecs, { color: "rgba(253,186,116,0.95)" }]}>-{dblTap.secs}ث</Text>
+            <Text style={[s.rippleSecs, { color: "rgba(253,186,116,0.95)" }]}>-10ث</Text>
           </View>
         </Animated.View>
       )}
-      {/* ── Double tap / ±10s burst seek ripple — right ── */}
+
+      {/* ── Double tap ripple — right ── */}
       {dblTap?.side === "R" && (
         <Animated.View
           pointerEvents="none"
           style={[s.rippleRight, {
-            opacity: dblTapRightOpacity,
-            transform: [{ scale: dblTapRightScale }],
+            opacity: dblTapRight.interpolate({ inputRange: [0, 0.3, 1], outputRange: [0, 0.9, 0] }),
+            transform: [{ scale: dblTapRight.interpolate({ inputRange: [0, 1], outputRange: [0.5, 2.2] }) }],
           }]}
         >
           <View style={s.rippleCircleR} />
           <View style={s.rippleLabel}>
             <Ionicons name="play-forward" size={26} color="rgba(196,181,253,0.95)" />
-            <Text style={[s.rippleSecs, { color: "rgba(196,181,253,0.95)" }]}>+{dblTap.secs}ث</Text>
+            <Text style={[s.rippleSecs, { color: "rgba(196,181,253,0.95)" }]}>+10ث</Text>
           </View>
         </Animated.View>
       )}
@@ -3669,62 +3852,106 @@ function ExpoRiftPlayer({
       )}
 
 
-      {/* ── Subtle orientation transition veil (never touches VideoView hardware texture) ── */}
-      <Animated.View
-        pointerEvents="none"
-        style={[
-          StyleSheet.absoluteFill,
-          { backgroundColor: "#000", opacity: orientationVeilOpacity, zIndex: 48 },
-        ]}
-      />
-
-      {/* ── Lock screen: padlock hidden until double-tap; unlock via horizontal slide ── */}
+      {/* ── قفل الشاشة: بدون أي أيقونة قفل ظاهرة — عند اللمس مرتين يظهر شريط السحب السلس لفتح القفل ── */}
       {isLocked && tvMode && (
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="إلغاء قفل المشغل"
           hasTVPreferredFocus
-          onPress={() => { setIsLocked(false); setShowUnlock(false); }}
+          onPress={() => {
+            if (unlockTimer.current) clearTimeout(unlockTimer.current);
+            setIsLocked(false);
+            setShowUnlock(false);
+            fadeIn();
+          }}
           style={s.tvUnlockTarget}
         >
-          <Ionicons name="lock-open-outline" size={28} color="#fbbf24" />
-          <Text style={s.tvUnlockText}>اضغط OK لإلغاء القفل</Text>
+          <View style={s.unlockIconCircle}>
+            <Ionicons name="lock-open-outline" size={26} color="#c4b5fd" />
+          </View>
+          <Text style={s.tvUnlockText}>الشاشة مقفلة • اضغط OK لفتح القفل</Text>
         </Pressable>
       )}
-      {isLocked && !tvMode && showUnlock && (
-        <Animated.View
-          style={[s.slideUnlockWrap, { opacity: unlockBarOpacity }]}
-          pointerEvents="box-none"
-        >
-          <View style={s.slideUnlockTrack}>
-            <Animated.View
-              pointerEvents="none"
-              style={[
-                s.slideUnlockPromptRow,
-                {
-                  opacity: slideUnlockPromptOpacity,
-                },
-              ]}
+
+      {isLocked && showUnlock && !tvMode && (() => {
+        const nativeRTL = Platform.OS !== "web" && I18nManager.isRTL;
+        const slideTrackDir: "row" | "row-reverse" = nativeRTL ? "row-reverse" : "row";
+        const slideStartEdge: "left" | "right" = nativeRTL ? "right" : "left";
+        const slideEndEdge: "left" | "right" = nativeRTL ? "left" : "right";
+        const hintOpacity = unlockSlideX.interpolate({
+          inputRange: [0, MAX_UNLOCK_SLIDE * 0.55],
+          outputRange: [1, 0],
+          extrapolate: "clamp",
+        });
+        const fillOpacity = unlockSlideX.interpolate({
+          inputRange: [0, MAX_UNLOCK_SLIDE],
+          outputRange: [0.06, 0.34],
+          extrapolate: "clamp",
+        });
+        const cardTranslateY = unlockRevealAnim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [18, 0],
+        });
+        return (
+          <Animated.View
+            style={[
+              s.unlockFloatWrap,
+              {
+                bottom: Math.max(insets.bottom + (isPortrait ? 38 : 24), 28),
+                opacity: unlockRevealAnim,
+                transform: [{ translateY: cardTranslateY }],
+              },
+            ]}
+            pointerEvents="box-none"
+          >
+            <View
+              onStartShouldSetResponder={() => true}
+              style={[s.unlockSliderTrack, { width: UNLOCK_TRACK_W, height: 56 }]}
             >
-              <Text style={s.slideUnlockText}>اسحب لفك القفل</Text>
-              <View style={s.slideUnlockChevrons}>
-                <Ionicons name={timelineNativeRTL ? "chevron-back" : "chevron-forward"} size={14} color="rgba(251,191,36,0.45)" />
-                <Ionicons name={timelineNativeRTL ? "chevron-back" : "chevron-forward"} size={14} color="rgba(251,191,36,0.75)" />
-                <Ionicons name={timelineNativeRTL ? "chevron-back" : "chevron-forward"} size={14} color="rgba(251,191,36,1)" />
-              </View>
-            </Animated.View>
-            <Animated.View
-              {...slideUnlockPan.panHandlers}
-              style={[
-                s.slideUnlockThumb,
-                { transform: [{ translateX: slideUnlockX }] },
-              ]}
-            >
-              <Ionicons name="lock-open-outline" size={20} color="#09090B" />
-            </Animated.View>
-          </View>
-        </Animated.View>
-      )}
+              <Animated.View
+                pointerEvents="none"
+                style={[
+                  StyleSheet.absoluteFill,
+                  { backgroundColor: "#8B5CF6", opacity: fillOpacity, borderRadius: 28 },
+                ]}
+              />
+              <Animated.View
+                style={[
+                  s.unlockSliderHintWrap,
+                  {
+                    [slideStartEdge]: UNLOCK_THUMB_SIZE + UNLOCK_PAD + 8,
+                    [slideEndEdge]: 14,
+                    flexDirection: slideTrackDir,
+                    opacity: hintOpacity,
+                  },
+                ]}
+                pointerEvents="none"
+              >
+                <Text style={s.unlockSliderHintText}>اسحب لفتح القفل</Text>
+                <Ionicons name="chevron-forward" size={14} color="rgba(221,214,254,0.82)" />
+                <Ionicons name="chevron-forward" size={14} color="rgba(221,214,254,0.45)" style={{ marginHorizontal: -6 }} />
+              </Animated.View>
+              <Animated.View
+                {...unlockSlidePan.panHandlers}
+                style={[
+                  s.unlockSliderThumb,
+                  {
+                    position: "absolute",
+                    top: UNLOCK_PAD,
+                    [slideStartEdge]: UNLOCK_PAD,
+                    width: UNLOCK_THUMB_SIZE,
+                    height: UNLOCK_THUMB_SIZE,
+                    borderRadius: UNLOCK_THUMB_SIZE / 2,
+                    transform: [{ translateX: unlockSlideX }],
+                  },
+                ]}
+              >
+                <Ionicons name="lock-open-outline" size={21} color="#fff" />
+              </Animated.View>
+            </View>
+          </Animated.View>
+        );
+      })()}
 
       {/* ── End of episode card ── */}
       {isEnded && !error && (
@@ -3796,14 +4023,14 @@ function ExpoRiftPlayer({
           style={[StyleSheet.absoluteFill, { zIndex: isLocked ? 15 : 5 }]}
           {...(isLocked ? {} : panResponder.panHandlers)}
         >
-          <Pressable
+          <RNPressable
             style={s.halfLeft}
             onPress={(e) => handleTap(e.nativeEvent.pageX)}
             onLongPress={handleLongPress}
             onPressOut={handleLongPressRelease}
             delayLongPress={500}
           />
-          <Pressable
+          <RNPressable
             style={s.halfRight}
             onPress={(e) => handleTap(e.nativeEvent.pageX)}
             onLongPress={handleLongPress}
@@ -3818,383 +4045,517 @@ function ExpoRiftPlayer({
       ════════════════════════════════════════ */}
 
 
-      {!error && !isEnded && !isLocked && (
+      {showControls && !error && !isEnded && !isLocked && (
         <Animated.View
-          style={[
-            StyleSheet.absoluteFill,
-            {
-              opacity: controlsOpacity,
-              transform: [{ scale: controlsScale }],
-              zIndex: 10,
-              flexDirection: "column",
-            },
-          ]}
-          pointerEvents={showControls ? "box-none" : "none"}
+          style={[StyleSheet.absoluteFill, { opacity: controlsOpacity, zIndex: 10, flexDirection: "column" }]}
+          pointerEvents="box-none"
         >
-          {/* ════ TOP BAR ════ */}
+          {/* ════ TOP BAR (Physical Left: Back + Title + Episode & EpisodeTitle; Physical Right: Screenshot + CC + Rotate) ════ */}
           {(() => {
-            // في RTL الأصلي (هاتف عربي): flexDirection:"row" يعرض من اليمين لليسار تلقائياً
-            // الأول في DOM → يظهر على اليمين، الأخير → على اليسار
-            // نحل الترتيب فقط (لا نغير flexDirection)
             const nativeRTL = Platform.OS !== "web" && I18nManager.isRTL;
-            const localizedEpTitle = (() => {
-              if (!episodeTitle) return null;
-              const epMatch = episodeTitle.match(/^(?:Episode|Ep\.?)\s*(\d+)$/i);
-              if (epMatch) return `الحلقة ${epMatch[1]}`;
-              return episodeTitle;
-            })();
-            const infoBlock = (
-              <View style={[s.topInfoWrap, tvMode && s.tvTopInfoWrap, nativeRTL && !tvMode && { alignItems: "flex-end" }]}>
-                {title ? (
-                  <Text style={[s.topInfoTitle, tvMode && s.tvTopInfoTitle, { color: colors.playerText }]} numberOfLines={1}>{title}</Text>
-                ) : null}
-                <View style={[s.topInfoRow, nativeRTL && { flexDirection: "row-reverse" }]}>
-                  {episode != null && (
-                      <View style={[s.topEpBadge, tvMode && s.tvTopEpBadge]}>
-                        <Text style={[s.topEpText, tvMode && s.tvTopEpText]}>الحلقة {episode}</Text>
-                    </View>
-                  )}
-                  {currentSrc?.quality ? (
-                      <View style={[s.topQualityBadge, tvMode && s.tvTopQualityBadge]}>
-                        <Text style={[s.topQualityText, tvMode && s.tvTopQualityText]}>{currentSrc.quality}</Text>
-                    </View>
-                  ) : null}
-                </View>
-                {localizedEpTitle ? (
-                    <Text style={[s.topEpTitle, tvMode && s.tvTopEpTitle, { color: colors.playerSecondaryText }]} numberOfLines={1}>{localizedEpTitle}</Text>
-                ) : null}
-                {autoSubSource ? (
-                  <View style={[s.autoSubBadge, nativeRTL && { alignSelf: "flex-end" }]}>
-                    <Text style={s.autoSubBadgeText}>✦ ترجمة {autoSubSource === "jimaku" ? "Jimaku" : autoSubSource === "animetosho" ? "Animetosho" : "تلقائية"}</Text>
-                  </View>
-                ) : null}
-              </View>
-            );
-            // في RTL: زر الإغلاق أول (يظهر أقصى اليمين) ← الصحيح للعربية
-            // في LTR: زر الإغلاق آخر (يظهر أقصى اليمين) ← الصحيح للـ web
+            const physicalRowDir: "row" | "row-reverse" = nativeRTL ? "row-reverse" : "row";
+            const fitIconName: "expand-outline" | "scan-outline" | "resize-outline" =
+              contentFit === "cover"
+                ? "scan-outline"
+                : contentFit === "fill"
+                  ? "resize-outline"
+                  : "expand-outline";
+            const epLineText =
+              episode != null
+                ? `الحلقة : ${episode}${episodeTitle ? `  ·  ${episodeTitle}` : ""}`
+                : (episodeTitle || "");
+
+            const tvBgFocusable = tvMode ? !(showFitMenu || showSpeedMenu || showSubPanel) : undefined;
+            const allowProgressPreferred =
+              tvMode &&
+              !inIntroRange &&
+              !inOutroRange &&
+              !showSubPanel &&
+              !showSpeedMenu &&
+              !showFitMenu &&
+              Date.now() > suppressProgressAutoFocusUntilRef.current;
             const ccBtn = subtitlesDisabled ? null : (
               <Pressable
-                onPress={() => setShowSubPanel(true)}
-                style={[s.topIconBtn, s.topCCBtn, tvMode && s.tvCCBtn, subOn && s.topCCBtnActive]}
+                ref={tvCcBtnRef}
+                focusable={tvBgFocusable}
+                onLayout={tvMode ? syncTvProgressHandles : undefined}
+                onPress={() => {
+                  setShowFitMenu(false);
+                  setShowSpeedMenu(false);
+                  setShowSubPanel(true);
+                }}
+                nextFocusLeft={tvMode ? tvNavHandles.back : undefined}
+                nextFocusDown={tvMode ? (tvNavHandles.seekFwd ?? tvNavHandles.play) : undefined}
+                style={[s.topIconBtn, tvMode && s.tvCCBtn, subOn && s.topCCBtnActive]}
                 hitSlop={10}
                 accessibilityRole="button"
                 accessibilityLabel="إعدادات الترجمة"
               >
-                <Ionicons
-                  name="logo-closed-captioning"
-                  size={tvMode ? 26 : 18}
-                  color={subOn ? PLAYER_ACTIVE_ICON : "rgba(255,255,255,0.75)"}
+                <MaterialCommunityIcons
+                  name={subOn ? "closed-caption" : "closed-caption-outline"}
+                  size={tvMode ? 28 : 26}
+                  color={subOn ? PLAYER_ACTIVE_ICON : "rgba(255,255,255,0.94)"}
                 />
               </Pressable>
             );
-            const btnsBlock = nativeRTL ? (
-              <View style={[s.topRightRow, tvMode && s.tvTopRightRow]}>
-                <Pressable onPress={handleBack} style={[s.topCloseBtn, tvMode && s.tvTopCloseBtn]} hitSlop={10}>
-                  <Ionicons name="close" size={21} color="rgba(239,68,68,0.90)" />
-                </Pressable>
-                {!tvMode && (
-                  <Pressable onPress={togglePortrait} style={[s.topRotateBtn, isPortrait && s.topRotateBtnActive]} hitSlop={10}>
-                    <Ionicons
-                      name={isPortrait ? "phone-landscape-outline" : "phone-portrait-outline"}
-                      size={17}
-                      color={isPortrait ? PLAYER_ACTIVE_ICON : "rgba(255,255,255,0.85)"}
-                    />
-                  </Pressable>
-                )}
-                {ccBtn}
-                {!tvMode && (
-                  <Pressable onPress={takeScreenshot} style={s.topIconBtn} hitSlop={10}>
-                    <Ionicons name="camera-outline" size={18} color="rgba(255,255,255,0.85)" />
-                  </Pressable>
-                )}
-              </View>
-            ) : (
-              <View style={[s.topRightRow, tvMode && s.tvTopRightRow]}>
-                {!tvMode && (
-                  <Pressable onPress={takeScreenshot} style={s.topIconBtn} hitSlop={10}>
-                    <Ionicons name="camera-outline" size={18} color="rgba(255,255,255,0.85)" />
-                  </Pressable>
-                )}
-                {ccBtn}
-                {!tvMode && (
-                  <Pressable onPress={togglePortrait} style={[s.topRotateBtn, isPortrait && s.topRotateBtnActive]} hitSlop={10}>
-                    <Ionicons
-                      name={isPortrait ? "phone-landscape-outline" : "phone-portrait-outline"}
-                      size={17}
-                      color={isPortrait ? PLAYER_ACTIVE_ICON : "rgba(255,255,255,0.85)"}
-                    />
-                  </Pressable>
-                )}
-                <Pressable onPress={handleBack} style={[s.topCloseBtn, tvMode && s.tvTopCloseBtn]} hitSlop={10}>
-                  <Ionicons name="close" size={21} color="rgba(239,68,68,0.90)" />
-                </Pressable>
-              </View>
-            );
+
             return (
-              <LinearGradient
-                colors={colors.playerTopGradient}
-                style={[s.topBar, tvMode && s.tvTopBar, { paddingTop: Platform.OS === "web" ? 14 : Math.max(insets.top + 16, 24) }]}
-              >
-                {/* RTL: مجموعة الأزرار أولاً (تظهر يميناً)، معلومات ثانياً (تظهر يساراً) */}
-                {nativeRTL ? <>{btnsBlock}{infoBlock}</> : <>{infoBlock}{btnsBlock}</>}
-              </LinearGradient>
+              <>
+                <LinearGradient
+                  colors={colors.playerTopGradient}
+                  style={[
+                    s.topBar,
+                    tvMode && s.tvTopBar,
+                    {
+                      flexDirection: physicalRowDir,
+                      alignItems: "flex-start",
+                      justifyContent: "space-between",
+                      paddingTop: Platform.OS === "web"
+                        ? 12
+                        : Math.max(insets.top + (isPortrait ? 10 : 6), tvMode ? 22 : 12),
+                    },
+                  ]}
+                >
+                  {/* أعلى أقصى اليسار الفعلي: زر الرجوع وتحته اسم الأنمي + رقم الحلقة وعنوانها */}
+                  <View
+                    style={[
+                      s.topLeftCol,
+                      isPortrait && s.topLeftColPortrait,
+                      tvMode && s.tvTopLeftCol,
+                      { alignItems: nativeRTL ? "flex-end" : "flex-start" },
+                    ]}
+                  >
+                    <Pressable
+                      ref={tvBackBtnRef}
+                      focusable={tvBgFocusable}
+                      onLayout={tvMode ? syncTvProgressHandles : undefined}
+                      onPress={handleBack}
+                      nextFocusRight={tvMode ? tvNavHandles.cc : undefined}
+                      nextFocusDown={tvMode ? (tvNavHandles.seekBack ?? tvNavHandles.play) : undefined}
+                      style={[s.topBackBtn, tvMode && s.tvTopCloseBtn]}
+                      hitSlop={12}
+                      accessibilityRole="button"
+                      accessibilityLabel="رجوع"
+                    >
+                      <Ionicons name="arrow-back" size={tvMode ? 26 : 24} color="#fff" />
+                    </Pressable>
+                    {(title || epLineText) && (
+                      <View
+                        style={[
+                          s.topLeftMetaWrap,
+                          tvMode && s.tvTopLeftMetaWrap,
+                          { alignItems: nativeRTL ? "flex-end" : "flex-start" },
+                        ]}
+                      >
+                        {title ? (
+                          <Text
+                            style={[s.topInfoTitle, tvMode && s.tvTopInfoTitle, { color: "#fff", textAlign: "left" }]}
+                            numberOfLines={1}
+                          >
+                            {title}
+                          </Text>
+                        ) : null}
+                        {epLineText ? (
+                          <Text
+                            style={[s.topEpisodeSub, tvMode && s.tvTopEpisodeSub, { textAlign: "left" }]}
+                            numberOfLines={isPortrait ? 2 : 1}
+                          >
+                            {epLineText}
+                          </Text>
+                        ) : null}
+                      </View>
+                    )}
+                  </View>
+
+                  {/* أعلى أقصى اليمين الفعلي: لقطة الشاشة + إعدادات الترجمة + قلب الشاشة */}
+                  <View
+                    style={[
+                      s.topRightRow,
+                      tvMode && s.tvTopRightActions,
+                      { flexDirection: physicalRowDir },
+                    ]}
+                  >
+                    {!tvMode && (
+                      <Pressable
+                        onPress={takeScreenshot}
+                        style={s.topIconBtn}
+                        hitSlop={10}
+                        accessibilityRole="button"
+                        accessibilityLabel="لقطة شاشة"
+                      >
+                        <Ionicons name="camera-outline" size={22} color="rgba(255,255,255,0.94)" />
+                      </Pressable>
+                    )}
+                    {ccBtn}
+                    {!tvMode && (
+                      <Pressable
+                        onPress={togglePortrait}
+                        style={[s.topIconBtn, isPortrait && s.topIconBtnActive]}
+                        hitSlop={10}
+                        accessibilityRole="button"
+                        accessibilityLabel="تدوير الشاشة"
+                      >
+                        <Ionicons
+                          name={isPortrait ? "phone-landscape-outline" : "phone-portrait-outline"}
+                          size={22}
+                          color={isPortrait ? PLAYER_ACTIVE_ICON : "rgba(255,255,255,0.94)"}
+                        />
+                      </Pressable>
+                    )}
+                  </View>
+                </LinearGradient>
+
+                {/* ════ CENTER (مرفوع قليلاً للأعلى وموحّد في العمودي والأفقي + التلفاز) ════ */}
+                <View
+                  style={[
+                    s.centerOverlay,
+                    isPortrait && s.centerOverlayPortrait,
+                    tvMode && s.tvCenterOverlay,
+                  ]}
+                  pointerEvents="box-none"
+                >
+                  <View
+                    style={[
+                      s.centerRowUnified,
+                      isPortrait && s.centerRowPortrait,
+                      tvMode && s.tvCenterRowUnified,
+                      { flexDirection: physicalRowDir },
+                    ]}
+                  >
+                    <Pressable
+                      ref={tvSeekBackBtnRef}
+                      focusable={tvBgFocusable}
+                      onLayout={tvMode ? syncTvProgressHandles : undefined}
+                      onPress={() => stepSeekSmooth(-10)}
+                      nextFocusUp={tvMode ? tvNavHandles.back : undefined}
+                      nextFocusRight={tvMode ? tvNavHandles.play : undefined}
+                      nextFocusDown={tvMode ? tvProgressHandles.center : undefined}
+                      style={[s.centerSeekBtn, tvMode && s.tvCenterSeekBtn]}
+                      hitSlop={14}
+                      accessibilityRole="button"
+                      accessibilityLabel="ترجيع 10 ثوانٍ"
+                    >
+                      <MaterialIcons name="replay-10" size={tvMode ? 38 : 28} color="#fff" />
+                    </Pressable>
+
+                    <Pressable
+                      ref={tvPlayBtnRef}
+                      focusable={tvBgFocusable}
+                      onLayout={tvMode ? syncTvProgressHandles : undefined}
+                      onPress={togglePlay}
+                      nextFocusUp={tvMode ? (tvNavHandles.back ?? tvNavHandles.cc) : undefined}
+                      nextFocusLeft={tvMode ? tvNavHandles.seekBack : undefined}
+                      nextFocusRight={tvMode ? tvNavHandles.seekFwd : undefined}
+                      nextFocusDown={tvMode ? tvProgressHandles.center : undefined}
+                      style={[s.centerPlayBtn, tvMode && s.tvCenterPlayBtn]}
+                      hitSlop={16}
+                      accessibilityRole="button"
+                      accessibilityLabel={isPlaying ? "إيقاف مؤقت" : "تشغيل"}
+                    >
+                      {buffering && !error ? (
+                        <ActivityIndicator size={tvMode ? 38 : 30} color="#fff" />
+                      ) : (
+                        <Ionicons
+                          name={isPlaying ? "pause" : "play"}
+                          size={tvMode ? 42 : 34}
+                          color="#fff"
+                          style={isPlaying ? undefined : { transform: [{ translateX: 2 }] }}
+                        />
+                      )}
+                    </Pressable>
+
+                    <Pressable
+                      ref={tvSeekFwdBtnRef}
+                      focusable={tvBgFocusable}
+                      onLayout={tvMode ? syncTvProgressHandles : undefined}
+                      onPress={() => stepSeekSmooth(10)}
+                      nextFocusUp={tvMode ? (tvNavHandles.cc ?? tvNavHandles.back) : undefined}
+                      nextFocusLeft={tvMode ? tvNavHandles.play : undefined}
+                      nextFocusDown={tvMode ? tvProgressHandles.center : undefined}
+                      style={[s.centerSeekBtn, tvMode && s.tvCenterSeekBtn]}
+                      hitSlop={14}
+                      accessibilityRole="button"
+                      accessibilityLabel="تقديم 10 ثوانٍ"
+                    >
+                      <MaterialIcons name="forward-10" size={tvMode ? 38 : 28} color="#fff" />
+                    </Pressable>
+                  </View>
+                </View>
+
+                {/* ════ BOTTOM SECTION (شريط التقدم + أزرار أيقونات فقط: يسار قفل + كتم | يمين تمدد + سرعة) ════ */}
+                <LinearGradient
+                  colors={colors.playerBottomGradient}
+                  style={[
+                    s.bottomSection,
+                    isPortrait && s.bottomSectionPortrait,
+                    tvMode && s.tvBottomSection,
+                    {
+                      paddingBottom: Platform.OS === "web"
+                        ? 12
+                        : Math.max(insets.bottom + (isPortrait ? 10 : 6), tvMode ? 22 : 10),
+                    },
+                  ]}
+                >
+                  {/* سطر شريط التقدم المدمج: الوقت الحالي [يسار] — الشريط — المدة الكلية [يمين] */}
+                  {(() => {
+                    const rawFill = displayProgress * 100;
+                    const fillPct = Math.min(Math.max(isFinite(rawFill) ? rawFill : 0, 0), 100);
+                    const thumbPct = Math.max(1.2, Math.min(98.8, fillPct));
+                    const tooltipPct = Math.max(4, Math.min(88, fillPct - 6));
+                    return (
+                      <View style={[s.seekRowCompact, tvMode && s.tvSeekRowCompact, { flexDirection: physicalRowDir }]}>
+                        <Text style={[s.timeText, tvMode && s.tvTimeText, { color: "#fff" }]}>
+                          {fmtTime(displayPosition)}
+                        </Text>
+
+                        <View
+                          ref={barRef}
+                          collapsable={false}
+                          style={[s.progressWrap, s.progressWrapInline, tvMode && s.tvProgressWrap, isDragging && s.progressWrapDragging]}
+                          onLayout={() => {
+                            measureSeekBar();
+                            if (tvMode) syncTvProgressHandles();
+                          }}
+                          {...(tvMode ? {} : (seekBarPan.current?.panHandlers ?? {}))}
+                        >
+                          <View style={[s.progressBg, tvMode && s.tvProgressBg, { backgroundColor: colors.playerTrack }]} pointerEvents="none" />
+                          {bufferedPct > 0 && (
+                            <View style={[s.bufferBar, { [timelineStartEdge]: 0, width: `${bufferedPct * 100}%` as any, backgroundColor: colors.playerBuffer }]} pointerEvents="none" />
+                          )}
+                          {markerPctIntro && (
+                            <View style={[s.skipMarker, {
+                              [timelineStartEdge]: `${markerPctIntro.start}%` as any,
+                              width: `${Math.max(1.2, markerPctIntro.end - markerPctIntro.start)}%` as any,
+                            }]} pointerEvents="none" />
+                          )}
+                          {markerPctOutro && (
+                            <View style={[s.skipMarker, {
+                              [timelineStartEdge]: `${markerPctOutro.start}%` as any,
+                              width: `${Math.max(1.2, markerPctOutro.end - markerPctOutro.start)}%` as any,
+                            }]} pointerEvents="none" />
+                          )}
+                          <LinearGradient
+                            colors={[colors.violetDark, colors.violet, colors.accent]}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 0 }}
+                            style={[s.progressFill, tvMode && s.tvProgressFill, { [timelineStartEdge]: 0, width: `${fillPct}%` as any }]}
+                            pointerEvents="none"
+                          />
+                          <View
+                            style={[
+                              s.thumb, tvMode && s.tvThumb,
+                              (isDragging || (tvMode && isTvProgressFocused)) && s.thumbDragging,
+                              { [timelineStartEdge]: `${thumbPct}%` as any, backgroundColor: colors.accent },
+                            ]}
+                            pointerEvents="none"
+                          />
+                          {(isDragging || (tvMode && isTvProgressFocused)) && (
+                            <View style={[s.dragTooltip, { [timelineStartEdge]: `${tooltipPct}%` as any, backgroundColor: colors.surfaceElevated, borderColor: colors.border }]} pointerEvents="none">
+                              <Text style={[s.dragTooltipText, { color: colors.textPrimary }]}>
+                                {tvMode ? `◀  ${fmtTime(displayPosition)}  ▶` : fmtTime(displayPosition)}
+                              </Text>
+                            </View>
+                          )}
+                          {tvMode && (
+                            <Pressable
+                              ref={tvProgressRef}
+                              testID={allowProgressPreferred ? "nova-tv-preferred-focus" : undefined}
+                              accessibilityRole="adjustable"
+                              accessibilityLabel="شريط التقدم"
+                              hasTVPreferredFocus={allowProgressPreferred}
+                              focusable={tvBgFocusable}
+                              nextFocusLeft={tvProgressHandles.center}
+                              nextFocusRight={tvProgressHandles.center}
+                              nextFocusUp={tvNavHandles.play}
+                              nextFocusDown={tvNavHandles.lock}
+                              onLayout={() => {
+                                syncTvProgressHandles();
+                                const tag = findNodeHandle(tvProgressRef.current);
+                                if (tag != null && lastNativeFocusTagRef.current === tag) {
+                                  markTvProgressFocused();
+                                }
+                              }}
+                              onPress={handleTvProgressPress}
+                              onFocus={() => {
+                                markTvProgressFocused();
+                                syncTvProgressHandles();
+                                schedHide();
+                              }}
+                              onBlur={markTvProgressBlurred}
+                              // @ts-ignore react-native-tvos exposes key events on Pressable
+                              onKeyDown={handleTvProgressKeyDown}
+                              style={({ focused }) => [
+                                { position: "absolute", left: 0, right: 0, top: 0, bottom: 0, zIndex: 25, elevation: 25 },
+                                (focused || isTvProgressFocused) && [
+                                  s.tvProgressFocus,
+                                  {
+                                    borderColor: isNativeTvRingActive() ? "transparent" : colors.accent,
+                                    backgroundColor: colors.overlay,
+                                    shadowColor: "transparent",
+                                    shadowOpacity: 0,
+                                    shadowRadius: 0,
+                                    elevation: 0,
+                                  },
+                                ],
+                              ]}
+                            />
+                          )}
+                        </View>
+
+                        <Text style={[s.timeText, tvMode && s.tvTimeText, { opacity: 0.78, color: colors.playerSecondaryText }]}>
+                          {fmtTime(duration)}
+                        </Text>
+                      </View>
+                    );
+                  })()}
+
+                  {/* ── صف الأزرار السفلي (أيقونات فقط بدون نصوص): أقصى اليسار قفل + كتم | أقصى اليمين تمدد + سرعة ── */}
+                  <View style={[s.bottomCtrlRow, tvMode && s.tvBottomCtrlRow, { flexDirection: physicalRowDir }]}>
+                    {/* أقصى اليسار السفلي الفعلي: قفل الشاشة + كتم الصوت */}
+                    <View style={[s.bottomSideGroup, { flexDirection: physicalRowDir }]}>
+                      <Pressable
+                        ref={tvLockBtnRef}
+                        focusable={tvBgFocusable}
+                        onLayout={tvMode ? syncTvProgressHandles : undefined}
+                        onPress={() => {
+                          setShowFitMenu(false);
+                          setShowSpeedMenu(false);
+                          if (unlockTimer.current) clearTimeout(unlockTimer.current);
+                          if (hideTimer.current) clearTimeout(hideTimer.current);
+                          lockLastTapRef.current = 0;
+                          unlockSlideX.setValue(0);
+                          unlockRevealAnim.setValue(0);
+                          setShowUnlock(false);
+                          setIsLocked(true);
+                        }}
+                        nextFocusUp={tvMode ? tvProgressHandles.center : undefined}
+                        nextFocusRight={tvMode ? tvNavHandles.mute : undefined}
+                        style={[s.bottomIconCircle, tvMode && s.tvBottomIconCircle]}
+                        hitSlop={10}
+                        accessibilityRole="button"
+                        accessibilityLabel="قفل الشاشة"
+                      >
+                        <Ionicons name="lock-closed-outline" size={tvMode ? 23 : 19} color="rgba(255,255,255,0.92)" />
+                      </Pressable>
+
+                      <Pressable
+                        ref={tvMuteBtnRef}
+                        focusable={tvBgFocusable}
+                        onLayout={tvMode ? syncTvProgressHandles : undefined}
+                        onPress={() => {
+                          setIsMuted(v => !v);
+                          fadeIn();
+                        }}
+                        nextFocusUp={tvMode ? tvProgressHandles.center : undefined}
+                        nextFocusLeft={tvMode ? tvNavHandles.lock : undefined}
+                        nextFocusRight={tvMode ? tvNavHandles.fit : undefined}
+                        style={[s.bottomIconCircle, tvMode && s.tvBottomIconCircle, isMuted && s.ctrlIconBtnMuted]}
+                        hitSlop={10}
+                        accessibilityRole="button"
+                        accessibilityLabel={isMuted ? "إلغاء كتم الصوت" : "كتم الصوت"}
+                      >
+                        <Ionicons
+                          name={isMuted ? "volume-mute-outline" : "volume-high-outline"}
+                          size={tvMode ? 23 : 19}
+                          color={isMuted ? PLAYER_MUTED_ICON : "rgba(255,255,255,0.92)"}
+                        />
+                      </Pressable>
+                    </View>
+
+                    {/* أقصى اليمين السفلي الفعلي: تمدد الشاشة + السرعة */}
+                    <View style={[s.bottomSideGroup, { flexDirection: physicalRowDir }]}>
+                      <View style={s.bottomDropAnchor}>
+                        {showFitMenu && !tvMode && (
+                          <View
+                            style={[s.fitDropdown, { [timelineEndEdge]: 0 }]}
+                          >
+                            {([
+                              { fit: "contain", label: "مع الحواف", icon: "expand-outline" },
+                              { fit: "cover",   label: "ملء الشاشة", icon: "scan-outline" },
+                              { fit: "fill",    label: "تمديد كامل", icon: "resize-outline" },
+                            ] as const).map(({ fit, label, icon }) => (
+                              <Pressable
+                                key={fit}
+                                onPress={() => { setContentFit(fit); setShowFitMenu(false); schedHide(); }}
+                                style={[s.dropItem, contentFit === fit && s.dropItemActive]}
+                              >
+                                <Ionicons name={icon} size={14} color={contentFit === fit ? "#c4b5fd" : "rgba(255,255,255,0.72)"} />
+                                <Text style={[s.dropItemText, contentFit === fit && s.dropItemTextActive]}>{label}</Text>
+                                {contentFit === fit && <Ionicons name="checkmark" size={13} color="#c4b5fd" />}
+                              </Pressable>
+                            ))}
+                          </View>
+                        )}
+                        <Pressable
+                          ref={tvFitBtnRef}
+                          focusable={tvBgFocusable}
+                          onLayout={tvMode ? syncTvProgressHandles : undefined}
+                          onPress={() => { setShowFitMenu(v => !v); setShowSpeedMenu(false); fadeIn(); }}
+                          nextFocusUp={tvMode ? tvProgressHandles.center : undefined}
+                          nextFocusLeft={tvMode ? tvNavHandles.mute : undefined}
+                          nextFocusRight={tvMode ? tvNavHandles.speed : undefined}
+                          style={[s.bottomIconCircle, tvMode && s.tvBottomIconCircle, (showFitMenu || contentFit !== "contain") && s.bottomPillBtnActive]}
+                          hitSlop={10}
+                          accessibilityRole="button"
+                          accessibilityLabel="تمدد الشاشة"
+                        >
+                          <Ionicons
+                            name={fitIconName}
+                            size={tvMode ? 23 : 19}
+                            color={showFitMenu || contentFit !== "contain" ? PLAYER_ACTIVE_ICON : "rgba(255,255,255,0.92)"}
+                          />
+                        </Pressable>
+                      </View>
+
+                      <View style={s.bottomDropAnchor}>
+                        {showSpeedMenu && !tvMode && (
+                          <View
+                            style={[s.speedDropdown, { [timelineEndEdge]: 0 }]}
+                          >
+                            {SPEEDS.map(sp => (
+                              <Pressable
+                                key={sp}
+                                onPress={() => { changeSpeed(sp); setShowSpeedMenu(false); }}
+                                style={[s.dropItem, speed === sp && s.dropItemActive]}
+                              >
+                                <Text style={[s.dropSpeedNum, speed === sp && s.dropItemTextActive]}>{sp}x</Text>
+                                {speed === sp && <Ionicons name="checkmark" size={13} color="#c4b5fd" style={{ marginLeft: "auto" as any }} />}
+                              </Pressable>
+                            ))}
+                          </View>
+                        )}
+                        <Pressable
+                          ref={tvSpeedBtnRef}
+                          focusable={tvBgFocusable}
+                          onLayout={tvMode ? syncTvProgressHandles : undefined}
+                          onPress={() => { setShowSpeedMenu(v => !v); setShowFitMenu(false); fadeIn(); }}
+                          nextFocusUp={tvMode ? tvProgressHandles.center : undefined}
+                          nextFocusLeft={tvMode ? tvNavHandles.fit : undefined}
+                          style={[s.bottomIconCircle, tvMode && s.tvBottomIconCircle, (showSpeedMenu || speed !== 1) && s.bottomPillBtnActive]}
+                          hitSlop={10}
+                          accessibilityRole="button"
+                          accessibilityLabel="سرعة التشغيل"
+                        >
+                          <MaterialIcons
+                            name="speed"
+                            size={tvMode ? 24 : 20}
+                            color={showSpeedMenu || speed !== 1 ? PLAYER_ACTIVE_ICON : "rgba(255,255,255,0.92)"}
+                          />
+                          {speed !== 1 && (
+                            <View style={s.speedMicroBadge}>
+                              <Text style={s.speedMicroBadgeText}>{speed}x</Text>
+                            </View>
+                          )}
+                        </Pressable>
+                      </View>
+                    </View>
+                  </View>
+                </LinearGradient>
+              </>
             );
           })()}
-
-          {/* ════ CENTER ════ */}
-          <View style={[s.centerOverlay, tvMode && s.tvCenterOverlay]} pointerEvents="box-none">
-            {isPortrait ? (
-              /* وضع عمودي: أزرار التخطي + التشغيل */
-              <View style={s.centerPortraitRow}>
-                {/* زر التخطي للأمام — الأول في JSX → يظهر على اليمين في RTL */}
-                <View style={s.controlButtonSlot}>
-                  <Pressable onPress={() => stepSeekBurst(1, { side: "R" })} style={[s.centerSeekBtn, tvMode && s.tvCenterSeekBtn]} hitSlop={14}>
-                    <Ionicons name="play-forward" size={tvMode ? 30 : 24} color="#fff" />
-                  </Pressable>
-                  <Text style={[s.controlButtonLabel, { color: PLAYER_CONTROL_LABEL }]}>10</Text>
-                </View>
-                {/* زر المنتصف: play/pause/spinner */}
-                <View style={s.controlButtonSlot}>
-                  <Pressable onPress={togglePlay} style={[s.centerPlayBtn, tvMode && s.tvCenterPlayBtn]} hitSlop={16}>
-                    {buffering && !error
-                      ? <ActivityIndicator size={32} color="#fff" />
-                      : <Ionicons
-                          name={isPlaying ? "pause" : "play"}
-                          size={36} color="#fff"
-                          style={isPlaying ? undefined : { transform: [{ translateX: 3 }] }}
-                        />}
-                  </Pressable>
-                </View>
-                {/* زر الرجوع — الأخير في JSX → يظهر على اليسار في RTL */}
-                <View style={s.controlButtonSlot}>
-                  <Pressable onPress={() => stepSeekBurst(-1, { side: "L" })} style={[s.centerSeekBtn, tvMode && s.tvCenterSeekBtn]} hitSlop={14}>
-                    <Ionicons name="play-back" size={tvMode ? 30 : 24} color="#fff" />
-                  </Pressable>
-                  <Text style={[s.controlButtonLabel, { color: PLAYER_CONTROL_LABEL }]}>10</Text>
-                </View>
-              </View>
-            ) : (
-              /* وضع أفقي: play/pause في المنتصف دائماً */
-              <View style={s.centerLandscapeWrap}>
-                <View style={s.controlButtonSlot}>
-                  <Pressable onPress={togglePlay} style={[s.centerPlayBtn, tvMode && s.tvCenterPlayBtn]} hitSlop={16}>
-                    {buffering && !error
-                      ? <ActivityIndicator size={32} color="#fff" />
-                      : <Ionicons
-                          name={isPlaying ? "pause" : "play"}
-                          size={36} color="#fff"
-                          style={isPlaying ? undefined : { transform: [{ translateX: 3 }] }}
-                        />}
-                  </Pressable>
-                </View>
-              </View>
-            )}
-          </View>
-
-          {/* ════ BOTTOM SECTION ════ */}
-          <LinearGradient
-            colors={colors.playerBottomGradient}
-            style={[s.bottomSection, tvMode && s.tvBottomSection, { paddingBottom: Platform.OS === "web" ? 16 : insets.bottom + 12 }]}
-          >
-            {/* أزرار التخطي انتقلت إلى overlay مستقل خارج showControls */}
-
-            {/* The progress timeline is left-to-right on every locale. */}
-            <View style={{ position: "relative", height: 18, marginBottom: 2 }}>
-              <Text style={[s.timeText, tvMode && s.tvTimeText, { position: "absolute", [timelineStartEdge]: 0, color: colors.playerText }]}>{fmtTime(displayPosition)}</Text>
-              <Text style={[s.timeText, tvMode && s.tvTimeText, { position: "absolute", [timelineEndEdge]: 0, opacity: 0.75, color: colors.playerSecondaryText }]}>{fmtTime(duration)}</Text>
-            </View>
-
-            {/* One physical left-to-right timeline, shared by fill, thumb and touch math. */}
-            {(() => {
-              const rawFill = displayProgress * 100;
-              const fillPct = Math.min(Math.max(isFinite(rawFill) ? rawFill : 0, 0), 100);
-              const thumbPct = fillPct;
-              const tooltipPct = Math.max(4, Math.min(88, fillPct - 6));
-              return (
-                <View
-                  ref={barRef}
-                  style={[s.progressWrap, tvMode && s.tvProgressWrap, isDragging && s.progressWrapDragging]}
-                  onLayout={() => {
-                    measureSeekBar();
-                    if (tvMode) syncTvProgressHandles();
-                  }}
-                  {...(tvMode ? {} : (seekBarPan.current?.panHandlers ?? {}))}
-                >
-                  {tvMode && (
-                    <Pressable
-                      ref={tvProgressRef}
-                      testID={!inIntroRange && !inOutroRange ? "nova-tv-preferred-focus" : undefined}
-                      accessibilityRole="adjustable"
-                      accessibilityLabel="شريط التقدم"
-                      hasTVPreferredFocus={tvMode && !inIntroRange && !inOutroRange}
-                      focusable={true}
-                      nextFocusLeft={tvProgressHandles.center}
-                      nextFocusRight={tvProgressHandles.center}
-                      onLayout={syncTvProgressHandles}
-                      onPress={handleTvProgressPress}
-                      onFocus={() => {
-                        markTvProgressFocused();
-                        syncTvProgressHandles();
-                        fadeIn();
-                      }}
-                      onBlur={markTvProgressBlurred}
-                      onKeyDown={handleTvProgressKeyDown}
-                      style={({ focused }) => [
-                        { position: "absolute", left: 6, right: 6, top: 0, bottom: 0, zIndex: 20 },
-                        (focused || isTvProgressFocused) && [
-                          s.tvProgressFocus,
-                          {
-                            borderColor: isNativeTvRingActive() ? "transparent" : colors.accent,
-                            backgroundColor: colors.overlay,
-                            shadowColor: "transparent",
-                            shadowOpacity: 0,
-                            shadowRadius: 0,
-                            elevation: 0,
-                          },
-                        ],
-                      ]}
-                    />
-                  )}
-                  <View style={[s.progressBg, tvMode && s.tvProgressBg, { backgroundColor: colors.playerTrack }]} />
-                  {bufferedPct > 0 && (
-                    <View style={[s.bufferBar, { [timelineStartEdge]: 0, width: `${bufferedPct * 100}%` as any, backgroundColor: colors.playerBuffer }]} />
-                  )}
-                  {markerPctIntro && (
-                    <View style={[s.skipMarker, {
-                      [timelineStartEdge]: `${markerPctIntro.start}%` as any,
-                      width: `${Math.max(1.2, markerPctIntro.end - markerPctIntro.start)}%` as any,
-                    }]} />
-                  )}
-                  {markerPctOutro && (
-                    <View style={[s.skipMarker, {
-                      [timelineStartEdge]: `${markerPctOutro.start}%` as any,
-                      width: `${Math.max(1.2, markerPctOutro.end - markerPctOutro.start)}%` as any,
-                    }]} />
-                  )}
-                  <LinearGradient
-                    colors={[colors.violetDark, colors.violet, colors.accent]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={[s.progressFill, tvMode && s.tvProgressFill, { [timelineStartEdge]: 0, width: `${fillPct}%` as any }]}
-                  />
-                  <View style={[
-                    s.thumb, tvMode && s.tvThumb,
-                    (isDragging || (tvMode && isTvProgressFocused)) && s.thumbDragging,
-                    { [timelineStartEdge]: `${thumbPct}%` as any, backgroundColor: colors.accent },
-                  ]} />
-                  {(isDragging || (tvMode && isTvProgressFocused)) && (
-                    <View style={[s.dragTooltip, { [timelineStartEdge]: `${tooltipPct}%` as any, backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
-                      <Text style={[s.dragTooltipText, { color: colors.textPrimary }]}>
-                        {tvMode ? `◀  ${fmtTime(displayPosition)}  ▶` : fmtTime(displayPosition)}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-              );
-            })()}
-
-            {/* ── صف أزرار التحكم السفلي ── */}
-            <View style={[
-              s.bottomCtrlRow,
-              tvMode && s.tvBottomCtrlRow,
-            ]}>
-
-              {/* يسار: قفل + ملء شاشة — نفس أزرار الهاتف، بحجم TV الحالي */}
-             <View style={s.bottomSide}>
-                <View style={s.controlButtonSlot}>
-                  <Pressable onPress={handleLockScreen} style={[s.ctrlIconBtn, tvMode && s.tvCtrlIconBtn]} hitSlop={10}>
-                    <Ionicons name="lock-closed-outline" size={16} color="rgba(255,255,255,0.80)" />
-                  </Pressable>
-                </View>
-                <View style={s.controlButtonSlot}>
-                  {showFitMenu && (
-                    <View testID={tvMode ? "nova-tv-modal-root" : undefined} style={s.fitDropdown}>
-                      {([
-                        { fit: "contain", label: "مع الحواف",   icon: "expand-outline"  },
-                        { fit: "cover",   label: "ملء الشاشة", icon: "scan-outline"    },
-                        { fit: "fill",    label: "تمديد كامل", icon: "resize-outline"  },
-                      ] as const).map(({ fit, label, icon }) => (
-                        <Pressable
-                          key={fit}
-                          hasTVPreferredFocus={tvMode && contentFit === fit}
-                          onPress={() => { setContentFit(fit); setShowFitMenu(false); fadeIn(); }}
-                          style={[s.dropItem, contentFit === fit && s.dropItemActive]}
-                        >
-                          <Ionicons name={icon} size={12} color={contentFit === fit ? "#c4b5fd" : "rgba(255,255,255,0.60)"} />
-                          <Text style={[s.dropItemText, contentFit === fit && s.dropItemTextActive]}>{label}</Text>
-                          {contentFit === fit && <Ionicons name="checkmark" size={11} color="#c4b5fd" />}
-                        </Pressable>
-                      ))}
-                    </View>
-                  )}
-                <Pressable onPress={() => { setShowFitMenu(v => !v); setShowSpeedMenu(false); fadeIn(); }} style={[s.ctrlIconBtn, tvMode && s.tvCtrlIconBtn, showFitMenu && s.ctrlIconBtnActive]} hitSlop={10}>
-                    <Ionicons name="scan-outline" size={tvMode ? 24 : 16} color={showFitMenu ? PLAYER_ACTIVE_ICON : "rgba(255,255,255,0.80)"} />
-                  </Pressable>
-                 </View>
-               </View>
-
-              {/* وسط: تخطي + تشغيل (وضع أفقي فقط) — "10" خارج الدائرة للمحاذاة الصحيحة */}
-              <View style={[
-                s.bottomCenter,
-                tvMode && s.tvBottomCenter,
-              ]}>
-                {!isPortrait && (
-                  <View style={s.controlButtonSlot}>
-                    <Pressable onPress={() => stepSeekBurst(1, { side: "R" })} style={[s.seekCtrlBtn, tvMode && s.tvSeekCtrlBtn]} hitSlop={10}>
-                      <Ionicons name="play-forward" size={tvMode ? 24 : 17} color={PLAYER_CONTROL_ICON} />
-                    </Pressable>
-                    <Text style={[s.controlButtonLabel, { color: PLAYER_CONTROL_LABEL }]}>10</Text>
-                  </View>
-                )}
-                <View style={s.controlButtonSlot}>
-                  <Pressable onPress={togglePlay} style={[s.bottomPlayBtn, tvMode && s.tvBottomPlayBtn]} hitSlop={10}>
-                    <Ionicons name={isPlaying ? "pause" : "play"} size={tvMode ? 30 : 23} color="#fff" style={isPlaying ? undefined : { transform: [{ translateX: 2 }] }} />
-                  </Pressable>
-                </View>
-                {!isPortrait && (
-                  <View style={s.controlButtonSlot}>
-                    <Pressable onPress={() => stepSeekBurst(-1, { side: "L" })} style={[s.seekCtrlBtn, tvMode && s.tvSeekCtrlBtn]} hitSlop={10}>
-                      <Ionicons name="play-back" size={tvMode ? 24 : 17} color={PLAYER_CONTROL_ICON} />
-                    </Pressable>
-                    <Text style={[s.controlButtonLabel, { color: PLAYER_CONTROL_LABEL }]}>10</Text>
-                  </View>
-                )}
-              </View>
-
-              {/* يمين: كتم + تشغيل تلقائي + سرعة — نفس أزرار الهاتف */}
-               <View style={[s.bottomSide, { justifyContent: "flex-end" }]}>
-                <View style={s.controlButtonSlot}>
-                  <Pressable onPress={() => { setIsMuted(v => !v); fadeIn(); }} style={[s.ctrlIconBtn, tvMode && s.tvCtrlIconBtn, isMuted && s.ctrlIconBtnMuted]} hitSlop={10}>
-                    <Ionicons name={isMuted ? "volume-mute-outline" : "volume-high-outline"} size={tvMode ? 24 : 16} color={isMuted ? PLAYER_MUTED_ICON : "rgba(255,255,255,0.80)"} />
-                  </Pressable>
-               </View>
-                <View style={s.controlButtonSlot}>
-                  {showSpeedMenu && (
-                    <View testID={tvMode ? "nova-tv-modal-root" : undefined} style={s.speedDropdown}>
-                      {SPEEDS.map(sp => (
-                        <Pressable
-                          key={sp}
-                          hasTVPreferredFocus={tvMode && speed === sp}
-                          onPress={() => { changeSpeed(sp); setShowSpeedMenu(false); }}
-                          style={[s.dropItem, speed === sp && s.dropItemActive]}
-                        >
-                          <Text style={[s.dropSpeedNum, speed === sp && s.dropItemTextActive]}>{sp}x</Text>
-                          {speed === sp && <Ionicons name="checkmark" size={11} color="#c4b5fd" style={{ marginLeft: "auto" as any }} />}
-                        </Pressable>
-                      ))}
-                    </View>
-                  )}
-                  <Pressable onPress={() => { setShowSpeedMenu(v => !v); setShowFitMenu(false); fadeIn(); }} style={[s.ctrlIconBtn, s.ctrlSpeedBtn, tvMode && s.tvCtrlIconBtn, showSpeedMenu && s.ctrlIconBtnActive]} hitSlop={10}>
-                    <Text style={[s.speedLabel, tvMode && s.tvSpeedLabel, speed !== 1 && s.speedLabelActive]}>{speed}x</Text>
-                  </Pressable>
-                </View>
-              </View>
-
-            </View>
-          </LinearGradient>
         </Animated.View>
       )}
-
       {tvMode && !showControls && !error && !isEnded && !isLocked && (
         <Pressable
           accessibilityRole="button"
@@ -4213,6 +4574,112 @@ function ExpoRiftPlayer({
         </Pressable>
       )}
 
+
+      {/* ════════════════════════════════════════
+          ANDROID TV MODALS: أبعاد الشاشة + سرعة التشغيل (تركيز D-pad مضمون بدون رجوع للمكان نفسه)
+      ════════════════════════════════════════ */}
+      {tvMode && showFitMenu && (
+        <View style={s.tvModalBackdrop} pointerEvents="auto">
+          <View
+            testID="nova-tv-modal-root"
+            collapsable={false}
+            style={s.tvModalCard}
+          >
+            <View style={s.tvModalHeader}>
+              <Ionicons name="expand-outline" size={22} color="#c4b5fd" />
+              <Text style={s.tvModalTitle}>أبعاد الشاشة</Text>
+            </View>
+            {([
+              { fit: "contain", label: "مع الحواف", icon: "expand-outline" },
+              { fit: "cover",   label: "ملء الشاشة", icon: "scan-outline" },
+              { fit: "fill",    label: "تمديد كامل", icon: "resize-outline" },
+            ] as const).map(({ fit, label, icon }, idx, arr) => {
+              const selfHandle = tvFitHandles[idx];
+              const upHandle = idx > 0 ? tvFitHandles[idx - 1] : selfHandle;
+              const downHandle = idx < arr.length - 1 ? tvFitHandles[idx + 1] : selfHandle;
+              return (
+                <Pressable
+                  key={fit}
+                  ref={(el) => { tvFitOptionRefs.current[idx] = el; }}
+                  onLayout={syncTvMenuHandles}
+                  hasTVPreferredFocus={contentFit === fit}
+                  focusable={true}
+                  nextFocusUp={upHandle}
+                  nextFocusDown={downHandle}
+                  nextFocusLeft={selfHandle}
+                  nextFocusRight={selfHandle}
+                  testID={contentFit === fit ? "nova-tv-preferred-focus" : undefined}
+                  onPress={() => {
+                    suppressProgressAutoFocusUntilRef.current = Date.now() + 450;
+                    setContentFit(fit);
+                    setShowFitMenu(false);
+                    setTimeout(() => { try { (tvFitBtnRef.current as any)?.focus?.(); } catch {} }, 90);
+                  }}
+                  style={({ focused }) => [
+                    s.tvModalOption,
+                    contentFit === fit && s.tvModalOptionActive,
+                    focused && s.tvModalOptionFocused,
+                  ]}
+                >
+                  <Ionicons name={icon} size={20} color={contentFit === fit ? "#ddd6fe" : "rgba(255,255,255,0.82)"} />
+                  <Text style={[s.tvModalOptionText, contentFit === fit && s.tvModalOptionTextActive]}>{label}</Text>
+                  {contentFit === fit && <Ionicons name="checkmark-circle" size={20} color="#a78bfa" />}
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      )}
+
+      {tvMode && showSpeedMenu && (
+        <View style={s.tvModalBackdrop} pointerEvents="auto">
+          <View
+            testID="nova-tv-modal-root"
+            collapsable={false}
+            style={s.tvModalCard}
+          >
+            <View style={s.tvModalHeader}>
+              <MaterialIcons name="speed" size={24} color="#c4b5fd" />
+              <Text style={s.tvModalTitle}>سرعة التشغيل</Text>
+            </View>
+            {SPEEDS.map((sp, idx) => {
+              const selfHandle = tvSpeedHandles[idx];
+              const upHandle = idx > 0 ? tvSpeedHandles[idx - 1] : selfHandle;
+              const downHandle = idx < SPEEDS.length - 1 ? tvSpeedHandles[idx + 1] : selfHandle;
+              return (
+                <Pressable
+                  key={sp}
+                  ref={(el) => { tvSpeedOptionRefs.current[idx] = el; }}
+                  onLayout={syncTvMenuHandles}
+                  hasTVPreferredFocus={speed === sp}
+                  focusable={true}
+                  nextFocusUp={upHandle}
+                  nextFocusDown={downHandle}
+                  nextFocusLeft={selfHandle}
+                  nextFocusRight={selfHandle}
+                  testID={speed === sp ? "nova-tv-preferred-focus" : undefined}
+                  onPress={() => {
+                    suppressProgressAutoFocusUntilRef.current = Date.now() + 450;
+                    changeSpeed(sp);
+                    setShowSpeedMenu(false);
+                    setTimeout(() => { try { (tvSpeedBtnRef.current as any)?.focus?.(); } catch {} }, 90);
+                  }}
+                  style={({ focused }) => [
+                    s.tvModalOption,
+                    speed === sp && s.tvModalOptionActive,
+                    focused && s.tvModalOptionFocused,
+                  ]}
+                >
+                  <Text style={[s.tvModalOptionText, speed === sp && s.tvModalOptionTextActive]}>
+                    {sp === 1 ? "1x (عادي)" : `${sp}x`}
+                  </Text>
+                  {speed === sp && <Ionicons name="checkmark-circle" size={20} color="#a78bfa" />}
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      )}
 
       {/* ════════════════════════════════════════
           SUBTITLE SETTINGS PANEL (Smooth controls & working buttons)
@@ -4581,12 +5048,18 @@ function ExpoRiftPlayer({
           </Animated.View>
         </View>
       )}
-      {/* ── أزرار تخطي المقدمة/النهاية — مستقلة تماماً عن رؤية الـ controls ── */}
+      {/* ── أزرار تخطي المقدمة/النهاية بتصميم زجاجي حديث — فوق شريط التقدم بدون تداخل مع الترجمة ── */}
       {!error && !isEnded && !isLocked && (inIntroRange || inOutroRange) && (
         <View
           style={[
             s.skipBtnRowFloat,
-            tvMode && { bottom: 148, left: 28, right: 28 },
+            {
+              bottom: showControls
+                ? (tvMode ? 136 : isPortrait ? 108 : 96)
+                : (tvMode ? 36 : isPortrait ? 30 : 22),
+              [timelineEndEdge]: tvMode ? 36 : 16,
+              flexDirection: (Platform.OS !== "web" && I18nManager.isRTL) ? "row-reverse" : "row",
+            },
           ]}
           pointerEvents="box-none"
         >
@@ -4609,19 +5082,22 @@ function ExpoRiftPlayer({
                 tvMode && s.tvSkipPill,
                 tvMode &&
                   focused && {
-                    borderColor: "#38BDF8",
-                    borderWidth: 3.5,
-                    backgroundColor: "#fbbf24",
-                    transform: [{ scale: 1.06 }],
+                    borderColor: "#fbbf24",
+                    borderWidth: 2.5,
+                    backgroundColor: "rgba(38, 28, 12, 0.94)",
+                    transform: [{ scale: 1.05 }],
                   },
               ]}
-              hitSlop={8}
+              hitSlop={10}
               pointerEvents="auto"
               accessibilityRole="button"
               accessibilityLabel="تخطي المقدمة"
             >
-              <Ionicons name="play-forward" size={tvMode ? 18 : 13} color="#92400e" />
+              <View style={[s.skipPillIconBadge, s.skipPillIntroBadge]}>
+                <Ionicons name="play-forward" size={tvMode ? 17 : 12} color="#fde68a" />
+              </View>
               <Text style={[s.skipPillIntroText, tvMode && s.tvSkipPillText]}>تخطي المقدمة</Text>
+              <Ionicons name="chevron-forward" size={tvMode ? 17 : 13} color="rgba(253,230,138,0.82)" />
             </Pressable>
           )}
           {inOutroRange && (
@@ -4643,19 +5119,22 @@ function ExpoRiftPlayer({
                 tvMode && s.tvSkipPill,
                 tvMode &&
                   focused && {
-                    borderColor: "#38BDF8",
-                    borderWidth: 3.5,
-                    backgroundColor: "#7c3aed",
-                    transform: [{ scale: 1.06 }],
+                    borderColor: "#c4b5fd",
+                    borderWidth: 2.5,
+                    backgroundColor: "rgba(36, 20, 68, 0.94)",
+                    transform: [{ scale: 1.05 }],
                   },
               ]}
-              hitSlop={8}
+              hitSlop={10}
               pointerEvents="auto"
               accessibilityRole="button"
-              accessibilityLabel="تخطي الخاتمة"
+              accessibilityLabel="تخطي النهاية"
             >
-              <Ionicons name="play-forward" size={tvMode ? 18 : 13} color={tvMode ? "#ffffff" : "#4c1d95"} />
+              <View style={[s.skipPillIconBadge, s.skipPillOutroBadge]}>
+                <Ionicons name="play-forward" size={tvMode ? 17 : 12} color="#ddd6fe" />
+              </View>
               <Text style={[s.skipPillOutroText, tvMode && s.tvSkipPillText]}>تخطي النهاية</Text>
+              <Ionicons name="chevron-forward" size={tvMode ? 17 : 13} color="rgba(221,214,254,0.82)" />
             </Pressable>
           )}
         </View>
@@ -4815,77 +5294,84 @@ const s = StyleSheet.create({
 
   /* Skip notification */
 
-  /* Lock — new swipe-down bar design */
-  lockDot: { position: "absolute", right: 12, top: "48%", backgroundColor: "rgba(0,0,0,0.55)", borderRadius: 20, padding: 8, borderWidth: 1, borderColor: "rgba(251,191,36,0.25)", zIndex: 25 },
-  tvUnlockTarget: {
-    position: "absolute", left: "35%", right: "35%", top: "44%",
-    minHeight: 88, alignItems: "center", justifyContent: "center", gap: 8,
-    backgroundColor: "rgba(5,5,15,0.84)", borderRadius: 18,
-    borderWidth: 1.5, borderColor: "rgba(251,191,36,0.45)", zIndex: 40,
+  /* Lock — smooth frosted Slide-to-Unlock capsule */
+  unlockFloatWrap: {
+    position: "absolute", left: 0, right: 0, alignItems: "center", justifyContent: "center",
+    zIndex: 42,
   },
-  tvUnlockText: { color: "rgba(253,224,71,0.90)", fontSize: 18, fontFamily: "Cairo_700Bold" },
-  swipeUnlockBar: {
-    position: "absolute", right: 10, top: "18%", bottom: "18%",
-    width: 46,
-    alignItems: "center", justifyContent: "space-evenly",
-    backgroundColor: "rgba(5,5,15,0.88)",
-    borderRadius: 23,
-    borderWidth: 1.5, borderColor: "rgba(251,191,36,0.45)",
-    zIndex: 40,
+  unlockSliderTrack: {
+    borderRadius: 28,
+    backgroundColor: "rgba(10, 9, 24, 0.88)",
+    borderWidth: 1.5, borderColor: "rgba(167,139,250,0.45)",
+    position: "relative",
+    overflow: "hidden",
+    shadowColor: "#000", shadowOpacity: 0.68, shadowRadius: 18, elevation: 16,
   },
-  swipeChevrons: { alignItems: "center", gap: -4 },
-  swipeUnlockIconWrap: { width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(251,191,36,0.14)", borderWidth: 1, borderColor: "rgba(251,191,36,0.32)", alignItems: "center", justifyContent: "center" },
-  swipeUnlockLabel: { color: "rgba(253,224,71,0.85)", fontSize: 9, fontFamily: "Cairo_700Bold", textAlign: "center", lineHeight: 13 },
-  slideUnlockWrap: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 42,
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 45,
+  unlockSliderHintWrap: {
+    position: "absolute", top: 0, bottom: 0,
+    alignItems: "center", justifyContent: "center", gap: 4,
   },
-  slideUnlockTrack: {
-    width: 248,
-    height: 54,
-    borderRadius: 27,
-    backgroundColor: "rgba(10, 12, 18, 0.88)",
-    borderWidth: 1.5,
-    borderColor: "rgba(251, 191, 36, 0.45)",
-    justifyContent: "center",
-    paddingHorizontal: 4,
+  unlockSliderHintText: {
+    color: "rgba(237,233,254,0.88)", fontSize: 13, fontFamily: "Cairo_700Bold",
   },
-  slideUnlockPromptRow: {
+  unlockSliderThumb: {
+    backgroundColor: "#8B5CF6",
+    borderWidth: 1.5, borderColor: "rgba(233,213,255,0.65)",
+    alignItems: "center", justifyContent: "center",
+    shadowColor: "#8B5CF6", shadowOpacity: 0.75, shadowRadius: 12, elevation: 10,
+  },
+  /* Android TV top-level modal for Fit & Speed menus */
+  tvModalBackdrop: {
     ...StyleSheet.absoluteFillObject,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 52,
-    gap: 6,
+    backgroundColor: "rgba(4, 3, 12, 0.68)",
+    alignItems: "center", justifyContent: "center",
+    zIndex: 72,
   },
-  slideUnlockText: {
-    color: "rgba(253, 230, 138, 0.92)",
-    fontSize: 13,
-    fontFamily: "Cairo_700Bold",
+  tvModalCard: {
+    width: 340,
+    backgroundColor: "rgba(14, 10, 32, 0.97)",
+    borderRadius: 22,
+    borderWidth: 1.5, borderColor: "rgba(167,139,250,0.42)",
+    paddingVertical: 16, paddingHorizontal: 16, gap: 8,
+    shadowColor: "#000", shadowOpacity: 0.8, shadowRadius: 24, elevation: 28,
   },
-  slideUnlockChevrons: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginLeft: 2,
+  tvModalHeader: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10,
+    paddingBottom: 10, marginBottom: 4,
+    borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.10)",
   },
-  slideUnlockThumb: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: "#FBBF24",
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#F59E0B",
-    shadowOpacity: 0.45,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 6,
+  tvModalTitle: { color: "#fff", fontSize: 19, fontFamily: "Cairo_700Bold" },
+  tvModalOption: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12,
+    paddingVertical: 13, paddingHorizontal: 16, borderRadius: 14,
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderWidth: 2, borderColor: "transparent",
   },
+  tvModalOptionActive: {
+    backgroundColor: "rgba(139,92,246,0.22)",
+    borderColor: "rgba(167,139,250,0.45)",
+  },
+  tvModalOptionFocused: {
+    backgroundColor: "rgba(139,92,246,0.36)",
+    borderColor: "#c4b5fd",
+    transform: [{ scale: 1.02 }],
+  },
+  tvModalOptionText: { color: "rgba(255,255,255,0.86)", fontSize: 17, fontFamily: "Cairo_700Bold", flex: 1 },
+  tvModalOptionTextActive: { color: "#fff" },
+  tvUnlockTarget: {
+    position: "absolute", left: "30%", right: "30%", top: "40%",
+    paddingVertical: 20, paddingHorizontal: 24,
+    alignItems: "center", justifyContent: "center", gap: 10,
+    backgroundColor: "rgba(10, 9, 24, 0.90)", borderRadius: 22,
+    borderWidth: 2, borderColor: "rgba(167,139,250,0.58)", zIndex: 42,
+    shadowColor: "#8B5CF6", shadowOpacity: 0.45, shadowRadius: 20, elevation: 16,
+  },
+  unlockIconCircle: {
+    width: 52, height: 52, borderRadius: 26,
+    backgroundColor: "rgba(139,92,246,0.24)", borderWidth: 1.5, borderColor: "rgba(196,181,253,0.45)",
+    alignItems: "center", justifyContent: "center",
+  },
+  tvUnlockText: { color: "#f5f3ff", fontSize: 17, fontFamily: "Cairo_700Bold", textAlign: "center" },
 
   /* End card */
   endCard: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.88)", alignItems: "center", justifyContent: "center", gap: 14, zIndex: 35 },
@@ -4912,25 +5398,35 @@ const s = StyleSheet.create({
   /* skipBtnRowFloat: overlay مستقل يظهر دائماً بغض النظر عن رؤية الـ controls
      bottom: 135 — يضمن ظهور الزر فوق قسم التحكم السفلي (~130px) بأمان */
   skipBtnRowFloat: {
-    position: "absolute", bottom: 135, left: 12, right: 12,
-    flexDirection: "row", justifyContent: "flex-start", gap: 8,
-    zIndex: 20,
+    position: "absolute", bottom: 112,
+    flexDirection: "row", justifyContent: "flex-end", alignItems: "center", gap: 8,
+    zIndex: 22,
   },
   skipBtnRow: { flexDirection: "row", justifyContent: "flex-start", gap: 8, marginBottom: 4, paddingStart: 2 },
   skipPillIntro: {
-    flexDirection: "row", alignItems: "center", gap: 5,
-    backgroundColor: "rgba(251,191,36,0.90)", borderRadius: 20,
-    paddingHorizontal: 14, paddingVertical: 7,
-    shadowColor: "#fbbf24", shadowOpacity: 0.40, shadowRadius: 8, elevation: 6,
+    flexDirection: "row", alignItems: "center", gap: 7,
+    backgroundColor: "rgba(12, 11, 22, 0.88)",
+    borderRadius: 999,
+    borderWidth: 1.5, borderColor: "rgba(251,191,36,0.58)",
+    paddingHorizontal: 12, paddingVertical: 6,
+    shadowColor: "#000", shadowOpacity: 0.55, shadowRadius: 12, elevation: 10,
   },
-  skipPillIntroText: { color: "#92400e", fontSize: 12, fontFamily: "Cairo_700Bold" },
+  skipPillIntroText: { color: "#fef3c7", fontSize: 12.5, fontFamily: "Cairo_700Bold" },
   skipPillOutro: {
-    flexDirection: "row", alignItems: "center", gap: 5,
-    backgroundColor: "rgba(139,92,246,0.88)", borderRadius: 20,
-    paddingHorizontal: 14, paddingVertical: 7,
-    shadowColor: "#8B5CF6", shadowOpacity: 0.40, shadowRadius: 8, elevation: 6,
+    flexDirection: "row", alignItems: "center", gap: 7,
+    backgroundColor: "rgba(14, 11, 28, 0.88)",
+    borderRadius: 999,
+    borderWidth: 1.5, borderColor: "rgba(167,139,250,0.65)",
+    paddingHorizontal: 12, paddingVertical: 6,
+    shadowColor: "#8B5CF6", shadowOpacity: 0.45, shadowRadius: 12, elevation: 10,
   },
-  skipPillOutroText: { color: "#f3f0ff", fontSize: 12, fontFamily: "Cairo_700Bold" },
+  skipPillOutroText: { color: "#f5f3ff", fontSize: 12.5, fontFamily: "Cairo_700Bold" },
+  skipPillIconBadge: {
+    width: 22, height: 22, borderRadius: 11,
+    alignItems: "center", justifyContent: "center",
+  },
+  skipPillIntroBadge: { backgroundColor: "rgba(251,191,36,0.20)" },
+  skipPillOutroBadge: { backgroundColor: "rgba(139,92,246,0.28)" },
   tvSkipPill: {
     minHeight: 58,
     paddingHorizontal: 22,
@@ -4946,8 +5442,8 @@ const s = StyleSheet.create({
   /* Keep CC in the same square action rail as screenshot, rotate and close.
      The old TV-only label made this one button much wider than its neighbours. */
   tvCCBtn: {
-    width: 60, height: 60, minWidth: 60, minHeight: 60,
-    paddingHorizontal: 0, paddingVertical: 0, borderRadius: 18, gap: 0,
+    width: 64, height: 64, minWidth: 64, minHeight: 64,
+    paddingHorizontal: 0, paddingVertical: 0, borderRadius: 20, gap: 0,
   },
   topCCBtnActive: { backgroundColor: "rgba(139,92,246,0.28)", borderColor: "rgba(167,139,250,0.55)" },
   topCCText: { color: "rgba(255,255,255,0.80)", fontSize: 11, fontFamily: "Cairo_700Bold", letterSpacing: 0.5 },
@@ -5141,14 +5637,40 @@ const s = StyleSheet.create({
 
   /* ── Top bar ── */
   topBar: {
-    paddingHorizontal: 10, paddingBottom: 12,
-    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    paddingHorizontal: 14, paddingBottom: 14,
+    flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between",
   },
   tvTopBar: {
-    minHeight: 104,
-    paddingHorizontal: 40,
-    paddingBottom: 16,
+    minHeight: 110,
+    paddingHorizontal: 38,
+    paddingBottom: 18,
   },
+  topLeftCol: {
+    flexShrink: 1, maxWidth: "68%", alignItems: "flex-start", gap: 6,
+  },
+  topLeftColPortrait: {
+    maxWidth: "64%",
+  },
+  tvTopLeftCol: {
+    maxWidth: "68%", gap: 8,
+  },
+  topBackBtn: {
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: "rgba(10,10,22,0.56)", borderWidth: 1, borderColor: "rgba(255,255,255,0.24)",
+    alignItems: "center", justifyContent: "center",
+  },
+  topLeftMetaWrap: {
+    alignItems: "flex-start", gap: 1, paddingHorizontal: 2,
+  },
+  tvTopLeftMetaWrap: {
+    gap: 3,
+  },
+  topEpisodeSub: {
+    color: "rgba(255,255,255,0.82)", fontSize: 12.5, fontFamily: "Cairo_600SemiBold",
+    textShadowColor: "rgba(0,0,0,0.85)", textShadowRadius: 4, textShadowOffset: { width: 0, height: 1 },
+  },
+  tvTopEpisodeSub: { fontSize: 16 },
+  tvTopRightActions: { gap: 12 },
   /* معلومات الأنمي — واضحة ومقروءة بالعربية ومنسدلة لأسفل قليلاً */
   topInfoWrap: {
     flexShrink: 1, maxWidth: "68%", flexDirection: "column", gap: 4, marginRight: 4,
@@ -5208,7 +5730,7 @@ const s = StyleSheet.create({
   autoSubBadgeText: {
     color: "rgba(196,181,253,0.85)", fontSize: 9, fontFamily: "Cairo_600SemiBold",
   },
-  topRightRow: { flexDirection: "row", alignItems: "center", gap: 5 },
+  topRightRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   tvTopRightRow: {
     position: "absolute",
     /* Use left in RTL so RN places the controls at the physical right,
@@ -5219,8 +5741,8 @@ const s = StyleSheet.create({
     zIndex: 4,
   },
   topIconBtn: {
-    width: 38, height: 38, borderRadius: 19,
-    backgroundColor: "rgba(255,255,255,0.10)", borderWidth: 1, borderColor: "rgba(255,255,255,0.16)",
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: "rgba(10,10,22,0.52)", borderWidth: 1, borderColor: "rgba(255,255,255,0.20)",
     alignItems: "center", justifyContent: "center",
   },
   topIconBtnActive: { backgroundColor: "rgba(139,92,246,0.30)", borderColor: "rgba(167,139,250,0.55)" },
@@ -5247,7 +5769,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 0, paddingVertical: 0,
   },
   tvTopCloseBtn: {
-    width: 60, height: 60, borderRadius: 18,
+    width: 64, height: 64, borderRadius: 20,
   },
 
   /* A focusable remote target remains after the chrome hides so OK can bring
@@ -5275,39 +5797,87 @@ const s = StyleSheet.create({
     fontFamily: "Cairo_700Bold",
   },
 
-  /* ── Center overlay ── */
-  centerOverlay: { flex: 1, alignItems: "center", justifyContent: "center", paddingTop: 60 },
-  tvCenterOverlay: { paddingTop: 30 },
+  /* ── Center overlay (مرفوع قليلاً للأعلى) ── */
+  centerOverlay: { flex: 1, alignItems: "center", justifyContent: "center", paddingBottom: 44 },
+  centerOverlayPortrait: { paddingBottom: 68 },
+  tvCenterOverlay: { paddingTop: 0, paddingBottom: 64 },
+  centerRowUnified: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 36 },
+  centerRowPortrait: { gap: 24 },
+  tvCenterRowUnified: { gap: 48 },
   centerLandscapeWrap: { alignItems: "center" },
   centerPortraitRow: { flexDirection: "row", alignItems: "center", gap: 28 },
   controlButtonSlot: { height: 72, justifyContent: "center", alignItems: "center" },
   controlButtonLabel: { position: "absolute", bottom: -2, color: "rgba(255,255,255,0.80)", fontSize: 11, fontFamily: "Cairo_700Bold", lineHeight: 13 },
   centerSeekBtn: {
-    width: 58, height: 58, borderRadius: 29,
-    backgroundColor: "rgba(0,0,0,0.38)", borderWidth: 1, borderColor: "rgba(255,255,255,0.20)",
-    alignItems: "center", justifyContent: "center", gap: 3,
+    width: 56, height: 56, borderRadius: 28,
+    backgroundColor: "rgba(8,10,22,0.62)", borderWidth: 1.5, borderColor: "rgba(255,255,255,0.28)",
+    alignItems: "center", justifyContent: "center",
+    shadowColor: "#000", shadowOpacity: 0.55, shadowRadius: 12, elevation: 10,
   },
   tvCenterSeekBtn: { width: 78, height: 78, borderRadius: 39 },
   centerSeekLabel: { color: "rgba(255,255,255,0.80)", fontSize: 11, fontFamily: "Cairo_700Bold", lineHeight: 13 },
   centerPlayBtn: {
-    width: 74, height: 74, borderRadius: 37,
-    backgroundColor: "rgba(139,92,246,0.30)",
-    borderWidth: 2, borderColor: "rgba(167,139,250,0.80)",
+    width: 72, height: 72, borderRadius: 36,
+    backgroundColor: "rgba(12,10,28,0.68)",
+    borderWidth: 2, borderColor: "rgba(196,181,253,0.72)",
     alignItems: "center", justifyContent: "center",
-    shadowColor: "#8B5CF6", shadowOpacity: 0.75, shadowRadius: 24, elevation: 16,
+    shadowColor: "#8B5CF6", shadowOpacity: 0.65, shadowRadius: 20, elevation: 14,
   },
-  tvCenterPlayBtn: { width: 104, height: 104, borderRadius: 52 },
+  tvCenterPlayBtn: { width: 96, height: 96, borderRadius: 48 },
 
   /* ── Bottom section ── */
-  bottomSection: { paddingHorizontal: 16, paddingTop: 20, gap: 5 },
-  tvBottomSection: { paddingHorizontal: 48, paddingTop: 24, gap: 8 },
+  bottomSection: { paddingHorizontal: 16, paddingTop: 14, gap: 6 },
+  bottomSectionPortrait: { paddingHorizontal: 12, paddingTop: 10, gap: 6 },
+  tvBottomSection: { paddingHorizontal: 38, paddingTop: 20, gap: 8 },
+  seekRowCompact: { flexDirection: "row", alignItems: "center", gap: 10, width: "100%", paddingHorizontal: 2 },
+  tvSeekRowCompact: { gap: 14 },
+  progressWrapInline: { flex: 1, minWidth: 80, height: 34, marginHorizontal: 2 },
 
-  /* ── Bottom controls row ── */
+  /* ── Bottom controls row (icon-only circular buttons) ── */
   bottomCtrlRow: {
-    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    marginTop: 4, marginBottom: 2,
+    width: "100%", flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    marginTop: 2, marginBottom: 2,
   },
-  tvBottomCtrlRow: { marginTop: 8, marginBottom: 4 },
+  tvBottomCtrlRow: { marginTop: 6, marginBottom: 4 },
+  bottomSideGroup: { flexDirection: "row", alignItems: "center", gap: 10 },
+  bottomRightGroup: { flexDirection: "row", alignItems: "center", gap: 10 },
+  bottomDropAnchor: { position: "relative" },
+  bottomIconCircle: {
+    width: 42, height: 42, borderRadius: 21,
+    backgroundColor: "rgba(12,12,24,0.62)", borderWidth: 1, borderColor: "rgba(255,255,255,0.20)",
+    alignItems: "center", justifyContent: "center",
+    position: "relative",
+  },
+  tvBottomIconCircle: {
+    width: 54, height: 54, borderRadius: 18,
+  },
+  speedMicroBadge: {
+    position: "absolute", top: -4, right: -4,
+    backgroundColor: "#8B5CF6", borderRadius: 8,
+    paddingHorizontal: 4, paddingVertical: 1,
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.35)",
+  },
+  speedMicroBadgeText: { color: "#fff", fontSize: 8.5, fontFamily: "Cairo_700Bold", lineHeight: 11 },
+  bottomPillBtn: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    paddingHorizontal: 11, paddingVertical: 7, borderRadius: 999,
+    backgroundColor: "rgba(12,12,24,0.58)", borderWidth: 1, borderColor: "rgba(255,255,255,0.18)",
+  },
+  tvBottomPillBtn: {
+    paddingHorizontal: 18, paddingVertical: 11, borderRadius: 16, gap: 8,
+  },
+  bottomPillBtnActive: {
+    backgroundColor: "rgba(139,92,246,0.28)", borderColor: "rgba(167,139,250,0.58)",
+  },
+  bottomPillText: {
+    color: "rgba(255,255,255,0.92)", fontSize: 12, fontFamily: "Cairo_700Bold",
+  },
+  tvBottomPillText: { fontSize: 16 },
+  bottomPillTextActive: { color: "#ddd6fe" },
+  tvDropdown: { bottom: 60, minWidth: 170, paddingVertical: 8, borderRadius: 16 },
+  tvDropItem: { paddingVertical: 12, paddingHorizontal: 16 },
+  tvDropItemText: { fontSize: 16 },
+  tvDropSpeedNum: { fontSize: 18 },
   bottomSide: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8 },
   bottomCenter: { flexDirection: "row", alignItems: "center", gap: 14 },
   tvBottomCenter: { gap: 24 },
@@ -5347,18 +5917,18 @@ const s = StyleSheet.create({
 
   /* ── Dropdown menus ── */
   fitDropdown: {
-    position: "absolute", bottom: 44, left: 0,
+    position: "absolute", bottom: 50,
     backgroundColor: "rgba(12,8,28,0.97)",
-    borderRadius: 14, borderWidth: 1, borderColor: "rgba(139,92,246,0.25)",
-    paddingVertical: 6, paddingHorizontal: 4, minWidth: 130, zIndex: 60,
-    shadowColor: "#000", shadowOpacity: 0.6, shadowRadius: 12, elevation: 20,
+    borderRadius: 14, borderWidth: 1, borderColor: "rgba(139,92,246,0.32)",
+    paddingVertical: 6, paddingHorizontal: 4, minWidth: 144, zIndex: 60,
+    shadowColor: "#000", shadowOpacity: 0.65, shadowRadius: 14, elevation: 24,
   },
   speedDropdown: {
-    position: "absolute", bottom: 44, right: 0,
+    position: "absolute", bottom: 50,
     backgroundColor: "rgba(12,8,28,0.97)",
-    borderRadius: 14, borderWidth: 1, borderColor: "rgba(139,92,246,0.25)",
-    paddingVertical: 6, paddingHorizontal: 4, minWidth: 100, zIndex: 60,
-    shadowColor: "#000", shadowOpacity: 0.6, shadowRadius: 12, elevation: 20,
+    borderRadius: 14, borderWidth: 1, borderColor: "rgba(139,92,246,0.32)",
+    paddingVertical: 6, paddingHorizontal: 4, minWidth: 106, zIndex: 60,
+    shadowColor: "#000", shadowOpacity: 0.65, shadowRadius: 14, elevation: 24,
   },
   dropItem: {
     flexDirection: "row", alignItems: "center", gap: 8,
@@ -5390,8 +5960,12 @@ const s = StyleSheet.create({
   /* Bottom bar */
   bottomBar: { paddingHorizontal: 16, paddingTop: 28, gap: 8 },
   timeRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 2 },
-  timeText: { color: "rgba(255,255,255,0.75)", fontSize: 11, fontFamily: "Cairo_400Regular", minWidth: 40, textAlign: "center" },
-  tvTimeText: { fontSize: 14, minWidth: 54 },
+  timeText: {
+    color: "rgba(255,255,255,0.86)", fontSize: 12, fontFamily: "Cairo_600SemiBold",
+    fontVariant: ["tabular-nums"], includeFontPadding: false, lineHeight: 16,
+    minWidth: 42, textAlign: "center",
+  },
+  tvTimeText: { fontSize: 15, lineHeight: 20, minWidth: 56 },
 
   /* Progress bar */
   progressWrap: { height: 34, justifyContent: "center", position: "relative", marginHorizontal: 2 },
@@ -5408,14 +5982,21 @@ const s = StyleSheet.create({
     zIndex: 20,
   },
   progressWrapDragging: { height: 48 },
-  progressBg: { position: "absolute", left: 0, right: 0, height: 6, backgroundColor: "rgba(255,255,255,0.15)", borderRadius: 3 },
-  tvProgressBg: { height: 8, borderRadius: 4 },
-  skipMarker: { position: "absolute", height: 4, backgroundColor: "rgba(250,204,21,0.80)", borderRadius: 2, top: "50%", marginTop: -2, zIndex: 2 },
-  progressFill: { position: "absolute", height: 6, backgroundColor: "#8B5CF6", borderRadius: 3, top: "50%", marginTop: -3, zIndex: 3 },
+  progressBg: { position: "absolute", left: 0, right: 0, height: 5, top: "50%", marginTop: -2.5, backgroundColor: "rgba(255,255,255,0.18)", borderRadius: 2.5 },
+  tvProgressBg: { height: 8, marginTop: -4, borderRadius: 4 },
+  skipMarker: { position: "absolute", height: 5, backgroundColor: "rgba(250,204,21,0.82)", borderRadius: 2.5, top: "50%", marginTop: -2.5, zIndex: 2 },
+  progressFill: { position: "absolute", height: 5, backgroundColor: "#8B5CF6", borderRadius: 2.5, top: "50%", marginTop: -2.5, zIndex: 3 },
   tvProgressFill: { height: 8, marginTop: -4, borderRadius: 4 },
-  thumb: { position: "absolute", top: "50%", width: 18, height: 18, borderRadius: 9, backgroundColor: "#fff", marginLeft: -9, marginTop: -9, shadowColor: "#8B5CF6", shadowOpacity: 0.5, shadowRadius: 6, elevation: 4, zIndex: 4 },
-  tvThumb: { width: 24, height: 24, borderRadius: 12, marginLeft: -12, marginTop: -12 },
-  thumbDragging: { width: 26, height: 26, borderRadius: 13, marginLeft: -13, marginTop: -13, backgroundColor: "#c4b5fd", shadowColor: "#8B5CF6", shadowOpacity: 1, shadowRadius: 14, elevation: 8 },
+  thumb: {
+    position: "absolute", top: "50%", width: 15, height: 15, borderRadius: 7.5,
+    backgroundColor: "#fff", marginTop: -7.5, transform: [{ translateX: -7.5 }],
+    shadowColor: "#8B5CF6", shadowOpacity: 0.55, shadowRadius: 6, elevation: 5, zIndex: 4,
+  },
+  tvThumb: { width: 22, height: 22, borderRadius: 11, marginTop: -11, transform: [{ translateX: -11 }] },
+  thumbDragging: {
+    width: 22, height: 22, borderRadius: 11, marginTop: -11, transform: [{ translateX: -11 }],
+    backgroundColor: "#c4b5fd", shadowColor: "#8B5CF6", shadowOpacity: 1, shadowRadius: 14, elevation: 8,
+  },
   dragTooltip: { position: "absolute", bottom: "100%", marginBottom: 6, backgroundColor: "rgba(10,6,30,0.95)", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: "rgba(139,92,246,0.40)", zIndex: 10 },
   dragTooltipText: { color: "#fff", fontSize: 13, fontFamily: "Cairo_700Bold" },
 
@@ -5534,9 +6115,9 @@ const s = StyleSheet.create({
 
   /* ══════ Buffer bar (web player port) ══════ */
   bufferBar: {
-    position: "absolute", height: 6,
-    backgroundColor: "rgba(255,255,255,0.22)",
-    borderRadius: 3, zIndex: 2,
+    position: "absolute", height: 5, top: "50%", marginTop: -2.5,
+    backgroundColor: "rgba(255,255,255,0.24)",
+    borderRadius: 2.5, zIndex: 2,
   },
 
   /* ══════ OP/ED Tick marks (web player port) ══════ */

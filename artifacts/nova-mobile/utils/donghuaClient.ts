@@ -2,7 +2,7 @@
  * Direct on-phone Donghua availability probe & on-demand stream/subtitle resolver.
  * Mirrors the exact check-first, extract-on-tap lifecycle used across Anime servers:
  *  - `probeDonghuaAvailabilityOnPhone`: lightweight series + episode lookup & cache (zero video extraction)
- *  - `resolveDonghuaSiteOnPhone`: on-demand extraction ONLY when user taps Play or Download on AX / AK,
+ *  - `resolveDonghuaSiteOnPhone`: fast on-demand extraction ONLY when user taps Play or Download on DX 1 / DX 2,
  *    with cross-source Arabic subtitle lookup (OpenSubtitles human -> AX direct Arabic SRT -> translate-vtt).
  */
 
@@ -15,7 +15,7 @@ import {
   parseStreamRubyEmbedHtml,
   extractDailymotionVideoId,
   parseDailymotionMetadata,
-  matchDonghuaCatalogItemByTitle,
+  rankDonghuaCatalogCandidates,
   pickDonghuaEpisodeByNumber,
   type DonghuaSourceId,
   type DonghuaCatalogItem,
@@ -32,6 +32,7 @@ export type DonghuaSiteKey = "donghua_ax" | "donghua_ak";
 
 const detailCache = new Map<string, { ts: number; detail: DonghuaDetail }>();
 const episodeUrlCache = new Map<string, string | null>();
+const epHtmlCache = new Map<string, { ts: number; html: string }>();
 const axArabicSubCache = new Map<string, string | null>();
 const CACHE_TTL = 10 * 60 * 1000;
 
@@ -39,7 +40,7 @@ async function fetchHtml(
   url: string,
   headers: Record<string, string> = {},
   signal?: AbortSignal,
-  timeoutMs = 9000,
+  timeoutMs = 8000,
 ): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -64,6 +65,24 @@ async function fetchHtml(
   }
 }
 
+async function fetchEpisodeHtmlCached(url: string, signal?: AbortSignal): Promise<string> {
+  const cached = epHtmlCache.get(url);
+  if (cached && Date.now() - cached.ts < CACHE_TTL) return cached.html;
+  const html = await fetchHtml(url, {}, signal, 8500);
+  epHtmlCache.set(url, { ts: Date.now(), html });
+  return html;
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  return Promise.race([
+    promise.finally(() => { if (timer) clearTimeout(timer); }),
+    new Promise<T>((resolve) => {
+      timer = setTimeout(() => resolve(fallback), ms);
+    }),
+  ]);
+}
+
 function buildSearchQueries(title?: string, englishTitle?: string, synonyms?: string[]): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
@@ -80,23 +99,36 @@ function buildSearchQueries(title?: string, englishTitle?: string, synonyms?: st
       seen.add(key);
       out.push(clean);
     }
-    const baseNoSeason = clean.replace(/\bseason\s*\d+\b|\bpart\s*\d+\b|\bfinal\s+season\b|\b\d+(?:nd|rd|th)\s+season\b/gi, "").replace(/\s+/g, " ").trim();
+    const baseNoSeason = clean
+      .replace(/\bseason\s*\d+\b|\bpart\s*\d+\b|\bfinal\s+season\b|\b\d+(?:nd|rd|th)\s+season\b/gi, "")
+      .replace(/\s+/g, " ")
+      .trim();
     if (baseNoSeason.length >= 2 && !seen.has(baseNoSeason.toLowerCase())) {
       seen.add(baseNoSeason.toLowerCase());
       out.push(baseNoSeason);
+    }
+    // Also try main title before colon (e.g. "Guimi Zhi Zhu: Xiaochou Pian" -> "Guimi Zhi Zhu")
+    if (String(raw || "").includes(":")) {
+      const beforeColon = String(raw || "").split(":")[0]
+        .replace(/[^a-zA-Z0-9\s']/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (beforeColon.length >= 3 && !seen.has(beforeColon.toLowerCase())) {
+        seen.add(beforeColon.toLowerCase());
+        out.push(beforeColon);
+      }
     }
   };
   add(englishTitle);
   add(title);
   if (Array.isArray(synonyms)) {
     for (const syn of synonyms.slice(0, 6)) {
-      // Only ASCII/Latin synonyms work on AX/AK search
       if (/^[a-zA-Z0-9\s:'\-.,!?()]+$/.test(String(syn || ""))) {
         add(syn);
       }
     }
   }
-  return out.slice(0, 4);
+  return out.slice(0, 5);
 }
 
 async function searchSourceCatalog(
@@ -108,14 +140,14 @@ async function searchSourceCatalog(
     source === "animekhor"
       ? `https://animekhor.org/?s=${encodeURIComponent(query)}`
       : `https://animexin.dev/?s=${encodeURIComponent(query)}`;
-  const html = await fetchHtml(url, {}, signal, 8000);
+  const html = await fetchHtml(url, {}, signal, 7500);
   return parseDonghuaCatalogHtml(html, source);
 }
 
 async function fetchDetailCached(source: DonghuaSourceId, url: string, signal?: AbortSignal): Promise<DonghuaDetail> {
   const cached = detailCache.get(url);
   if (cached && Date.now() - cached.ts < CACHE_TTL) return cached.detail;
-  const html = await fetchHtml(url, {}, signal, 8500);
+  const html = await fetchHtml(url, {}, signal, 7500);
   const detail = parseDonghuaDetailHtml(html, source, url);
   detailCache.set(url, { ts: Date.now(), detail });
   return detail;
@@ -138,13 +170,20 @@ async function findEpisodeUrlForSource(
     try {
       const items = await searchSourceCatalog(source, q, opts.signal);
       if (items.length === 0) continue;
-      const matched = matchDonghuaCatalogItemByTitle(items, queries);
-      if (!matched) continue;
-      const detail = await fetchDetailCached(source, matched.url, opts.signal);
-      const epItem = pickDonghuaEpisodeByNumber(detail.episodes, ep);
-      if (epItem?.url) {
-        episodeUrlCache.set(cacheKey, epItem.url);
-        return epItem.url;
+      // Check up to top 3 ranked candidates so empty stub pages (0 episodes) don't block valid ones
+      const ranked = rankDonghuaCatalogCandidates(items, queries);
+      for (const candidate of ranked.slice(0, 3)) {
+        if (opts.signal?.aborted) return null;
+        try {
+          const detail = await fetchDetailCached(source, candidate.url, opts.signal);
+          const epItem = pickDonghuaEpisodeByNumber(detail.episodes, ep);
+          if (epItem?.url) {
+            episodeUrlCache.set(cacheKey, epItem.url);
+            return epItem.url;
+          }
+        } catch {
+          // Try next candidate
+        }
       }
     } catch {
       // Try next query candidate
@@ -158,7 +197,7 @@ async function findEpisodeUrlForSource(
 /**
  * Lightweight availability probe for Donghua servers (`donghua_ax` & `donghua_ak`).
  * Runs ONLY series/episode lookup (no video mirror extraction) so watch.tsx shows
- * available short-code slots (`AX`, `AK`) just like standard Anime check mode.
+ * available short-code slots (`DX 1`, `DX 2`) just like standard Anime check mode.
  */
 export async function probeDonghuaAvailabilityOnPhone(opts: {
   title?: string;
@@ -203,7 +242,7 @@ async function fetchDirectAxArabicSubtitle(
         axArabicSubCache.set(key, null);
         return { arabicSubUrl: null, englishSubUrl: null };
       }
-      html = await fetchHtml(epUrl, {}, opts.signal, 8000);
+      html = await fetchEpisodeHtmlCached(epUrl, opts.signal);
     }
     const mirrors = parseDonghuaEpisodeMirrors(html);
     const dmMirrors = mirrors.filter((m) => m.host === "dailymotion_allsub" || m.host === "dailymotion");
@@ -216,7 +255,7 @@ async function fetchDirectAxArabicSubtitle(
           `https://www.dailymotion.com/player/metadata/video/${vid}`,
           { Referer: "https://geo.dailymotion.com/", Accept: "application/json" },
           opts.signal,
-          6500,
+          3500,
         );
         const meta = parseDailymotionMetadata(JSON.parse(metaText));
         if (meta.arabicSubUrl) {
@@ -233,9 +272,19 @@ async function fetchDirectAxArabicSubtitle(
   }
 }
 
+function qualityRank(q: string): number {
+  const low = String(q || "").toLowerCase();
+  if (low.includes("2160")) return 5;
+  if (low.includes("1440")) return 4;
+  if (low.includes("1080")) return 3;
+  if (low.includes("720")) return 2;
+  if (low.includes("480")) return 1;
+  return 0;
+}
+
 /**
- * On-demand stream + Arabic subtitle extraction called ONLY when user taps Play/Download
- * on `السيرفر AX` (`donghua_ax`) or `السيرفر AK` (`donghua_ak`).
+ * On-demand fast stream + Arabic subtitle extraction called ONLY when user taps Play/Download
+ * on `DX 1` (`donghua_ax`) or `DX 2` (`donghua_ak`).
  */
 export async function resolveDonghuaSiteOnPhone(opts: {
   site: DonghuaSiteKey;
@@ -248,39 +297,61 @@ export async function resolveDonghuaSiteOnPhone(opts: {
 }): Promise<DonghuaPhoneResolvedSource[]> {
   const source: DonghuaSourceId = opts.site === "donghua_ak" ? "animekhor" : "animexin";
   const referer = source === "animekhor" ? "https://animekhor.org/" : "https://animexin.dev/";
-
   const epUrl = await findEpisodeUrlForSource(source, opts);
   if (!epUrl) return [];
 
-  // Fetch episode HTML + OpenSubtitles human Arabic subtitle in parallel
-  const [epHtml, osSub] = await Promise.all([
-    fetchHtml(epUrl, {}, opts.signal, 10000),
+  // Fetch episode HTML immediately + OpenSubtitles human Arabic subtitle capped at 2.8s so playback isn't stalled
+  const osPromise = withTimeout(
     fetchHumanArabicSubtitleFromOpenSubtitles({
       title: opts.title,
       englishTitle: opts.englishTitle,
       episode: opts.episode,
       signal: opts.signal,
     }).catch(() => null),
-  ]);
+    2800,
+    null,
+  );
+  const epHtml = await fetchEpisodeHtmlCached(epUrl, opts.signal);
 
   const mirrors: DonghuaMirror[] = parseDonghuaEpisodeMirrors(epHtml).filter(
     (m) => !m.isIndoOnly && m.host !== "rumble",
   );
-
   const candidates: DonghuaPhoneResolvedSource[] = [];
-  let directArabicSub: string | null = osSub?.url && osSub.isHuman ? osSub.url : null;
-  let isHumanSub = Boolean(directArabicSub);
+  let directArabicSub: string | null = null;
+  let isHumanSub = false;
   let englishFallbackSub: string | null = null;
 
-  // Cross-fetch direct Arabic SRT from AX if OpenSubtitles didn't have human Arabic
-  const axSubPromise = !directArabicSub
-    ? fetchDirectAxArabicSubtitle(opts, source === "animexin" ? epHtml : undefined)
-    : Promise.resolve({ arabicSubUrl: null, englishSubUrl: null });
-
-  const mirrorTasks = mirrors.map(async (mirror) => {
+  const extractMirror = async (mirror: DonghuaMirror): Promise<void> => {
     try {
+      if (mirror.host === "okru") {
+        const html = await fetchHtml(mirror.embedUrl, { Referer: referer }, opts.signal, 5500);
+        const ok = parseOkRuEmbedHtml(html);
+        let maxOkQuality = "720p";
+        for (const q of ["1080p", "720p", "480p"]) {
+          const v = ok.videos.find((x) => x.quality === q);
+          if (v) {
+            if (qualityRank(q) > qualityRank(maxOkQuality)) maxOkQuality = q;
+            candidates.push({
+              url: v.url,
+              quality: q,
+              isHls: false,
+              headers: { Referer: "https://ok.ru/", "User-Agent": MOBILE_UA },
+            });
+          }
+        }
+        if (ok.hlsUrl) {
+          candidates.push({
+            url: ok.hlsUrl,
+            quality: maxOkQuality,
+            isHls: true,
+            headers: { Referer: "https://ok.ru/", "User-Agent": MOBILE_UA },
+          });
+        }
+        return;
+      }
+
       if (mirror.host === "streamruby") {
-        const html = await fetchHtml(mirror.embedUrl, { Referer: referer }, opts.signal, 8000);
+        const html = await fetchHtml(mirror.embedUrl, { Referer: referer }, opts.signal, 5500);
         const parsed = parseStreamRubyEmbedHtml(html);
         for (const tr of parsed.tracks) {
           if (tr.isArabic && !directArabicSub) directArabicSub = tr.url;
@@ -294,60 +365,78 @@ export async function resolveDonghuaSiteOnPhone(opts: {
             url: parsed.m3u8,
             quality: "1080p",
             isHls: true,
-            headers: { Referer: origin },
+            headers: { Referer: origin, "User-Agent": MOBILE_UA },
           });
         }
         return;
       }
 
-      if (mirror.host === "okru") {
-        const html = await fetchHtml(mirror.embedUrl, { Referer: referer }, opts.signal, 8000);
-        const ok = parseOkRuEmbedHtml(html);
-        if (ok.hlsUrl) {
+      if (mirror.host === "dailymotion_allsub" || mirror.host === "dailymotion") {
+        const vid = extractDailymotionVideoId(mirror.embedUrl);
+        if (!vid) return;
+        const metaText = await fetchHtml(
+          `https://www.dailymotion.com/player/metadata/video/${vid}`,
+          { Referer: "https://geo.dailymotion.com/", Accept: "application/json" },
+          opts.signal,
+          4500,
+        );
+        const meta = parseDailymotionMetadata(JSON.parse(metaText));
+        if (meta.arabicSubUrl && !directArabicSub) directArabicSub = meta.arabicSubUrl;
+        if (meta.englishSubUrl && !englishFallbackSub) englishFallbackSub = meta.englishSubUrl;
+        if (meta.hlsUrl) {
           candidates.push({
-            url: ok.hlsUrl,
+            url: meta.hlsUrl,
             quality: "1080p",
             isHls: true,
-            headers: { Referer: "https://ok.ru/" },
+            headers: { Referer: "https://geo.dailymotion.com/", "User-Agent": MOBILE_UA },
           });
-        }
-        for (const q of ["1080p", "720p", "480p"]) {
-          const v = ok.videos.find((x) => x.quality === q);
-          if (v) {
-            candidates.push({
-              url: v.url,
-              quality: q,
-              isHls: false,
-              headers: { Referer: "https://ok.ru/" },
-            });
-          }
         }
         return;
       }
 
       if (mirror.host === "odysee") {
-        const html = await fetchHtml(mirror.embedUrl, { Referer: referer }, opts.signal, 8000);
+        const html = await fetchHtml(mirror.embedUrl, { Referer: referer }, opts.signal, 5500);
         const mediaUrl = parseOdyseeEmbedHtml(html);
         if (mediaUrl) {
           candidates.push({
             url: mediaUrl,
             quality: "1080p",
             isHls: /\.m3u8/i.test(mediaUrl),
-            headers: { Referer: "https://odysee.com/" },
+            headers: { Referer: "https://odysee.com/", "User-Agent": MOBILE_UA },
           });
         }
       }
     } catch {
       // Ignore single mirror failure so backups proceed
     }
-  });
+  };
 
-  const [axSubRes] = await Promise.all([axSubPromise, Promise.allSettled(mirrorTasks)]);
-  if (!directArabicSub && axSubRes.arabicSubUrl) {
-    directArabicSub = axSubRes.arabicSubUrl;
+  // Phase 1: Fast reliable hosts first (Ok.ru + StreamRuby — usually ~1s, avoids 6-8s Odysee block!)
+  const fastMirrors = mirrors.filter((m) => m.host === "okru" || m.host === "streamruby");
+  const fallbackMirrors = mirrors.filter((m) => m.host !== "okru" && m.host !== "streamruby");
+
+  await Promise.allSettled(fastMirrors.map(extractMirror));
+
+  // Phase 2: Only try slower fallback hosts (Dailymotion HLS / Odysee) if fast mirrors yielded nothing
+  if (candidates.length === 0 && fallbackMirrors.length > 0 && !opts.signal?.aborted) {
+    await Promise.allSettled(fallbackMirrors.map(extractMirror));
   }
-  if (!englishFallbackSub && axSubRes.englishSubUrl) {
-    englishFallbackSub = axSubRes.englishSubUrl;
+
+  const osSub = await osPromise;
+  if (osSub?.url && osSub.isHuman) {
+    directArabicSub = osSub.url;
+    isHumanSub = true;
+  }
+
+  // Cross-fetch direct Arabic SRT from AX if needed (capped at 2.6s so playback never drags)
+  if (!directArabicSub && !opts.signal?.aborted) {
+    const axSubRes = await withTimeout(
+      fetchDirectAxArabicSubtitle(opts, source === "animexin" ? epHtml : undefined),
+      2600,
+      { arabicSubUrl: null, englishSubUrl: null },
+    );
+    if (axSubRes.arabicSubUrl) directArabicSub = axSubRes.arabicSubUrl;
+    if (!englishFallbackSub && axSubRes.englishSubUrl) englishFallbackSub = axSubRes.englishSubUrl;
   }
 
   let finalSubtitleUrl: string | undefined = directArabicSub || undefined;
@@ -360,15 +449,16 @@ export async function resolveDonghuaSiteOnPhone(opts: {
     }
   }
 
-  // Sort by preferred quality first, then HLS/1080p -> MP4
+  // Sort by preferred quality first, preferring direct MP4 first at equal quality for instant startup & download
   const wantedQ = String(opts.preferredQuality || "1080p").toLowerCase();
   candidates.sort((a, b) => {
     const aExact = a.quality.toLowerCase() === wantedQ ? 1 : 0;
     const bExact = b.quality.toLowerCase() === wantedQ ? 1 : 0;
     if (aExact !== bExact) return bExact - aExact;
-    const qRank = (q: string) => (q === "1080p" ? 3 : q === "720p" ? 2 : 1);
-    if (qRank(a.quality) !== qRank(b.quality)) return qRank(b.quality) - qRank(a.quality);
-    return (b.isHls ? 1 : 0) - (a.isHls ? 1 : 0);
+    const qa = qualityRank(a.quality);
+    const qb = qualityRank(b.quality);
+    if (qa !== qb) return qb - qa;
+    return (a.isHls ? 1 : 0) - (b.isHls ? 1 : 0);
   });
 
   const seen = new Set<string>();

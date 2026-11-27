@@ -22,9 +22,6 @@ const NATIVE_FRIENDLY_DIRECT_HOSTS = [
   "pixeldrain.net",
   "drive.google.com",
   "googleusercontent.com",
-  "okcdn.ru",
-  "userapi.com",
-  "vkvideo.ru",
   "buzzheavier.com",
   "buzzheav.com",
 ];

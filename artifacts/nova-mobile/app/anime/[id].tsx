@@ -25,6 +25,7 @@ import { isTvDevice, tvFocusStyle, TvPressable as Pressable, useTvMetrics } from
 import { useTvFocusMemory } from "@/utils/tvFocus";
 import { useColors } from "@/hooks/useColors";
 import { getPrimaryCtaMetrics } from "@/utils/responsiveUiLogic.mjs";
+import { formatMediaTitleHierarchy } from "@/utils/donghuaLogic.mjs";
 import type { ThemePalette } from "@/constants/colors";
 
 const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
@@ -35,7 +36,7 @@ const { width: W } = Dimensions.get("window");
 const DETAIL_QUERY = `
 query ($id: Int) {
   Media(id: $id, type: ANIME) {
-    id idMal isAdult
+    id idMal isAdult countryOfOrigin
     title { romaji english native }
     synonyms
     coverImage { large extraLarge }
@@ -260,6 +261,7 @@ export default function AnimeDetailScreen() {
   const [saved, setSaved] = useState(false);
   const [warnDismissed, setWarnDismissed] = useState(false);
   const [descAr, setDescAr] = useState<string | null>(null);
+  const [autoTitleAr, setAutoTitleAr] = useState<string | null>(null);
   const [descLoading, setDescLoading] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [favCharIds, setFavCharIds] = useState<Set<number>>(new Set());
@@ -311,6 +313,7 @@ export default function AnimeDetailScreen() {
       setLoading(true);
       setAnime(null);
       setDescAr(null);
+      setAutoTitleAr(null);
       AsyncStorage.getItem(`nova:anime-detail:v1:${id}`).then(raw => {
         if (!raw || !isMountedRef.current) return;
         try {
@@ -438,6 +441,33 @@ export default function AnimeDetailScreen() {
       } else {
         setDescLoading(false);
       }
+      if (a?.countryOfOrigin === "CN") {
+        const knownTitleAr = a?.title_ar
+          || a?.synonyms?.find((value: string) => /[\u0600-\u06FF]/.test(value))
+          || getKnownArabicAnimeTitle(a?.id, a?.title?.english, a?.title?.romaji);
+        const primaryForAr = (a?.title?.english || a?.title?.romaji || "").trim();
+        if (!knownTitleAr && primaryForAr) {
+          const titleCacheKey = `title-ar-${id}`;
+          AsyncStorage.getItem(titleCacheKey).then(cachedTitle => {
+            if (controller.signal.aborted) return;
+            if (cachedTitle && /[\u0600-\u06FF]/.test(cachedTitle)) {
+              setAutoTitleAr(cachedTitle);
+              return;
+            }
+            fetch(`${base}/api/anime/translate?text=${encodeURIComponent(primaryForAr)}&from=en&to=ar&kind=title`, { signal: controller.signal })
+              .then(r2 => r2.json())
+              .then(d2 => {
+                if (controller.signal.aborted) return;
+                const t = typeof d2?.translated === "string" ? d2.translated.trim() : "";
+                if (t && /[\u0600-\u06FF]/.test(t) && t.length > 1) {
+                  setAutoTitleAr(t);
+                  AsyncStorage.setItem(titleCacheKey, t).catch(() => {});
+                }
+              })
+              .catch(() => {});
+          }).catch(() => {});
+        }
+      }
     }).catch(() => { if (isMountedRef.current) { setDescLoading(false); setLoadError(true); } })
       .finally(() => { clearTimeout(timeoutId); if (isMountedRef.current) setLoading(false); });
 
@@ -509,7 +539,16 @@ export default function AnimeDetailScreen() {
     await AsyncStorage.setItem(`my-rating-${id}`, String(n));
   }
 
-  const arabicTitle = anime?.title_ar || anime?.synonyms?.find((value: string) => /[\u0600-\u06FF]/.test(value)) || getKnownArabicAnimeTitle(anime?.id, anime?.title?.english, anime?.title?.romaji);
+  const arabicTitle = anime?.title_ar || anime?.synonyms?.find((value: string) => /[\u0600-\u06FF]/.test(value)) || getKnownArabicAnimeTitle(anime?.id, anime?.title?.english, anime?.title?.romaji) || autoTitleAr || undefined;
+  const isDonghua = anime?.countryOfOrigin === "CN";
+  const donghuaTitles = isDonghua && anime
+    ? formatMediaTitleHierarchy({
+        english: anime.title?.english,
+        romaji: anime.title?.romaji,
+        native: anime.title?.native,
+        arabic: arabicTitle,
+      })
+    : null;
   if (loading) return (
     <View style={[d.container, { paddingTop: topPad }]}>
       <View style={[d.topBar, tvMode && d.tvTopBar]}>
@@ -600,7 +639,7 @@ export default function AnimeDetailScreen() {
           <Ionicons name="chevron-forward" size={tvMode ? 20 : 20} color={colors.textPrimary} />
         </Pressable>
         <Text style={[d.topBarTitle, tvMode && d.tvTopBarTitle]} numberOfLines={1}>
-          {arabicTitle || anime.title?.english || anime.title?.romaji || "تفاصيل الأنمي"}
+          {donghuaTitles?.primary || arabicTitle || anime.title?.english || anime.title?.romaji || "تفاصيل الأنمي"}
         </Text>
         <View style={{ flexDirection: ROW_RTL, alignItems: "center", gap: 6 }}>
           {anime.status ? (
@@ -652,14 +691,34 @@ export default function AnimeDetailScreen() {
             resizeMode="cover"
           />
           <View style={d.infoText}>
-            <Text style={[d.titleMain, d.titleArabicMain, tvMode && d.tvTitleMain]} numberOfLines={2}>
-              {arabicTitle || anime.title?.english || anime.title?.romaji || "عنوان غير متاح"}
-            </Text>
-            {(anime.title?.english || anime.title?.romaji) ? (
-              <Text style={[d.titleArabic, tvMode && d.tvTitleArabic, { writingDirection: "ltr", textAlign: "left" }]} numberOfLines={1}>
-                {anime.title?.english || anime.title?.romaji}
-              </Text>
-            ) : null}
+            {donghuaTitles ? (
+              <>
+                <Text style={[d.titleMain, tvMode && d.tvTitleMain, { writingDirection: "ltr", textAlign: "left" }]} numberOfLines={2}>
+                  {donghuaTitles.primary || "عنوان غير متاح"}
+                </Text>
+                {donghuaTitles.arabic ? (
+                  <Text style={[d.titleArabic, tvMode && d.tvTitleArabic, { writingDirection: "rtl", textAlign: "right" }]} numberOfLines={1}>
+                    {donghuaTitles.arabic}
+                  </Text>
+                ) : null}
+                {donghuaTitles.original ? (
+                  <Text style={[d.titleNative, { writingDirection: "ltr", textAlign: "left" }]} numberOfLines={1}>
+                    {donghuaTitles.original}
+                  </Text>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <Text style={[d.titleMain, d.titleArabicMain, tvMode && d.tvTitleMain]} numberOfLines={2}>
+                  {arabicTitle || anime.title?.english || anime.title?.romaji || "عنوان غير متاح"}
+                </Text>
+                {(anime.title?.english || anime.title?.romaji) ? (
+                  <Text style={[d.titleArabic, tvMode && d.tvTitleArabic, { writingDirection: "ltr", textAlign: "left" }]} numberOfLines={1}>
+                    {anime.title?.english || anime.title?.romaji}
+                  </Text>
+                ) : null}
+              </>
+            )}
             <View style={d.badgeRow}>
               {formatText ? (
                 <View style={[d.badge, d.badgeDefault]}>
@@ -824,7 +883,7 @@ export default function AnimeDetailScreen() {
         {/* ── Synopsis ── */}
         {desc ? (
           <View style={[d.section, tvMode && d.tvSection]}>
-            <SectionHeader title="قصة الأنمي" tvMode={tvMode} />
+            <SectionHeader title={isDonghua ? "القصة" : "قصة الأنمي"} tvMode={tvMode} />
             <Pressable
               onPress={() => setShowFull(f => !f)}
               focusable={tvMode}

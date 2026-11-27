@@ -36,6 +36,7 @@ import { useTvFocusMemory } from "@/utils/tvFocus";
 import { getBaseUrl } from "@/utils/api";
 import { fetchHumanArabicSubtitleFromOpenSubtitles } from "@/utils/openSubtitlesClient";
 import { probeDonghuaAvailabilityOnPhone, resolveDonghuaSiteOnPhone, type DonghuaPhoneResolvedSource } from "@/utils/donghuaClient";
+import { isAllowedSlotForDonghua } from "@/utils/donghuaLogic.mjs";
 import { anilistQuery, EPISODE_COUNT_QUERY } from "@/utils/anilist";
 import { secureFetch, secureStreamFetch, warmAuthToken, getAuthToken, getDownloadToken } from "@/utils/secureApi";
 import {
@@ -1153,6 +1154,8 @@ export default function WatchScreen() {
   )?.totalEps;
   const [catalogTotalEps, setCatalogTotalEps] = useState<number | undefined>();
   const [isDonghuaOrigin, setIsDonghuaOrigin] = useState(false);
+  const isDonghuaOriginRef = useRef(false);
+  isDonghuaOriginRef.current = isDonghuaOrigin;
   const donghuaSynonymsRef = useRef<string[]>([]);
   const [awEpisodeNumbersBySeason, setAwEpisodeNumbersBySeason] =
     useState<Record<string, number[]>>({});
@@ -1232,7 +1235,9 @@ export default function WatchScreen() {
       canGoNextEpisode ? epNum + 1 : epNum,
     )
     : totalEpsCount;
-  const displayTitle = titleArStr || englishStr || titleStr;
+  const displayTitle = isDonghuaOrigin
+    ? (englishStr || titleStr || titleArStr)
+    : (titleArStr || englishStr || titleStr);
 
   const analyticsRef = useRef<ReturnType<typeof startMobileWatchAnalytics> | null>(null);
   const analyticsAnimeKey = anime || awSeries || displayTitle;
@@ -1302,6 +1307,26 @@ export default function WatchScreen() {
   const [availabilityError, setAvailabilityError] = useState(false);
   const [availabilityAttempt, setAvailabilityAttempt] = useState(0);
 
+  useEffect(() => {
+    if (!isDonghuaOrigin) return;
+    setAvailableSlots((curr) => {
+      let changed = false;
+      const next: typeof curr = {};
+      for (const [site, tiers] of Object.entries(curr)) {
+        if (isAllowedSlotForDonghua(site)) {
+          next[site] = tiers;
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : curr;
+    });
+    setSources((curr) => {
+      const filtered = curr.filter((src) => isAllowedSlotForDonghua(src.site));
+      return filtered.length === curr.length ? curr : filtered;
+    });
+  }, [isDonghuaOrigin]);
+
   // Check-only Donghua availability probe (same check-first, extract-on-tap lifecycle as Anime!)
   useEffect(() => {
     if (Platform.OS === "web" || isAwDubbed || !isDonghuaOrigin) return;
@@ -1369,10 +1394,10 @@ export default function WatchScreen() {
   const visiblePickerKeys = useMemo(
     () => Q_KEYS.flatMap((quality) =>
       Object.entries(availableSlots)
-        .filter(([, tiers]) => Boolean(tiers[quality]))
+        .filter(([site, tiers]) => Boolean(tiers[quality]) && (!isDonghuaOrigin || isAllowedSlotForDonghua(site)))
         .map(([site]) => pickerSlotKey(site, quality)),
     ),
-    [availableSlots],
+    [availableSlots, isDonghuaOrigin],
   );
   const pickerFocusKey = preferredKey && visiblePickerKeys.includes(preferredKey)
     ? preferredKey
@@ -1739,25 +1764,40 @@ export default function WatchScreen() {
       ? null
       : readAvailabilityHintRows(availabilityHintKey);
     if (cachedHints) {
+      const filteredCachedHints: Record<string, Partial<Record<QualityKey, AvailableSlot>>> = {};
       const cachedStatus: Record<string, "ready"> = {};
       for (const [site, tiers] of Object.entries(cachedHints)) {
+        if (isDonghuaOriginRef.current && !isAllowedSlotForDonghua(site)) continue;
+        filteredCachedHints[site] = tiers;
         for (const quality of Object.keys(tiers) as QualityKey[]) {
           cachedStatus[pickerSlotKey(site, quality)] = "ready";
         }
       }
-      setAvailableSlots(cachedHints);
-      setSlotStatus(cachedStatus);
+      setAvailableSlots((curr) => ({
+        ...filteredCachedHints,
+        ...(curr.donghua_ax ? { donghua_ax: curr.donghua_ax } : {}),
+        ...(curr.donghua_ak ? { donghua_ak: curr.donghua_ak } : {}),
+      }));
+      setSlotStatus((curr) => {
+        const next: Record<string, "ready"> = { ...cachedStatus };
+        for (const [k, v] of Object.entries(curr)) {
+          if ((k.startsWith("donghua_ax:") || k.startsWith("donghua_ak:")) && v === "ready") {
+            next[k] = "ready";
+          }
+        }
+        return next;
+      });
       setAvailabilityDone(true);
       setAvailabilityError(false);
       setShowingAvailabilityHints(true);
-      const hintRows = Object.values(cachedHints).reduce(
+      const hintRows = Object.values(filteredCachedHints).reduce(
         (sum, tiers) => sum + Object.keys(tiers).length,
         0,
       );
       console.info(
         `[playback-trace] id=${playbackTraceId} component=availability stage=hint_cache_hit rows=${hintRows}`,
       );
-      if (Platform.OS !== "web" && !cachedHints.anime4up2_hard) {
+      if (Platform.OS !== "web" && !isDonghuaOriginRef.current && !filteredCachedHints.anime4up2_hard) {
         const ad1HintCtrl = new AbortController();
         let hintCancelled = false;
         void probeAd1AvailabilityOnPhone({
@@ -1794,8 +1834,21 @@ export default function WatchScreen() {
     setAvailabilityDone(false);
     setAvailabilityError(false);
     setShowingAvailabilityHints(false);
-    setAvailableSlots({});
-    setSlotStatus({});
+    setAvailableSlots((curr) => {
+      const preserved: typeof curr = {};
+      if (curr.donghua_ax) preserved.donghua_ax = curr.donghua_ax;
+      if (curr.donghua_ak) preserved.donghua_ak = curr.donghua_ak;
+      return preserved;
+    });
+    setSlotStatus((curr) => {
+      const preserved: typeof curr = {};
+      for (const [k, v] of Object.entries(curr)) {
+        if ((k.startsWith("donghua_ax:") || k.startsWith("donghua_ak:")) && v === "ready") {
+          preserved[k] = "ready";
+        }
+      }
+      return preserved;
+    });
 
     const params = new URLSearchParams();
     params.set("title", titleStr);
@@ -1842,6 +1895,7 @@ export default function WatchScreen() {
       /* Availability identifies a provider/quality candidate only. The
          click-time fetch-source request still resolves this episode's link. */
       if (!site || !qk) return;
+      if (isDonghuaOriginRef.current && !isAllowedSlotForDonghua(site)) return;
       const previous = stagedSlots[site]?.[qk];
       stagedSlots[site] = {
         ...stagedSlots[site],
@@ -1873,15 +1927,35 @@ export default function WatchScreen() {
 
     const commitRows = () => {
       if (!isMountedRef.current) return;
-      const nextStatus: Record<string, "ready"> = {};
+      const filteredStaged: Record<string, Partial<Record<QualityKey, AvailableSlot>>> = {};
       for (const [site, tiers] of Object.entries(stagedSlots)) {
-        for (const qk of Object.keys(tiers) as QualityKey[]) {
-          nextStatus[pickerSlotKey(site, qk)] = "ready";
-        }
+        if (isDonghuaOriginRef.current && !isAllowedSlotForDonghua(site)) continue;
+        filteredStaged[site] = tiers;
       }
-      setAvailableSlots(stagedSlots);
-      setSlotStatus(nextStatus);
-      storeAvailabilityHintRows(availabilityHintKey, stagedSlots);
+      setAvailableSlots((curr) => {
+        const merged: Record<string, Partial<Record<QualityKey, AvailableSlot>>> = { ...filteredStaged };
+        for (const phoneSite of ["donghua_ax", "donghua_ak"] as const) {
+          if (curr[phoneSite] && !merged[phoneSite]) {
+            merged[phoneSite] = curr[phoneSite];
+          }
+        }
+        storeAvailabilityHintRows(availabilityHintKey, merged);
+        return merged;
+      });
+      setSlotStatus((curr) => {
+        const nextStatus: Record<string, "ready"> = {};
+        for (const [site, tiers] of Object.entries(filteredStaged)) {
+          for (const qk of Object.keys(tiers) as QualityKey[]) {
+            nextStatus[pickerSlotKey(site, qk)] = "ready";
+          }
+        }
+        for (const [k, v] of Object.entries(curr)) {
+          if ((k.startsWith("donghua_ax:") || k.startsWith("donghua_ak:")) && v === "ready") {
+            nextStatus[k] = "ready";
+          }
+        }
+        return nextStatus;
+      });
     };
 
     let activeReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
@@ -2061,7 +2135,7 @@ export default function WatchScreen() {
       closeReaderSafely();
       controller.abort();
     }, availabilityTimeoutMs);
-    if (Platform.OS !== "web") {
+    if (Platform.OS !== "web" && !isDonghuaOriginRef.current) {
       void probeAd1AvailabilityOnPhone({
         title: titleStr,
         english: englishStr,
@@ -2670,7 +2744,7 @@ export default function WatchScreen() {
             site,
             name: siteTag,
             label: `${siteTag} · ${item.quality}`,
-            quality: preferredQuality || item.quality,
+            quality: idx === 0 ? (preferredQuality || item.quality) : item.quality,
             url: item.url,
             directUrl: item.url,
             rawUrl: item.url,
@@ -3823,7 +3897,7 @@ export default function WatchScreen() {
   const downloadSlots = useMemo(() => {
     return Q_KEYS.flatMap((quality) =>
       Object.entries(availableSlots)
-        .filter(([site, tiers]) => (isAwDubbed || DOWNLOAD_SOURCE_SITES.has(site)) && Boolean(tiers[quality]))
+        .filter(([site, tiers]) => (isAwDubbed || DOWNLOAD_SOURCE_SITES.has(site)) && (!isDonghuaOrigin || isAllowedSlotForDonghua(site)) && Boolean(tiers[quality]))
         .map(([site, tiers]) => ({
           site,
           tag: tiers[quality]?.tag || SITE_TAG[site] || getSiteTag(site),
@@ -3936,12 +4010,17 @@ export default function WatchScreen() {
         sources={playerSources}
         initialSourceIndex={0}
         animePlayback={!isAwDubbed}
+        hardsubOverlap={isDonghuaOrigin || playingSrc?.site === "donghua_ax" || playingSrc?.site === "donghua_ak"}
         title={displayTitle}
         episode={epNum}
         anilistId={!isAwDubbed && sourceAnimeId ? parseInt(sourceAnimeId) : undefined}
         episodeTitle={isAwDubbed
           ? `${awCurrentSeason.label} · الحلقة ${epNum}`
-          : (arEpTitle ?? (etitle && /[\u0600-\u06FF]/.test(safeDecodeURIComponent(etitle)) ? safeDecodeURIComponent(etitle) : undefined))}
+          : (arEpTitle ?? (() => {
+              const dec = etitle ? safeDecodeURIComponent(etitle).trim() : "";
+              if (!dec || /^(?:episode|ep\.?|الحلقة)\s*\d+$/i.test(dec)) return undefined;
+              return dec;
+            })())}
         initialPosition={resumeTime}
         totalEps={playerTotalEps}
         onBack={onRiftBack}
@@ -4216,7 +4295,7 @@ export default function WatchScreen() {
               for (const qk of Q_KEYS) {
                 const pickerDefs = STATIC_PICKER[qk] || [];
                 const matchingSites = Object.entries(availableSlots)
-                  .filter(([site, tiers]) => !!tiers[qk] && !BLOCKED_SOURCE_SITES.has(site.toLowerCase()) && matchesAudioTab(site))
+                  .filter(([site, tiers]) => !!tiers[qk] && !BLOCKED_SOURCE_SITES.has(site.toLowerCase()) && (!isDonghuaOrigin || isAllowedSlotForDonghua(site)) && matchesAudioTab(site))
                   .map(([site]) => site)
                   .sort((a, b) => {
                     const ai = pickerDefs.findIndex(def => def.site === a);

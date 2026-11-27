@@ -84,3 +84,19 @@ export function pickDonghuaEpisodeByNumber(
 export function normalizeAndSortSubtitleCues<T extends { start: number; end: number; text: string }>(
   cues: T[]
 ): { start: number; end: number; text: string }[];
+export const DONGHUA_EXCLUDED_ANIME_SITES: ReadonlySet<string>;
+export function isAllowedSlotForDonghua(site: string): boolean;
+export function filterReleasedBrowseMedia<T extends { status?: string | null; startDate?: { year?: number | null } | null }>(
+  items: T[],
+  opts?: { currentYear?: number; allowUnreleased?: boolean }
+): T[];
+export function formatMediaTitleHierarchy(input?: {
+  english?: string | null;
+  romaji?: string | null;
+  native?: string | null;
+  arabic?: string | null;
+}): { primary: string; arabic: string; original: string };
+export function rankDonghuaCatalogCandidates(
+  items: DonghuaCatalogItem[],
+  candidateTitles?: string[]
+): DonghuaCatalogItem[];
