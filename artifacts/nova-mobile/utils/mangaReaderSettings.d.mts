@@ -69,6 +69,7 @@ export declare const MANGA_READER_SETTINGS_KEY: string;
 export declare const MANGA_READER_MODES_KEY: string;
 export declare const MAX_SAVED_MANGA_MODES: number;
 export declare const READING_MODES: readonly ReadingMode[];
+export declare const MANHWA_SUPPORTED_READING_MODES: readonly ReadingMode[];
 export declare const ROTATION_MODES: readonly ReaderRotation[];
 export declare const BACKGROUND_MODES: readonly ReaderBackground[];
 export declare const SIDE_PADDING_OPTIONS: readonly SidePaddingPercent[];
@@ -77,6 +78,15 @@ export declare const READING_MODE_META: readonly ReadingModeMetaItem[];
 export declare const ROTATION_META: readonly RotationMetaItem[];
 export declare const BACKGROUND_META: readonly BackgroundMetaItem[];
 
+export declare function isManhwaWork(
+  source?: string | null,
+  countryOfOrigin?: string | null,
+): boolean;
+export declare function isReadingModeAllowedForWork(
+  mode: string,
+  source?: string | null,
+  countryOfOrigin?: string | null,
+): boolean;
 export declare function resolveEffectiveReadingMode(
   selectedMode?: string | null,
   source?: string | null,

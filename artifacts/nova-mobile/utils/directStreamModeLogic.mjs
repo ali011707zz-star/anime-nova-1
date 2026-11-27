@@ -1,4 +1,4 @@
-export const DIRECT_STREAM_MIN_VERSION = [1, 0, 11];
+export const DIRECT_STREAM_MIN_VERSION = [1, 0, 10];
 
 export function parseAppVersion(raw) {
   const m = String(raw || "").trim().match(/(\d+)\.(\d+)\.(\d+)/);

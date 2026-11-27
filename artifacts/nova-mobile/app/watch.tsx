@@ -3914,6 +3914,167 @@ export default function WatchScreen() {
     );
   }, [availableSlots, isAwDubbed]);
 
+  /* ── تنزيل المصدر النشط حالياً داخل المشغّل (نفس السيرفر ونفس الجودة — مباشر أو HLS على الهاتف) ── */
+  const playingDownloadMeta = useMemo(() => {
+    if (screen !== "native" || !playingSrc || !isDirectPlayable(playingSrc)) return null;
+    const rawUrl = getPlayUrl(playingSrc);
+    if (!rawUrl || rawUrl.startsWith("file://")) return null;
+    const base = getBaseUrl();
+    const site = isAwDubbed
+      ? (playingSrc.awPickerKey || playingSrc.site || "animewitcher")
+      : (playingSrc.site || "");
+    const quality = getSrcQuality(playingSrc);
+    const qualityKey = downloadQualityKey(quality);
+    const stateKey = `${site}:${qualityKey}`;
+    const headers = playingSrc.headers || extractProxyHeaders(rawUrl);
+    const isHls = playingSrc.directType === "hls" || isHlsMediaUrl(rawUrl);
+    const serverApproved = isAwDubbed || DOWNLOAD_SOURCE_SITES.has(site);
+    if (!serverApproved && isHls) return null;
+    const subRaw = (isAwDubbed || subtitlesDisabledForSite(site))
+      ? undefined
+      : (playingSrc.subtitleUrl || globalSubUrl);
+    const subtitleUrl = normalizeProviderSubtitleUrl(site, subRaw, base);
+    return {
+      site,
+      quality,
+      qualityKey,
+      stateKey,
+      rawUrl,
+      directUrl: playingSrc.directUrl,
+      origRawUrl: playingSrc.rawUrl,
+      directType: playingSrc.directType,
+      deliveryMode: playingSrc.deliveryMode,
+      clientExtract: playingSrc.clientExtract,
+      headers,
+      subtitleUrl,
+      base,
+    };
+  }, [screen, playingSrc, isAwDubbed, globalSubUrl]);
+
+  const handleDownloadCurrentPlaying = useCallback(async () => {
+    if (!playingDownloadMeta) return;
+    const {
+      site,
+      quality,
+      stateKey,
+      rawUrl,
+      directUrl,
+      origRawUrl,
+      directType,
+      deliveryMode,
+      clientExtract,
+      headers,
+      subtitleUrl,
+      base,
+    } = playingDownloadMeta;
+    const currentState = downloadStates[stateKey] || "idle";
+    if (currentState === "downloading" || currentState === "done") return;
+    try {
+      let resolvedUrl = rawUrl;
+      let resolvedDirectUrl = directUrl;
+      let resolvedRawUrl = origRawUrl;
+      let resolvedType = directType;
+      let resolvedHeaders = headers;
+      let resolvedDelivery = deliveryMode;
+
+      if (clientExtract?.embedUrl) {
+        const extracted = await extractDirectStreamOnPhone({
+          ...clientExtract,
+          referer: clientExtract.referer || resolvedHeaders?.Referer || "",
+        });
+        if (extracted?.url) {
+          resolvedUrl = extracted.url;
+          resolvedDirectUrl = extracted.url;
+          resolvedRawUrl = extracted.url;
+          resolvedType = extracted.type;
+          resolvedHeaders = extracted.headers;
+          resolvedDelivery = "client-extract";
+        }
+      }
+
+      const mfCandidate = [resolvedUrl, resolvedDirectUrl, resolvedRawUrl].find(
+        (u): u is string =>
+          typeof u === "string" &&
+          (u.includes("/api/aw-dubbed/mf-stream") || /https?:\/\/(?:www\.)?mediafire\.com\/(?:file|view|download)\//i.test(u)),
+      );
+      if (mfCandidate) {
+        const mfDirect = await resolveMediaFireDirectOnPhone(mfCandidate, base);
+        if (mfDirect?.url) {
+          resolvedUrl = mfDirect.url;
+          resolvedDirectUrl = mfDirect.url;
+          resolvedRawUrl = mfDirect.url;
+          resolvedType = "mp4";
+          resolvedHeaders = mfDirect.headers;
+          resolvedDelivery = "client-extract";
+        }
+      }
+
+      const directMp4 = resolveDirectInternalMp4Download({
+        url: resolvedUrl,
+        rawUrl: resolvedRawUrl,
+        directUrl: resolvedDirectUrl,
+        directType: resolvedType,
+        site,
+        deliveryMode: resolvedDelivery,
+        headers: resolvedHeaders,
+        baseUrl: base,
+      });
+
+      const [token, downloadToken] = await Promise.all([getAuthToken(), getDownloadToken()]);
+      let finalDownloadUrl: string;
+      let finalHeaders: Record<string, string> | undefined = resolvedHeaders;
+      let finalHlsManifestUrl: string | undefined;
+
+      if (directMp4.isDirect && directMp4.url) {
+        finalDownloadUrl = directMp4.url;
+        finalHeaders = directMp4.headers;
+        finalHlsManifestUrl = undefined;
+      } else {
+        const cleanResolved = resolveUrl(resolvedUrl, base);
+        const fallbackProxyUrl = isAwDubbed
+          ? cleanResolved
+          : ensureVpsProxy(cleanResolved, resolvedHeaders, base, resolvedType === "hls");
+        const isHlsDownload = resolvedType === "hls" || isHlsMediaUrl(fallbackProxyUrl) || isHlsMediaUrl(cleanResolved);
+        finalDownloadUrl = (DOWNLOAD_SUBTITLE_SITES.has(site) || isHlsDownload)
+          ? buildEmbeddedDownloadUrl(site, fallbackProxyUrl, subtitleUrl, base)
+          : fallbackProxyUrl;
+        finalHlsManifestUrl = isHlsDownload ? (cleanResolved || fallbackProxyUrl) : undefined;
+      }
+
+      const numericId = isAwDubbed
+        ? Math.abs(Array.from(awSeries || titleStr).reduce((acc, ch) => ((acc << 5) - acc) + ch.charCodeAt(0), 0)) || 900001
+        : (parseInt(anime || "0", 10) || 0);
+
+      startingDlKeysRef.current.add(stateKey);
+      if (isMountedRef.current) {
+        setDownloadStates(prev => ({ ...prev, [stateKey]: "downloading" }));
+        setDownloadProgress(prev => ({ ...prev, [stateKey]: 0 }));
+      }
+      try {
+        await startGlobalDownload({
+          animeId: numericId,
+          ep: epNum,
+          title: displayTitle,
+          cover: coverUrl,
+          site,
+          quality,
+          url: finalDownloadUrl,
+          authToken: token,
+          downloadToken,
+          headers: finalHeaders,
+          subtitleUrl,
+          hlsManifestUrl: finalHlsManifestUrl,
+        });
+      } finally {
+        startingDlKeysRef.current.delete(stateKey);
+      }
+    } catch {
+      if (isMountedRef.current) {
+        setDownloadStates(prev => ({ ...prev, [stateKey]: "error" }));
+      }
+    }
+  }, [playingDownloadMeta, downloadStates, isAwDubbed, awSeries, titleStr, anime, epNum, displayTitle, coverUrl]);
+
   /* ── التوجيه الثابت: المصادر المباشرة تذهب 100% من الهاتف، والمصادر المحمية
      (SA / NOVA VIP / روابط الخادم) تمر عبر الخادم مباشرة من البداية بدون أي فحص أو تبديل مؤقت. ── */
   const playerSources = useMemo((): PlayerSource[] => {
@@ -4030,6 +4191,10 @@ export default function WatchScreen() {
         onNextEpisode={canGoNextEpisode ? onRiftNextEpisode : undefined}
         onPrevEpisode={canGoPrevEpisode ? onRiftPrevEpisode : undefined}
         onEpisodeSelect={onRiftEpisodeSelect}
+        onDownloadCurrent={playingDownloadMeta ? () => { void handleDownloadCurrentPlaying(); } : undefined}
+        downloadState={playingDownloadMeta ? (downloadStates[playingDownloadMeta.stateKey] || "idle") : "idle"}
+        downloadProgress={playingDownloadMeta ? (downloadProgress[playingDownloadMeta.stateKey] ?? 0) : 0}
+        downloadQualityLabel={playingDownloadMeta?.quality}
       />
     );
   }

@@ -9,12 +9,16 @@ import {
   isDirectStreamVersion,
 } from "./directStreamModeLogic.mjs";
 
-test("isDirectStreamVersion enables direct mode only for v1.0.11+ and never for v1.0.10", () => {
-  assert.equal(isDirectStreamVersion("1.0.10"), false);
+test("isDirectStreamVersion enables direct mode for v1.0.10+ and never for v1.0.9 or older", () => {
   assert.equal(isDirectStreamVersion("1.0.9"), false);
+  assert.equal(isDirectStreamVersion("1.0.10"), true);
   assert.equal(isDirectStreamVersion("1.0.11"), true);
   assert.equal(isDirectStreamVersion("1.1.0"), true);
-  assert.deepEqual(buildDirectStreamHeaders("1.0.10"), {});
+  assert.deepEqual(buildDirectStreamHeaders("1.0.9"), {});
+  assert.deepEqual(buildDirectStreamHeaders("1.0.10"), {
+    "X-Nova-Direct-Mode": "1",
+    "X-Nova-Version": "1.0.10",
+  });
   assert.deepEqual(buildDirectStreamHeaders("1.0.11"), {
     "X-Nova-Direct-Mode": "1",
     "X-Nova-Version": "1.0.11",

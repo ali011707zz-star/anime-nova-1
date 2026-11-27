@@ -116,20 +116,38 @@ export const BACKGROUND_META = Object.freeze([
  *  - Manhwa / Korean (KR) / Manhua (CN, TW) -> "webtoon" (seamless vertical strip)
  *  - Japanese Manga / other -> "continuous_vertical" (vertical scroll with page gap)
  */
-export function resolveEffectiveReadingMode(selectedMode, source, countryOfOrigin) {
-  if (
-    typeof selectedMode === "string" &&
-    selectedMode !== "default" &&
-    READING_MODES.includes(selectedMode)
-  ) {
-    return selectedMode;
-  }
+export const MANHWA_SUPPORTED_READING_MODES = Object.freeze([
+  "default",
+  "webtoon",
+  "continuous_vertical",
+]);
+
+export function isManhwaWork(source, countryOfOrigin) {
   const normalizedCountry = String(countryOfOrigin || "").trim().toUpperCase();
-  const isManhwaOrManhua =
+  return (
     source === "manhwa" ||
     normalizedCountry === "KR" ||
     normalizedCountry === "CN" ||
-    normalizedCountry === "TW";
+    normalizedCountry === "TW"
+  );
+}
+
+export function isReadingModeAllowedForWork(mode, source, countryOfOrigin) {
+  if (!READING_MODES.includes(mode)) return false;
+  if (!isManhwaWork(source, countryOfOrigin)) return true;
+  return MANHWA_SUPPORTED_READING_MODES.includes(mode);
+}
+
+export function resolveEffectiveReadingMode(selectedMode, source, countryOfOrigin) {
+  const isManhwaOrManhua = isManhwaWork(source, countryOfOrigin);
+  if (
+    typeof selectedMode === "string" &&
+    selectedMode !== "default" &&
+    READING_MODES.includes(selectedMode) &&
+    isReadingModeAllowedForWork(selectedMode, source, countryOfOrigin)
+  ) {
+    return selectedMode;
+  }
   return isManhwaOrManhua ? "webtoon" : "continuous_vertical";
 }
 
