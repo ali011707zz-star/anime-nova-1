@@ -103,6 +103,7 @@ const ACCOUNT_HISTORY_KEY = (userId: string) => `nova-history:account:${userId}`
 const ACCOUNT_FAVORITES_KEY = (userId: string) => `nova-favorites:account:${userId}`;
 const ANONYMOUS_HISTORY_KEY = "nova-history";
 const ANONYMOUS_FAVORITES_KEY = "nova-favorites";
+const MAX_FAVORITES = 5000;
 
 function asNumber(value: unknown, fallback = 0): number {
   const parsed = Number(value);
@@ -829,7 +830,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       syncedUserIdRef.current = userId;
       lastSyncedAtRef.current = Date.now();
       setWatchHistory([...mergedHistory.values()].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 100));
-      setFavorites([...mergedFavorites.values()].sort((a, b) => b.addedAt - a.addedAt).slice(0, 500));
+      setFavorites([...mergedFavorites.values()].sort((a, b) => b.addedAt - a.addedAt).slice(0, MAX_FAVORITES));
       return historyDeletesSucceeded && favoriteDeletesSucceeded &&
         historyUploadsSucceeded && favoriteUploadsSucceeded;
     } catch {
@@ -1132,7 +1133,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const toggleFavorite = useCallback(async (anime: FavoriteAnime) => {
     const exists = favorites.some((f) => f.id === anime.id);
     setFavorites((prev) => {
-      return exists ? prev.filter((f) => f.id !== anime.id) : [anime, ...prev].slice(0, 500);
+      return exists ? prev.filter((f) => f.id !== anime.id) : [anime, ...prev].slice(0, MAX_FAVORITES);
     });
     const userId = currentUser?.id;
     if (!userId) return;
@@ -1198,7 +1199,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
     setFavorites((prev) => {
       const rest = prev.filter((f) => f.id !== anime.id);
-      return [merged, ...rest].slice(0, 500);
+      return [merged, ...rest].slice(0, MAX_FAVORITES);
     });
     const userId = currentUser?.id;
     if (!userId) return;

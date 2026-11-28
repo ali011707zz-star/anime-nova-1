@@ -1,3 +1,4 @@
+import { collectPaginatedRows } from "./supabasePagination.mjs";
 /**
  * supabaseClient.ts — Supabase REST API with PostgreSQL fallback
  *
@@ -409,22 +410,19 @@ export async function sbCount(
 export async function sbSelectAll<T = any>(
   table: string,
   filters: Record<string, string | number | undefined> = {},
-  opts: { select?: string; maxRows?: number; pageSize?: number } = {},
+  opts: { select?: string; maxRows?: number; pageSize?: number; strict?: boolean } = {},
 ): Promise<T[]> {
   const pageSize = Math.min(Math.max(opts.pageSize || 1000, 100), 1000);
   const maxRows = Math.max(opts.maxRows || 25000, pageSize);
-  const all: T[] = [];
-  for (let offset = 0; offset < maxRows; offset += pageSize) {
-    const batch = await sbSelect<T>(table, filters, {
+  return collectPaginatedRows<T>(
+    (limit, offset) => sbSelect<T>(table, filters, {
       select: opts.select || "*",
-      limit: pageSize,
+      limit,
       offset,
-    });
-    if (!Array.isArray(batch) || batch.length === 0) break;
-    all.push(...batch);
-    if (batch.length < pageSize) break;
-  }
-  return all;
+      strict: opts.strict,
+    }),
+    { pageSize, maxRows },
+  );
 }
 
 // ── INSERT ────────────────────────────────────────────────────────────────

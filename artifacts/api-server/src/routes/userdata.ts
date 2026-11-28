@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { sbSelect, sbInsert, sbUpsert, sbDelete, sbPatch } from "../lib/supabaseClient.js";
+import { sbSelect, sbSelectAll, sbCount, sbInsert, sbUpsert, sbDelete, sbPatch } from "../lib/supabaseClient.js";
 import { getMobileUserId } from "../lib/security.js";
 
 const router = Router();
@@ -293,9 +293,9 @@ router.get("/user/favorites", async (req: Request, res: Response) => {
   if (!userId) return res.status(401).json({ error: "غير مصرّح" });
 
   try {
-    const rows = await sbSelect("favorites",
+    const rows = await sbSelectAll("favorites",
       { user_id: `eq.${userId}`, order: "added_at.desc" },
-      { strict: true },
+      { strict: true, maxRows: 5000 },
     );
     res.setHeader("Cache-Control", "no-store");
     return res.json({ favorites: rows.map(unpackFavoriteRow) });
@@ -310,7 +310,10 @@ router.get("/user/favorites/ids", async (req: Request, res: Response) => {
   if (!userId) return res.json({ ids: [] });
 
   try {
-    const rows = await sbSelect("favorites", { user_id: `eq.${userId}` }, { strict: true });
+    const rows = await sbSelectAll("favorites",
+      { user_id: `eq.${userId}`, order: "added_at.desc" },
+      { strict: true, maxRows: 5000 },
+    );
     res.setHeader("Cache-Control", "no-store");
     const statuses: Record<number, string> = {};
     for (const r of rows) {
@@ -464,8 +467,9 @@ router.get("/user/progress/all", async (req: Request, res: Response) => {
   if (!userId) return res.json({ progress: [] });
 
   try {
-    const rows = await sbSelect("watch_progress",
+    const rows = await sbSelectAll("watch_progress",
       { user_id: `eq.${userId}`, order: "updated_at.desc" },
+      { maxRows: 5000 },
     );
     return res.json({ progress: rows });
   } catch (err) {
@@ -558,16 +562,16 @@ router.get("/user/stats", async (req: Request, res: Response) => {
   if (!userId) return res.json({ watchedCount: 0, favoritesCount: 0, progressCount: 0 });
 
   try {
-    const [histRows, favRows, progRows] = await Promise.all([
-      sbSelect("watch_history",  { user_id: `eq.${userId}` }),
-      sbSelect("favorites",      { user_id: `eq.${userId}` }),
-      sbSelect("watch_progress", { user_id: `eq.${userId}` }),
+    const [watchedCount, favoritesCount, progressCount] = await Promise.all([
+      sbCount("watch_history",  { user_id: `eq.${userId}` }),
+      sbCount("favorites",      { user_id: `eq.${userId}` }),
+      sbCount("watch_progress", { user_id: `eq.${userId}` }),
     ]);
 
     return res.json({
-      watchedCount:   histRows.length,
-      favoritesCount: favRows.length,
-      progressCount:  progRows.length,
+      watchedCount,
+      favoritesCount,
+      progressCount,
     });
   } catch (err) {
     console.error("[userdata] stats:", err);

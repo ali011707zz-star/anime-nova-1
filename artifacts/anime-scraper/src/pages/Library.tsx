@@ -4,6 +4,7 @@ import { Link } from "wouter";
 import { BookMarked, History, Trash2, Play, Clock, ChevronRight, Home, Star, PlayCircle, Heart, Clapperboard, Search as SearchIcon, X } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { loadWatchHistory, loadSavedIds, loadSavedStatuses, saveAnime, unsaveAnime } from "@/lib/db";
+import { chunkIds, orderMediaBySavedIds } from "@/lib/savedListUtils.mjs";
 import { WatchlistStatusSheet } from "@/components/WatchlistStatusSheet";
 import {
   WATCHLIST_STATUSES,
@@ -25,6 +26,34 @@ query ($ids: [Int]) {
     }
   }
 }`;
+
+async function fetchSavedAnimeBatched(savedIds: number[]): Promise<any[]> {
+  const chunks = chunkIds(savedIds, 50);
+  if (chunks.length === 0) return [];
+  const allMedia: any[] = [];
+  // Fetch in bounded pairs to avoid AniList rate limits while supporting 200+ / 1000+ saved anime
+  for (let i = 0; i < chunks.length; i += 2) {
+    const batch = chunks.slice(i, i + 2);
+    const results = await Promise.all(
+      batch.map(async (idsChunk) => {
+        try {
+          const r = await fetch(API_BASE + "/api/anilist", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ query: ANIME_QUERY, variables: { ids: idsChunk } }),
+          });
+          if (!r.ok) return [];
+          const d = await r.json();
+          return Array.isArray(d?.data?.Page?.media) ? d.data.Page.media : [];
+        } catch {
+          return [];
+        }
+      }),
+    );
+    for (const arr of results) allMedia.push(...arr);
+  }
+  return orderMediaBySavedIds(allMedia, savedIds);
+}
 
 /* ── Load animation watch history from localStorage ── */
 interface AnimHistItem {
@@ -151,13 +180,8 @@ export default function Library() {
     if (savedIds.length === 0) { setSavedAnime([]); return; }
     setLoading(true);
     try {
-      const r = await fetch(API_BASE + "/api/anilist", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: ANIME_QUERY, variables: { ids: savedIds } }),
-      });
-      const d = await r.json();
-      setSavedAnime(d.data?.Page?.media || []);
+      const media = await fetchSavedAnimeBatched(savedIds);
+      setSavedAnime(media);
     } catch { /* keep empty */ } finally {
       setLoading(false);
     }
@@ -177,13 +201,8 @@ export default function Library() {
       if (savedIds.length === 0) { if (!cancelled) setSavedAnime([]); return; }
       if (!cancelled) setLoading(true);
       try {
-        const r = await fetch(API_BASE + "/api/anilist", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query: ANIME_QUERY, variables: { ids: savedIds } }),
-        });
-        const d = await r.json();
-        if (!cancelled) setSavedAnime(d.data?.Page?.media || []);
+        const media = await fetchSavedAnimeBatched(savedIds);
+        if (!cancelled) setSavedAnime(media);
       } catch {} finally {
         if (!cancelled) setLoading(false);
       }
