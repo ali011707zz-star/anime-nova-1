@@ -1,0 +1,399 @@
+name: ⚡ نشر تحديث هوائي لنسخة الاختبار (OTA v1.0.11)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [test/v1.0.11]
+    paths:
+      - 'artifacts/nova-mobile/app/**'
+      - 'artifacts/nova-mobile/components/**'
+      - 'artifacts/nova-mobile/context/**'
+      - 'artifacts/nova-mobile/hooks/**'
+      - 'artifacts/nova-mobile/utils/**'
+      - 'artifacts/nova-mobile/constants/**'
+      - 'artifacts/nova-mobile/lib/**'
+      - 'artifacts/nova-mobile/scripts/export-ota.mjs'
+      - '.github/workflows/publish-ota-test.yml'
+
+concurrency:
+  group: ota-test-v1011
+  cancel-in-progress: true
+
+env:
+  EXPO_PUBLIC_DOMAIN: "https://animenovaa.duckdns.org"
+  EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: "413058110781-cbielvl5jhrf2bje392f8l9fnulvegp7.apps.googleusercontent.com"
+  EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: "413058110781-r8otf4jg4v1e7akp4ujii01brj3hv8kg.apps.googleusercontent.com"
+  EXPO_PUBLIC_SENTRY_DSN: "https://f58d23758aeb03d3d03a23a12c91dd8b@o4511863460265984.ingest.us.sentry.io/4511863487266816"
+  NODE_ENV: production
+
+jobs:
+  publish-ota-test:
+    name: Export & Publish Isolated v1.0.11 OTA
+    if: ${{ github.ref == 'refs/heads/test/v1.0.11' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 📦 Checkout test/v1.0.11
+        uses: actions/checkout@v4
+
+      - name: 🔧 Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 📦 Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: 💾 pnpm store path
+        id: pnpm-cache
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_OUTPUT
+
+      - name: 💾 Cache pnpm
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-ota-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-ota-
+            ${{ runner.os }}-pnpm-
+
+      - name: 📥 Install dependencies
+        run: NODE_ENV="" pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: 🧪 TypeScript typecheck
+        run: pnpm --filter @workspace/nova-mobile run typecheck
+
+      - name: 📦 Export v1.0.11 Android OTA bundle
+        run: |
+          pnpm --filter @workspace/nova-mobile run export:ota
+          node -e '
+            const fs = require("fs");
+            const m = JSON.parse(fs.readFileSync("artifacts/nova-mobile/ota-dist/ota-manifest.json", "utf8"));
+            if (String(m.runtimeVersion) !== "1.0.11") {
+              throw new Error("Refusing to publish non-1.0.11 runtimeVersion: " + m.runtimeVersion);
+            }
+            console.log("✅ Verified test OTA manifest:", m.id, "runtime:", m.runtimeVersion, "assets:", (m.assets || []).length);
+          '
+          tar -czf ota-1011.tar.gz -C artifacts/nova-mobile/ota-dist .
+          ls -lh ota-1011.tar.gz
+
+      - name: 📤 Upload v1.0.11 OTA bundle to VPS (isolated)
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          source: "ota-1011.tar.gz"
+          target: "/tmp"
+
+      - name: 🚀 Activate isolated v1.0.11 OTA on VPS (zero impact on v1.0.10)
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          command_timeout: 4m
+          script: |
+            set -euo pipefail
+            export PATH="$HOME/.local/share/pnpm:$HOME/.pnpm-global/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+            if [ -s "$HOME/.nvm/nvm.sh" ]; then
+              . "$HOME/.nvm/nvm.sh"
+            fi
+
+            TEST_OTA_ROOT="/opt/anime-nova-test-ota"
+            mkdir -p "$TEST_OTA_ROOT"
+            rm -rf "$TEST_OTA_ROOT/ota-dist.new"
+            mkdir -p "$TEST_OTA_ROOT/ota-dist.new"
+            tar -xzf /tmp/ota-1011.tar.gz -C "$TEST_OTA_ROOT/ota-dist.new"
+            rm -f /tmp/ota-1011.tar.gz
+
+            # Atomic swap of isolated 1.0.11 ota-dist (NEVER touches /opt/anime-nova)
+            rm -rf "$TEST_OTA_ROOT/ota-dist.prev"
+            if [ -d "$TEST_OTA_ROOT/ota-dist" ]; then
+              mv "$TEST_OTA_ROOT/ota-dist" "$TEST_OTA_ROOT/ota-dist.prev"
+            fi
+            mv "$TEST_OTA_ROOT/ota-dist.new" "$TEST_OTA_ROOT/ota-dist"
+            rm -rf "$TEST_OTA_ROOT/ota-dist.prev"
+
+            # Standalone lightweight Node server strictly for runtimeVersion 1.0.11
+            cat > "$TEST_OTA_ROOT/server.mjs" << 'SERVER_EOF'
+            import fs from "node:fs";
+            import http from "node:http";
+            import path from "node:path";
+
+            const PORT = 8091;
+            const OTA_DIR = "/opt/anime-nova-test-ota/ota-dist";
+            const MIME_BY_EXT = {
+              ".png": "image/png",
+              ".jpg": "image/jpeg",
+              ".jpeg": "image/jpeg",
+              ".gif": "image/gif",
+              ".webp": "image/webp",
+              ".svg": "image/svg+xml",
+              ".ttf": "font/ttf",
+              ".otf": "font/otf",
+              ".woff": "font/woff",
+              ".woff2": "font/woff2",
+              ".mp4": "video/mp4",
+              ".mp3": "audio/mpeg",
+              ".json": "application/json",
+              ".js": "application/javascript",
+              ".hbc": "application/javascript",
+              ".bundle": "application/javascript",
+            };
+
+            let cached = null;
+            function loadManifest() {
+              const p = path.join(OTA_DIR, "ota-manifest.json");
+              if (!fs.existsSync(p)) return null;
+              try {
+                const stat = fs.statSync(p);
+                if (cached && cached.mtimeMs === stat.mtimeMs) return cached.data;
+                const data = JSON.parse(fs.readFileSync(p, "utf8"));
+                cached = { mtimeMs: stat.mtimeMs, data };
+                return data;
+              } catch {
+                return null;
+              }
+            }
+
+            function send204(res) {
+              res.writeHead(204, {
+                "expo-protocol-version": "1",
+                "expo-sfv-version": "0",
+                "cache-control": "private, max-age=0",
+              });
+              res.end();
+            }
+
+            function getBaseUrl(req) {
+              const proto = String(req.headers["x-forwarded-proto"] || "https").split(",")[0].trim() || "https";
+              const host = String(req.headers["x-forwarded-host"] || req.headers.host || "animenovaa.duckdns.org").split(",")[0].trim();
+              return `${proto}://${host}`;
+            }
+
+            const server = http.createServer((req, res) => {
+              const urlObj = new URL(req.url || "/", "http://127.0.0.1");
+              const pathname = urlObj.pathname;
+
+              if (pathname === "/api/ota-1011/status") {
+                const m = loadManifest();
+                res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+                res.end(JSON.stringify(m ? {
+                  enabled: true,
+                  activeUpdate: true,
+                  id: m.id,
+                  createdAt: m.createdAt,
+                  runtimeVersion: m.runtimeVersion,
+                  assetsCount: Array.isArray(m.assets) ? m.assets.length : 0,
+                } : { enabled: true, activeUpdate: false }));
+                return;
+              }
+
+              if (pathname === "/api/ota/manifest" || pathname === "/api/ota-1011/manifest") {
+                const platform = String(req.headers["expo-platform"] || urlObj.searchParams.get("platform") || "android").toLowerCase();
+                if (platform !== "android") return send204(res);
+                const m = loadManifest();
+                if (!m || !m.id || !m.launchAsset) return send204(res);
+                const reqRuntime = String(req.headers["expo-runtime-version"] || urlObj.searchParams.get("runtimeVersion") || "").trim();
+                if (reqRuntime && reqRuntime !== String(m.runtimeVersion)) return send204(res);
+                const curId = String(req.headers["expo-current-update-id"] || "").trim().toLowerCase();
+                const embId = String(req.headers["expo-embedded-update-id"] || "").trim().toLowerCase();
+                const targetId = String(m.id).trim().toLowerCase();
+                if (curId && curId === targetId) return send204(res);
+                if (!curId && embId && embId === targetId) return send204(res);
+
+                const baseUrl = getBaseUrl(req);
+                const body = JSON.stringify({
+                  id: m.id,
+                  createdAt: m.createdAt,
+                  runtimeVersion: m.runtimeVersion,
+                  launchAsset: {
+                    hash: m.launchAsset.hash,
+                    key: m.launchAsset.key,
+                    fileExtension: m.launchAsset.fileExtension || ".bundle",
+                    contentType: m.launchAsset.contentType || "application/javascript",
+                    url: `${baseUrl}/api/ota-1011/assets/${m.launchAsset.relativePath}`,
+                  },
+                  assets: (Array.isArray(m.assets) ? m.assets : []).map((a) => ({
+                    hash: a.hash,
+                    key: a.key,
+                    fileExtension: a.fileExtension,
+                    contentType: a.contentType,
+                    url: `${baseUrl}/api/ota-1011/assets/${a.relativePath}`,
+                  })),
+                  metadata: m.metadata || {},
+                  extra: m.extra || {},
+                });
+                res.writeHead(200, {
+                  "expo-protocol-version": "1",
+                  "expo-sfv-version": "0",
+                  "cache-control": "private, max-age=0",
+                  "content-type": "application/expo+json; charset=utf-8",
+                });
+                res.end(body);
+                return;
+              }
+
+              if (pathname.startsWith("/api/ota-1011/assets/")) {
+                if (req.method !== "GET" && req.method !== "HEAD") {
+                  res.writeHead(405);
+                  res.end();
+                  return;
+                }
+                const rel = decodeURIComponent(pathname.slice("/api/ota-1011/assets/".length)).replace(/^\/+/, "");
+                if (!rel || rel.includes("..")) {
+                  res.writeHead(400);
+                  res.end("Invalid path");
+                  return;
+                }
+                const abs = path.resolve(OTA_DIR, rel);
+                if (!abs.startsWith(path.resolve(OTA_DIR)) || !fs.existsSync(abs) || fs.statSync(abs).isDirectory()) {
+                  res.writeHead(404);
+                  res.end("Not found");
+                  return;
+                }
+                const ext = path.extname(abs).toLowerCase();
+                res.writeHead(200, {
+                  "content-type": MIME_BY_EXT[ext] || "application/octet-stream",
+                  "cache-control": "public, max-age=31536000, immutable",
+                });
+                if (req.method === "HEAD") {
+                  res.end();
+                  return;
+                }
+                fs.createReadStream(abs).pipe(res);
+                return;
+              }
+
+              res.writeHead(404);
+              res.end("Not found");
+            });
+
+            server.listen(PORT, "127.0.0.1", () => {
+              console.log(`[ota-1011] listening on 127.0.0.1:${PORT}`);
+            });
+            SERVER_EOF
+
+            # Start/restart ONLY the isolated anime-nova-ota-1011 process (NEVER touch anime-nova-api)
+            if pm2 describe anime-nova-ota-1011 >/dev/null 2>&1; then
+              pm2 restart anime-nova-ota-1011 --update-env
+            else
+              pm2 start "$TEST_OTA_ROOT/server.mjs" --name anime-nova-ota-1011
+              pm2 save
+            fi
+
+            sleep 1
+            curl -fsSL http://127.0.0.1:8091/api/ota-1011/status
+            echo ""
+
+            # Safely configure Nginx routing ONLY for expo-runtime-version == 1.0.11 & /api/ota-1011/*
+            python3 - << 'PY_EOF'
+            import glob, os, re, shutil, subprocess
+
+            os.makedirs("/etc/nginx/snippets", exist_ok=True)
+            snippet_path = "/etc/nginx/snippets/nova-ota-1011.conf"
+
+            # Clean any stale backup files first
+            for stale in glob.glob("/etc/nginx/sites-enabled/*.bak*"):
+                os.remove(stale)
+
+            # Find active nginx site config serving animenovaa.duckdns.org with proxy_pass
+            candidates = []
+            for pattern in ["/etc/nginx/sites-enabled/*", "/etc/nginx/conf.d/*.conf"]:
+                for p in sorted(glob.glob(pattern)):
+                    if os.path.isfile(p) and ".bak" not in os.path.basename(p):
+                        txt = open(p, "r", encoding="utf-8", errors="ignore").read()
+                        if "animenovaa.duckdns.org" in txt and "proxy_pass" in txt:
+                            candidates.append((p, txt))
+
+            if not candidates:
+                raise RuntimeError("No active Nginx config found for animenovaa.duckdns.org")
+
+            target_path, orig_txt = candidates[0]
+            # Detect existing main backend proxy_pass target (fallback 127.0.0.1:8080)
+            m_up = re.search(r"proxy_pass\s+(https?://[^;\s]+);", orig_txt)
+            main_upstream = m_up.group(1).rstrip("/") if m_up else "http://127.0.0.1:8080"
+            if "8091" in main_upstream:
+                main_upstream = "http://127.0.0.1:8080"
+
+            snippet_body = f"""# Isolated OTA routing for test/v1.0.11 ONLY (v1.0.10 stays untouched on main API)
+            location = /api/ota/manifest {{
+                set $nova_ota_upstream {main_upstream};
+                if ($http_expo_runtime_version = "1.0.11") {{
+                    set $nova_ota_upstream http://127.0.0.1:8091;
+                }}
+                proxy_pass $nova_ota_upstream;
+                proxy_http_version 1.1;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+            }}
+
+            location ^~ /api/ota-1011/ {{
+                proxy_pass http://127.0.0.1:8091;
+                proxy_http_version 1.1;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+            }}
+            """
+            # Dedent cleanly
+            snippet_body = "\n".join(line[12:] if line.startswith("            ") else line for line in snippet_body.splitlines()) + "\n"
+            with open(snippet_path, "w", encoding="utf-8") as f:
+                f.write(snippet_body)
+
+            include_line = "    include /etc/nginx/snippets/nova-ota-1011.conf;"
+            backup_path = "/tmp/anime-nova.nginx.bak-ota1011"
+
+            if include_line not in orig_txt:
+                shutil.copy2(target_path, backup_path)
+                # Insert include right before the first "location /" inside server block(s) with proxy_pass
+                new_txt, count = re.subn(
+                    r"(?m)^([ \t]*location\s+/\s*\{)",
+                    lambda m: include_line + "\n\n" + m.group(1),
+                    orig_txt,
+                )
+                if count == 0:
+                    raise RuntimeError(f"Could not find location / anchor in {target_path}")
+                with open(target_path, "w", encoding="utf-8") as f:
+                    f.write(new_txt)
+
+                check = subprocess.run(["nginx", "-t"], capture_output=True, text=True)
+                if check.returncode != 0:
+                    shutil.copy2(backup_path, target_path)
+                    raise RuntimeError("nginx -t failed, restored backup:\n" + check.stderr)
+                os.remove(backup_path)
+                print(f"✅ Injected nova-ota-1011.conf into {target_path} ({count} server block(s))")
+            else:
+                check = subprocess.run(["nginx", "-t"], capture_output=True, text=True)
+                if check.returncode != 0:
+                    raise RuntimeError("nginx -t failed:\n" + check.stderr)
+                print(f"✅ nova-ota-1011.conf already present in {target_path}")
+
+            subprocess.run(["nginx", "-s", "reload"], check=True)
+            print("✅ Nginx reloaded cleanly with zero downtime")
+            PY_EOF
+
+            echo "=== VERIFY v1.0.10 UNTOUCHED ==="
+            curl -fsSL -H "expo-runtime-version: 1.0.10" -H "expo-platform: android" https://animenovaa.duckdns.org/api/ota/manifest | node -e '
+              const m = JSON.parse(require("fs").readFileSync(0, "utf8"));
+              if (m.runtimeVersion !== "1.0.10") throw new Error("1.0.10 manifest mismatch: " + m.runtimeVersion);
+              console.log("✅ v1.0.10 OTA intact:", m.id, "runtime:", m.runtimeVersion);
+            '
+
+            echo "=== VERIFY v1.0.11 OTA LIVE ==="
+            curl -fsSL -H "expo-runtime-version: 1.0.11" -H "expo-platform: android" https://animenovaa.duckdns.org/api/ota/manifest | node -e '
+              const m = JSON.parse(require("fs").readFileSync(0, "utf8"));
+              if (m.runtimeVersion !== "1.0.11") throw new Error("1.0.11 manifest mismatch: " + m.runtimeVersion);
+              console.log("✅ v1.0.11 OTA live:", m.id, "runtime:", m.runtimeVersion, "bundle:", m.launchAsset.url);
+            '
+            BUNDLE_URL=$(curl -fsSL -H "expo-runtime-version: 1.0.11" -H "expo-platform: android" https://animenovaa.duckdns.org/api/ota/manifest | node -e 'console.log(JSON.parse(require("fs").readFileSync(0,"utf8")).launchAsset.url)')
+            curl -fsSI "$BUNDLE_URL" | head -n 5

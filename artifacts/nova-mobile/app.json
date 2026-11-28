@@ -3,7 +3,7 @@
     "name": "ANIME NOVA",
     "slug": "anime-nova-",
     "owner": "ali011707s-team",
-    "version": "1.0.10",
+    "version": "1.0.11",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "com.googleusercontent.apps.413058110781-cbielvl5jhrf2bje392f8l9fnulvegp7",
@@ -34,7 +34,7 @@
         "backgroundColor": "#09090B"
       },
       "package": "com.nova.anime",
-      "versionCode": 11,
+      "versionCode": 12,
       "backgroundColor": "#09090B",
       "usesCleartextTraffic": false,
       "permissions": [
@@ -111,7 +111,7 @@
         "projectId": "07296477-c5e8-4a47-a804-95f28b46ef7b"
       }
     },
-    "runtimeVersion": "1.0.10",
+    "runtimeVersion": "1.0.11",
     "updates": {
       "enabled": true,
       "url": "https://animenovaa.duckdns.org/api/ota/manifest",
