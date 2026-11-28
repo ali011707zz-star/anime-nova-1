@@ -36,6 +36,7 @@ import { useTvFocusMemory } from "@/utils/tvFocus";
 import { getBaseUrl } from "@/utils/api";
 import { fetchHumanArabicSubtitleFromOpenSubtitles } from "@/utils/openSubtitlesClient";
 import { probeDonghuaAvailabilityOnPhone, resolveDonghuaSiteOnPhone, type DonghuaPhoneResolvedSource, type DonghuaSiteKey } from "@/utils/donghuaClient";
+import { probeAnimeRiftAvailabilityOnPhone, resolveAnimeRiftOnPhone, isAnimeRiftSite, type AnimeRiftSiteKey } from "@/utils/animeRiftClient";
 import { isAllowedSlotForDonghua } from "@/utils/donghuaLogic.mjs";
 import { anilistQuery, EPISODE_COUNT_QUERY } from "@/utils/anilist";
 import { secureFetch, secureStreamFetch, warmAuthToken, getAuthToken, getDownloadToken } from "@/utils/secureApi";
@@ -139,8 +140,13 @@ const SUBTITLE_DISABLED_SITES = new Set([
   "anifox", "fx",
   "anime4up2_hard", "ad 1", "ad1",
   "anslayer", "as",
+  "animerift_cr2", "cr2",
+  "animerift_bbz", "bbz",
+  "animerift_cr2_dub", "cr2 dub",
 ]);
 const HARDSUB_ARABIC_SITES = new Set([
+  "animerift_cr2",
+  "animerift_bbz",
   "animewitcher",
   "animeify",
   "sanime",
@@ -148,7 +154,8 @@ const HARDSUB_ARABIC_SITES = new Set([
   "anime4up2_hard",
 ]);
 const ARABIC_PLAYBACK_SITES = new Set([
-  "nova_tg", "nova_vip", "shahiid", "animelek", "animedar", "okanime", "arabseed", "animeify",
+  "nova_tg", "nova_vip", "animerift_cr2", "animerift_bbz", "animerift_cr2_dub",
+  "shahiid", "animelek", "animedar", "okanime", "arabseed", "animeify",
   "animeday", "mycima", "topcinemaa", "anime4up2_hard", "animewitcher",
   "ristoanime", "faselhd_db", "animetime", "sanime", "anifox",
 ]);
@@ -172,6 +179,8 @@ const DOWNLOAD_SOURCE_SITES = new Set([
   "nova_vip",       // NOVA VIP
   "animedar",       // AnimeDar
   "anime4up2_hard", // AD 1 — أنمي فور أب (مدمج)
+  "animerift_cr2",     // CR2 — ترجمة عربية مدمجة (MP4 مباشر)
+  "animerift_cr2_dub", // CR2 DUB — دبلجة عربية (MP4 مباشر)
   "animewitcher",   // AW
   "sanime",         // SA
   "animeify",       // AF — direct MediaFire/FileMoon sources
@@ -203,12 +212,14 @@ const SITE_TAG: Record<string, string> = {
   akwam: "AQ",
   anivexa_animegg: "GG", anivexa_anidbapp: "DB", anivexa_2dhive: "2D",
   anivexa_anibd: "BD", anivexa_senshi: "SE", anivexa_kaa: "KA",
+  animerift_cr2: "CR2", animerift_bbz: "BBZ", animerift_cr2_dub: "CR2 DUB",
   donghua_ax: "DX 1", donghua_ak: "DX 2", donghua_ds: "DX 3",
 };
 
 /* ── اسم عرض لكل موقع في منتقي المصادر ── */
 const SITE_LABEL: Record<string, string> = {
   nova_tg: "NOVA VIP", nova_tg_dub: "NOVA VIP (إنجليزي)", nova_vip: "NOVA VIP", kawaii: "Kawaii", megaplay: "MegaPlay", megaplay_dub: "MegaPlay (إنجليزي)", reflix: "ReAnime", reflix_dub: "ReAnime (إنجليزي)", reanime: "ReAnime", animekai: "AnimeKai",
+  animerift_cr2: "CR2", animerift_bbz: "BBZ", animerift_cr2_dub: "CR2 (مدبلج عربي)",
   animewitcher: "AnimeWitcher",
   anineko: "AniNeko",
   dulo_anim: "Dulo",
@@ -233,6 +244,9 @@ function getSiteTag(site: string): string {
 const SITE_DESC: Record<string, string> = {
   nova_tg: "سيرفر NOVA الخاص · بث وتحميل مباشر", nova_tg_dub: "دبلجة إنجليزية · سيرفر NOVA الخاص", nova_vip: "سيرفر NOVA الخاص · بث وتحميل مباشر", kawaii: "1080p · مباشر", megaplay: "HLS · صوت خام · ترجمة Kawaii", megaplay_dub: "دبلجة إنجليزية · ترجمة عربية", reflix: "HLS · صوت خام · ترجمة Kawaii", reflix_dub: "دبلجة إنجليزية · ترجمة عربية", reanime: "HLS · صوت خام · ترجمة Kawaii",
   anineko: "HLS · متعدد الجودات", animekai: "HLS · ياباني + ترجمة",
+  animerift_cr2: "ترجمة عربية مدمجة · MP4 مباشر",
+  animerift_bbz: "ترجمة عربية مدمجة · HLS مباشر",
+  animerift_cr2_dub: "دبلجة عربية · MP4 مباشر",
   animewitcher: "PD/ST · مباشر",
   dulo_anim: "ياباني/إنجليزي · HLS مباشر",
   vidlink_anim: "ياباني مترجم · مباشر",
@@ -654,6 +668,9 @@ type QualityKey = "1080p" | "720p" | "480p" | "360p";
 
 const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: string }[]> = {
   "1080p": [
+    { site: "animerift_cr2",     name: "CR2",                tag: "CR2" },
+    { site: "animerift_bbz",     name: "BBZ",                tag: "BBZ" },
+    { site: "animerift_cr2_dub", name: "CR2 (مدبلج عربي)",  tag: "CR2 DUB" },
     { site: "animewitcher",   name: "AnimeWitcher",       tag: "AW" },
     { site: "animeify",       name: "أنمي فاي",          tag: "AF" },
     { site: "sanime",         name: "سـAnime",            tag: "SA" },
@@ -670,6 +687,9 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "donghua_ds",     name: "DX 3",               tag: "DX 3" },
   ],
   "720p": [
+    { site: "animerift_cr2",     name: "CR2",                tag: "CR2" },
+    { site: "animerift_bbz",     name: "BBZ",                tag: "BBZ" },
+    { site: "animerift_cr2_dub", name: "CR2 (مدبلج عربي)",  tag: "CR2 DUB" },
     { site: "animewitcher",   name: "AnimeWitcher",       tag: "AW" },
     { site: "animeify",       name: "أنمي فاي",          tag: "AF" },
     { site: "sanime",         name: "سـAnime",            tag: "SA" },
@@ -685,6 +705,9 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "donghua_ds",     name: "DX 3",               tag: "DX 3" },
   ],
   "480p": [
+    { site: "animerift_cr2",     name: "CR2",                tag: "CR2" },
+    { site: "animerift_bbz",     name: "BBZ",                tag: "BBZ" },
+    { site: "animerift_cr2_dub", name: "CR2 (مدبلج عربي)",  tag: "CR2 DUB" },
     { site: "animewitcher",   name: "AnimeWitcher",       tag: "AW" },
     { site: "animeify",       name: "أنمي فاي",          tag: "AF" },
     { site: "sanime",         name: "سـAnime",            tag: "SA" },
@@ -700,6 +723,9 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "donghua_ds",     name: "DX 3",               tag: "DX 3" },
   ],
   "360p": [
+    { site: "animerift_cr2",     name: "CR2",                tag: "CR2" },
+    { site: "animerift_bbz",     name: "BBZ",                tag: "BBZ" },
+    { site: "animerift_cr2_dub", name: "CR2 (مدبلج عربي)",  tag: "CR2 DUB" },
     { site: "animewitcher",   name: "AnimeWitcher",       tag: "AW" },
     { site: "animeify",       name: "أنمي فاي",          tag: "AF" },
     { site: "sanime",         name: "سـAnime",            tag: "SA" },
@@ -1009,6 +1035,9 @@ const AVAILABILITY_TIMEOUT_MS = 50_000;
 const AVAILABILITY_FIRST_CHUNK_TIMEOUT_MS = 20_000;
 const AVAILABILITY_IDLE_CHUNK_TIMEOUT_MS = 22_000;
 const SITE_TIMEOUT_MAP: Record<string, number> = {
+  animerift_cr2:     24_000,
+  animerift_bbz:     24_000,
+  animerift_cr2_dub: 24_000,
   anifox:       35_000,
   animewitcher: 38_000,
   animeify:     22_000,
@@ -1799,35 +1828,78 @@ export default function WatchScreen() {
       console.info(
         `[playback-trace] id=${playbackTraceId} component=availability stage=hint_cache_hit rows=${hintRows}`,
       );
-      if (Platform.OS !== "web" && !isDonghuaOriginRef.current && !filteredCachedHints.anime4up2_hard) {
-        const ad1HintCtrl = new AbortController();
-        let hintCancelled = false;
-        void probeAd1AvailabilityOnPhone({
-          title: titleStr,
-          english: englishStr,
-          epNum,
-          signal: ad1HintCtrl.signal,
-        }).then((probe) => {
-          if (hintCancelled || !probe || !isMountedRef.current) return;
-          const ad1Tiers: Partial<Record<QualityKey, AvailableSlot>> = {
-            "1080p": { serverCount: probe.serverCount, name: "أنمي فور أب (مدمج)", tag: "AD 1", qualityRank: 1080 },
-            "720p": { serverCount: probe.serverCount, name: "أنمي فور أب (مدمج)", tag: "AD 1", qualityRank: 720 },
-            "480p": { serverCount: probe.serverCount, name: "أنمي فور أب (مدمج)", tag: "AD 1", qualityRank: 480 },
+      if (Platform.OS !== "web" && !isDonghuaOriginRef.current) {
+        const needAd1 = !filteredCachedHints.anime4up2_hard;
+        const needRift = !filteredCachedHints.animerift_cr2 && !filteredCachedHints.animerift_bbz && !filteredCachedHints.animerift_cr2_dub;
+        if (needAd1 || needRift) {
+          const hintCtrl = new AbortController();
+          let hintCancelled = false;
+          const mergedHints: AvailabilityHintRows = { ...cachedHints };
+          if (needAd1) {
+            void probeAd1AvailabilityOnPhone({
+              title: titleStr,
+              english: englishStr,
+              epNum,
+              signal: hintCtrl.signal,
+            }).then((probe) => {
+              if (hintCancelled || !probe || !isMountedRef.current) return;
+              const ad1Tiers: Partial<Record<QualityKey, AvailableSlot>> = {
+                "1080p": { serverCount: probe.serverCount, name: "أنمي فور أب (مدمج)", tag: "AD 1", qualityRank: 1080 },
+                "720p": { serverCount: probe.serverCount, name: "أنمي فور أب (مدمج)", tag: "AD 1", qualityRank: 720 },
+                "480p": { serverCount: probe.serverCount, name: "أنمي فور أب (مدمج)", tag: "AD 1", qualityRank: 480 },
+              };
+              mergedHints.anime4up2_hard = ad1Tiers;
+              setAvailableSlots((curr) => (curr.anime4up2_hard ? curr : { ...curr, anime4up2_hard: ad1Tiers }));
+              setSlotStatus((curr) => ({
+                ...curr,
+                [pickerSlotKey("anime4up2_hard", "1080p")]: curr[pickerSlotKey("anime4up2_hard", "1080p")] || "ready",
+                [pickerSlotKey("anime4up2_hard", "720p")]: curr[pickerSlotKey("anime4up2_hard", "720p")] || "ready",
+                [pickerSlotKey("anime4up2_hard", "480p")]: curr[pickerSlotKey("anime4up2_hard", "480p")] || "ready",
+              }));
+              storeAvailabilityHintRows(availabilityHintKey, mergedHints);
+            }).catch(() => {});
+          }
+          if (needRift) {
+            void probeAnimeRiftAvailabilityOnPhone({
+              title: titleStr,
+              english: englishStr,
+              titles: titleVariants,
+              format: format || "",
+              year: year || "",
+              epNum,
+              signal: hintCtrl.signal,
+            }).then((probe) => {
+              if (hintCancelled || !probe || !isMountedRef.current) return;
+              const riftUpdates: AvailabilityHintRows = {};
+              const statusUpdates: Record<string, "ready"> = {};
+              for (const [riftSite, qs] of Object.entries(probe.availableQualities) as Array<[AnimeRiftSiteKey, QualityKey[] | undefined]>) {
+                if (!qs?.length) continue;
+                const tiers: Partial<Record<QualityKey, AvailableSlot>> = {};
+                const tag = SITE_TAG[riftSite] || "CR2";
+                const name = SITE_LABEL[riftSite] || tag;
+                for (const q of qs) {
+                  tiers[q] = {
+                    serverCount: 1,
+                    name,
+                    tag,
+                    qualityRank: q === "1080p" ? 1080 : q === "720p" ? 720 : q === "480p" ? 480 : 360,
+                  };
+                  statusUpdates[pickerSlotKey(riftSite, q)] = "ready";
+                }
+                riftUpdates[riftSite] = tiers;
+                mergedHints[riftSite] = tiers;
+              }
+              if (Object.keys(riftUpdates).length === 0) return;
+              setAvailableSlots((curr) => ({ ...curr, ...riftUpdates }));
+              setSlotStatus((curr) => ({ ...statusUpdates, ...curr }));
+              storeAvailabilityHintRows(availabilityHintKey, mergedHints);
+            }).catch(() => {});
+          }
+          return () => {
+            hintCancelled = true;
+            hintCtrl.abort();
           };
-          const merged = { ...cachedHints, anime4up2_hard: ad1Tiers };
-          setAvailableSlots((curr) => (curr.anime4up2_hard ? curr : { ...curr, anime4up2_hard: ad1Tiers }));
-          setSlotStatus((curr) => ({
-            ...curr,
-            [pickerSlotKey("anime4up2_hard", "1080p")]: curr[pickerSlotKey("anime4up2_hard", "1080p")] || "ready",
-            [pickerSlotKey("anime4up2_hard", "720p")]: curr[pickerSlotKey("anime4up2_hard", "720p")] || "ready",
-            [pickerSlotKey("anime4up2_hard", "480p")]: curr[pickerSlotKey("anime4up2_hard", "480p")] || "ready",
-          }));
-          storeAvailabilityHintRows(availabilityHintKey, merged);
-        }).catch(() => {});
-        return () => {
-          hintCancelled = true;
-          ad1HintCtrl.abort();
-        };
+        }
       }
       return;
     }
@@ -2158,6 +2230,39 @@ export default function WatchScreen() {
           });
         }
         storeAvailabilityHintRows(availabilityHintKey, stagedSlots);
+      }).catch(() => {});
+
+      void probeAnimeRiftAvailabilityOnPhone({
+        title: titleStr,
+        english: englishStr,
+        titles: titleVariants,
+        format: format || "",
+        year: year || "",
+        epNum,
+        signal: controller.signal,
+      }).then((probe) => {
+        if (cancelled || !probe || !isMountedRef.current) return;
+        let added = false;
+        for (const [riftSite, qs] of Object.entries(probe.availableQualities) as Array<[AnimeRiftSiteKey, QualityKey[] | undefined]>) {
+          if (!qs?.length) continue;
+          const tag = SITE_TAG[riftSite] || "CR2";
+          const name = SITE_LABEL[riftSite] || tag;
+          for (const q of qs) {
+            applyRow({
+              site: riftSite,
+              quality: q,
+              serverCount: 1,
+              name,
+              tag,
+              qualityRank: q === "1080p" ? 1080 : q === "720p" ? 720 : q === "480p" ? 480 : 360,
+            });
+            added = true;
+          }
+        }
+        if (added) {
+          setAvailabilityError(false);
+          storeAvailabilityHintRows(availabilityHintKey, stagedSlots);
+        }
       }).catch(() => {});
     }
     void run();
@@ -2773,6 +2878,46 @@ export default function WatchScreen() {
         throw new Error("donghua source unavailable");
       }
 
+      // On-demand direct resolution for AnimeRift servers (CR2 / BBZ / CR2 DUB) — 0% VPS load
+      if (Platform.OS !== "web" && isAnimeRiftSite(site) && !currentSiteCtrl.signal.aborted && isMountedRef.current) {
+        const riftResolved = await resolveAnimeRiftOnPhone({
+          site,
+          title: titleStr,
+          english: englishStr,
+          titles: titleVariants,
+          format: format || "",
+          year: year || "",
+          epNum,
+          preferredQuality,
+          isDownload: false,
+          signal: currentSiteCtrl.signal,
+        });
+        if (riftResolved?.url && isMountedRef.current && progressivePlaybackRef.current === playback) {
+          const candidateKey = `${site}-phone-${riftResolved.quality}`;
+          if (!requestExcludeKeys.includes(candidateKey)) {
+            const mappedRift: Src = {
+              site,
+              name: riftResolved.name,
+              label: riftResolved.label,
+              quality: preferredQuality || riftResolved.quality,
+              url: riftResolved.url,
+              directUrl: riftResolved.url,
+              rawUrl: riftResolved.url,
+              directType: riftResolved.directType,
+              isEmbed: false,
+              deliveryMode: "direct",
+              headers: riftResolved.headers,
+              candidateKey,
+            };
+            streamDoneSeen = true;
+            playback.streamOpen = false;
+            acceptPlayableCandidate(mappedRift, candidateKey, "primary");
+            return;
+          }
+        }
+        throw new Error("animerift source unavailable");
+      }
+
             // Phone-first direct resolution for AD 1 (Anime4Up A4SL 1.2 + MegaMax Inertia, 0% VPS load)
       if (Platform.OS !== "web" && site === "anime4up2_hard" && !excludeKeys.length && !currentSiteCtrl.signal.aborted && isMountedRef.current) {
         const ad1Fast = await resolveAd1OnPhone({
@@ -3361,6 +3506,38 @@ export default function WatchScreen() {
           });
         }
         if (newSrcs.length === 0) throw new Error("donghua download unavailable");
+      }
+
+      // On-demand direct download resolution for AnimeRift MP4 servers (CR2 / CR2 DUB) — 0% VPS load
+      if (Platform.OS !== "web" && isAnimeRiftSite(site) && !siteCtrl.signal.aborted) {
+        const riftDl = await resolveAnimeRiftOnPhone({
+          site,
+          title: titleStr,
+          english: englishStr,
+          titles: titleVariants,
+          format: format || "",
+          year: year || "",
+          epNum,
+          preferredQuality,
+          isDownload: true,
+          signal: siteCtrl.signal,
+        });
+        if (riftDl?.url) {
+          newSrcs.push({
+            site,
+            name: riftDl.name,
+            label: riftDl.label,
+            quality: riftDl.quality,
+            url: riftDl.url,
+            directUrl: riftDl.url,
+            rawUrl: riftDl.url,
+            directType: riftDl.directType,
+            isEmbed: false,
+            deliveryMode: "direct",
+            headers: riftDl.headers,
+          });
+        }
+        if (newSrcs.length === 0) throw new Error("animerift download unavailable");
       }
 
             // Phone-first AD 1 download resolution (0% VPS load, skips broken server AD 1 scraper)
@@ -4707,24 +4884,31 @@ export default function WatchScreen() {
                               {!isAwDubbed && (
                                 (() => {
                                   const isEngDub = ENGLISH_DUB_SITES.has(slot.site.toLowerCase());
+                                  const isArDub = slot.site.toLowerCase() === "animerift_cr2_dub";
                                   const isHardsub = HARDSUB_ARABIC_SITES.has(slot.site.toLowerCase());
                                   const badgeBg = isEngDub
                                     ? "rgba(56,189,248,0.14)"
-                                    : isHardsub
-                                      ? "rgba(16,185,129,0.13)"
-                                      : "rgba(245,158,11,0.11)";
+                                    : isArDub
+                                      ? "rgba(167,139,250,0.14)"
+                                      : isHardsub
+                                        ? "rgba(16,185,129,0.13)"
+                                        : "rgba(245,158,11,0.11)";
                                   const badgeBorder = isEngDub
                                     ? "rgba(56,189,248,0.40)"
-                                    : isHardsub
-                                      ? "rgba(16,185,129,0.34)"
-                                      : "rgba(245,158,11,0.30)";
-                                  const badgeColor = isEngDub ? "#38bdf8" : isHardsub ? "#10b981" : "#f59e0b";
+                                    : isArDub
+                                      ? "rgba(167,139,250,0.42)"
+                                      : isHardsub
+                                        ? "rgba(16,185,129,0.34)"
+                                        : "rgba(245,158,11,0.30)";
+                                  const badgeColor = isEngDub ? "#38bdf8" : isArDub ? "#a78bfa" : isHardsub ? "#10b981" : "#f59e0b";
                                   const isHumanSub = Boolean(globalSubUrl?.includes("dl.opensubtitles.org"));
                                   const isDonghuaSite = slot.site === "donghua_ax" || slot.site === "donghua_ak" || slot.site === "donghua_ds";
                                   const badgeText = isEngDub
                                     ? "دبلجة إنجليزية · ترجمة عربية"
-                                    : isHardsub
-                                      ? "ترجمة عربية مدمجة"
+                                    : isArDub
+                                      ? "دبلجة عربية"
+                                      : isHardsub
+                                        ? "ترجمة عربية مدمجة"
                                       : isHumanSub
                                         ? "ترجمة عربية بشرية"
                                         : isDonghuaSite
