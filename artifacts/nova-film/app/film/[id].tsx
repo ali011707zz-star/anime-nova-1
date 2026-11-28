@@ -23,6 +23,7 @@ import { WatchlistStatusModal } from "@/components/WatchlistStatusModal";
 import { YoutubeTrailerModal } from "@/components/YoutubeTrailerModal";
 import type { ThemePalette } from "@/constants/colors";
 import { useColors } from "@/hooks/useColors";
+import { prewarmEgyWatchOnPhone } from "@/utils/egyWatchClient";
 import { fetchFilmDetail } from "@/utils/filmApi";
 import {
   type FilmCastMember,
@@ -300,7 +301,22 @@ export default function FilmDetailScreen() {
   );
 
   const lastWatchPressAtRef = useRef(0);
-  const handlePrimaryWatch = useCallback(() => {
+  useEffect(() => {
+    if (!detail) return;
+    void prewarmEgyWatchOnPhone({
+      tmdbId: detail.realTmdbId || null,
+      tmdbType: detail.tmdbType,
+      titleAr: detail.titleAr,
+      titleEn: detail.titleEn,
+      year: detail.year,
+      season: 1,
+      preferDubbed: detail.audioLabel === "مدبلج عربي" || detail.egyWatchType === "anime",
+      egyWatchId: detail.egyWatchId || null,
+      egyWatchType: detail.egyWatchType || null,
+    });
+  }, [detail?.id, detail?.egyWatchId, detail?.egyWatchType, detail?.realTmdbId, detail?.titleAr, detail?.titleEn, detail?.audioLabel]);
+
+    const handlePrimaryWatch = useCallback(() => {
     if (!detail) return;
     const now = Date.now();
     if (now - lastWatchPressAtRef.current < 750) return;
@@ -314,6 +330,10 @@ export default function FilmDetailScreen() {
           title: detail.titleAr,
           english: detail.titleEn,
           poster: detail.posterUrl || "",
+          ...(detail.egyWatchId ? { ewId: String(detail.egyWatchId) } : {}),
+          ...(detail.egyWatchType ? { ewType: detail.egyWatchType } : {}),
+          ...(detail.audioLabel ? { audioLabel: detail.audioLabel } : {}),
+          ...(detail.originalLanguage ? { origLang: detail.originalLanguage } : {}),
         },
       });
     } else {
@@ -327,6 +347,10 @@ export default function FilmDetailScreen() {
           title: detail.titleAr,
           english: detail.titleEn,
           poster: detail.posterUrl || "",
+          ...(detail.egyWatchId ? { ewId: String(detail.egyWatchId) } : {}),
+          ...(detail.egyWatchType ? { ewType: detail.egyWatchType } : {}),
+          ...(detail.audioLabel ? { audioLabel: detail.audioLabel } : {}),
+          ...(detail.originalLanguage ? { origLang: detail.originalLanguage } : {}),
         },
       });
     }

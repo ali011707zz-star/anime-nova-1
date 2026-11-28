@@ -332,9 +332,9 @@ function normalizeServerFromSSE(raw: any, index: number, base: string): FilmServ
   ) {
     qualityTier = "FHD";
     quality = "1080p FHD";
-  } else if (lower.includes("360") || lower.includes("sd")) {
+  } else if (lower.includes("480") || lower.includes("360") || lower.includes("sd")) {
     qualityTier = "SD";
-    quality = "360p SD";
+    quality = lower.includes("480") ? "480p SD" : "360p SD";
   }
 
   if (rawUrl.includes("erebus.cursed.st")) return null;
@@ -438,12 +438,20 @@ export async function streamFilmSources(params: {
   // Start client-side Cobalt (VixSrc) immediately if realTmdbId is already known from detail
   triggerVixSrc(params.realTmdbId);
   // Start direct client-side EgyWatch (EG, TK, UQ, EB, VS) immediately on phone (0% VPS load!)
-  let egyWatchStarted = false;
-  let egyWatchPromise: Promise<number> | null = null;
-  const triggerEgyWatch = (realId?: number | null) => {
-    if (egyWatchStarted) return;
-    if (!params.egyWatchId && !params.titleAr && !params.titleEn && !params.title) return;
-    egyWatchStarted = true;
+  let egyWatchStartedKey = "";
+  const egyWatchPromises: Promise<number>[] = [];
+  const triggerEgyWatch = (
+    realId?: number | null,
+    metaEwId?: number | null,
+    metaEwType?: "movie" | "serie" | "anime" | null,
+    metaPreferDubbed?: boolean,
+  ) => {
+    const effEwId = Number(metaEwId || params.egyWatchId || 0) || 0;
+    const effEwType = (metaEwType || params.egyWatchType || null) as "movie" | "serie" | "anime" | null;
+    const runKey = effEwId ? `ew:${effEwId}:${effEwType || ""}` : "search";
+    if (egyWatchStartedKey === runKey || (egyWatchStartedKey.startsWith("ew:") && runKey === "search")) return;
+    if (!effEwId && !params.titleAr && !params.titleEn && !params.title) return;
+    egyWatchStartedKey = runKey;
     const rawNum = Number(params.tmdbId || 0);
     const derivedTmdbId =
       realId && Number.isFinite(Number(realId)) && Number(realId) > 0
@@ -453,22 +461,24 @@ export async function streamFilmSources(params: {
           : rawNum >= 1_500_000_000 && rawNum < 1_650_000_000
             ? rawNum - 1_500_000_000
             : null;
-    egyWatchPromise = resolveEgyWatchOnPhone({
-      tmdbId: derivedTmdbId,
-      tmdbType: mediaType,
-      titleAr: params.titleAr || params.title,
-      titleEn: params.titleEn || params.title,
-      year: params.year,
-      season: params.season,
-      episode: params.episode,
-      preferDubbed: params.preferDubbed || params.egyWatchType === "anime",
-      egyWatchId: params.egyWatchId || null,
-      egyWatchType: params.egyWatchType || null,
-      signal: params.signal,
-      onSource: (srv) => {
-        if (!params.signal?.aborted) emitUnique(srv);
-      },
-    }).catch(() => 0);
+    egyWatchPromises.push(
+      resolveEgyWatchOnPhone({
+        tmdbId: derivedTmdbId,
+        tmdbType: mediaType,
+        titleAr: params.titleAr || params.title,
+        titleEn: params.titleEn || params.title,
+        year: params.year,
+        season: params.season,
+        episode: params.episode,
+        preferDubbed: Boolean(metaPreferDubbed || params.preferDubbed || effEwType === "anime"),
+        egyWatchId: effEwId || null,
+        egyWatchType: effEwType,
+        signal: params.signal,
+        onSource: (srv) => {
+          if (!params.signal?.aborted) emitUnique(srv);
+        },
+      }).catch(() => 0),
+    );
   };
   triggerEgyWatch(params.realTmdbId);
 
@@ -480,7 +490,7 @@ export async function streamFilmSources(params: {
         if (parsed?.items?.length > 0 && Date.now() - parsed.ts < SOURCES_CACHE_TTL) {
           triggerVixSrc(parsed.realTmdbId);
           parsed.items.forEach((item) => emitUnique(item));
-          if (egyWatchPromise) await egyWatchPromise;
+          if (egyWatchPromises.length > 0) await Promise.allSettled(egyWatchPromises);
           if (vixPromise) await vixPromise;
           params.onDone?.();
           return collected;
@@ -497,6 +507,7 @@ export async function streamFilmSources(params: {
     title: params.title,
     titleAr: params.titleAr || params.title,
     clientExtract: "1",
+    skipServerEw: "1",
     ...(params.egyWatchId ? { ewId: String(params.egyWatchId) } : {}),
     ...(params.egyWatchType ? { ewType: params.egyWatchType } : {}),
     ...(params.preferDubbed ? { preferDubbed: "1" } : {}),
@@ -523,11 +534,21 @@ export async function streamFilmSources(params: {
       try {
         const data = JSON.parse(line.slice(5).trim());
         const ev = state.currentEvent || data.type || "";
-        if (ev === "meta" && data.realTmdbId) {
-          const rid = Number(data.realTmdbId);
-          if (Number.isFinite(rid) && rid > 0) {
-            discoveredRealTmdbId = rid;
-            triggerVixSrc(rid);
+        if (ev === "meta") {
+          if (data.realTmdbId) {
+            const rid = Number(data.realTmdbId);
+            if (Number.isFinite(rid) && rid > 0) {
+              discoveredRealTmdbId = rid;
+              triggerVixSrc(rid);
+            }
+          }
+          if (data.egyWatchId && Number(data.egyWatchId) > 0) {
+            triggerEgyWatch(
+              discoveredRealTmdbId,
+              Number(data.egyWatchId),
+              data.egyWatchType || null,
+              Boolean(data.preferDubbed),
+            );
           }
         } else if (ev === "status" && data.msg) {
           params.onStatus?.(String(data.msg));
@@ -598,8 +619,8 @@ export async function streamFilmSources(params: {
   if (pendingExtracts.length > 0) {
     await Promise.allSettled(pendingExtracts);
   }
-  if (egyWatchPromise) {
-    await egyWatchPromise;
+  if (egyWatchPromises.length > 0) {
+    await Promise.allSettled(egyWatchPromises);
   }
   if (vixPromise) {
     await vixPromise;

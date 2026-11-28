@@ -218,6 +218,9 @@ export function normalizeFilmSummary(raw: any): FilmSummary {
     audioLabel: String(raw?.audioLabel || "مترجم"),
     categoryLabel: String(raw?.categoryLabel || (tmdbType === "tv" ? "مسلسلات أجنبية" : "أفلام أجنبية")),
     genres: Array.isArray(raw?.genres) ? raw.genres : [],
+    originalLanguage: raw?.originalLanguage || raw?.original_language || undefined,
+    egyWatchId: Number(raw?.egyWatchId || 0) || undefined,
+    egyWatchType: raw?.egyWatchType || undefined,
     watchStatus: normalizeWatchlistStatus(raw?.watchStatus),
   };
 }

@@ -21,6 +21,7 @@ import type { ThemePalette } from "@/constants/colors";
 import { useColors } from "@/hooks/useColors";
 import { getBaseUrl } from "@/utils/baseUrl";
 import { resolveVixSrcClient } from "@/utils/vixsrcClient";
+import { resolveEgyWatchOnPhone } from "@/utils/egyWatchClient";
 import {
   getActiveDownloadsSnapshot,
   getDownloads,
@@ -128,6 +129,10 @@ export default function FilmWatchScreen() {
     title?: string;
     english?: string;
     poster?: string;
+    ewId?: string;
+    ewType?: string;
+    audioLabel?: string;
+    origLang?: string;
   }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -139,6 +144,12 @@ export default function FilmWatchScreen() {
   const tmdbType: "movie" | "tv" = params.type === "tv" ? "tv" : "movie";
   const initialSeason = Math.max(1, Number.parseInt(String(params.season || "1"), 10) || 1);
   const initialEp = Math.max(1, Number.parseInt(String(params.episode || "1"), 10) || 1);
+  const paramEwId = Number.parseInt(String(params.ewId || "0"), 10) || 0;
+  const paramEwType = (params.ewType === "movie" || params.ewType === "serie" || params.ewType === "anime"
+    ? params.ewType
+    : null) as "movie" | "serie" | "anime" | null;
+  const paramAudioLabel = String(params.audioLabel || "").trim();
+  const paramOrigLang = String(params.origLang || "").trim().toLowerCase();
 
   const [detail, setDetail] = useState<FilmDetail | null>(null);
   const [episodes, setEpisodes] = useState<FilmEpisode[]>([]);
@@ -254,16 +265,28 @@ export default function FilmWatchScreen() {
     const lookupTitle = dNow?.titleEn || params.english || dNow?.titleAr || params.title || "";
     const lookupYear = dNow?.year;
 
-    void fetchFilmSubtitleTracks({
-      tmdbId: filmId,
-      type: tmdbType,
-      season: currentSeason,
-      episode: currentEpNum,
-      title: lookupTitle,
-      signal: controller.signal,
-    }).then((tracks) => {
-      if (!controller.signal.aborted) setSubtitles(tracks);
-    });
+    const effEwId = paramEwId || dNow?.egyWatchId || 0;
+    const effEwType = paramEwType || dNow?.egyWatchType || null;
+    const effDubbed =
+      paramAudioLabel === "مدبلج عربي" ||
+      dNow?.audioLabel === "مدبلج عربي" ||
+      effEwType === "anime";
+    const effNativeArabic =
+      paramOrigLang === "ar" ||
+      String(dNow?.originalLanguage || "").toLowerCase() === "ar";
+
+    if (!effDubbed && !effNativeArabic) {
+      void fetchFilmSubtitleTracks({
+        tmdbId: filmId,
+        type: tmdbType,
+        season: currentSeason,
+        episode: currentEpNum,
+        title: lookupTitle,
+        signal: controller.signal,
+      }).then((tracks) => {
+        if (!controller.signal.aborted) setSubtitles(tracks);
+      });
+    }
 
     void streamFilmSources({
       tmdbId: filmId,
@@ -275,9 +298,9 @@ export default function FilmWatchScreen() {
       titleEn: String(dNow?.titleEn || params.english || "").trim() || lookupTitle,
       year: lookupYear,
       realTmdbId: dNow?.realTmdbId,
-      egyWatchId: dNow?.egyWatchId,
-      egyWatchType: dNow?.egyWatchType,
-      preferDubbed: dNow?.audioLabel === "مدبلج عربي" || dNow?.egyWatchType === "anime",
+      egyWatchId: effEwId || undefined,
+      egyWatchType: effEwType || undefined,
+      preferDubbed: effDubbed,
       forceRefresh: refreshNonce > 0,
       signal: controller.signal,
       onStatus: (msg) => {
@@ -300,7 +323,36 @@ export default function FilmWatchScreen() {
     return () => controller.abort();
   }, [filmId, tmdbType, currentSeason, currentEpNum, refreshNonce]);
 
-  // Trigger client-side Cobalt (CB / VixSrc) immediately when detail.realTmdbId arrives without restarting SSE
+  // Trigger direct phone EgyWatch if detail.egyWatchId arrives after mount (e.g. from Favorites/Search/History)
+  useEffect(() => {
+    const detEwId = Number(detail?.egyWatchId || 0) || 0;
+    if (!detEwId || detEwId === paramEwId) return;
+    const controller = new AbortController();
+    void resolveEgyWatchOnPhone({
+      tmdbId: detail?.realTmdbId || null,
+      tmdbType,
+      titleAr: detail?.titleAr || params.title || "",
+      titleEn: detail?.titleEn || params.english || "",
+      year: detail?.year,
+      season: currentSeason,
+      episode: currentEpNum,
+      preferDubbed: detail?.audioLabel === "مدبلج عربي" || detail?.egyWatchType === "anime",
+      egyWatchId: detEwId,
+      egyWatchType: detail?.egyWatchType || null,
+      signal: controller.signal,
+      onSource: (src) => {
+        if (controller.signal.aborted || src.isEmbed) return;
+        setSources((prev) => {
+          const playUrl = resolveFilmPlayableUrl(src);
+          if (!playUrl || prev.some((x) => resolveFilmPlayableUrl(x) === playUrl)) return prev;
+          return src.recommended ? [src, ...prev] : [...prev, src];
+        });
+      },
+    }).catch(() => {});
+    return () => controller.abort();
+  }, [detail?.egyWatchId, detail?.egyWatchType, paramEwId, tmdbType, currentSeason, currentEpNum, refreshNonce]);
+
+    // Trigger client-side Cobalt (CB / VixSrc) immediately when detail.realTmdbId arrives without restarting SSE
   useEffect(() => {
     const rid = detail?.realTmdbId;
     if (!rid || !Number.isFinite(rid) || rid <= 0) return;
@@ -407,6 +459,14 @@ export default function FilmWatchScreen() {
 
   // Re-fetch Arabic subtitles once detail.realTmdbId / titleEn arrives if initial fetch had no Arabic track
   useEffect(() => {
+    const isNativeArabicOrDubbed =
+      paramOrigLang === "ar" ||
+      String(detail?.originalLanguage || "").toLowerCase() === "ar" ||
+      paramAudioLabel === "مدبلج عربي" ||
+      detail?.audioLabel === "مدبلج عربي" ||
+      paramEwType === "anime" ||
+      detail?.egyWatchType === "anime";
+    if (isNativeArabicOrDubbed) return;
     const hasAr = subtitles.some((t) => t.lang === "ar");
     if (hasAr) return;
     const resolvedId = detail?.realTmdbId || 0;
@@ -481,7 +541,19 @@ export default function FilmWatchScreen() {
         lower.includes("ex.divhard.com/api/media.php") ||
         lower.includes("master.txt");
       const siteLower = String(src.site || "").toLowerCase();
-      const isHardsub = Boolean(src.hardsubbed) || siteLower === "vidhls" || siteLower === "vidhls-alt";
+      const isNativeArabicOrDubbed =
+        paramOrigLang === "ar" ||
+        String(detail?.originalLanguage || "").toLowerCase() === "ar" ||
+        paramAudioLabel === "مدبلج عربي" ||
+        detail?.audioLabel === "مدبلج عربي" ||
+        paramEwType === "anime" ||
+        detail?.egyWatchType === "anime";
+      const isHardsub =
+        isNativeArabicOrDubbed ||
+        Boolean(src.hardsubbed) ||
+        siteLower.startsWith("egywatch_") ||
+        siteLower === "vidhls" ||
+        siteLower === "vidhls-alt";
       const tag = serverShortTag(src, idx);
       return {
         url: playUrl,
@@ -498,14 +570,15 @@ export default function FilmWatchScreen() {
                 ? src.subtitleUrl
                 : `${getBaseUrl()}${src.subtitleUrl}`
               : undefined,
-        subtitleTracks: (isHardsub ? externalSubTracks.filter((t) => t.lang !== "ar") : externalSubTracks)
-          .map((t) => ({ lang: t.lang, label: t.label, url: t.url })),
+        subtitleTracks: isHardsub
+          ? []
+          : externalSubTracks.map((t) => ({ lang: t.lang, label: t.label, url: t.url })),
         isArabic: isHardsub ? true : arSubIsNativeArabic,
         hardsubbed: isHardsub,
         headers: src.headers,
       };
     });
-  }, [sources, arSubTrackUrl, arSubIsNativeArabic, externalSubTracks]);
+  }, [sources, arSubTrackUrl, arSubIsNativeArabic, externalSubTracks, detail?.originalLanguage, detail?.audioLabel, detail?.egyWatchType, paramOrigLang, paramAudioLabel, paramEwType]);
 
   const orderedPlaySources = useMemo(() => {
     if (playerSources.length === 0) return [];
@@ -586,7 +659,7 @@ export default function FilmWatchScreen() {
           playUrl.includes(".m3u8") ||
           playUrl.includes("master.txt");
         const siteLower = String(src.site || "").toLowerCase();
-        const isHardsub = Boolean(src.hardsubbed) || siteLower === "vidhls" || siteLower === "vidhls-alt";
+        const isHardsub = Boolean(src.hardsubbed) || siteLower.startsWith("egywatch_") || siteLower === "vidhls" || siteLower === "vidhls-alt";
         // Direct client-side download straight from CDN on the user's phone (0% VPS bandwidth!)
         const downloadUrl = playUrl;
         await startGlobalDownload({
@@ -602,7 +675,7 @@ export default function FilmWatchScreen() {
           headers: src.headers,
           subtitleUrl: isHardsub ? undefined : arSubTrackUrl,
           englishSubtitleUrl: enSubTrackUrl,
-          subtitleTracks: isHardsub ? externalSubTracks.filter((t) => t.lang !== "ar") : externalSubTracks,
+          subtitleTracks: isHardsub ? [] : externalSubTracks,
           hlsManifestUrl: isHls ? playUrl : undefined,
         });
       } catch {
@@ -1020,8 +1093,21 @@ export default function FilmWatchScreen() {
                         {/* Right: السيرفر XX مع شارة نوع الترجمة (مثل أنمي نوفا) */}
                         {(() => {
                           const siteL = String(src.site || "").toLowerCase();
+                          const isDubRow =
+                            paramAudioLabel === "مدبلج عربي" ||
+                            detail?.audioLabel === "مدبلج عربي" ||
+                            paramEwType === "anime" ||
+                            detail?.egyWatchType === "anime";
+                          const isNativeArRow =
+                            paramOrigLang === "ar" ||
+                            String(detail?.originalLanguage || "").toLowerCase() === "ar";
                           const isHardsubRow =
-                            Boolean(src.hardsubbed) || siteL === "vidhls" || siteL === "vidhls-alt";
+                            isDubRow ||
+                            isNativeArRow ||
+                            Boolean(src.hardsubbed) ||
+                            siteL.startsWith("egywatch_") ||
+                            siteL === "vidhls" ||
+                            siteL === "vidhls-alt";
                           return (
                             <View
                               style={{
@@ -1113,7 +1199,7 @@ export default function FilmWatchScreen() {
                                     includeFontPadding: false,
                                   }}
                                 >
-                                  {isHardsubRow ? "ترجمة عربية مدمجة" : "ترجمة عربية خارجية"}
+                                  {isDubRow ? "مدبلج عربي" : isNativeArRow ? "صوت عربي أصلي" : isHardsubRow ? "ترجمة عربية مدمجة" : "ترجمة عربية خارجية"}
                                 </Text>
                               </View>
                             </View>

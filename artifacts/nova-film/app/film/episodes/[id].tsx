@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { SafePosterImage } from "@/components/SafePosterImage";
 import { useColors } from "@/hooks/useColors";
+import { prewarmEgyWatchOnPhone } from "@/utils/egyWatchClient";
 import { fetchFilmDetail, fetchFilmSeason } from "@/utils/filmApi";
 import {
   type FilmDetail,
@@ -175,6 +176,10 @@ export default function FilmEpisodesScreen() {
     title?: string;
     english?: string;
     poster?: string;
+    ewId?: string;
+    ewType?: string;
+    audioLabel?: string;
+    origLang?: string;
   }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -323,7 +328,24 @@ export default function FilmEpisodesScreen() {
     [filmId, selectedSeason, reqType],
   );
 
-  const watchEp = useCallback(
+  useEffect(() => {
+    const ewIdNum = Number(detail?.egyWatchId || params.ewId || 0) || 0;
+    const ewTypeVal = (detail?.egyWatchType || params.ewType || null) as "movie" | "serie" | "anime" | null;
+    if (!ewIdNum && !detail?.titleAr && !params.title) return;
+    void prewarmEgyWatchOnPhone({
+      tmdbId: detail?.realTmdbId || null,
+      tmdbType: "tv",
+      titleAr: detail?.titleAr || params.title || "",
+      titleEn: detail?.titleEn || params.english || "",
+      year: detail?.year,
+      season: selectedSeason,
+      preferDubbed: (detail?.audioLabel || params.audioLabel) === "مدبلج عربي" || ewTypeVal === "anime",
+      egyWatchId: ewIdNum || null,
+      egyWatchType: ewTypeVal,
+    });
+  }, [detail?.egyWatchId, detail?.egyWatchType, detail?.titleAr, detail?.titleEn, detail?.realTmdbId, detail?.audioLabel, params.ewId, params.ewType, params.title, params.english, params.audioLabel, selectedSeason]);
+
+    const watchEp = useCallback(
     (epNum: number) => {
       void toggleEpisodeWatched(filmId, selectedSeason, epNum, reqType, true)
         .then(setWatchedMap)
@@ -338,6 +360,10 @@ export default function FilmEpisodesScreen() {
           title: detail?.titleAr || params.title || "",
           english: detail?.titleEn || params.english || "",
           poster: detail?.posterUrl || params.poster || "",
+          ...((detail?.egyWatchId || params.ewId) ? { ewId: String(detail?.egyWatchId || params.ewId) } : {}),
+          ...((detail?.egyWatchType || params.ewType) ? { ewType: String(detail?.egyWatchType || params.ewType) } : {}),
+          ...((detail?.audioLabel || params.audioLabel) ? { audioLabel: String(detail?.audioLabel || params.audioLabel) } : {}),
+          ...((detail?.originalLanguage || params.origLang) ? { origLang: String(detail?.originalLanguage || params.origLang) } : {}),
         },
       });
     },

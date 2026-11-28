@@ -1867,7 +1867,7 @@ function ExpoRiftPlayer({
      2. Network fetch
   */
   useEffect(() => {
-    if (subtitlesDisabled) {
+    if (subtitlesDisabled || currentSrc?.hardsubbed) {
       setLoadedCues([]);
       setSubOn(false);
       setAutoSubSource(null);
@@ -2080,18 +2080,18 @@ function ExpoRiftPlayer({
       }
       if (aliveRef.current) setSubLoading(false);
     };
-  }, [currentSrc?.subtitleUrl, currentSrc?.subtitleTracks, currentSrc?.url, currentSrc?.site, srcIdx, anilistId, episode, subLang, subtitlesDisabled]); // eslint-disable-line
+  }, [currentSrc?.subtitleUrl, currentSrc?.subtitleTracks, currentSrc?.hardsubbed, currentSrc?.url, currentSrc?.site, srcIdx, anilistId, episode, subLang, subtitlesDisabled]); // eslint-disable-line
 
-  /* ─── Auto-enable subtitles when source provides a subtitle URL ─── */
+  /* ─── Auto-enable subtitles when source provides a subtitle URL (NEVER on hardsubbed streams!) ─── */
   useEffect(() => {
-    if (subtitlesDisabled) {
+    if (subtitlesDisabled || currentSrc?.hardsubbed) {
       setSubOn(false);
       setLoadedCues([]);
       setAutoSubSource(null);
     } else if (currentSrc?.subtitleUrl || (currentSrc?.subtitleTracks && currentSrc.subtitleTracks.length > 0)) {
       setSubOn(true);
     }
-  }, [currentSrc?.subtitleUrl, currentSrc?.subtitleTracks, subtitlesDisabled]);
+  }, [currentSrc?.subtitleUrl, currentSrc?.subtitleTracks, currentSrc?.hardsubbed, subtitlesDisabled]);
 
   /* ─── Flip screen — rotate 180° using CSS transform (no surface recreation = no black flash) ─── */
   const flipScreen = useCallback(() => {
