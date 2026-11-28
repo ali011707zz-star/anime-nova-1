@@ -16,6 +16,7 @@ import { isTvDevice, tvFocusStyle, TvFocusGuideView, TvPressable, useTvListFocus
 const Pressable = TvPressable;
 import { useTvFocusMemory } from "@/utils/tvFocus";
 import { useColors } from "@/hooks/useColors";
+import { prewarmAnimeRiftCatalogOnPhone } from "@/utils/animeRiftClient";
 
 const ROW_RTL = I18nManager.isRTL ? "row" : "row-reverse";
 
@@ -691,6 +692,22 @@ export default function EpisodeListScreen() {
   }, [fetchEpisodePage, search]);
 
   /* Load comment counts from server (background, non-blocking) */
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    const romaji = String(selectedAnime?.title?.romaji || (Array.isArray(title) ? title[0] : title) || "").trim();
+    const eng = String(selectedAnime?.title?.english || (Array.isArray(english) ? english[0] : english) || "").trim();
+    if (!romaji && !eng) return;
+    const syns = Array.isArray(selectedAnime?.synonyms) ? selectedAnime.synonyms.filter((s: any) => typeof s === "string") : [];
+    const yr = selectedAnime?.seasonYear || selectedAnime?.startDate?.year || "";
+    void prewarmAnimeRiftCatalogOnPhone({
+      title: romaji || eng,
+      english: eng || undefined,
+      titles: syns,
+      format: selectedAnime?.format || "",
+      year: yr,
+    });
+  }, [selectedAnime?.id, selectedAnime?.title?.romaji, selectedAnime?.title?.english, title, english]);
+
   useEffect(() => {
     if (!selectedAnimeId) return;
     const ctrl = new AbortController();

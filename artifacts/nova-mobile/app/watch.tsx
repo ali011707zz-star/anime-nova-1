@@ -1817,7 +1817,7 @@ export default function WatchScreen() {
       setSlotStatus((curr) => {
         const next: Record<string, "ready"> = { ...cachedStatus };
         for (const [k, v] of Object.entries(curr)) {
-          if ((k.startsWith("donghua_ax:") || k.startsWith("donghua_ak:") || k.startsWith("donghua_ds:")) && v === "ready") {
+          if ((k.startsWith("donghua_ax:") || k.startsWith("donghua_ak:") || k.startsWith("donghua_ds:") || k.startsWith("animerift_cr2:") || k.startsWith("animerift_bbz:") || k.startsWith("animerift_cr2_dub:") || k.startsWith("anime4up2_hard:")) && v === "ready") {
             next[k] = "ready";
           }
         }
@@ -1909,6 +1909,7 @@ export default function WatchScreen() {
       return;
     }
     const controller = new AbortController();
+    const riftCtrl = new AbortController();
     availabilityAbortRef.current = controller;
     setAvailabilityDone(false);
     setAvailabilityError(false);
@@ -2014,7 +2015,7 @@ export default function WatchScreen() {
       }
       setAvailableSlots((curr) => {
         const merged: Record<string, Partial<Record<QualityKey, AvailableSlot>>> = { ...filteredStaged };
-        for (const phoneSite of ["donghua_ax", "donghua_ak", "donghua_ds"] as const) {
+        for (const phoneSite of ["donghua_ax", "donghua_ak", "donghua_ds", "animerift_cr2", "animerift_bbz", "animerift_cr2_dub", "anime4up2_hard"] as const) {
           if (curr[phoneSite] && !merged[phoneSite]) {
             merged[phoneSite] = curr[phoneSite];
           }
@@ -2244,7 +2245,7 @@ export default function WatchScreen() {
         format: format || "",
         year: year || "",
         epNum,
-        signal: controller.signal,
+        signal: riftCtrl.signal,
       }).then((probe) => {
         if (cancelled || !probe || !isMountedRef.current) return;
         let added = false;
@@ -2276,6 +2277,7 @@ export default function WatchScreen() {
       clearTimeout(timeoutId);
       closeReaderSafely();
       controller.abort();
+      riftCtrl.abort();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAwDubbed, anime, anilistId, sourceAnimeId, epNum, titleStr, englishStr, titleArStr, format, year, episodes, native, anslayerId, awAnimeId, isFromLatest, latestSource, availabilityAttempt, availabilityHintKey, playbackTraceId]);
