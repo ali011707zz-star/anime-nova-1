@@ -103,6 +103,8 @@ export type FilmSummary = {
   genres: string[];
   originalLanguage?: string;
   releaseDate?: string;
+  egyWatchId?: number;
+  egyWatchType?: "movie" | "serie" | "anime";
   durationOrSeasons?: string;
   seasonsCount?: number;
   releaseDayIndex?: number;
@@ -266,6 +268,9 @@ export function resolveFilmImageUrl(url?: string | null): string | undefined {
         return `${base}/api/film/poster?u=${encodeURIComponent(s)}`;
       }
     } catch {}
+    if (s.includes("image.tmdb.org/t/p/")) {
+      return s.replace(/\/t\/p\/(?:original|w780|w500)\//i, "/t/p/w342/");
+    }
     return s;
   }
   return undefined;

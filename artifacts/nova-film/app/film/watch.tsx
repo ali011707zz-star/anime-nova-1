@@ -95,6 +95,11 @@ function normalizeQualityBucket(src: FilmStreamSource): "1080p" | "720p" | "480p
 
 function serverShortTag(src: FilmStreamSource, idx: number): string {
   const s = (src.site || "").toLowerCase();
+  if (s === "egywatch_eg" || s === "eg") return "EG";
+  if (s === "egywatch_tk" || s === "tk") return "TK";
+  if (s === "egywatch_uq" || s === "uq") return "UQ";
+  if (s === "egywatch_eb" || s === "eb") return "EB";
+  if (s === "egywatch_vs" || s === "vs") return "VS";
   if (s === "cb" || s.includes("cobalt") || s.includes("vixsrc")) return "CB";
   if (s === "vidhls") return "VH";
   if (s === "vidhls-alt") return "CD";
@@ -266,8 +271,13 @@ export default function FilmWatchScreen() {
       season: currentSeason,
       episode: currentEpNum,
       title: lookupTitle,
+      titleAr: String(dNow?.titleAr || params.title || "").trim() || lookupTitle,
+      titleEn: String(dNow?.titleEn || params.english || "").trim() || lookupTitle,
       year: lookupYear,
       realTmdbId: dNow?.realTmdbId,
+      egyWatchId: dNow?.egyWatchId,
+      egyWatchType: dNow?.egyWatchType,
+      preferDubbed: dNow?.audioLabel === "مدبلج عربي" || dNow?.egyWatchType === "anime",
       forceRefresh: refreshNonce > 0,
       signal: controller.signal,
       onStatus: (msg) => {

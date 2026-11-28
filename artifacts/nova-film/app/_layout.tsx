@@ -22,7 +22,7 @@ import { TelegramAnnouncementModal } from "@/components/TelegramAnnouncementModa
 import { AppProvider, useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { loadRuntimeApiUrl } from "@/utils/baseUrl";
-import { loadCachedFilmHome } from "@/utils/filmApi";
+import { fetchFilmHome, loadCachedFilmHome } from "@/utils/filmApi";
 import { installGlobalCrashHandlers } from "@/utils/crashLogger";
 import { getRuntimeIntegrity, runtimeIntegrityMessage } from "@/utils/runtimeIntegrity";
 import { isTvDevice, useTvMetrics } from "@/utils/tv";
@@ -79,8 +79,12 @@ if (SENTRY_DSN && RUNTIME_INTEGRITY.trusted) {
 
 // تحميل عنوان API المخصص من AsyncStorage قبل أي طلب شبكي
 if (RUNTIME_INTEGRITY.trusted) {
-  loadRuntimeApiUrl().catch(() => {});
-  loadCachedFilmHome().catch(() => {});
+  loadRuntimeApiUrl()
+    .catch(() => {})
+    .finally(() => {
+      loadCachedFilmHome().catch(() => {});
+      fetchFilmHome().catch(() => {});
+    });
 }
 
 // تثبيت معالجات الأعطال العالمية — فوراً عند بدء التشغيل

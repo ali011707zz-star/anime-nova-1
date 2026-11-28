@@ -1,4 +1,5 @@
 import { resolveVixSrcClient } from "./vixsrcClient";
+import { resolveEgyWatchOnPhone } from "./egyWatchClient";
 import { extractDirectStreamOnPhone, type ClientExtractDescriptor } from "./directClientExtractor";
 import { Image } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -52,7 +53,40 @@ function resolveAbsUrl(url: string | undefined, base: string): string {
   return `${base}${url.startsWith("/") ? url : `/${url}`}`;
 }
 
-export const FILM_HOME_CACHE_KEY = "nova_film_home_cache_v6";
+export const FILM_HOME_CACHE_KEY = "nova_film_home_cache_v7";
+
+function prefetchHomePosters(feed: FilmHomeFeed) {
+  try {
+    const urls = new Set<string>();
+    const addUrl = (u?: string | null) => {
+      const r = resolveFilmImageUrl(u);
+      if (r && r.startsWith("http")) urls.add(r);
+    };
+    for (const h of (feed.hero || []).slice(0, 4)) {
+      addUrl(h.backdropUrl || h.posterUrl);
+      addUrl(h.posterUrl);
+    }
+    for (const arr of [
+      feed.trendingMovies,
+      feed.latestMovies,
+      feed.arabicMovies,
+      feed.popularSeries,
+      feed.arabicSeries,
+      feed.turkishSeries,
+      feed.dubbedSeries,
+      feed.animationMovies,
+    ]) {
+      for (const it of (arr || []).slice(0, 5)) {
+        addUrl(it.posterUrl);
+      }
+    }
+    Array.from(urls)
+      .slice(0, 26)
+      .forEach((u) => {
+        Image.prefetch(u).catch(() => {});
+      });
+  } catch {}
+}
 let _memHomeFeed: FilmHomeFeed | undefined = undefined;
 
 function normalizeHomeFeed(raw: any): FilmHomeFeed {
@@ -101,6 +135,7 @@ export function primeMemoryFilmHomeFromJson(rawJson: string | null | undefined):
     const parsed = normalizeHomeFeed(JSON.parse(rawJson));
     if (hasHomeContent(parsed)) {
       _memHomeFeed = parsed;
+      prefetchHomePosters(parsed);
       return parsed;
     }
   } catch {}
@@ -127,6 +162,7 @@ export async function fetchFilmHome(): Promise<FilmHomeFeed> {
   const normalized = normalizeHomeFeed(raw);
   if (hasHomeContent(normalized)) {
     _memHomeFeed = normalized;
+    prefetchHomePosters(normalized);
     AsyncStorage.setItem(FILM_HOME_CACHE_KEY, JSON.stringify(normalized)).catch(() => {});
     scheduleBackgroundAnimWarm();
   }
@@ -353,8 +389,13 @@ export async function streamFilmSources(params: {
   season: number;
   episode: number;
   title: string;
+  titleAr?: string;
+  titleEn?: string;
   year?: number | string;
   realTmdbId?: number | null;
+  egyWatchId?: number | null;
+  egyWatchType?: "movie" | "serie" | "anime" | null;
+  preferDubbed?: boolean;
   forceRefresh?: boolean;
   onStatus?: (msg: string) => void;
   onSource: (srv: FilmServerLink) => void;
@@ -363,7 +404,7 @@ export async function streamFilmSources(params: {
 }): Promise<FilmServerLink[]> {
   const base = getBaseUrl();
   const mediaType: TmdbMediaType = params.tmdbType || params.type || "movie";
-  const cacheKey = `film-srcs-v6-${mediaType}-${params.tmdbId}-s${params.season}-e${params.episode}`;
+  const cacheKey = `film-srcs-v7-${mediaType}-${params.tmdbId}-s${params.season}-e${params.episode}`;
 
   const collected: FilmServerLink[] = [];
   const seen = new Set<string>();
@@ -396,6 +437,40 @@ export async function streamFilmSources(params: {
 
   // Start client-side Cobalt (VixSrc) immediately if realTmdbId is already known from detail
   triggerVixSrc(params.realTmdbId);
+  // Start direct client-side EgyWatch (EG, TK, UQ, EB, VS) immediately on phone (0% VPS load!)
+  let egyWatchStarted = false;
+  let egyWatchPromise: Promise<number> | null = null;
+  const triggerEgyWatch = (realId?: number | null) => {
+    if (egyWatchStarted) return;
+    if (!params.egyWatchId && !params.titleAr && !params.titleEn && !params.title) return;
+    egyWatchStarted = true;
+    const rawNum = Number(params.tmdbId || 0);
+    const derivedTmdbId =
+      realId && Number.isFinite(Number(realId)) && Number(realId) > 0
+        ? Number(realId)
+        : rawNum >= 1_800_000_000 && rawNum < 1_900_000_000
+          ? rawNum - 1_800_000_000
+          : rawNum >= 1_500_000_000 && rawNum < 1_650_000_000
+            ? rawNum - 1_500_000_000
+            : null;
+    egyWatchPromise = resolveEgyWatchOnPhone({
+      tmdbId: derivedTmdbId,
+      tmdbType: mediaType,
+      titleAr: params.titleAr || params.title,
+      titleEn: params.titleEn || params.title,
+      year: params.year,
+      season: params.season,
+      episode: params.episode,
+      preferDubbed: params.preferDubbed || params.egyWatchType === "anime",
+      egyWatchId: params.egyWatchId || null,
+      egyWatchType: params.egyWatchType || null,
+      signal: params.signal,
+      onSource: (srv) => {
+        if (!params.signal?.aborted) emitUnique(srv);
+      },
+    }).catch(() => 0);
+  };
+  triggerEgyWatch(params.realTmdbId);
 
   if (!params.forceRefresh) {
     try {
@@ -405,6 +480,7 @@ export async function streamFilmSources(params: {
         if (parsed?.items?.length > 0 && Date.now() - parsed.ts < SOURCES_CACHE_TTL) {
           triggerVixSrc(parsed.realTmdbId);
           parsed.items.forEach((item) => emitUnique(item));
+          if (egyWatchPromise) await egyWatchPromise;
           if (vixPromise) await vixPromise;
           params.onDone?.();
           return collected;
@@ -419,7 +495,11 @@ export async function streamFilmSources(params: {
     season: String(params.season),
     ep: String(params.episode),
     title: params.title,
+    titleAr: params.titleAr || params.title,
     clientExtract: "1",
+    ...(params.egyWatchId ? { ewId: String(params.egyWatchId) } : {}),
+    ...(params.egyWatchType ? { ewType: params.egyWatchType } : {}),
+    ...(params.preferDubbed ? { preferDubbed: "1" } : {}),
   });
 
   let idxCounter = 0;
@@ -517,6 +597,9 @@ export async function streamFilmSources(params: {
 
   if (pendingExtracts.length > 0) {
     await Promise.allSettled(pendingExtracts);
+  }
+  if (egyWatchPromise) {
+    await egyWatchPromise;
   }
   if (vixPromise) {
     await vixPromise;
