@@ -231,6 +231,9 @@ const SUBTITLE_DISABLED_SITES = new Set([
   "anime4up2_hard", "ad 1", "ad1",
   "anslayer", "as",
   "stardima_catalog",
+  "animerift_cr2", "cr2", "ax",
+  "animerift_bbz", "bbz", "nv",
+  "animerift_cr2_dub", "cr2 dub",
 ]);
 
 function subtitlesDisabledForSite(site?: string): boolean {
