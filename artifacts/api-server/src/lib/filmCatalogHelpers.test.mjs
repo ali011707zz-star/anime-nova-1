@@ -76,7 +76,7 @@ test("mapTmdbItemToFilmSummary enforces official TMDB posters and skips missing 
     buildTmdbDiscoverSpec("animation_movies"),
   );
   assert.equal(ok.id, 1_501_084_244);
-  assert.equal(ok.posterUrl, "https://image.tmdb.org/t/p/w780/b9yODva86tl5Em8cOoKSQQzzAy4.jpg");
+  assert.equal(ok.posterUrl, "https://image.tmdb.org/t/p/w342/b9yODva86tl5Em8cOoKSQQzzAy4.jpg");
   assert.equal(ok.mediaType, "animation");
 });
 
@@ -126,4 +126,38 @@ test("mergeSeasonEpisodes fills missing episodes 4..6 in Season 2 while keeping 
   assert.equal(merged.length, 6);
   assert.deepEqual(merged.map((e) => e.episodeNumber), [1, 2, 3, 4, 5, 6]);
   assert.equal(merged[5].stillUrl, "https://image.tmdb.org/t/p/w1280/s2e6.jpg");
+});
+
+test("animation specs exclude Japanese anime and unreleased future movies", () => {
+  const animSpec = buildTmdbDiscoverSpec("animation_movies", { page: 1 });
+  assert.ok(animSpec.path.includes("without_keywords=210024"));
+  assert.ok(animSpec.path.includes("primary_release_date.lte="));
+
+  const animeBlocked = mapTmdbItemToFilmSummary(
+    {
+      id: 129,
+      title: "المخطوفة",
+      original_title: "千と千尋の神隠し",
+      original_language: "ja",
+      poster_path: "/39wmItIWsg5sZMyRUHLkWBcuVCM.jpg",
+      release_date: "2001-07-20",
+      genre_ids: [16, 10751],
+    },
+    animSpec,
+  );
+  assert.equal(animeBlocked, null);
+
+  const futureBlocked = mapTmdbItemToFilmSummary(
+    {
+      id: 9999999,
+      title: "Future Movie",
+      original_title: "Future Movie",
+      original_language: "en",
+      poster_path: "/future.jpg",
+      release_date: "2029-12-25",
+      genre_ids: [16, 10751],
+    },
+    animSpec,
+  );
+  assert.equal(futureBlocked, null);
 });

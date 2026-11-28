@@ -1,5 +1,5 @@
-export const TMDB_IMG_POSTER = "https://image.tmdb.org/t/p/w780";
-export const TMDB_IMG_BACKDROP = "https://image.tmdb.org/t/p/w1280";
+export const TMDB_IMG_POSTER = "https://image.tmdb.org/t/p/w342";
+export const TMDB_IMG_BACKDROP = "https://image.tmdb.org/t/p/w780";
 
 const ARABIC_GENRE_TO_TMDB_MOVIE = {
   "أكشن": 28,
@@ -135,10 +135,12 @@ export function buildTmdbDiscoverSpec(category, opts = {}) {
       audioLabel: "مترجم",
       baseParams: {
         with_genres: "16",
+        with_original_language: "en|fr|es|de|it|pt|ru|nl",
+        without_keywords: "210024",
         without_genres: "10749",
         certification_country: "US",
         "certification.lte": "PG-13",
-        "vote_count.gte": "10",
+        "vote_count.gte": "30",
       },
     },
     animation_series: {
@@ -148,11 +150,12 @@ export function buildTmdbDiscoverSpec(category, opts = {}) {
       audioLabel: "مترجم",
       baseParams: {
         with_genres: "16",
+        with_original_language: "en|fr|es|de|it|pt|ru|nl",
         without_keywords: "210024",
         without_genres: "10749",
         certification_country: "US",
         "certification.lte": "TV-PG",
-        "vote_count.gte": "10",
+        "vote_count.gte": "20",
       },
     },
     animation: {
@@ -162,10 +165,12 @@ export function buildTmdbDiscoverSpec(category, opts = {}) {
       audioLabel: "مترجم",
       baseParams: {
         with_genres: "16",
+        with_original_language: "en|fr|es|de|it|pt|ru|nl",
+        without_keywords: "210024",
         without_genres: "10749",
         certification_country: "US",
         "certification.lte": "PG-13",
-        "vote_count.gte": "10",
+        "vote_count.gte": "30",
       },
     },
     arabic_movies: {
@@ -355,13 +360,15 @@ export function buildTmdbDiscoverSpec(category, opts = {}) {
     ...spec.baseParams,
   });
 
+  const today = new Date().toISOString().slice(0, 10);
+  if (!year || year <= Number(today.slice(0, 4))) {
+    qs.set(isTv ? "first_air_date.lte" : "primary_release_date.lte", today);
+  }
   if (sortRaw === "rating" || cat === "top_rated") {
     qs.set("sort_by", "vote_average.desc");
     if (!qs.has("vote_count.gte")) qs.set("vote_count.gte", "50");
   } else if (sortRaw === "year" || sortRaw === "latest") {
     qs.set("sort_by", isTv ? "first_air_date.desc" : "primary_release_date.desc");
-    const today = new Date().toISOString().slice(0, 10);
-    qs.set(isTv ? "first_air_date.lte" : "primary_release_date.lte", today);
   } else {
     qs.set("sort_by", "popularity.desc");
   }
@@ -401,7 +408,20 @@ export function mapTmdbItemToFilmSummary(raw, spec) {
   if (!Number.isFinite(realTmdbId) || realTmdbId <= 0) return null;
 
   const genreIds = Array.isArray(raw.genre_ids) ? raw.genre_ids.map(Number) : [];
-  const isAnim = spec?.mediaType === "animation" || genreIds.includes(16);
+  const rawDateStr = String(raw.release_date || raw.first_air_date || "").slice(0, 10);
+  const todayIso = new Date().toISOString().slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(rawDateStr) && rawDateStr > todayIso) {
+    return null;
+  }
+  const origLang = String(raw.original_language || "").toLowerCase();
+  const origCountries = Array.isArray(raw.origin_country) ? raw.origin_country.map((c) => String(c).toUpperCase()) : [];
+  const origTitleRaw = String(raw.original_title || raw.original_name || "");
+  const isJapaneseOrigin = origLang === "ja" || origCountries.includes("JP") || /[\u3040-\u30FF\u4E00-\u9FFF]/.test(origTitleRaw);
+  if (spec?.mediaType === "animation") {
+    if (isJapaneseOrigin) return null;
+    if (genreIds.length > 0 && !genreIds.includes(16)) return null;
+  }
+  const isAnim = spec?.mediaType === "animation" || (genreIds.includes(16) && !isJapaneseOrigin);
   const mediaType = spec?.mediaType || (isAnim ? "animation" : tmdbType === "tv" ? "series" : "movie");
 
   const titleAr = String(raw.title || raw.name || raw.original_title || raw.original_name || "").trim();
@@ -437,6 +457,8 @@ export function mapTmdbItemToFilmSummary(raw, spec) {
       spec?.categoryLabel ||
       (isAnim ? (tmdbType === "tv" ? "مسلسلات أنميشن" : "أفلام أنميشن") : tmdbType === "tv" ? "مسلسلات أجنبية" : "أفلام أجنبية"),
     genres: genres.length > 0 ? genres : isAnim ? ["أنميشن"] : ["دراما"],
+    originalLanguage: origLang || undefined,
+    releaseDate: rawDateStr || undefined,
     durationOrSeasons: tmdbType === "tv" ? "مسلسل · مواسم كاملة" : "فيلم كامل",
   };
 }

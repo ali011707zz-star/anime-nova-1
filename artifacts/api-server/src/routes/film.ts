@@ -28,13 +28,22 @@ import {
   mergeTvSeasons,
   normalizeArabicSearchVariants,
 } from "../lib/filmCatalogHelpers.mjs";
+import {
+  getEgyWatchSeriesSeasons,
+  getVerifiedEgyWatchCategory,
+  lookupVerifiedEgyWatchItem,
+  resolveEgyWatchStreams,
+  startEgyWatchCatalogScheduler,
+} from "../lib/egyWatchCatalog.js";
+import { isAsianSeriesSummary } from "../lib/egyWatchLogic.mjs";
 
 const router = Router();
 
 const TMDB_KEY = process.env.TMDB_API_KEY || "4ef0d7355d9ffb5151e987764708ce96";
 const TMDB_BASE = "https://api.themoviedb.org/3";
-const TMDB_IMG_POSTER = "https://image.tmdb.org/t/p/w780";
-const TMDB_IMG_BACKDROP = "https://image.tmdb.org/t/p/w1280";
+const TMDB_IMG_POSTER = "https://image.tmdb.org/t/p/w342";
+const TMDB_IMG_BACKDROP = "https://image.tmdb.org/t/p/w780";
+startEgyWatchCatalogScheduler();
 const TMDB_IMG_PROFILE = "https://image.tmdb.org/t/p/w185";
 
 const BROWSER_UA =
@@ -251,7 +260,7 @@ async function enrichDetailFromTmdb(row: any): Promise<{
   const backdropUrl = data.backdrop_path ? `${TMDB_IMG_BACKDROP}${data.backdrop_path}` : null;
   const curPoster = String(row.poster_url || "");
   const curBackdrop = String(row.backdrop_url || "");
-  const needsPosterUpgrade = Boolean(posterUrl && (!curPoster.includes("image.tmdb.org/t/p/w780") || curPoster.includes("moviztime")));
+  const needsPosterUpgrade = Boolean(posterUrl && (!curPoster.includes("image.tmdb.org/t/p/") || curPoster.includes("moviztime")));
   const needsBackdropUpgrade = Boolean(backdropUrl && (!curBackdrop.includes("image.tmdb.org") || curBackdrop === curPoster));
   if (!row.tmdb_id || needsPosterUpgrade || needsBackdropUpgrade) {
     pool
@@ -1237,149 +1246,189 @@ router.get("/config", (_req: Request, res: Response) => {
 
 // ── 2. Home batched real vault + live EgyDead & TopCinema feeds (deduped) ──
 let _filmHomeCache: { ts: number; payload: any } | null = null;
+let _filmHomeRefreshing = false;
+
+async function buildFreshFilmHomePayload() {
+  const [
+    heroRes,
+    trendingRes,
+    latestRes,
+    asianRes,
+    seriesRes,
+    topRatedRes,
+    tmdbForeignM,
+    tmdbForeignS,
+    tmdbArabicM,
+    tmdbTurkishM,
+    tmdbIndianM,
+    tmdbAsianM,
+    tmdbArabicS,
+    tmdbTurkishS,
+    tmdbIndianS,
+    tmdbAsianS,
+    tmdbAnimM,
+    tmdbAnimS,
+  ] = await Promise.all([
+    pool.query(
+      `SELECT * FROM film_vault_titles
+       WHERE is_archived = FALSE AND has_live_server = TRUE
+         AND media_type != 'animation'
+         AND poster_url IS NOT NULL AND poster_url != '' AND poster_url NOT LIKE '%images.jpg%'
+         AND backdrop_url IS NOT NULL AND backdrop_url != ''
+       ORDER BY COALESCE(year, 2020) DESC, COALESCE(imdb_rating, 7.0) DESC, id DESC
+       LIMIT 10`,
+    ),
+    pool.query(
+      `SELECT * FROM film_vault_titles
+       WHERE is_archived = FALSE AND has_live_server = TRUE AND media_type = 'movie'
+         AND poster_url IS NOT NULL AND poster_url != '' AND poster_url NOT LIKE '%images.jpg%'
+       ORDER BY COALESCE(year, 2020) DESC, COALESCE(imdb_rating, 6.8) DESC, id DESC
+       LIMIT 16`,
+    ),
+    pool.query(
+      `SELECT * FROM film_vault_titles
+       WHERE is_archived = FALSE AND has_live_server = TRUE AND media_type = 'movie'
+         AND poster_url IS NOT NULL AND poster_url != '' AND poster_url NOT LIKE '%images.jpg%'
+       ORDER BY updated_at DESC, id DESC
+       LIMIT 16`,
+    ),
+    pool.query(
+      `SELECT * FROM film_vault_titles
+       WHERE is_archived = FALSE AND has_live_server = TRUE AND media_type = 'movie'
+         AND category_label IN ('أفلام آسيوية', 'أفلام أوروبية')
+       ORDER BY COALESCE(year, 2020) DESC, id DESC
+       LIMIT 16`,
+    ),
+    pool.query(
+      `SELECT * FROM film_vault_titles
+       WHERE is_archived = FALSE AND has_live_server = TRUE AND media_type = 'series'
+         AND COALESCE(category_label, '') NOT IN ('مسلسلات آسيوية', 'دراما آسيوية', 'دراما كورية', 'دراما صينية', 'مسلسلات أنمي')
+         AND poster_url IS NOT NULL AND poster_url != '' AND poster_url NOT LIKE '%images.jpg%'
+       ORDER BY COALESCE(year, 2020) DESC, playable_episode_count DESC, updated_at DESC
+       LIMIT 24`,
+    ),
+    pool.query(
+      `SELECT * FROM film_vault_titles
+       WHERE is_archived = FALSE AND has_live_server = TRUE AND media_type = 'movie'
+         AND imdb_rating IS NOT NULL
+       ORDER BY imdb_rating DESC, COALESCE(year, 2020) DESC, id DESC
+       LIMIT 16`,
+    ),
+    fetchTmdbDiscoverCategory("foreign_movies", { page: 1 }, 16).catch(() => ({ items: [] })),
+    fetchTmdbDiscoverCategory("foreign_series", { page: 1 }, 16).catch(() => ({ items: [] })),
+    fetchTmdbDiscoverCategory("arabic_movies", { page: 1 }, 16).catch(() => ({ items: [] })),
+    fetchTmdbDiscoverCategory("turkish_movies", { page: 1 }, 16).catch(() => ({ items: [] })),
+    fetchTmdbDiscoverCategory("indian_movies", { page: 1 }, 16).catch(() => ({ items: [] })),
+    fetchTmdbDiscoverCategory("asian_movies", { page: 1 }, 16).catch(() => ({ items: [] })),
+    fetchTmdbDiscoverCategory("arabic_series", { page: 1 }, 16).catch(() => ({ items: [] })),
+    fetchTmdbDiscoverCategory("turkish_series", { page: 1 }, 16).catch(() => ({ items: [] })),
+    fetchTmdbDiscoverCategory("indian_series", { page: 1 }, 16).catch(() => ({ items: [] })),
+    fetchTmdbDiscoverCategory("asian_series", { page: 1 }, 16).catch(() => ({ items: [] })),
+    fetchTmdbDiscoverCategory("animation_movies", { page: 1 }, 16).catch(() => ({ items: [] })),
+    fetchTmdbDiscoverCategory("animation_series", { page: 1 }, 16).catch(() => ({ items: [] })),
+  ]);
+
+  const fastCard = (x: any) => {
+    if (!x) return x;
+    const p = typeof x.posterUrl === "string" ? x.posterUrl.replace(/\/t\/p\/(?:original|w1280|w780|w500)\//i, "/t/p/w342/") : x.posterUrl;
+    const b = typeof x.backdropUrl === "string" ? x.backdropUrl.replace(/\/t\/p\/(?:original|w1280)\//i, "/t/p/w780/") : x.backdropUrl;
+    return { ...x, posterUrl: p, backdropUrl: b };
+  };
+
+  const vHero = heroRes.rows.map(rowToFilmSummary).map(fastCard);
+  const vTrending = trendingRes.rows.map(rowToFilmSummary).map(fastCard);
+  const vLatest = latestRes.rows.map(rowToFilmSummary).map(fastCard);
+  const vAsian = asianRes.rows.map(rowToFilmSummary).map(fastCard);
+  const vSeries = seriesRes.rows.map(rowToFilmSummary).filter((x) => !isAsianSeriesSummary(x)).map(fastCard);
+  const vTopRated = topRatedRes.rows.map(rowToFilmSummary).map(fastCard);
+
+  // Verified EgyWatch regional & dubbed lists (100% playable servers!)
+  const ewArabicM = getVerifiedEgyWatchCategory("arabic_movies");
+  const ewArabicS = getVerifiedEgyWatchCategory("arabic_series");
+  const ewTurkishM = getVerifiedEgyWatchCategory("turkish_movies");
+  const ewTurkishS = getVerifiedEgyWatchCategory("turkish_series");
+  const ewIndianM = getVerifiedEgyWatchCategory("indian_movies");
+  const ewIndianS = getVerifiedEgyWatchCategory("indian_series");
+  const ewAsianM = getVerifiedEgyWatchCategory("asian_movies");
+  const ewAsianS = getVerifiedEgyWatchCategory("asian_series");
+  const ewDubbedS = getVerifiedEgyWatchCategory("dubbed_series");
+
+  const hero = deduplicateFilmSummaries([tmdbForeignM.items.slice(0, 4), vHero.slice(0, 4), tmdbForeignS.items.slice(0, 2)], undefined, 6);
+  const trendingMovies = deduplicateFilmSummaries([tmdbForeignM.items, vTrending], undefined, 16);
+  const latestMovies = deduplicateFilmSummaries([tmdbForeignM.items, vLatest], undefined, 16);
+  const foreignMovies = deduplicateFilmSummaries([tmdbForeignM.items, vTrending, vLatest], undefined, 16);
+  const arabicMovies = deduplicateFilmSummaries(ewArabicM.length >= 4 ? [ewArabicM] : [ewArabicM, tmdbArabicM.items], undefined, 16);
+  const turkishMovies = deduplicateFilmSummaries(ewTurkishM.length >= 4 ? [ewTurkishM] : [ewTurkishM, tmdbTurkishM.items], undefined, 16);
+  const indianMovies = deduplicateFilmSummaries(ewIndianM.length >= 4 ? [ewIndianM] : [ewIndianM, tmdbIndianM.items], undefined, 16);
+  const asianMovies = deduplicateFilmSummaries([ewAsianM, vAsian, tmdbAsianM.items], undefined, 16);
+  const popularSeries = deduplicateFilmSummaries([tmdbForeignS.items, vSeries], undefined, 16);
+  const latestSeries = deduplicateFilmSummaries([tmdbForeignS.items, vSeries], undefined, 16);
+  const arabicSeries = deduplicateFilmSummaries(ewArabicS.length >= 4 ? [ewArabicS] : [ewArabicS, tmdbArabicS.items], undefined, 16);
+  const turkishSeries = deduplicateFilmSummaries(ewTurkishS.length >= 4 ? [ewTurkishS] : [ewTurkishS, tmdbTurkishS.items], undefined, 16);
+  const asianSeries = deduplicateFilmSummaries(ewAsianS.length >= 4 ? [ewAsianS] : [ewAsianS, tmdbAsianS.items], undefined, 16);
+  const dubbedSeries = deduplicateFilmSummaries(ewDubbedS.length > 0 ? [ewDubbedS] : [ewTurkishS], undefined, 16);
+  const indianSeries = deduplicateFilmSummaries(ewIndianS.length >= 4 ? [ewIndianS] : [ewIndianS, tmdbIndianS.items], undefined, 16);
+  const topRated = deduplicateFilmSummaries([vTopRated, tmdbForeignM.items], undefined, 16);
+  const animationMovies = deduplicateFilmSummaries([tmdbAnimM.items], undefined, 16);
+  const animationSeries = deduplicateFilmSummaries([tmdbAnimS.items], undefined, 16);
+  const animations = deduplicateFilmSummaries([tmdbAnimM.items.slice(0, 10), tmdbAnimS.items.slice(0, 8)], undefined, 16);
+
+  return {
+    hero,
+    trendingMovies,
+    latestMovies,
+    foreignMovies,
+    arabicMovies,
+    turkishMovies,
+    indianMovies,
+    asianMovies,
+    popularSeries,
+    latestSeries,
+    arabicSeries,
+    turkishSeries,
+    asianSeries,
+    dubbedSeries,
+    indianSeries,
+    topRated,
+    animations,
+    animationMovies,
+    animationSeries,
+  };
+}
+
+// Pre-warm /home immediately on boot so the very first user request responds in <15ms
+setTimeout(() => {
+  void buildFreshFilmHomePayload()
+    .then((payload) => {
+      _filmHomeCache = { ts: Date.now(), payload };
+    })
+    .catch(() => {});
+}, 800);
+
 router.get("/home", async (_req: Request, res: Response) => {
   try {
-    if (_filmHomeCache && Date.now() - _filmHomeCache.ts < 5 * 60_000) {
+    const now = Date.now();
+    if (_filmHomeCache) {
+      const age = now - _filmHomeCache.ts;
+      // Always respond instantly from cache (SWR) so first-open posters never wait!
+      res.setHeader("Cache-Control", "public, max-age=120");
       res.json(_filmHomeCache.payload);
+      if (age >= 5 * 60_000 && !_filmHomeRefreshing) {
+        _filmHomeRefreshing = true;
+        void buildFreshFilmHomePayload()
+          .then((payload) => {
+            _filmHomeCache = { ts: Date.now(), payload };
+          })
+          .catch(() => {})
+          .finally(() => {
+            _filmHomeRefreshing = false;
+          });
+      }
       return;
     }
-
-    const [
-      heroRes,
-      trendingRes,
-      latestRes,
-      asianRes,
-      seriesRes,
-      topRatedRes,
-      extHome,
-      tmdbForeignM,
-      tmdbArabicM,
-      tmdbTurkishM,
-      tmdbIndianM,
-      tmdbAsianM,
-      tmdbArabicS,
-      tmdbTurkishS,
-      tmdbIndianS,
-      tmdbAsianS,
-      tmdbDubbedS,
-      tmdbAnimM,
-      tmdbAnimS,
-    ] = await Promise.all([
-      pool.query(
-        `SELECT * FROM film_vault_titles
-         WHERE is_archived = FALSE AND has_live_server = TRUE
-           AND media_type != 'animation'
-           AND poster_url != '' AND poster_url NOT LIKE '%images.jpg%'
-         ORDER BY COALESCE(year, 2020) DESC, COALESCE(imdb_rating, 7.0) DESC, updated_at DESC
-         LIMIT 8`,
-      ),
-      pool.query(
-        `SELECT * FROM film_vault_titles
-         WHERE is_archived = FALSE AND has_live_server = TRUE AND media_type = 'movie'
-           AND poster_url != ''
-         ORDER BY (COALESCE(year, 2020) * 1.5 + COALESCE(imdb_rating, 6.8) * 10) DESC, id DESC
-         LIMIT 16`,
-      ),
-      pool.query(
-        `SELECT * FROM film_vault_titles
-         WHERE is_archived = FALSE AND has_live_server = TRUE AND media_type = 'movie'
-           AND poster_url IS NOT NULL AND poster_url != '' AND poster_url NOT LIKE '%images.jpg%'
-         ORDER BY COALESCE(year, 2020) DESC, updated_at DESC, id DESC
-         LIMIT 16`,
-      ),
-      pool.query(
-        `SELECT * FROM film_vault_titles
-         WHERE is_archived = FALSE AND has_live_server = TRUE AND media_type = 'movie'
-           AND category_label IN ('أفلام آسيوية', 'أفلام أوروبية')
-         ORDER BY COALESCE(year, 2020) DESC, COALESCE(imdb_rating, 6.5) DESC, id DESC
-         LIMIT 16`,
-      ),
-      pool.query(
-        `SELECT * FROM film_vault_titles
-         WHERE is_archived = FALSE AND has_live_server = TRUE AND media_type = 'series'
-           AND poster_url IS NOT NULL AND poster_url != '' AND poster_url NOT LIKE '%images.jpg%'
-         ORDER BY COALESCE(year, 2020) DESC, playable_episode_count DESC, updated_at DESC
-         LIMIT 16`,
-      ),
-      pool.query(
-        `SELECT * FROM film_vault_titles
-         WHERE is_archived = FALSE AND has_live_server = TRUE AND media_type = 'movie'
-           AND imdb_rating IS NOT NULL
-         ORDER BY imdb_rating DESC, COALESCE(year, 2020) DESC, id DESC
-         LIMIT 16`,
-      ),
-      fetchExternalHomeCatalog().catch(() => null),
-      fetchTmdbDiscoverCategory("foreign_movies", { page: 1 }, 16).catch(() => ({ items: [] })),
-      fetchTmdbDiscoverCategory("arabic_movies", { page: 1 }, 16).catch(() => ({ items: [] })),
-      fetchTmdbDiscoverCategory("turkish_movies", { page: 1 }, 16).catch(() => ({ items: [] })),
-      fetchTmdbDiscoverCategory("indian_movies", { page: 1 }, 16).catch(() => ({ items: [] })),
-      fetchTmdbDiscoverCategory("asian_movies", { page: 1 }, 16).catch(() => ({ items: [] })),
-      fetchTmdbDiscoverCategory("arabic_series", { page: 1 }, 16).catch(() => ({ items: [] })),
-      fetchTmdbDiscoverCategory("turkish_series", { page: 1 }, 16).catch(() => ({ items: [] })),
-      fetchTmdbDiscoverCategory("indian_series", { page: 1 }, 16).catch(() => ({ items: [] })),
-      fetchTmdbDiscoverCategory("asian_series", { page: 1 }, 16).catch(() => ({ items: [] })),
-      fetchTmdbDiscoverCategory("dubbed_series", { page: 1 }, 16).catch(() => ({ items: [] })),
-      fetchTmdbDiscoverCategory("animation_movies", { page: 1 }, 16).catch(() => ({ items: [] })),
-      fetchTmdbDiscoverCategory("animation_series", { page: 1 }, 16).catch(() => ({ items: [] })),
-    ]);
-
-    const vHero = heroRes.rows.map(rowToFilmSummary);
-    const vTrending = trendingRes.rows.map(rowToFilmSummary);
-    const vLatest = latestRes.rows.map(rowToFilmSummary);
-    const vAsian = asianRes.rows.map(rowToFilmSummary);
-    const vSeries = seriesRes.rows.map(rowToFilmSummary);
-    const vTopRated = topRatedRes.rows.map(rowToFilmSummary);
-
-    const ext = extHome || {
-      foreignMovies: [], arabicMovies: [], turkishMovies: [], indianMovies: [],
-      asianMovies: [], animationMovies: [], foreignSeries: [], arabicSeries: [],
-      turkishSeries: [], indianSeries: [], asianSeries: [], dubbedSeries: [], animationSeries: [],
-    };
-
-    const hero = deduplicateFilmSummaries([vHero, tmdbForeignM.items.slice(0, 4), ext.foreignMovies.slice(0, 4), ext.foreignSeries.slice(0, 2)], undefined, 6);
-    const trendingMovies = deduplicateFilmSummaries([vTrending, tmdbForeignM.items, ext.foreignMovies], undefined, 16);
-    const latestMovies = deduplicateFilmSummaries([tmdbForeignM.items, ext.foreignMovies, vLatest], undefined, 16);
-    const foreignMovies = deduplicateFilmSummaries([tmdbForeignM.items, ext.foreignMovies, vTrending, vLatest], undefined, 16);
-    const arabicMovies = deduplicateFilmSummaries([ext.arabicMovies, tmdbArabicM.items], undefined, 16);
-    const turkishMovies = deduplicateFilmSummaries([ext.turkishMovies, tmdbTurkishM.items], undefined, 16);
-    const indianMovies = deduplicateFilmSummaries([ext.indianMovies, tmdbIndianM.items], undefined, 16);
-    const asianMovies = deduplicateFilmSummaries([ext.asianMovies, tmdbAsianM.items, vAsian], undefined, 16);
-    const popularSeries = deduplicateFilmSummaries([vSeries, ext.foreignSeries], undefined, 16);
-    const latestSeries = deduplicateFilmSummaries([ext.foreignSeries, vSeries], undefined, 16);
-    const arabicSeries = deduplicateFilmSummaries([ext.arabicSeries, tmdbArabicS.items], undefined, 16);
-    const turkishSeries = deduplicateFilmSummaries([ext.turkishSeries, tmdbTurkishS.items], undefined, 16);
-    const asianSeries = deduplicateFilmSummaries([ext.asianSeries, tmdbAsianS.items], undefined, 16);
-    const dubbedSeries = deduplicateFilmSummaries([ext.dubbedSeries, tmdbDubbedS.items], undefined, 16);
-    const indianSeries = deduplicateFilmSummaries([ext.indianSeries, tmdbIndianS.items], undefined, 16);
-    const topRated = deduplicateFilmSummaries([vTopRated, tmdbForeignM.items, ext.foreignMovies], undefined, 16);
-    // Official Animation Movies & Animation Series DB ONLY (stops wrong saved vault/scraped anime posters)
-    const animationMovies = deduplicateFilmSummaries([tmdbAnimM.items], undefined, 16);
-    const animationSeries = deduplicateFilmSummaries([tmdbAnimS.items], undefined, 16);
-    const animations = deduplicateFilmSummaries([tmdbAnimM.items.slice(0, 10), tmdbAnimS.items.slice(0, 8)], undefined, 16);
-
-    const payload = {
-      hero,
-      trendingMovies,
-      latestMovies,
-      foreignMovies,
-      arabicMovies,
-      turkishMovies,
-      indianMovies,
-      asianMovies,
-      popularSeries,
-      latestSeries,
-      arabicSeries,
-      turkishSeries,
-      asianSeries,
-      dubbedSeries,
-      indianSeries,
-      topRated,
-      animations,
-      animationMovies,
-      animationSeries,
-    };
-
+    const payload = await buildFreshFilmHomePayload();
     _filmHomeCache = { ts: Date.now(), payload };
+    res.setHeader("Cache-Control", "public, max-age=120");
     res.json(payload);
   } catch (err: any) {
     res.status(500).json({ error: String(err?.message || err) });
@@ -1518,7 +1567,7 @@ router.get("/browse", async (req: Request, res: Response) => {
       } else if (category === "movie" || category === "foreign_movies" || category === "western_movies" || category === "top_rated") {
         conditions.push(`media_type = 'movie'`);
       } else if (category === "series" || category === "foreign_series" || category === "western_series") {
-        conditions.push(`media_type = 'series'`);
+        conditions.push(`media_type = 'series' AND COALESCE(category_label, '') NOT IN ('مسلسلات آسيوية', 'دراما آسيوية', 'دراما كورية', 'دراما صينية', 'مسلسلات أنمي')`);
       }
 
       if (Number.isFinite(yearParam) && yearParam >= 1950 && yearParam <= 2035) {
@@ -1627,12 +1676,41 @@ router.get("/browse", async (req: Request, res: Response) => {
 
     const [vaultData, extItems, tmdbData] = await Promise.all([vaultPromise, extPromise, tmdbPromise]);
 
+    // Filter out any Asian/CJK dramas leaking into Western/Foreign series
+    const isWesternSeriesCat = category === "series" || category === "foreign_series" || category === "western_series";
+    const cleanVaultRows = isWesternSeriesCat
+      ? vaultData.rows.filter((x) => !isAsianSeriesSummary(x))
+      : vaultData.rows;
+
+    // Verified EgyWatch items for regional & dubbed categories (100% playable servers!)
+    const verifiedEwAll = !q ? getVerifiedEgyWatchCategory(category) : [];
+    const verifiedEwFiltered = verifiedEwAll.filter((x) => {
+      if (Number.isFinite(yearParam) && yearParam >= 1950 && yearParam <= 2035 && x.year !== yearParam) return false;
+      if (genre && genre !== "الكل") {
+        const gLow = genre.toLowerCase();
+        if (!x.genres.some((g) => g.toLowerCase().includes(gLow)) && !x.categoryLabel.toLowerCase().includes(gLow)) return false;
+      }
+      return true;
+    });
+    const ewPageSlice = verifiedEwFiltered.slice((page - 1) * limit, page * limit);
+
+    const isDubbedCat = category === "dubbed" || category === "dubbed_series";
     const orderedLists = q
-      ? [vaultData.rows, tmdbData.items, extItems]
-      : isPureRegionalCat || sortRaw === "year"
-        ? [extItems, tmdbData.items, vaultData.rows]
-        : [vaultData.rows, tmdbData.items, extItems];
-    const merged = deduplicateFilmSummaries(orderedLists, undefined, limit);
+      ? [cleanVaultRows, tmdbData.items, extItems]
+      : isDubbedCat
+        ? [ewPageSlice]
+        : isPureRegionalCat
+          ? (ewPageSlice.length >= 6 ? [ewPageSlice] : [ewPageSlice, tmdbData.items, extItems])
+          : isWesternSeriesCat
+            ? [tmdbData.items, cleanVaultRows, extItems]
+            : sortRaw === "year"
+              ? [tmdbData.items, cleanVaultRows, extItems]
+              : [tmdbData.items, cleanVaultRows, extItems];
+    const merged = deduplicateFilmSummaries(orderedLists, undefined, limit).map((x) => ({
+      ...x,
+      posterUrl: typeof x.posterUrl === "string" ? x.posterUrl.replace(/\/t\/p\/(?:original|w1280|w780|w500)\//i, "/t/p/w342/") : x.posterUrl,
+      backdropUrl: typeof x.backdropUrl === "string" ? x.backdropUrl.replace(/\/t\/p\/(?:original|w1280)\//i, "/t/p/w780/") : x.backdropUrl,
+    }));
     const hasRichPages = !q && (extItems.length >= 6 || tmdbData.items.length >= 6);
     const estTotalPages = Math.max(
       1,
@@ -1776,7 +1854,39 @@ router.get("/detail", async (req: Request, res: Response) => {
       return;
     }
 
-    const decoded = decodeSyntheticTmdbId(rawId);
+    const verifiedEwItem = lookupVerifiedEgyWatchItem(rawId);
+    if (verifiedEwItem && !decodeSyntheticTmdbId(rawId)) {
+      const ewSeasonData =
+        verifiedEwItem.tmdbType === "tv"
+          ? await getEgyWatchSeriesSeasons(
+              verifiedEwItem.egyWatchId,
+              verifiedEwItem.egyWatchType === "anime" ? "anime" : "serie",
+              rawId,
+              1,
+            ).catch(() => null)
+          : null;
+      res.json({
+        ...verifiedEwItem,
+        realTmdbId: verifiedEwItem.realTmdbId || null,
+        runtimeMin: verifiedEwItem.tmdbType === "tv" ? 45 : 110,
+        statusLabel: "متاح للمشاهدة",
+        ageRating: "PG-13",
+        director: "",
+        productionCompany: "",
+        imdbId: null,
+        trailerYoutubeKey: null,
+        cast: [],
+        seasons: ewSeasonData?.seasons || [],
+        episodes: ewSeasonData?.episodes || [],
+        relations: [],
+        recommendations: getVerifiedEgyWatchCategory(
+          verifiedEwItem.egyWatchType === "anime" ? "dubbed_series" : "arabic_series",
+        ).filter((x) => x.id !== rawId).slice(0, 10),
+      });
+      return;
+    }
+
+        const decoded = decodeSyntheticTmdbId(rawId);
     const reqType: "movie" | "tv" = decoded?.tmdbType || (String(req.query.type || "movie") === "tv" ? "tv" : "movie");
     let titleRes = await pool.query(
       `SELECT * FROM film_vault_titles WHERE id = $1 AND is_archived = FALSE LIMIT 1`,
@@ -1883,6 +1993,7 @@ router.get("/detail", async (req: Request, res: Response) => {
 
     res.json({
       ...summary,
+      ...(verifiedEwItem ? { egyWatchId: verifiedEwItem.egyWatchId, egyWatchType: verifiedEwItem.egyWatchType } : {}),
       realTmdbId: effectiveRealTmdbId,
       posterUrl: effectivePosterUrl,
       backdropUrl: effectiveBackdropUrl,
@@ -2070,12 +2181,13 @@ router.get("/sources-stream", async (req: Request, res: Response) => {
     if (res.writableEnded) return;
     let payload = data;
     if (event === "source" && data && typeof data === "object") {
-      const code = SERVER_CODES[_srvCodeSeq % SERVER_CODES.length] || `S${_srvCodeSeq + 1}`;
-      _srvCodeSeq++;
+      const presetCode = typeof data.serverCode === "string" && /^[A-Z]{2}$/.test(data.serverCode) ? data.serverCode : null;
+      const code = presetCode || SERVER_CODES[_srvCodeSeq % SERVER_CODES.length] || `S${_srvCodeSeq + 1}`;
+      if (!presetCode) _srvCodeSeq++;
       const tier = String(data.tier || (/1080|fhd|4k|2160/i.test(String(data.label || "")) ? "1080p FHD" : "720p HD"));
       payload = {
         ...data,
-        site: code.toLowerCase(),
+        site: presetCode ? String(data.site || code.toLowerCase()) : code.toLowerCase(),
         label: `السيرفر ${code}`,
         tier,
       };
@@ -2186,7 +2298,36 @@ router.get("/sources-stream", async (req: Request, res: Response) => {
       sendEvent("source", src);
       emitted++;
     }
-    // Also query multi-CDN providers (/api/animation/sources-stream) if titleEn is available
+    // EgyWatch Arabic/Turkish/Indian/Dubbed/Global direct servers (EG, TK, UQ, EB, VS)
+    const skipServerEw = String(req.query.skipServerEw || "") === "1";
+    const verifiedEw = lookupVerifiedEgyWatchItem(tmdbId);
+    const ewIdParam = Number.parseInt(String(req.query.ewId || "0"), 10) || verifiedEw?.egyWatchId || 0;
+    const ewTypeParam = (String(req.query.ewType || "").trim() || verifiedEw?.egyWatchType || "") as "movie" | "serie" | "anime" | "";
+    const preferDubbed = String(req.query.preferDubbed || "") === "1" || ewTypeParam === "anime" || verifiedEw?.audioLabel === "مدبلج عربي";
+    const titleArParam = String(req.query.titleAr || verifiedEw?.titleAr || titleParam || "").trim();
+
+    if (!skipServerEw) {
+      try {
+        await resolveEgyWatchStreams({
+          tmdbId: effectiveRealTmdbId,
+          tmdbType: type,
+          titleAr: titleArParam,
+          titleEn: effectiveTitleEn || verifiedEw?.titleEn || titleParam,
+          year: verifiedEw?.year,
+          season,
+          ep,
+          preferDubbed,
+          egyWatchId: ewIdParam || null,
+          egyWatchType: ewTypeParam || null,
+          onSource: (ewSrc) => {
+            sendEvent("source", ewSrc);
+            emitted++;
+          },
+        });
+      } catch {}
+    }
+
+        // Also query multi-CDN providers (/api/animation/sources-stream) if titleEn is available
     if (effectiveTitleEn) {
       try {
         const port = Number(process.env.PORT || 5000);

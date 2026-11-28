@@ -56,7 +56,7 @@ const APP_VERSION = "3.13.13";
 const DEVICE_STORAGE_KEY = "@nova_animerift_device_v1";
 const ANIME_MAP_STORAGE_KEY = "@nova_animerift_anime_map_v1";
 
-const MIN_REQUEST_GAP_MS = 1250;
+const MIN_REQUEST_GAP_MS = 180;
 const REQUEST_TIMEOUT_MS = 12_000;
 const ANIME_MAP_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const ANIME_MAP_MAX_ENTRIES = 120;
@@ -153,6 +153,8 @@ const episodesCache = new Map<string, { ts: number; episodes: any[] }>();
 const sourcesCache = new Map<string, EpisodeSourcesEntry>();
 const directLinkCache = new Map<string, { ts: number; link: NormalizedAnimeRiftLink }>();
 const inflightEpisodeSources = new Map<string, Promise<EpisodeSourcesEntry | null>>();
+const inflightAnimeId = new Map<string, Promise<string | null>>();
+const inflightEpisodes = new Map<string, Promise<any[] | null>>();
 
 // Global serialized gateway pacer
 let lastGatewayCallAt = 0;
@@ -450,6 +452,20 @@ function makeAnimeCacheKey(params: AnimeRiftProbeParams): string {
 }
 
 async function resolveAnimeId(params: AnimeRiftProbeParams): Promise<string | null> {
+  const dedupKey = makeAnimeCacheKey(params);
+  if (!dedupKey.replace(/\|/g, "")) return null;
+  const existingReq = inflightAnimeId.get(dedupKey);
+  if (existingReq) return existingReq;
+  const task = resolveAnimeIdUncached(params);
+  inflightAnimeId.set(dedupKey, task);
+  try {
+    return await task;
+  } finally {
+    if (inflightAnimeId.get(dedupKey) === task) inflightAnimeId.delete(dedupKey);
+  }
+}
+
+async function resolveAnimeIdUncached(params: AnimeRiftProbeParams): Promise<string | null> {
   const cacheKey = makeAnimeCacheKey(params);
   if (!cacheKey.replace(/\|/g, "")) return null;
 
@@ -504,7 +520,7 @@ async function resolveAnimeId(params: AnimeRiftProbeParams): Promise<string | nu
       bestMatch = candidate;
     }
     // Strong match on first query -> stop immediately to save gateway requests
-    if (bestMatch && bestMatch.score >= 720) break;
+    if (bestMatch && bestMatch.score >= 520) break;
   }
 
   const matchedId = bestMatch?.item?._id ? String(bestMatch.item._id) : null;
@@ -519,21 +535,31 @@ async function fetchEpisodesList(animeId: string, signal?: AbortSignal): Promise
   if (cached && Date.now() - cached.ts < EPISODES_CACHE_TTL_MS) {
     return cached.episodes;
   }
-  const json = await gatewayRequest(
-    "GET",
-    `/library/episodes/${encodeURIComponent(animeId)}?sort_by_latest=1&with_arcs=true&with_favorites=true`,
-    undefined,
-    signal,
-  );
-  const episodes = Array.isArray(json?.episodes)
-    ? json.episodes
-    : Array.isArray(json?.items)
-      ? json.items
-      : null;
-  if (episodes) {
-    episodesCache.set(animeId, { ts: Date.now(), episodes });
+  const existing = inflightEpisodes.get(animeId);
+  if (existing) return existing;
+  const task = (async (): Promise<any[] | null> => {
+    const json = await gatewayRequest(
+      "GET",
+      `/library/episodes/${encodeURIComponent(animeId)}?sort_by_latest=1&with_arcs=true&with_favorites=true`,
+      undefined,
+      signal,
+    );
+    const episodes = Array.isArray(json?.episodes)
+      ? json.episodes
+      : Array.isArray(json?.items)
+        ? json.items
+        : null;
+    if (episodes) {
+      episodesCache.set(animeId, { ts: Date.now(), episodes });
+    }
+    return episodes;
+  })();
+  inflightEpisodes.set(animeId, task);
+  try {
+    return await task;
+  } finally {
+    if (inflightEpisodes.get(animeId) === task) inflightEpisodes.delete(animeId);
   }
-  return episodes;
 }
 
 async function fetchEpisodeSourcesEntry(params: AnimeRiftProbeParams): Promise<EpisodeSourcesEntry | null> {
@@ -597,6 +623,28 @@ async function fetchEpisodeSourcesEntry(params: AnimeRiftProbeParams): Promise<E
  * (`animerift_cr2`, `animerift_bbz`, `animerift_cr2_dub`) and exact qualities exist
  * for this episode WITHOUT calling `can_play` or `direct_link`.
  */
+/**
+ * Pre-warms device registration, animeId lookup, and episodes list silently
+ * when the user opens an anime episodes screen, so AX/NV appear near-instantly
+ * when tapping an episode.
+ */
+export async function prewarmAnimeRiftCatalogOnPhone(params: {
+  title: string;
+  english?: string;
+  titles?: string[];
+  format?: string;
+  year?: string | number;
+}): Promise<void> {
+  try {
+    const animeId = await resolveAnimeId({ ...params, epNum: 1 });
+    if (animeId) {
+      await fetchEpisodesList(animeId);
+    }
+  } catch {
+    // Silent background prewarm
+  }
+}
+
 export async function probeAnimeRiftAvailabilityOnPhone(
   params: AnimeRiftProbeParams,
 ): Promise<AnimeRiftProbeResult | null> {
