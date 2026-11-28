@@ -4319,7 +4319,7 @@ export default function WatchScreen() {
             ? resolveUrl(playingSrc.subtitleUrl, base)
             : (KAWAII_SUBTITLE_SITES.has(site) || !isArabic ? globalSubUrl : undefined)),
       isArabic,
-      wantsSmartSub: !isArabic,
+      wantsSmartSub: !isArabic && !subtitlesDisabledForSite(site),
       skipIntro: playingSrc.skipIntro || episodeSkipTimes.intro,
       skipOutro: playingSrc.skipOutro || episodeSkipTimes.outro,
     })];
