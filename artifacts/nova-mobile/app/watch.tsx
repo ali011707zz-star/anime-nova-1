@@ -140,8 +140,8 @@ const SUBTITLE_DISABLED_SITES = new Set([
   "anifox", "fx",
   "anime4up2_hard", "ad 1", "ad1",
   "anslayer", "as",
-  "animerift_cr2", "cr2",
-  "animerift_bbz", "bbz",
+  "animerift_cr2", "cr2", "ax",
+  "animerift_bbz", "bbz", "nv",
   "animerift_cr2_dub", "cr2 dub",
 ]);
 const HARDSUB_ARABIC_SITES = new Set([
@@ -212,14 +212,14 @@ const SITE_TAG: Record<string, string> = {
   akwam: "AQ",
   anivexa_animegg: "GG", anivexa_anidbapp: "DB", anivexa_2dhive: "2D",
   anivexa_anibd: "BD", anivexa_senshi: "SE", anivexa_kaa: "KA",
-  animerift_cr2: "CR2", animerift_bbz: "BBZ", animerift_cr2_dub: "CR2 DUB",
+  animerift_cr2: "AX", animerift_bbz: "NV", animerift_cr2_dub: "AX",
   donghua_ax: "DX 1", donghua_ak: "DX 2", donghua_ds: "DX 3",
 };
 
 /* ── اسم عرض لكل موقع في منتقي المصادر ── */
 const SITE_LABEL: Record<string, string> = {
   nova_tg: "NOVA VIP", nova_tg_dub: "NOVA VIP (إنجليزي)", nova_vip: "NOVA VIP", kawaii: "Kawaii", megaplay: "MegaPlay", megaplay_dub: "MegaPlay (إنجليزي)", reflix: "ReAnime", reflix_dub: "ReAnime (إنجليزي)", reanime: "ReAnime", animekai: "AnimeKai",
-  animerift_cr2: "CR2", animerift_bbz: "BBZ", animerift_cr2_dub: "CR2 (مدبلج عربي)",
+  animerift_cr2: "AX", animerift_bbz: "NV", animerift_cr2_dub: "AX (مدبلج عربي)",
   animewitcher: "AnimeWitcher",
   anineko: "AniNeko",
   dulo_anim: "Dulo",
@@ -583,6 +583,7 @@ function buildEmbeddedDownloadUrl(
    Japanese raw-audio providers AN/AK/MP as well as for KW itself. */
 const KAWAII_SUBTITLE_SITES = new Set(["kawaii", "anineko", "animekai", "megaplay", "megaplay_dub", "reflix", "reflix_dub", "reanime"]);
 const ENGLISH_DUB_SITES = new Set(["reflix_dub", "megaplay_dub", "nova_tg_dub"]);
+const ARABIC_DUB_SITES = new Set(["animerift_cr2_dub"]);
 const DOWNLOAD_SUBTITLE_SITES = KAWAII_SUBTITLE_SITES;
 
 function normalizeProviderSubtitleUrl(
@@ -672,9 +673,9 @@ type QualityKey = "1080p" | "720p" | "480p" | "360p";
 
 const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: string }[]> = {
   "1080p": [
-    { site: "animerift_cr2",     name: "CR2",                tag: "CR2" },
-    { site: "animerift_bbz",     name: "BBZ",                tag: "BBZ" },
-    { site: "animerift_cr2_dub", name: "CR2 (مدبلج عربي)",  tag: "CR2 DUB" },
+    { site: "animerift_cr2",     name: "AX",                 tag: "AX" },
+    { site: "animerift_bbz",     name: "NV",                 tag: "NV" },
+    { site: "animerift_cr2_dub", name: "AX (مدبلج عربي)",   tag: "AX" },
     { site: "animewitcher",   name: "AnimeWitcher",       tag: "AW" },
     { site: "animeify",       name: "أنمي فاي",          tag: "AF" },
     { site: "sanime",         name: "سـAnime",            tag: "SA" },
@@ -691,9 +692,9 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "donghua_ds",     name: "DX 3",               tag: "DX 3" },
   ],
   "720p": [
-    { site: "animerift_cr2",     name: "CR2",                tag: "CR2" },
-    { site: "animerift_bbz",     name: "BBZ",                tag: "BBZ" },
-    { site: "animerift_cr2_dub", name: "CR2 (مدبلج عربي)",  tag: "CR2 DUB" },
+    { site: "animerift_cr2",     name: "AX",                 tag: "AX" },
+    { site: "animerift_bbz",     name: "NV",                 tag: "NV" },
+    { site: "animerift_cr2_dub", name: "AX (مدبلج عربي)",   tag: "AX" },
     { site: "animewitcher",   name: "AnimeWitcher",       tag: "AW" },
     { site: "animeify",       name: "أنمي فاي",          tag: "AF" },
     { site: "sanime",         name: "سـAnime",            tag: "SA" },
@@ -709,9 +710,9 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "donghua_ds",     name: "DX 3",               tag: "DX 3" },
   ],
   "480p": [
-    { site: "animerift_cr2",     name: "CR2",                tag: "CR2" },
-    { site: "animerift_bbz",     name: "BBZ",                tag: "BBZ" },
-    { site: "animerift_cr2_dub", name: "CR2 (مدبلج عربي)",  tag: "CR2 DUB" },
+    { site: "animerift_cr2",     name: "AX",                 tag: "AX" },
+    { site: "animerift_bbz",     name: "NV",                 tag: "NV" },
+    { site: "animerift_cr2_dub", name: "AX (مدبلج عربي)",   tag: "AX" },
     { site: "animewitcher",   name: "AnimeWitcher",       tag: "AW" },
     { site: "animeify",       name: "أنمي فاي",          tag: "AF" },
     { site: "sanime",         name: "سـAnime",            tag: "SA" },
@@ -727,9 +728,9 @@ const STATIC_PICKER: Record<QualityKey, { site: string; name: string; tag: strin
     { site: "donghua_ds",     name: "DX 3",               tag: "DX 3" },
   ],
   "360p": [
-    { site: "animerift_cr2",     name: "CR2",                tag: "CR2" },
-    { site: "animerift_bbz",     name: "BBZ",                tag: "BBZ" },
-    { site: "animerift_cr2_dub", name: "CR2 (مدبلج عربي)",  tag: "CR2 DUB" },
+    { site: "animerift_cr2",     name: "AX",                 tag: "AX" },
+    { site: "animerift_bbz",     name: "NV",                 tag: "NV" },
+    { site: "animerift_cr2_dub", name: "AX (مدبلج عربي)",   tag: "AX" },
     { site: "animewitcher",   name: "AnimeWitcher",       tag: "AW" },
     { site: "animeify",       name: "أنمي فاي",          tag: "AF" },
     { site: "sanime",         name: "سـAnime",            tag: "SA" },
@@ -1339,7 +1340,7 @@ export default function WatchScreen() {
     qualityRank?: number;
   };
   const [availableSlots, setAvailableSlots] = useState<Record<string, Partial<Record<QualityKey, AvailableSlot>>>>({});
-  const [audioModeTab, setAudioModeTab] = useState<"sub" | "dub">("sub");
+  const [audioModeTab, setAudioModeTab] = useState<"sub" | "ar_dub" | "dub">("sub");
   useEffect(() => {
     setAudioModeTab("sub");
   }, [anime, epNum]);
@@ -1879,7 +1880,7 @@ export default function WatchScreen() {
               for (const [riftSite, qs] of Object.entries(probe.availableQualities) as Array<[AnimeRiftSiteKey, QualityKey[] | undefined]>) {
                 if (!qs?.length) continue;
                 const tiers: Partial<Record<QualityKey, AvailableSlot>> = {};
-                const tag = SITE_TAG[riftSite] || "CR2";
+                const tag = SITE_TAG[riftSite] || "AX";
                 const name = SITE_LABEL[riftSite] || tag;
                 for (const q of qs) {
                   tiers[q] = {
@@ -2249,7 +2250,7 @@ export default function WatchScreen() {
         let added = false;
         for (const [riftSite, qs] of Object.entries(probe.availableQualities) as Array<[AnimeRiftSiteKey, QualityKey[] | undefined]>) {
           if (!qs?.length) continue;
-          const tag = SITE_TAG[riftSite] || "CR2";
+          const tag = SITE_TAG[riftSite] || "AX";
           const name = SITE_LABEL[riftSite] || tag;
           for (const q of qs) {
             applyRow({
@@ -4629,20 +4630,39 @@ export default function WatchScreen() {
             </View>
           )}
 
-          {/* خيار 1: شريط تبديل الصوت (🇯🇵 ياباني مترجم / 🇬🇧 دبلجة إنجليزية) — يظهر أعلى التنبيه عند توفر دبلجة إنجليزية */}
+          {/* شريط تبديل الصوت (🇯🇵 ياباني مترجم / 🇸🇦 دبلجة عربية / 🇬🇧 دبلجة إنجليزية) — يظهر تلقائياً عند توفر أكثر من مسار صوتي */}
             {(() => {
+              const hasArabicDubSlot = !isAwDubbed && Object.entries(availableSlots).some(
+                ([site, tiers]) => ARABIC_DUB_SITES.has(site.toLowerCase()) && !BLOCKED_SOURCE_SITES.has(site.toLowerCase()) && Object.keys(tiers).length > 0,
+              );
               const hasEnglishDubSlot = !isAwDubbed && Object.entries(availableSlots).some(
-                ([site, tiers]) => ENGLISH_DUB_SITES.has(site.toLowerCase()) && Object.keys(tiers).length > 0,
+                ([site, tiers]) => ENGLISH_DUB_SITES.has(site.toLowerCase()) && !BLOCKED_SOURCE_SITES.has(site.toLowerCase()) && Object.keys(tiers).length > 0,
               );
               const hasSubSlot = Object.entries(availableSlots).some(
-                ([site, tiers]) => !ENGLISH_DUB_SITES.has(site.toLowerCase()) && !BLOCKED_SOURCE_SITES.has(site.toLowerCase()) && Object.keys(tiers).length > 0,
+                ([site, tiers]) =>
+                  !ENGLISH_DUB_SITES.has(site.toLowerCase())
+                  && !ARABIC_DUB_SITES.has(site.toLowerCase())
+                  && !BLOCKED_SOURCE_SITES.has(site.toLowerCase())
+                  && Object.keys(tiers).length > 0,
               );
-              const effectiveAudioTab: "sub" | "dub" = hasEnglishDubSlot
-                ? (audioModeTab === "dub" || !hasSubSlot ? "dub" : "sub")
-                : "sub";
+              const audioTabCount = (hasSubSlot ? 1 : 0) + (hasArabicDubSlot ? 1 : 0) + (hasEnglishDubSlot ? 1 : 0);
+              const effectiveAudioTab: "sub" | "ar_dub" | "dub" =
+                audioModeTab === "ar_dub" && hasArabicDubSlot
+                  ? "ar_dub"
+                  : audioModeTab === "dub" && hasEnglishDubSlot
+                    ? "dub"
+                    : hasSubSlot
+                      ? "sub"
+                      : hasArabicDubSlot
+                        ? "ar_dub"
+                        : hasEnglishDubSlot
+                          ? "dub"
+                          : "sub";
               const matchesAudioTab = (site: string) => {
-                const isEngDub = ENGLISH_DUB_SITES.has(site.toLowerCase());
-                return effectiveAudioTab === "dub" ? isEngDub : !isEngDub;
+                const lower = site.toLowerCase();
+                if (effectiveAudioTab === "ar_dub") return ARABIC_DUB_SITES.has(lower);
+                if (effectiveAudioTab === "dub") return ENGLISH_DUB_SITES.has(lower);
+                return !ENGLISH_DUB_SITES.has(lower) && !ARABIC_DUB_SITES.has(lower);
               };
 
               let firstAvailableKey: string | null = null;
@@ -4662,7 +4682,8 @@ export default function WatchScreen() {
                 }
               }
 
-              const audioToggleBar = hasAvailableSlot && hasEnglishDubSlot && hasSubSlot ? (
+              const compactTabs = !tvMode && audioTabCount >= 3;
+              const audioToggleBar = hasAvailableSlot && audioTabCount >= 2 ? (
                 <View
                   style={{
                     flexDirection: ROW_RTL,
@@ -4672,82 +4693,133 @@ export default function WatchScreen() {
                     borderWidth: 1,
                     borderRadius: 12,
                     padding: tvMode ? 5 : 3,
-                    gap: tvMode ? 8 : 5,
+                    gap: tvMode ? 8 : (compactTabs ? 4 : 5),
                     marginBottom: 2,
                   }}
                 >
-                  <Pressable
-                    onPress={() => setAudioModeTab("sub")}
-                    focusable={tvMode}
-                    nativeFocusOnly
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: effectiveAudioTab === "sub" }}
-                    style={({ focused, pressed }) => [
-                      {
-                        flex: 1,
-                        minHeight: tvMode ? 46 : 36,
-                        borderRadius: 11,
-                        borderWidth: 1,
-                        flexDirection: ROW_RTL,
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: 6,
-                        paddingHorizontal: 10,
-                        backgroundColor: effectiveAudioTab === "sub" ? "rgba(16,185,129,0.16)" : "transparent",
-                        borderColor: effectiveAudioTab === "sub" ? "rgba(16,185,129,0.48)" : "transparent",
-                      },
-                      tvMode && tvFocusStyle(focused),
-                      pressed && { opacity: 0.82 },
-                    ]}
-                  >
-                    <Text style={{ fontSize: tvMode ? 18 : 15 }}>{isDonghuaOrigin ? "🇨🇳" : "🇯🇵"}</Text>
-                    <Text
-                      style={{
-                        color: effectiveAudioTab === "sub" ? "#10b981" : colors.textSecondary,
-                        fontSize: tvMode ? 15 : 13,
-                        fontFamily: "Cairo_700Bold",
-                      }}
-                      numberOfLines={1}
+                  {hasSubSlot && (
+                    <Pressable
+                      onPress={() => setAudioModeTab("sub")}
+                      focusable={tvMode}
+                      nativeFocusOnly
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: effectiveAudioTab === "sub" }}
+                      style={({ focused, pressed }) => [
+                        {
+                          flex: 1,
+                          minHeight: tvMode ? 46 : 36,
+                          borderRadius: 10,
+                          borderWidth: 1,
+                          flexDirection: ROW_RTL,
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: compactTabs ? 4 : 6,
+                          paddingHorizontal: compactTabs ? 5 : 10,
+                          backgroundColor: effectiveAudioTab === "sub" ? "rgba(16,185,129,0.16)" : "transparent",
+                          borderColor: effectiveAudioTab === "sub" ? "rgba(16,185,129,0.48)" : "transparent",
+                        },
+                        tvMode && tvFocusStyle(focused),
+                        pressed && { opacity: 0.82 },
+                      ]}
                     >
-                      {isDonghuaOrigin ? "صيني مترجم" : "ياباني مترجم"}
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => setAudioModeTab("dub")}
-                    focusable={tvMode}
-                    nativeFocusOnly
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: effectiveAudioTab === "dub" }}
-                    style={({ focused, pressed }) => [
-                      {
-                        flex: 1,
-                        minHeight: tvMode ? 46 : 36,
-                        borderRadius: 10,
-                        borderWidth: 1,
-                        flexDirection: ROW_RTL,
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: 6,
-                        paddingHorizontal: 10,
-                        backgroundColor: effectiveAudioTab === "dub" ? "rgba(56,189,248,0.16)" : "transparent",
-                        borderColor: effectiveAudioTab === "dub" ? "rgba(56,189,248,0.52)" : "transparent",
-                      },
-                      tvMode && tvFocusStyle(focused),
-                      pressed && { opacity: 0.82 },
-                    ]}
-                  >
-                    <Text style={{ fontSize: tvMode ? 18 : 15 }}>🇬🇧</Text>
-                    <Text
-                      style={{
-                        color: effectiveAudioTab === "dub" ? "#38bdf8" : colors.textSecondary,
-                        fontSize: tvMode ? 15 : 13,
-                        fontFamily: "Cairo_700Bold",
-                      }}
-                      numberOfLines={1}
+                      <Text style={{ fontSize: tvMode ? 18 : (compactTabs ? 13.5 : 15) }}>{isDonghuaOrigin ? "🇨🇳" : "🇯🇵"}</Text>
+                      <Text
+                        style={{
+                          color: effectiveAudioTab === "sub" ? "#10b981" : colors.textSecondary,
+                          fontSize: tvMode ? 15 : (compactTabs ? 11.5 : 13),
+                          fontFamily: "Cairo_700Bold",
+                          flexShrink: 1,
+                        }}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.8}
+                      >
+                        {isDonghuaOrigin ? "صيني مترجم" : "ياباني مترجم"}
+                      </Text>
+                    </Pressable>
+                  )}
+                  {hasArabicDubSlot && (
+                    <Pressable
+                      onPress={() => setAudioModeTab("ar_dub")}
+                      focusable={tvMode}
+                      nativeFocusOnly
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: effectiveAudioTab === "ar_dub" }}
+                      style={({ focused, pressed }) => [
+                        {
+                          flex: 1,
+                          minHeight: tvMode ? 46 : 36,
+                          borderRadius: 10,
+                          borderWidth: 1,
+                          flexDirection: ROW_RTL,
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: compactTabs ? 4 : 6,
+                          paddingHorizontal: compactTabs ? 5 : 10,
+                          backgroundColor: effectiveAudioTab === "ar_dub" ? "rgba(167,139,250,0.16)" : "transparent",
+                          borderColor: effectiveAudioTab === "ar_dub" ? "rgba(167,139,250,0.52)" : "transparent",
+                        },
+                        tvMode && tvFocusStyle(focused),
+                        pressed && { opacity: 0.82 },
+                      ]}
                     >
-                      دبلجة إنجليزية
-                    </Text>
-                  </Pressable>
+                      <Text style={{ fontSize: tvMode ? 18 : (compactTabs ? 13.5 : 15) }}>🇸🇦</Text>
+                      <Text
+                        style={{
+                          color: effectiveAudioTab === "ar_dub" ? "#a78bfa" : colors.textSecondary,
+                          fontSize: tvMode ? 15 : (compactTabs ? 11.5 : 13),
+                          fontFamily: "Cairo_700Bold",
+                          flexShrink: 1,
+                        }}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.8}
+                      >
+                        دبلجة عربية
+                      </Text>
+                    </Pressable>
+                  )}
+                  {hasEnglishDubSlot && (
+                    <Pressable
+                      onPress={() => setAudioModeTab("dub")}
+                      focusable={tvMode}
+                      nativeFocusOnly
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: effectiveAudioTab === "dub" }}
+                      style={({ focused, pressed }) => [
+                        {
+                          flex: 1,
+                          minHeight: tvMode ? 46 : 36,
+                          borderRadius: 10,
+                          borderWidth: 1,
+                          flexDirection: ROW_RTL,
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: compactTabs ? 4 : 6,
+                          paddingHorizontal: compactTabs ? 5 : 10,
+                          backgroundColor: effectiveAudioTab === "dub" ? "rgba(56,189,248,0.16)" : "transparent",
+                          borderColor: effectiveAudioTab === "dub" ? "rgba(56,189,248,0.52)" : "transparent",
+                        },
+                        tvMode && tvFocusStyle(focused),
+                        pressed && { opacity: 0.82 },
+                      ]}
+                    >
+                      <Text style={{ fontSize: tvMode ? 18 : (compactTabs ? 13.5 : 15) }}>🇬🇧</Text>
+                      <Text
+                        style={{
+                          color: effectiveAudioTab === "dub" ? "#38bdf8" : colors.textSecondary,
+                          fontSize: tvMode ? 15 : (compactTabs ? 11.5 : 13),
+                          fontFamily: "Cairo_700Bold",
+                          flexShrink: 1,
+                        }}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.8}
+                      >
+                        دبلجة إنجليزية
+                      </Text>
+                    </Pressable>
+                  )}
                 </View>
               ) : null;
 
@@ -4888,7 +4960,7 @@ export default function WatchScreen() {
                               {!isAwDubbed && (
                                 (() => {
                                   const isEngDub = ENGLISH_DUB_SITES.has(slot.site.toLowerCase());
-                                  const isArDub = slot.site.toLowerCase() === "animerift_cr2_dub";
+                                  const isArDub = ARABIC_DUB_SITES.has(slot.site.toLowerCase());
                                   const isHardsub = HARDSUB_ARABIC_SITES.has(slot.site.toLowerCase());
                                   const badgeBg = isEngDub
                                     ? "rgba(56,189,248,0.14)"
@@ -5092,22 +5164,29 @@ export default function WatchScreen() {
                         {!isAwDubbed && (() => {
                           const isExternalSub = EXTERNAL_SUB_DOWNLOAD_SITES.has(slot.site.toLowerCase());
                           const isEngDub = ENGLISH_DUB_SITES.has(slot.site.toLowerCase());
+                          const isArDub = ARABIC_DUB_SITES.has(slot.site.toLowerCase());
                           const bBg = isExternalSub
                             ? "rgba(245,158,11,0.13)"
-                            : isEngDub
-                              ? "rgba(56,189,248,0.14)"
-                              : "rgba(16,185,129,0.13)";
+                            : isArDub
+                              ? "rgba(167,139,250,0.14)"
+                              : isEngDub
+                                ? "rgba(56,189,248,0.14)"
+                                : "rgba(16,185,129,0.13)";
                           const bBorder = isExternalSub
                             ? "rgba(245,158,11,0.34)"
-                            : isEngDub
-                              ? "rgba(56,189,248,0.38)"
-                              : "rgba(16,185,129,0.32)";
-                          const bColor = isExternalSub ? "#fbbf24" : isEngDub ? "#38bdf8" : "#34d399";
+                            : isArDub
+                              ? "rgba(167,139,250,0.42)"
+                              : isEngDub
+                                ? "rgba(56,189,248,0.38)"
+                                : "rgba(16,185,129,0.32)";
+                          const bColor = isExternalSub ? "#fbbf24" : isArDub ? "#a78bfa" : isEngDub ? "#38bdf8" : "#34d399";
                           const bText = isExternalSub
                             ? (globalSubUrl?.includes("dl.opensubtitles.org") ? "ترجمة عربية بشرية (خارجية)" : "ترجمة خارجية منفصلة")
-                            : isEngDub
-                              ? "دبلجة إنجليزية · ترجمة منفصلة"
-                              : "ترجمة عربية مدمجة";
+                            : isArDub
+                              ? "دبلجة عربية"
+                              : isEngDub
+                                ? "دبلجة إنجليزية · ترجمة منفصلة"
+                                : "ترجمة عربية مدمجة";
                           return (
                             <View
                               style={{
