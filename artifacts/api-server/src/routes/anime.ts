@@ -118,7 +118,7 @@ async function pgTranslateSave(key: string, translated: string, from: string, to
 const router = Router();
 // Disabled by the user; keep these out of both availability probes and
 // playback extraction even if stale client/config data still requests them.
-const TEMPORARILY_DISABLED_SOURCE_SITES = new Set<string>(["animekai", "anineko", "consumet_gogo", "animedar", "anslayer"]);
+const TEMPORARILY_DISABLED_SOURCE_SITES = new Set<string>(["animekai", "anineko", "consumet_gogo", "animedar", "anslayer", "anifox", "anime4up2", "sanime", "animeify"]);
 
 async function pipeWebMediaBody(
   body: ReadableStream<Uint8Array> | null,
