@@ -280,6 +280,10 @@ const BLOCKED_SOURCE_SITES = new Set([
   "animekai", "ak",
   "anineko", "an",
   "anslayer", "as",
+  "anifox", "fx",
+  "anime4up2", "ad 2",
+  "sanime", "sa",
+  "animeify", "af",
 ]);
 function isBlockedSource(src: Pick<Src, "site">): boolean {
   return BLOCKED_SOURCE_SITES.has(String(src.site || "").trim().toLowerCase());
@@ -4077,7 +4081,7 @@ export default function WatchScreen() {
   const downloadSlots = useMemo(() => {
     return Q_KEYS.flatMap((quality) =>
       Object.entries(availableSlots)
-        .filter(([site, tiers]) => (isAwDubbed || DOWNLOAD_SOURCE_SITES.has(site)) && (!isDonghuaOrigin || isAllowedSlotForDonghua(site)) && Boolean(tiers[quality]))
+        .filter(([site, tiers]) => !BLOCKED_SOURCE_SITES.has(site.toLowerCase()) && (isAwDubbed || DOWNLOAD_SOURCE_SITES.has(site)) && (!isDonghuaOrigin || isAllowedSlotForDonghua(site)) && Boolean(tiers[quality]))
         .map(([site, tiers]) => ({
           site,
           tag: tiers[quality]?.tag || SITE_TAG[site] || getSiteTag(site),
