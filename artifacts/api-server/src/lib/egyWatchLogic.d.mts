@@ -22,6 +22,7 @@ export interface ClassifiedEgyWatchServer {
   label: string;
   priority: number;
   mode: "turki_api" | "direct" | "json_worker" | "redirect_worker" | "scraper" | "embed";
+  uaBound: boolean;
   link: string;
   serverRaw: string;
   rule: { endpoint: string; method: "GET" | "POST"; queryKey: string } | null;

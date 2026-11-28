@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  getDigitalReleaseCutoffIso,
+  hasUntranslatedCjkTitle,
   encodeSyntheticTmdbId,
   decodeSyntheticTmdbId,
   isOfficialAnimationCategory,
@@ -160,4 +162,36 @@ test("animation specs exclude Japanese anime and unreleased future movies", () =
     animSpec,
   );
   assert.equal(futureBlocked, null);
+});
+
+test("top_rated enforces vote_count>=2000 and theatrical movies enforce 45-day digital release cutoff", () => {
+  const tr = buildTmdbDiscoverSpec("top_rated", { page: 1 });
+  assert.ok(tr);
+  assert.ok(tr.path.includes("vote_count.gte=2000"));
+
+  const fm = buildTmdbDiscoverSpec("foreign_movies", { page: 1 });
+  assert.ok(fm);
+  const cutoff = getDigitalReleaseCutoffIso(45);
+  assert.ok(fm.path.includes("primary_release_date.lte=" + cutoff));
+  assert.ok(fm.path.includes("vote_count.gte=80"));
+
+  // Unreleased/theatrical 2026 movie released 10 days ago with low votes must be rejected
+  const tenDaysAgo = getDigitalReleaseCutoffIso(10);
+  const rejected = mapTmdbItemToFilmSummary(
+    { id: 999111, title: "Cinema Only Movie", original_language: "en", poster_path: "/x.jpg", release_date: tenDaysAgo, vote_count: 120, vote_average: 7.5 },
+    { tmdbType: "movie", mediaType: "movie" }
+  );
+  assert.equal(rejected, null);
+
+  // Older digital movie (>45 days ago) passes cleanly
+  const oldDate = getDigitalReleaseCutoffIso(90);
+  const accepted = mapTmdbItemToFilmSummary(
+    { id: 999112, title: "Digital Movie", original_language: "en", poster_path: "/x.jpg", release_date: oldDate, vote_count: 120, vote_average: 7.5 },
+    { tmdbType: "movie", mediaType: "movie" }
+  );
+  assert.ok(accepted);
+
+  assert.equal(hasUntranslatedCjkTitle("시카고 타자기"), true);
+  assert.equal(hasUntranslatedCjkTitle("Chicago Typewriter"), false);
+  assert.equal(hasUntranslatedCjkTitle("لعبة الحبار"), false);
 });

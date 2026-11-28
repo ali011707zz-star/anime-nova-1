@@ -19,7 +19,7 @@ export const EGYWATCH_HEADERS = {
 };
 
 export const EGYWATCH_BROWSER_UA =
-  "Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36";
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
 // Retained for backward-compat exports; extraction now unpacks directly without slow third-party PHP scrapers.
 export const EGYWATCH_HOST_RULES = {};
@@ -186,7 +186,7 @@ export function classifyEgyWatchServer(video) {
   // Strictly inspect the URL itself — NEVER trust `video.hls === 1` because EgyWatch sets hls=1 on HTML embed URLs!
   const isDirectMedia = isDirectPlayableMediaUrl(link);
 
-  // 1. Server Turki (`TK`) — highest priority for Turkish / Dubbed / Arabic series
+  // 1. Server Turki (`TK`) — UA-independent fast Arabic/Turkish/Dubbed HLS (direct on phone, 0% VPS)
   if (host.includes("badmoussi") || host.includes("3isk") || sLower.includes("turki")) {
     if (host.includes("badmoussi")) {
       return {
@@ -195,6 +195,7 @@ export function classifyEgyWatchServer(video) {
         label: "السيرفر TK",
         priority: 1,
         mode: "turki_api",
+        uaBound: false,
         link,
         serverRaw,
         rule: null,
@@ -208,6 +209,7 @@ export function classifyEgyWatchServer(video) {
         label: "السيرفر TK",
         priority: 1,
         mode: "direct",
+        uaBound: false,
         link,
         serverRaw,
         rule: null,
@@ -217,14 +219,18 @@ export function classifyEgyWatchServer(video) {
     return null;
   }
 
-  // 2. High-quality `EG` (StreamRuby CinemaScope 1080p/800p + Cloudflare direct workers)
-  if (host.includes("stmruby") || host.includes("streamruby")) {
+  // 2. High-quality `EG`:
+  //    - liiivideo (Server VIP⭐ 1080p ABR HLS — UA-independent! Plays directly on Android/iOS with 0% VPS!)
+  //    - developer-pro.workers.dev (UA-independent direct/worker feeds)
+  //    - stmruby (CinemaScope 1080p/800p — IP+UA-bound, served via VPS hls-proxy with matching Chrome/124 UA)
+  if (host.includes("liiivideo")) {
     return {
       code: "EG",
       site: "egywatch_eg",
       label: "السيرفر EG",
-      priority: 2,
+      priority: 1,
       mode: isDirectMedia ? "direct" : "embed",
+      uaBound: false,
       link,
       serverRaw,
       rule: null,
@@ -246,6 +252,21 @@ export function classifyEgyWatchServer(video) {
       label: "السيرفر EG",
       priority: 2,
       mode,
+      uaBound: false,
+      link,
+      serverRaw,
+      rule: null,
+      headers: normalizeVideoHeaders(video),
+    };
+  }
+  if (host.includes("stmruby") || host.includes("streamruby")) {
+    return {
+      code: "EG",
+      site: "egywatch_eg",
+      label: "السيرفر EG",
+      priority: 2,
+      mode: isDirectMedia ? "direct" : "embed",
+      uaBound: true,
       link,
       serverRaw,
       rule: null,
@@ -253,19 +274,23 @@ export function classifyEgyWatchServer(video) {
     };
   }
 
-  // 3. `EB` (EgybestVid 720p, 1Vid 720p, Film77 720p, Mp4Plus direct MP4)
+  // 3. `EB`:
+  //    - 1vid, film77, mp4plus: UA-independent (direct on phone)
+  //    - egybestvid: IP+UA-bound (VPS hls-proxy with matching Chrome/124 UA -> 100% 200 OK!)
   if (
     host.includes("egybestvid") ||
     host.includes("1vid.") ||
     host.includes("film77.") ||
     host.includes("mp4plus.")
   ) {
+    const isUaBound = host.includes("egybestvid");
     return {
       code: "EB",
       site: "egywatch_eb",
       label: "السيرفر EB",
-      priority: host.includes("egybestvid") || host.includes("1vid.") ? 3 : 4,
+      priority: host.includes("1vid.") || host.includes("mp4plus.") ? 2 : 3,
       mode: isDirectMedia ? "direct" : "embed",
+      uaBound: isUaBound,
       link,
       serverRaw,
       rule: null,
@@ -273,14 +298,15 @@ export function classifyEgyWatchServer(video) {
     };
   }
 
-  // 4. `UQ` (Uqload direct HLS/MP4)
+  // 4. `UQ` (Uqload direct HLS/MP4 — UA-independent)
   if (host.includes("uqload")) {
     return {
       code: "UQ",
       site: "egywatch_uq",
       label: "السيرفر UQ",
-      priority: 5,
+      priority: 4,
       mode: isDirectMedia ? "direct" : "embed",
+      uaBound: false,
       link,
       serverRaw,
       rule: null,
@@ -288,7 +314,7 @@ export function classifyEgyWatchServer(video) {
     };
   }
 
-  // 5. `VS` (Verified working fast XFileSharing HLS hosts)
+  // 5. `VS` (XFileSharing HLS mirrors — IP+UA-bound -> VPS hls-proxy with Chrome/124 UA -> 100% 200 OK!)
   if (
     host.includes("vidsp.") ||
     host.includes("vidspeed.") ||
@@ -303,8 +329,9 @@ export function classifyEgyWatchServer(video) {
       code: "VS",
       site: "egywatch_vs",
       label: "السيرفر VS",
-      priority: host.includes("vidsp.") ? 4 : 6,
+      priority: 5,
       mode: isDirectMedia ? "direct" : "embed",
+      uaBound: true,
       link,
       serverRaw,
       rule: null,
@@ -312,14 +339,15 @@ export function classifyEgyWatchServer(video) {
     };
   }
 
-  // Direct .m3u8 / .mp4 on any other non-blacklisted host
+  // 6. Direct playable .m3u8/.mp4 on any remaining non-dead host
   if (isDirectMedia) {
     return {
       code: "EB",
       site: "egywatch_eb",
       label: "السيرفر EB",
-      priority: 7,
+      priority: 6,
       mode: "direct",
+      uaBound: false,
       link,
       serverRaw,
       rule: null,
@@ -330,11 +358,6 @@ export function classifyEgyWatchServer(video) {
   return null;
 }
 
-/**
- * Pick the best matching EgyWatch item from `/search` candidates.
- * Strongly prefers exact `tmdb_id` match, then normalized Arabic/English title match,
- * and respects dubbed vs subbed preference (`anime` = dubbed series in EgyWatch).
- */
 export function pickBestEgyWatchMatch(candidates, target) {
   if (!Array.isArray(candidates) || candidates.length === 0) return null;
   const targetTmdbId = Number(target?.tmdbId || 0) || 0;

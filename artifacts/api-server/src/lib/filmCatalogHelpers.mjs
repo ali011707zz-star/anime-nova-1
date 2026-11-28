@@ -120,6 +120,27 @@ export function normalizeArabicSearchVariants(rawQuery) {
   return out.slice(0, 4);
 }
 
+/**
+ * Returns an ISO date string (YYYY-MM-DD) N days before today.
+ * Used for theatrical-to-digital release cutoff so unreleased / cinema-only movies
+ * (with no working digital servers yet) never pollute Foreign, Animation, or Asian browse feeds.
+ */
+export function getDigitalReleaseCutoffIso(daysAgo = 45, nowDate = new Date()) {
+  const d = new Date(nowDate.getTime() - Math.max(0, daysAgo) * 86_400_000);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Returns true if a title contains CJK / Hangul / Hiragana / Katakana characters
+ * with no Arabic letters (e.g., untranslated Korean title "시카고 타자기").
+ */
+export function hasUntranslatedCjkTitle(title) {
+  const s = String(title || "").trim();
+  if (!s) return false;
+  if (/[\u0600-\u06FF]/.test(s)) return false;
+  return /[\uAC00-\uD7AF\u3040-\u30FF\u4E00-\u9FFF]/.test(s);
+}
+
 export function buildTmdbDiscoverSpec(category, opts = {}) {
   const cat = String(category || "all").trim().toLowerCase();
   const genre = String(opts.genre || "").trim();
@@ -140,7 +161,7 @@ export function buildTmdbDiscoverSpec(category, opts = {}) {
         without_genres: "10749",
         certification_country: "US",
         "certification.lte": "PG-13",
-        "vote_count.gte": "30",
+        "vote_count.gte": "80",
       },
     },
     animation_series: {
@@ -170,7 +191,7 @@ export function buildTmdbDiscoverSpec(category, opts = {}) {
         without_genres: "10749",
         certification_country: "US",
         "certification.lte": "PG-13",
-        "vote_count.gte": "30",
+        "vote_count.gte": "80",
       },
     },
     arabic_movies: {
@@ -280,7 +301,7 @@ export function buildTmdbDiscoverSpec(category, opts = {}) {
       baseParams: {
         with_original_language: "en|fr|es|de|it",
         without_genres: "16",
-        "vote_count.gte": "30",
+        "vote_count.gte": "80",
       },
     },
     western_movies: {
@@ -291,7 +312,7 @@ export function buildTmdbDiscoverSpec(category, opts = {}) {
       baseParams: {
         with_original_language: "en|fr|es|de|it",
         without_genres: "16",
-        "vote_count.gte": "30",
+        "vote_count.gte": "80",
       },
     },
     movie: {
@@ -302,7 +323,7 @@ export function buildTmdbDiscoverSpec(category, opts = {}) {
       baseParams: {
         with_original_language: "en|fr|es|de|it",
         without_genres: "16",
-        "vote_count.gte": "30",
+        "vote_count.gte": "80",
       },
     },
     foreign_series: {
@@ -345,7 +366,7 @@ export function buildTmdbDiscoverSpec(category, opts = {}) {
       audioLabel: "مترجم",
       baseParams: {
         without_genres: "16",
-        "vote_count.gte": "400",
+        "vote_count.gte": "2000",
       },
     },
   };
@@ -361,8 +382,12 @@ export function buildTmdbDiscoverSpec(category, opts = {}) {
   });
 
   const today = new Date().toISOString().slice(0, 10);
+  const isTheatricalDigitalMovieCat =
+    !isTv &&
+    ["foreign_movies", "western_movies", "movie", "animation_movies", "animation", "asian_movies", "top_rated"].includes(cat);
+  const dateCap = isTheatricalDigitalMovieCat ? getDigitalReleaseCutoffIso(45) : today;
   if (!year || year <= Number(today.slice(0, 4))) {
-    qs.set(isTv ? "first_air_date.lte" : "primary_release_date.lte", today);
+    qs.set(isTv ? "first_air_date.lte" : "primary_release_date.lte", dateCap);
   }
   if (sortRaw === "rating" || cat === "top_rated") {
     qs.set("sort_by", "vote_average.desc");
@@ -412,6 +437,17 @@ export function mapTmdbItemToFilmSummary(raw, spec) {
   const todayIso = new Date().toISOString().slice(0, 10);
   if (/^\d{4}-\d{2}-\d{2}$/.test(rawDateStr) && rawDateStr > todayIso) {
     return null;
+  }
+  if (
+    tmdbType === "movie" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(rawDateStr) &&
+    !["ar", "tr", "hi", "ta", "te", "ml"].includes(String(raw.original_language || "").toLowerCase())
+  ) {
+    const digitalCutoff = getDigitalReleaseCutoffIso(45);
+    const votes = Number(raw.vote_count || 0);
+    if (rawDateStr > digitalCutoff && votes < 500) {
+      return null;
+    }
   }
   const origLang = String(raw.original_language || "").toLowerCase();
   const origCountries = Array.isArray(raw.origin_country) ? raw.origin_country.map((c) => String(c).toUpperCase()) : [];

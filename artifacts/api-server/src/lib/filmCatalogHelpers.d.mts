@@ -56,3 +56,6 @@ export function mergeSeasonEpisodes(
   fallbackStillUrl?: string | null,
 ): MergedEpisodeSummary[];
 export function formatMergedSeriesDuration(seasons: MergedSeasonSummary[]): string;
+
+export function getDigitalReleaseCutoffIso(daysAgo?: number, nowDate?: Date): string;
+export function hasUntranslatedCjkTitle(title: string): boolean;

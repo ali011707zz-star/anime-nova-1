@@ -23,7 +23,7 @@ import type { ExternalFilmSummary } from "./filmExternalSources.js";
 
 const TMDB_KEY = process.env.TMDB_API_KEY || "4ef0d7355d9ffb5151e987764708ce96";
 const TMDB_BASE = "https://api.themoviedb.org/3";
-const CACHE_FILE = "/tmp/nova-egywatch-catalog-v3.json";
+const CACHE_FILE = "/tmp/nova-egywatch-catalog-v4.json";
 const REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 export type EgyWatchVerifiedCategory =
@@ -212,14 +212,10 @@ async function indexDubbedSeriesFromEgyWatch(): Promise<VerifiedFilmItem[]> {
   const rawItems: any[] = [];
   const seenEw = new Set<number>();
 
-  // Pull pages 1..6 from genres/animes/all (most recent dubbed) & animes/byrating
+  // Pull pages 1..8 from genres/animes/all (most recent dubbed) & pages 1..4 animes/byrating
   const pages = await Promise.all([
-    egyWatchApiFetch(`genres/animes/all/${EGYWATCH_API_CODE}?page=1`, 8000),
-    egyWatchApiFetch(`genres/animes/all/${EGYWATCH_API_CODE}?page=2`, 8000),
-    egyWatchApiFetch(`genres/animes/all/${EGYWATCH_API_CODE}?page=3`, 8000),
-    egyWatchApiFetch(`genres/animes/all/${EGYWATCH_API_CODE}?page=4`, 8000),
-    egyWatchApiFetch(`animes/byrating/${EGYWATCH_API_CODE}?page=1`, 8000),
-    egyWatchApiFetch(`animes/byrating/${EGYWATCH_API_CODE}?page=2`, 8000),
+    ...[1, 2, 3, 4, 5, 6, 7, 8].map((p) => egyWatchApiFetch(`genres/animes/all/${EGYWATCH_API_CODE}?page=${p}`, 8000)),
+    ...[1, 2, 3, 4].map((p) => egyWatchApiFetch(`animes/byrating/${EGYWATCH_API_CODE}?page=${p}`, 8000)),
   ]);
   for (const p of pages) {
     const list = Array.isArray(p?.data) ? p.data : [];
@@ -231,7 +227,7 @@ async function indexDubbedSeriesFromEgyWatch(): Promise<VerifiedFilmItem[]> {
     }
   }
 
-  const verified = await runPool(rawItems.slice(0, 56), 6, async (item): Promise<VerifiedFilmItem | null> => {
+  const verified = await runPool(rawItems.slice(0, 96), 8, async (item): Promise<VerifiedFilmItem | null> => {
     const ewId = Number(item.id);
     const det = await egyWatchApiFetch(`animes/show/${ewId}/${EGYWATCH_API_CODE}`, 4500);
     const seasons = Array.isArray(det?.seasons) ? det.seasons : [];
@@ -249,7 +245,8 @@ async function indexDubbedSeriesFromEgyWatch(): Promise<VerifiedFilmItem[]> {
     if (!titleAr || !posterUrl) return null;
 
     const realTmdbId = Number(det?.tmdb_id || 0) || null;
-    const id = realTmdbId ? encodeSyntheticTmdbId("tv", realTmdbId) : makeFallbackSyntheticId("anime", ewId);
+    // Always use dedicated dubbed synthetic ID so dubbed titles NEVER overwrite subbed Turkish/Korean titles sharing the same TMDB ID!
+    const id = makeFallbackSyntheticId("anime", ewId);
     const dateStr = String(det?.first_air_date || det?.release_date || "");
     const year = Number(dateStr.slice(0, 4)) || new Date().getFullYear();
     const genres = Array.isArray(det?.genreslist) && det.genreslist.length > 0 ? det.genreslist.slice(0, 4) : ["دراما", "مدبلج"];
@@ -282,11 +279,9 @@ async function indexDubbedSeriesFromEgyWatch(): Promise<VerifiedFilmItem[]> {
 }
 
 async function indexRamadanArabicSeries(): Promise<VerifiedFilmItem[]> {
-  const pages = await Promise.all([
-    egyWatchApiFetch(`networks/media/show/8618/${EGYWATCH_API_CODE}?page=1`, 8000),
-    egyWatchApiFetch(`networks/media/show/8618/${EGYWATCH_API_CODE}?page=2`, 8000),
-    egyWatchApiFetch(`networks/media/show/8618/${EGYWATCH_API_CODE}?page=3`, 8000),
-  ]);
+  const pages = await Promise.all(
+    [1, 2, 3, 4, 5].map((p) => egyWatchApiFetch(`networks/media/show/8618/${EGYWATCH_API_CODE}?page=${p}`, 8000)),
+  );
   const rawItems: any[] = [];
   const seen = new Set<number>();
   for (const p of pages) {
@@ -299,7 +294,7 @@ async function indexRamadanArabicSeries(): Promise<VerifiedFilmItem[]> {
     }
   }
 
-  const verified = await runPool(rawItems.slice(0, 32), 6, async (item): Promise<VerifiedFilmItem | null> => {
+  const verified = await runPool(rawItems.slice(0, 48), 8, async (item): Promise<VerifiedFilmItem | null> => {
     const ewId = Number(item.id);
     const det = await egyWatchApiFetch(`series/show/${ewId}/${EGYWATCH_API_CODE}`, 4500);
     const seasons = Array.isArray(det?.seasons) ? det.seasons : [];
@@ -348,6 +343,19 @@ async function indexRamadanArabicSeries(): Promise<VerifiedFilmItem[]> {
   return verified.filter((x): x is VerifiedFilmItem => Boolean(x));
 }
 
+async function fetchTmdbEnglishTitle(tmdbType: "movie" | "tv", realTmdbId: number): Promise<string> {
+  try {
+    const r = await fetch(`${TMDB_BASE}/${tmdbType}/${realTmdbId}?api_key=${TMDB_KEY}&language=en-US`, {
+      signal: AbortSignal.timeout(4500),
+    });
+    if (!r.ok) return "";
+    const d = await r.json();
+    return String(d?.title || d?.name || "").trim();
+  } catch {
+    return "";
+  }
+}
+
 async function indexRegionalCategoryViaTmdbAndEgyWatch(
   category: Exclude<EgyWatchVerifiedCategory, "dubbed_series">,
   pagesToScan = 3,
@@ -372,10 +380,20 @@ async function indexRegionalCategoryViaTmdbAndEgyWatch(
     }
   }
 
-  const verified = await runPool(candidates.slice(0, 50), 6, async ({ summary, realTmdbId }): Promise<VerifiedFilmItem | null> => {
+  const maxCandidates = Math.min(110, Math.max(60, pagesToScan * 18));
+  const verified = await runPool(candidates.slice(0, maxCandidates), 8, async ({ summary, realTmdbId }): Promise<VerifiedFilmItem | null> => {
+    let cleanTitleAr = summary.titleAr;
+    let cleanTitleEn = summary.titleEn;
+    if (hasUntranslatedCjkTitle(cleanTitleAr)) {
+      const enTitle = await fetchTmdbEnglishTitle(summary.tmdbType, realTmdbId);
+      if (enTitle && !hasUntranslatedCjkTitle(enTitle)) {
+        cleanTitleAr = enTitle;
+        cleanTitleEn = enTitle;
+      }
+    }
     const queries = Array.from(
-      new Set([summary.titleAr, summary.titleEn].map((s) => String(s || "").trim()).filter((s) => s.length >= 2)),
-    );
+      new Set([cleanTitleAr, cleanTitleEn, summary.titleAr, summary.titleEn].map((s) => String(s || "").trim()).filter((s) => s.length >= 2)),
+    ).slice(0, 3);
     let match = null;
     for (const q of queries) {
       const sr = await egyWatchApiFetch(`search/${encodeURIComponent(q)}/${EGYWATCH_API_CODE}`, 4500);
@@ -384,8 +402,8 @@ async function indexRegionalCategoryViaTmdbAndEgyWatch(
       const pick = pickBestEgyWatchMatch(list, {
         tmdbId: realTmdbId,
         tmdbType: summary.tmdbType,
-        titleAr: summary.titleAr,
-        titleEn: summary.titleEn,
+        titleAr: cleanTitleAr,
+        titleEn: cleanTitleEn,
         year: summary.year,
         preferDubbed: false,
       });
@@ -401,6 +419,8 @@ async function indexRegionalCategoryViaTmdbAndEgyWatch(
 
     return {
       ...summary,
+      titleAr: cleanTitleAr,
+      titleEn: cleanTitleEn,
       posterUrl: upgradeToFastPoster(summary.posterUrl),
       backdropUrl: upgradeToFastPoster(summary.backdropUrl, true),
       durationOrSeasons:
@@ -431,8 +451,8 @@ export async function refreshEgyWatchCatalog(force = false): Promise<void> {
     const [dubbed, ramadan, arabicMovies, turkishSeries] = await Promise.all([
       indexDubbedSeriesFromEgyWatch().catch(() => []),
       indexRamadanArabicSeries().catch(() => []),
-      indexRegionalCategoryViaTmdbAndEgyWatch("arabic_movies", 3).catch(() => []),
-      indexRegionalCategoryViaTmdbAndEgyWatch("turkish_series", 3).catch(() => []),
+      indexRegionalCategoryViaTmdbAndEgyWatch("arabic_movies", 6).catch(() => []),
+      indexRegionalCategoryViaTmdbAndEgyWatch("turkish_series", 6).catch(() => []),
     ]);
 
     if (dubbed.length > 0) _store.categories.dubbed_series = dubbed;
@@ -441,12 +461,12 @@ export async function refreshEgyWatchCatalog(force = false): Promise<void> {
 
     // Stage B: Arabic Series (Ramadan first + TMDB verified classics), Indian, Turkish Movies, Asian
     const [arabicSeriesTmdb, indianMovies, turkishMovies, indianSeries, asianMovies, asianSeries] = await Promise.all([
-      indexRegionalCategoryViaTmdbAndEgyWatch("arabic_series", 3).catch(() => []),
-      indexRegionalCategoryViaTmdbAndEgyWatch("indian_movies", 3).catch(() => []),
-      indexRegionalCategoryViaTmdbAndEgyWatch("turkish_movies", 2).catch(() => []),
-      indexRegionalCategoryViaTmdbAndEgyWatch("indian_series", 2).catch(() => []),
-      indexRegionalCategoryViaTmdbAndEgyWatch("asian_movies", 2).catch(() => []),
-      indexRegionalCategoryViaTmdbAndEgyWatch("asian_series", 2).catch(() => []),
+      indexRegionalCategoryViaTmdbAndEgyWatch("arabic_series", 5).catch(() => []),
+      indexRegionalCategoryViaTmdbAndEgyWatch("indian_movies", 6).catch(() => []),
+      indexRegionalCategoryViaTmdbAndEgyWatch("turkish_movies", 5).catch(() => []),
+      indexRegionalCategoryViaTmdbAndEgyWatch("indian_series", 5).catch(() => []),
+      indexRegionalCategoryViaTmdbAndEgyWatch("asian_movies", 5).catch(() => []),
+      indexRegionalCategoryViaTmdbAndEgyWatch("asian_series", 5).catch(() => []),
     ]);
 
     // Merge Ramadan 2026 at top of arabic_series without duplicates
@@ -698,6 +718,7 @@ export async function resolveEgyWatchStreams(params: {
   preferDubbed?: boolean;
   egyWatchId?: number | null;
   egyWatchType?: "movie" | "serie" | "anime" | null;
+  uaBoundOnly?: boolean;
   onSource: (src: ServerEgyWatchSource) => void;
 }): Promise<number> {
   let ewId = Number(params.egyWatchId || 0) || 0;
@@ -765,6 +786,7 @@ export async function resolveEgyWatchStreams(params: {
   for (const v of rawVideos) {
     const c = classifyEgyWatchServer(v);
     if (!c || seenLinks.has(c.link)) continue;
+    if (params.uaBoundOnly && !c.uaBound) continue;
     seenLinks.add(c.link);
     const count = perCode.get(c.code) || 0;
     if (count >= 2) continue;
@@ -785,19 +807,27 @@ export async function resolveEgyWatchStreams(params: {
         if (seenResolved.has(key)) continue;
         seenResolved.add(key);
         emitted++;
+        // UA+IP-bound XFileSharing CDNs (egybestvid, stmruby, vidspeed, anafast, vidoba, v.vidsp)
+        // are extracted with VPS IP + Chrome/124 and served via /api/anime/hls-proxy (NO Referer!)
+        // so ExoPlayer on Android gets 100% matching IP + UA -> HTTP 200 guaranteed!
+        const playUrl = srv.uaBound
+          ? media.kind === "hls"
+            ? `/api/anime/hls-proxy?url=${encodeURIComponent(media.url)}`
+            : `/api/anime/video-proxy?url=${encodeURIComponent(media.url)}`
+          : media.url;
         params.onSource({
           id: `${srv.site}-${emitted}`,
           site: srv.site,
           serverCode: srv.code,
           name: srv.label,
           label: srv.label,
-          url: media.url,
-          directUrl: media.url,
+          url: playUrl,
+          directUrl: playUrl,
           kind: media.kind,
           type: media.kind,
           quality: media.quality,
           tier: media.quality === "4K" ? "4K UHD" : media.quality === "1080p" ? "1080p FHD" : media.quality === "480p" || media.quality === "360p" ? "480p SD" : "720p HD",
-          headers: media.headers,
+          headers: srv.uaBound ? {} : media.headers,
           isArabic: true,
           hardsubbed: true,
           downloadableOnPhone: true,
