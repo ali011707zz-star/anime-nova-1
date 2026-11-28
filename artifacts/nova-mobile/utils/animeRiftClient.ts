@@ -612,9 +612,9 @@ export async function probeAnimeRiftAvailabilityOnPhone(
 }
 
 function displayMetaForSite(site: AnimeRiftSiteKey): { name: string; tag: string } {
-  if (site === ANIMERIFT_SITE_CR2_DUB) return { name: "CR2 (مدبلج عربي)", tag: "CR2 DUB" };
-  if (site === ANIMERIFT_SITE_BBZ) return { name: "BBZ", tag: "BBZ" };
-  return { name: "CR2", tag: "CR2" };
+  if (site === ANIMERIFT_SITE_CR2_DUB) return { name: "AX (مدبلج عربي)", tag: "AX" };
+  if (site === ANIMERIFT_SITE_BBZ) return { name: "NV", tag: "NV" };
+  return { name: "AX", tag: "AX" };
 }
 
 async function resolveSingleHost(
