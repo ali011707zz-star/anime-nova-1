@@ -65,10 +65,10 @@ export function encodeSyntheticTmdbId(tmdbType, realTmdbId) {
 
 export function decodeSyntheticTmdbId(rawId) {
   if (!Number.isFinite(rawId) || rawId <= 0) return null;
-  if (rawId >= 1_500_000_000 && rawId < 1_800_000_000) {
+  if (rawId >= 1_500_000_000 && rawId < 1_690_000_000) {
     return { realTmdbId: rawId - 1_500_000_000, tmdbType: "movie" };
   }
-  if (rawId >= 1_800_000_000 && rawId < 2_000_000_000) {
+  if (rawId >= 1_800_000_000 && rawId < 1_900_000_000) {
     return { realTmdbId: rawId - 1_800_000_000, tmdbType: "tv" };
   }
   return null;

@@ -32,6 +32,7 @@ import {
   getEgyWatchSeriesSeasons,
   getVerifiedEgyWatchCategory,
   lookupVerifiedEgyWatchItem,
+  onEgyWatchCatalogReady,
   resolveEgyWatchStreams,
   startEgyWatchCatalogScheduler,
 } from "../lib/egyWatchCatalog.js";
@@ -1450,6 +1451,15 @@ setTimeout(() => {
     })
     .catch(() => {});
 }, 800);
+
+// Immediately refresh /home cache whenever EgyWatch catalog finishes Stage A/B indexing!
+onEgyWatchCatalogReady(() => {
+  void buildFreshFilmHomePayload()
+    .then((payload) => {
+      _filmHomeCache = { ts: Date.now(), payload };
+    })
+    .catch(() => {});
+});
 
 router.get("/home", async (_req: Request, res: Response) => {
   try {

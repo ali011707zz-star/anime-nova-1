@@ -195,3 +195,11 @@ test("top_rated enforces vote_count>=2000 and theatrical movies enforce 45-day d
   assert.equal(hasUntranslatedCjkTitle("Chicago Typewriter"), false);
   assert.equal(hasUntranslatedCjkTitle("لعبة الحبار"), false);
 });
+
+test("decodeSyntheticTmdbId returns null for dedicated EgyWatch fallback & dubbed IDs", () => {
+  assert.equal(decodeSyntheticTmdbId(1_690_029_067), null);
+  assert.equal(decodeSyntheticTmdbId(1_930_000_171), null);
+  assert.equal(decodeSyntheticTmdbId(1_960_000_069), null);
+  assert.deepEqual(decodeSyntheticTmdbId(1_500_001_726), { realTmdbId: 1726, tmdbType: "movie" });
+  assert.deepEqual(decodeSyntheticTmdbId(1_800_095_603), { realTmdbId: 95603, tmdbType: "tv" });
+});

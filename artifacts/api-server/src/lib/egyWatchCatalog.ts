@@ -17,6 +17,7 @@ import {
   TMDB_IMG_POSTER,
   buildTmdbDiscoverSpec,
   encodeSyntheticTmdbId,
+  hasUntranslatedCjkTitle,
   mapTmdbItemToFilmSummary,
 } from "./filmCatalogHelpers.mjs";
 import type { ExternalFilmSummary } from "./filmExternalSources.js";
@@ -68,6 +69,10 @@ let _store: CatalogStore = {
 const _itemById = new Map<number, VerifiedFilmItem>();
 let _refreshRunning = false;
 let _schedulerStarted = false;
+const _readyListeners: Array<() => void> = [];
+export function onEgyWatchCatalogReady(cb: () => void): void {
+  _readyListeners.push(cb);
+}
 
 function rebuildLookupIndex() {
   _itemById.clear();
@@ -456,8 +461,13 @@ export async function refreshEgyWatchCatalog(force = false): Promise<void> {
     ]);
 
     if (dubbed.length > 0) _store.categories.dubbed_series = dubbed;
+    if (ramadan.length > 0) _store.categories.arabic_series = ramadan;
     if (arabicMovies.length > 0) _store.categories.arabic_movies = arabicMovies;
     if (turkishSeries.length > 0) _store.categories.turkish_series = turkishSeries;
+    rebuildLookupIndex();
+    for (const cb of _readyListeners) {
+      try { cb(); } catch {}
+    }
 
     // Stage B: Arabic Series (Ramadan first + TMDB verified classics), Indian, Turkish Movies, Asian
     const [arabicSeriesTmdb, indianMovies, turkishMovies, indianSeries, asianMovies, asianSeries] = await Promise.all([
@@ -487,6 +497,9 @@ export async function refreshEgyWatchCatalog(force = false): Promise<void> {
     _store.updatedAt = Date.now();
     rebuildLookupIndex();
     saveDiskCache();
+    for (const cb of _readyListeners) {
+      try { cb(); } catch {}
+    }
     console.info(
       `[egywatch-catalog] Ready: dubbed=${_store.categories.dubbed_series.length}, arM=${_store.categories.arabic_movies.length}, arS=${_store.categories.arabic_series.length}, trS=${_store.categories.turkish_series.length}, inM=${_store.categories.indian_movies.length}, asM=${_store.categories.asian_movies.length}, asS=${_store.categories.asian_series.length}`,
     );
