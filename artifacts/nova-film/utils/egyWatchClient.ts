@@ -282,8 +282,9 @@ export async function resolveEgyWatchOnPhone(params: EgyWatchPhoneParams): Promi
       const showPath = ewType === "anime" ? `animes/show/${ewId}` : `series/show/${ewId}`;
       const det = await egyApiFetch(`${showPath}/${EGYWATCH_API_CODE}`, params.signal, 6500);
       if (Array.isArray(det?.seasons)) {
-        seasons = det.seasons;
-        showSeasonsCache.set(showKey, { ts: Date.now(), seasons });
+        const fetchedSeasons: any[] = det.seasons;
+        seasons = fetchedSeasons;
+        showSeasonsCache.set(showKey, { ts: Date.now(), seasons: fetchedSeasons });
       }
     }
     if (seasons && seasons.length > 0) {
@@ -303,8 +304,9 @@ export async function resolveEgyWatchOnPhone(params: EgyWatchPhoneParams): Promi
           const seasonPath = ewType === "anime" ? "animes/season" : "series/season";
           const sData = await egyApiFetch(`${seasonPath}/${targetSeason.id}/${EGYWATCH_API_CODE}`, params.signal, 6500);
           if (Array.isArray(sData?.episodes)) {
-            eps = sData.episodes;
-            seasonEpisodesCache.set(sKey, { ts: Date.now(), episodes: eps });
+            const fetchedEps: any[] = sData.episodes;
+            eps = fetchedEps;
+            seasonEpisodesCache.set(sKey, { ts: Date.now(), episodes: fetchedEps });
           }
         }
         if (eps && eps.length > 0) {
