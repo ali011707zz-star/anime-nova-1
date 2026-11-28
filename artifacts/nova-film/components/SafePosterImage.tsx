@@ -52,7 +52,6 @@ export const SafePosterImage = React.memo(function SafePosterImage({
   return (
     <Image
       {...rest}
-      key={activeUri}
       source={{ uri: activeUri }}
       style={[styles.base, style]}
       resizeMode={resizeMode}

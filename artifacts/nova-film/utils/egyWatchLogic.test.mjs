@@ -88,3 +88,31 @@ test("normalizeEgyTitle, matching, and content hygiene helpers work", () => {
   assert.equal(isUnreleasedDate("2027-05-01", "2026-11-28"), true);
   assert.equal(isAsianSeriesSummary({ categoryLabel: "مسلسلات آسيوية" }), true);
 });
+
+test("classifyEgyWatchServer marks UA-independent vs UA-bound hosts accurately and enables liiivideo as EG", () => {
+  const lv = classifyEgyWatchServer({ server: "Server VIP", link: "https://vipserver.liiivideo.com/embed-6waj1ngzrqw4.html", hls: 1 });
+  assert.ok(lv);
+  assert.equal(lv.code, "EG");
+  assert.equal(lv.uaBound, false);
+  assert.equal(lv.mode, "embed");
+
+  const tk = classifyEgyWatchServer({ server: "Server Turki", link: "https://eisk.badmoussi.com/api/servers?id=49872&type=episode" });
+  assert.ok(tk);
+  assert.equal(tk.code, "TK");
+  assert.equal(tk.uaBound, false);
+
+  const eb = classifyEgyWatchServer({ server: "Server VIP EGY", link: "https://egybestvid.com/embed-abc123.html" });
+  assert.ok(eb);
+  assert.equal(eb.code, "EB");
+  assert.equal(eb.uaBound, true);
+
+  const sr = classifyEgyWatchServer({ server: "StreamRuby", link: "https://stmruby.com/embed-abc123.html" });
+  assert.ok(sr);
+  assert.equal(sr.code, "EG");
+  assert.equal(sr.uaBound, true);
+
+  const vs = classifyEgyWatchServer({ server: "VidSpeed", link: "https://vidspeed.net/embed-abc123.html" });
+  assert.ok(vs);
+  assert.equal(vs.code, "VS");
+  assert.equal(vs.uaBound, true);
+});

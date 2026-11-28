@@ -301,6 +301,7 @@ export default function FilmWatchScreen() {
       egyWatchId: effEwId || undefined,
       egyWatchType: effEwType || undefined,
       preferDubbed: effDubbed,
+      origLang: paramOrigLang || String(dNow?.originalLanguage || "").trim().toLowerCase() || undefined,
       forceRefresh: refreshNonce > 0,
       signal: controller.signal,
       onStatus: (msg) => {
@@ -352,10 +353,17 @@ export default function FilmWatchScreen() {
     return () => controller.abort();
   }, [detail?.egyWatchId, detail?.egyWatchType, paramEwId, tmdbType, currentSeason, currentEpNum, refreshNonce]);
 
-    // Trigger client-side Cobalt (CB / VixSrc) immediately when detail.realTmdbId arrives without restarting SSE
+    // Trigger client-side Cobalt (CB / VixSrc) immediately when detail.realTmdbId arrives (Western/Animation only!)
   useEffect(() => {
     const rid = detail?.realTmdbId;
-    if (!rid || !Number.isFinite(rid) || rid <= 0) return;
+    const oLang = String(paramOrigLang || detail?.originalLanguage || "").trim().toLowerCase();
+    const isRegional =
+      paramAudioLabel === "مدبلج عربي" ||
+      detail?.audioLabel === "مدبلج عربي" ||
+      paramEwType === "anime" ||
+      detail?.egyWatchType === "anime" ||
+      ["ar", "tr", "hi", "ta", "te", "ml"].includes(oLang);
+    if (isRegional || !rid || !Number.isFinite(rid) || rid <= 0) return;
     const controller = new AbortController();
     void resolveVixSrcClient({
       tmdbId: rid,

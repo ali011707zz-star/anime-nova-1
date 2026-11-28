@@ -409,7 +409,7 @@ export async function resolveEgyWatchOnPhone(params: EgyWatchPhoneParams): Promi
   const seenLinks = new Set<string>();
   for (const v of rawVideos) {
     const c = classifyEgyWatchServer(v);
-    if (!c || seenLinks.has(c.link)) continue;
+    if (!c || c.uaBound || seenLinks.has(c.link)) continue;
     seenLinks.add(c.link);
     const cnt = perCode.get(c.code) || 0;
     if (cnt >= 3) continue;

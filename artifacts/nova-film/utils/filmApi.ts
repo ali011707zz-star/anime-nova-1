@@ -53,7 +53,7 @@ function resolveAbsUrl(url: string | undefined, base: string): string {
   return `${base}${url.startsWith("/") ? url : `/${url}`}`;
 }
 
-export const FILM_HOME_CACHE_KEY = "nova_film_home_cache_v7";
+export const FILM_HOME_CACHE_KEY = "nova_film_home_cache_v8";
 
 function prefetchHomePosters(feed: FilmHomeFeed) {
   try {
@@ -62,26 +62,18 @@ function prefetchHomePosters(feed: FilmHomeFeed) {
       const r = resolveFilmImageUrl(u);
       if (r && r.startsWith("http")) urls.add(r);
     };
-    for (const h of (feed.hero || []).slice(0, 4)) {
+    // Prioritize ONLY immediately visible above-the-fold Hero (top 2) + first 8 cards
+    // so Android's 6-socket HTTP pool renders visible posters instantaneously without contention.
+    for (const h of (feed.hero || []).slice(0, 2)) {
       addUrl(h.backdropUrl || h.posterUrl);
-      addUrl(h.posterUrl);
     }
-    for (const arr of [
-      feed.trendingMovies,
-      feed.latestMovies,
-      feed.arabicMovies,
-      feed.popularSeries,
-      feed.arabicSeries,
-      feed.turkishSeries,
-      feed.dubbedSeries,
-      feed.animationMovies,
-    ]) {
-      for (const it of (arr || []).slice(0, 5)) {
+    for (const arr of [feed.trendingMovies, feed.latestMovies]) {
+      for (const it of (arr || []).slice(0, 4)) {
         addUrl(it.posterUrl);
       }
     }
     Array.from(urls)
-      .slice(0, 26)
+      .slice(0, 10)
       .forEach((u) => {
         Image.prefetch(u).catch(() => {});
       });
@@ -396,6 +388,7 @@ export async function streamFilmSources(params: {
   egyWatchId?: number | null;
   egyWatchType?: "movie" | "serie" | "anime" | null;
   preferDubbed?: boolean;
+  origLang?: string;
   forceRefresh?: boolean;
   onStatus?: (msg: string) => void;
   onSource: (srv: FilmServerLink) => void;
@@ -404,7 +397,12 @@ export async function streamFilmSources(params: {
 }): Promise<FilmServerLink[]> {
   const base = getBaseUrl();
   const mediaType: TmdbMediaType = params.tmdbType || params.type || "movie";
-  const cacheKey = `film-srcs-v7-${mediaType}-${params.tmdbId}-s${params.season}-e${params.episode}`;
+  const cacheKey = `film-srcs-v8-${mediaType}-${params.tmdbId}-s${params.season}-e${params.episode}`;
+  const origLangLower = String(params.origLang || "").trim().toLowerCase();
+  const isRegionalSkipCb =
+    Boolean(params.preferDubbed) ||
+    params.egyWatchType === "anime" ||
+    ["ar", "tr", "hi", "ta", "te", "ml"].includes(origLangLower);
 
   const collected: FilmServerLink[] = [];
   const seen = new Set<string>();
@@ -418,7 +416,7 @@ export async function streamFilmSources(params: {
 
   let vixPromise: Promise<void> | null = null;
   const triggerVixSrc = (realId: number | null | undefined) => {
-    if (vixPromise || !realId || !Number.isFinite(Number(realId)) || Number(realId) <= 0) return;
+    if (isRegionalSkipCb || vixPromise || !realId || !Number.isFinite(Number(realId)) || Number(realId) <= 0) return;
     vixPromise = resolveVixSrcClient({
       tmdbId: Number(realId),
       type: mediaType,
@@ -511,6 +509,7 @@ export async function streamFilmSources(params: {
     ...(params.egyWatchId ? { ewId: String(params.egyWatchId) } : {}),
     ...(params.egyWatchType ? { ewType: params.egyWatchType } : {}),
     ...(params.preferDubbed ? { preferDubbed: "1" } : {}),
+    ...(origLangLower ? { origLang: origLangLower } : {}),
   });
 
   let idxCounter = 0;
@@ -695,8 +694,8 @@ let _warmStarted = false;
 export function toFastGridPosterUrl(url?: string | null): string | undefined {
   const resolved = resolveFilmImageUrl(url);
   if (!resolved) return undefined;
-  if (resolved.includes("image.tmdb.org/t/p/w780/")) {
-    return resolved.replace("/t/p/w780/", "/t/p/w500/");
+  if (resolved.includes("image.tmdb.org/t/p/")) {
+    return resolved.replace(/\/t\/p\/(?:original|w1280|w780|w500)\//i, "/t/p/w342/");
   }
   return resolved;
 }
@@ -785,14 +784,14 @@ export function prefetchAnimPosterBatch(items: FilmSummary[], limit = 18): void 
 export async function prefetchAnimTabPage(tab: AnimTabKey): Promise<FilmSummary[] | null> {
   const existing = getMemoryAnimPage(tab, 1, "");
   if (existing && existing.items.length > 0) {
-    prefetchAnimPosterBatch(existing.items, 15);
+    prefetchAnimPosterBatch(existing.items, 6);
     return existing.items;
   }
   try {
     const res = await fetchFilmBrowse({ category: tab, sort: "popularity", page: 1 });
     if (res.results.length > 0) {
       setMemoryAnimPage(tab, 1, "", res.results, res.totalPages || 25);
-      prefetchAnimPosterBatch(res.results, 15);
+      prefetchAnimPosterBatch(res.results, 6);
       return res.results;
     }
   } catch {}
@@ -802,6 +801,7 @@ export async function prefetchAnimTabPage(tab: AnimTabKey): Promise<FilmSummary[
 export function scheduleBackgroundAnimWarm(): void {
   if (_warmStarted) return;
   _warmStarted = true;
+  // Delay background off-screen tab warming by 5s so visible Home posters get 100% of Android's HTTP pool on first open!
   setTimeout(() => {
     void (async () => {
       await Promise.allSettled([
@@ -811,15 +811,18 @@ export function scheduleBackgroundAnimWarm(): void {
         loadDiskBrowsePage("movie"),
         loadDiskBrowsePage("series"),
       ]);
-      await Promise.allSettled([
-        prefetchAnimTabPage("animation_movies"),
-        prefetchAnimTabPage("animation_series"),
-        prefetchBrowseCategoryPage("movie", "الكل", "popularity", "", 1),
-        prefetchBrowseCategoryPage("series", "الكل", "popularity", "", 1),
-        prefetchBrowseCategoryPage("all", "الكل", "popularity", "", 1),
-      ]);
+      const tasks = [
+        () => prefetchBrowseCategoryPage("movie", "الكل", "popularity", "", 1),
+        () => prefetchBrowseCategoryPage("series", "الكل", "popularity", "", 1),
+        () => prefetchAnimTabPage("animation_movies"),
+        () => prefetchAnimTabPage("animation_series"),
+      ];
+      for (const run of tasks) {
+        await run().catch(() => {});
+        await new Promise((r) => setTimeout(r, 900));
+      }
     })();
-  }, 650);
+  }, 5000);
 }
 
 
