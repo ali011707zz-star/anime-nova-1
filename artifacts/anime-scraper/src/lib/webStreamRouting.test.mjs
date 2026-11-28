@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildWebPlaybackCandidates,
+  expandWebPlaybackCandidates,
   getWebDirectRequestHeaders,
   isBrowserDirectMediaUrl,
   isBrowserNonIframeMediaUrl,
@@ -90,4 +91,15 @@ test("VPS-only sites (sanime, nova_tg) always route through VPS proxy", () => {
   });
   assert.equal(tgPlan.primaryUrl, "/api/tg-stream/abc123");
   assert.equal(tgPlan.isDirect, false);
+});
+
+test("expandWebPlaybackCandidates chains all mirror candidates and their VPS proxy fallbacks in order", () => {
+  const urls = expandWebPlaybackCandidates([
+    { site: "animewitcher", directUrl: "https://pixeldrain.com/api/file/fizmS64J", directType: "mp4" },
+    { site: "animewitcher", directUrl: "https://download1523.mediafire.com/abc/ep1.mp4", directType: "mp4" },
+  ]);
+  assert.equal(urls.length, 3);
+  assert.ok(urls[0].startsWith("/api/anime/video-proxy?"));
+  assert.equal(urls[1], "https://download1523.mediafire.com/abc/ep1.mp4");
+  assert.ok(urls[2].startsWith("/api/anime/video-proxy?"));
 });

@@ -1,12 +1,12 @@
-import { Download, Smartphone, X } from "lucide-react";
+import { Download, Send, Smartphone, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 
 const APP_VERSION = "1.0.10";
 const APK_URL = `/Anime-Nova.apk?v=${APP_VERSION}`;
 const TV_APK_URL = `/nova.apk?v=${APP_VERSION}`;
+const TELEGRAM_URL = "https://t.me/Anime_NOVA_0";
 const DOWNLOADER_CODE = "2576388";
-const DOWNLOADER_SHORT_URL = "aftv.news/2576388";
 
 export function WebAppDownloadModal() {
   const [location, navigate] = useLocation();
@@ -17,11 +17,13 @@ export function WebAppDownloadModal() {
       setOpen(false);
       return;
     }
+
     const ua = typeof navigator !== "undefined" ? navigator.userAgent || "" : "";
     const isBot =
       (typeof navigator !== "undefined" && Boolean((navigator as any).webdriver)) ||
       /bot|google|crawl|spider|slurp|bing|duckduck|yandex|baidu|lighthouse|inspection|headless/i.test(ua);
     if (isBot) return;
+
     const timer = window.setTimeout(() => setOpen(true), 1800);
     return () => window.clearTimeout(timer);
   }, [location]);
@@ -30,22 +32,34 @@ export function WebAppDownloadModal() {
 
   return (
     <div
-      className="fixed inset-0 z-[120] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 p-3.5 backdrop-blur-sm"
       dir="rtl"
       role="presentation"
       onClick={() => setOpen(false)}
     >
       <div
-        className="relative w-full max-w-md overflow-hidden rounded-[28px] border border-violet-300/20 bg-[#111116] p-6 text-right shadow-2xl shadow-black/60"
+        className="relative w-full max-w-[320px] sm:max-w-[340px] overflow-hidden rounded-[22px] border border-violet-300/20 bg-[#111118] p-4 text-center shadow-2xl shadow-black/70"
         role="dialog"
         aria-modal="true"
         aria-labelledby="web-app-download-title"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="relative -mx-6 -mt-6 mb-5 aspect-[498/436] overflow-hidden bg-black">
+        <div className="pointer-events-none absolute -right-10 -top-12 h-28 w-28 rounded-full bg-violet-600/20 blur-2xl" />
+
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          aria-label="إغلاق نافذة الإعلان"
+          className="absolute left-2.5 top-2.5 z-20 flex h-8 w-8 items-center justify-center rounded-xl border border-white/15 bg-black/50 text-white/75 transition-colors hover:bg-black/80 hover:text-white active:scale-90"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+
+        {/* Compact framed preview video */}
+        <div className="relative mx-auto mb-2.5 h-[96px] w-[110px] overflow-hidden rounded-2xl border border-white/12 bg-black shadow-lg shadow-black/50">
           <video
             src="/deku-ad.mp4"
-            className="h-full w-full object-contain"
+            className="h-full w-full object-cover"
             autoPlay
             loop
             muted
@@ -53,84 +67,76 @@ export function WebAppDownloadModal() {
             aria-label="إعلان قناة Anime NOVA على تلجرام"
           />
         </div>
-        <div className="pointer-events-none absolute -right-14 -top-16 h-44 w-44 rounded-full bg-violet-600/20 blur-3xl" />
-        <div className="relative mt-3 rounded-2xl border border-cyan-400/20 bg-cyan-500/10 px-3.5 py-2.5 text-right font-['Cairo']">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[11px] font-black text-cyan-300">
-              📺 نسخة التلفاز (Android TV · v{APP_VERSION})
-            </span>
-            <a
-              href={TV_APK_URL}
-              download="Anime-Nova-TV-v1.0.10.apk"
-              className="rounded-lg bg-cyan-500/20 px-2 py-0.5 text-[10px] font-black text-cyan-200 hover:bg-cyan-500/30"
-            >
-              تحميل مباشر (nova.apk)
-            </a>
-          </div>
-          <p className="mt-1 text-[11px] font-bold text-white/75">
-            كود تطبيق Downloader:{" "}
-            <span className="rounded bg-black/40 px-1.5 py-0.5 font-mono text-[12px] font-black text-amber-300">
-              {DOWNLOADER_CODE}
-            </span>{" "}
-            أو الرابط:{" "}
-            <a
-              href={`https://${DOWNLOADER_SHORT_URL}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-mono text-[10.5px] text-cyan-200 underline decoration-cyan-400/40 hover:text-cyan-100"
-            >
-              {DOWNLOADER_SHORT_URL}
-            </a>
-          </p>
-        </div>
 
-        <button
-          type="button"
-          onClick={() => { setOpen(false); navigate("/app"); }}
-          className="relative mt-2.5 flex h-10 w-full items-center justify-center rounded-xl border border-orange-500/30 bg-orange-500/10 font-[Cairo] text-[12px] font-black text-orange-300 transition-colors hover:bg-orange-500/20"
+        <p className="font-['Cairo'] text-[10px] font-bold text-violet-300/80">
+          تجربة أسرع على الهاتف والتلفاز · v{APP_VERSION}
+        </p>
+        <h2
+          id="web-app-download-title"
+          className="mt-0.5 font-['Cairo'] text-[15px] font-black text-white"
         >
-          ✨ استعراض صفحة ومميزات تطبيق الهاتف والتلفاز
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setOpen(false)}
-          aria-label="إغلاق نافذة تحميل التطبيق"
-          className="absolute left-3 top-3 z-20 flex h-10 w-10 items-center justify-center rounded-xl border border-white/20 bg-black/60 text-white/80 shadow-lg backdrop-blur-sm transition-colors hover:bg-black/80 hover:text-white active:scale-90"
-        >
-          <X className="h-4 w-4" />
-        </button>
-
-        <div className="relative flex items-start gap-3 pl-10">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-violet-300/25 bg-violet-500/15 text-violet-300">
-            <Smartphone className="h-6 w-6" />
-          </div>
-          <div>
-            <p className="mb-1 font-['Cairo'] text-[10px] font-bold text-violet-300/70">
-              تجربة أفضل على الهاتف والتلفاز · الإصدار v{APP_VERSION}
-            </p>
-            <h2 id="web-app-download-title" className="font-['Cairo'] text-[18px] font-black text-white">
-              حمّل تطبيق Anime NOVA
-            </h2>
-          </div>
-        </div>
-
-        <p className="relative mt-5 font-['Cairo'] text-[13px] leading-7 text-white/65">
-          شاهد الأنمي بسرعة أفضل، واستمتع بمشغّل مخصص وتجربة مشاهدة أكثر سلاسة على هاتفك وتلفازك الذكي.
+          تطبيق Anime NOVA وقناتنا على تلجرام
+        </h2>
+        <p className="mt-1 font-['Cairo'] text-[11px] leading-5 text-white/60">
+          تابع التحديثات على تلجرام أو حمّل التطبيق الرسمي لمشاهدة أسرع بدون تقطيع.
         </p>
 
-        <a
-          href={APK_URL}
-          download="Anime-Nova-v1.0.10.apk"
-          className="relative mt-5 flex h-12 items-center justify-center gap-2 rounded-2xl bg-gradient-to-l from-violet-700 to-violet-500 font-['Cairo'] text-[13px] font-black text-white shadow-lg shadow-violet-900/30 transition-transform hover:brightness-110 active:scale-[0.98]"
-        >
-          <Download className="h-4 w-4" />
-          تحميل التطبيق الآن (v{APP_VERSION})
-        </a>
+        {/* Compact Android TV code row */}
+        <div className="mt-2.5 flex items-center justify-between gap-2 rounded-xl border border-cyan-400/20 bg-cyan-500/10 px-2.5 py-1.5 text-right font-['Cairo']">
+          <span className="text-[10px] font-bold text-cyan-200/90">
+            📺 كود التلفاز:{" "}
+            <span className="rounded bg-black/40 px-1.5 py-0.5 font-mono text-[11px] font-black text-amber-300">
+              {DOWNLOADER_CODE}
+            </span>
+          </span>
+          <a
+            href={TV_APK_URL}
+            download="Anime-Nova-TV-v1.0.10.apk"
+            className="shrink-0 rounded-lg bg-cyan-500/20 px-2 py-0.5 text-[10px] font-black text-cyan-200 hover:bg-cyan-500/30"
+          >
+            TV APK
+          </a>
+        </div>
+
+        {/* Primary compact CTAs */}
+        <div className="mt-3 flex flex-col gap-2">
+          <a
+            href={TELEGRAM_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex h-9 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-l from-sky-600 to-cyan-500 font-['Cairo'] text-[12px] font-black text-white shadow-md shadow-sky-900/30 transition-transform hover:brightness-110 active:scale-[0.98]"
+          >
+            <Send className="h-3.5 w-3.5" />
+            انضم لقناتنا على تلجرام
+          </a>
+
+          <div className="grid grid-cols-2 gap-2">
+            <a
+              href={APK_URL}
+              download="Anime-Nova-v1.0.10.apk"
+              className="flex h-9 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-l from-violet-700 to-violet-500 font-['Cairo'] text-[11px] font-black text-white shadow-md shadow-violet-900/30 transition-transform hover:brightness-110 active:scale-[0.98]"
+            >
+              <Download className="h-3.5 w-3.5" />
+              تحميل التطبيق
+            </a>
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                navigate("/app");
+              }}
+              className="flex h-9 items-center justify-center gap-1 rounded-xl border border-white/15 bg-white/5 font-['Cairo'] text-[11px] font-bold text-white/85 transition-colors hover:bg-white/10"
+            >
+              <Smartphone className="h-3.5 w-3.5 text-orange-300" />
+              صفحة التطبيق
+            </button>
+          </div>
+        </div>
+
         <button
           type="button"
           onClick={() => setOpen(false)}
-          className="relative mt-3 h-9 w-full font-['Cairo'] text-[11px] font-bold text-white/35 transition-colors hover:text-white/65"
+          className="mt-2 h-7 w-full font-['Cairo'] text-[10.5px] font-bold text-white/40 transition-colors hover:text-white/70"
         >
           متابعة التصفح
         </button>

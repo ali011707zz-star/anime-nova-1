@@ -325,3 +325,26 @@ export function buildWebPlaybackCandidates(src) {
     needsNoReferrer: false,
   };
 }
+
+/**
+ * Expands a prioritized array of fetched sources (e.g. multiple mirrors returned
+ * for the same provider/tier) into a deduplicated ordered list of browser-playable
+ * URLs: [src1.primary, ...src1.fallbacks, src2.primary, ...src2.fallbacks, ...].
+ */
+export function expandWebPlaybackCandidates(sources) {
+  const list = Array.isArray(sources) ? sources : sources ? [sources] : [];
+  const urls = [];
+  for (const src of list) {
+    if (!src) continue;
+    const plan = buildWebPlaybackCandidates(src);
+    if (plan.primaryUrl && !urls.includes(plan.primaryUrl)) {
+      urls.push(plan.primaryUrl);
+    }
+    for (const fb of plan.fallbackUrls || []) {
+      if (fb && !urls.includes(fb)) {
+        urls.push(fb);
+      }
+    }
+  }
+  return urls;
+}

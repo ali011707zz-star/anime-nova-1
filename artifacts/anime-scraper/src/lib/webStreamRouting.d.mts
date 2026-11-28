@@ -32,3 +32,5 @@ export declare function isBrowserDirectMediaUrl(
 ): boolean;
 export declare function isBrowserNonIframeMediaUrl(url: string): boolean;
 export declare function buildWebPlaybackCandidates(src: WebStreamSourceInput): WebPlaybackPlan;
+
+export declare function expandWebPlaybackCandidates(sources: WebStreamSourceInput | WebStreamSourceInput[]): string[];

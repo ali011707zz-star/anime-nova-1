@@ -12,6 +12,7 @@ import {
 import { getAppToken } from "@/lib/appToken";
 import {
   buildWebPlaybackCandidates,
+  expandWebPlaybackCandidates,
   getWebDirectRequestHeaders,
   isBrowserNonIframeMediaUrl,
   isKawaiiCdnUrl,
@@ -5501,9 +5502,20 @@ export default function WatchPage() {
        المشكلة: عند فشل المشغل (رابط منتهي الصلاحية)، تبقى slotSources بروابطها القديمة
        المحذوفة. النقرة التالية على أي مصدر "ready" تُعيد تشغيل نفس الرابط المنتهي → فشل
        سلسلة. الحل: إعادة ضبط كل المصادر المُجلَبة لإجبار إعادة الجلب من الباكند. */
-    setSlotStatus(EMPTY_SLOTS());
-    setSlotSources({});
-    slotStatusRef.current = EMPTY_SLOTS();
+    const failedSite = playerSrcSiteRef.current;
+    if (failedSite && failedSite !== "_resume") {
+      setSlotSources((prev) => {
+        const cur = prev[failedSite] || [];
+        const keepCheckRows = cur.filter((item) => !!item.checkOnly);
+        return {
+          ...prev,
+          [failedSite]:
+            keepCheckRows.length > 0
+              ? keepCheckRows
+              : cur.map((item) => ({ ...item, url: "", directUrl: "", checkOnly: true })),
+        };
+      });
+    }
     setTimeout(() => setFailedSrcToast(false), 3500);
   }
 
@@ -5710,9 +5722,10 @@ export default function WatchPage() {
        const sameTier = srcs.filter((src) => getSrcQualityTier(src) === requestedQuality);
        const candidates =
          sameTier.length || !QUALITY_FALLBACK_SITES.has(site) ? sameTier : srcs;
-       const selectedSrc = [...candidates].sort(
+       const sortedCandidates = [...candidates].sort(
         (a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0),
-      )[0];
+      );
+       const selectedSrc = sortedCandidates[0];
 
       if (selectedSrc) {
         setSlotSources((prev) => ({
@@ -5721,17 +5734,17 @@ export default function WatchPage() {
             ...(prev[site] || []).filter(
               (s) => getSrcQualityTier(s) !== requestedQuality,
             ),
-            selectedSrc,
+            ...sortedCandidates,
           ],
         }));
         setSlotStatus((prev) => ({ ...prev, [site]: "ready" }));
         setQualityStatus((prev) => ({ ...prev, [qualityKey]: "ready" }));
-        if (animeId) saveAnimeSrcs(animeId, ep, site, [selectedSrc]);
+        if (animeId) saveAnimeSrcs(animeId, ep, site, sortedCandidates);
 
-        /* المستخدم اختار مصدرًا وجودة: شغّل هذا الرابط فقط. */
+        /* المستخدم اختار مصدرًا وجودة: شغّل هذا الرابط مع بقية مرايا نفس المزود كاحتياط فوري. */
         if (!bgLoad) {
           autoPlayedRef.current = true;
-          handlePlaySrc(selectedSrc);
+          handlePlaySrc(selectedSrc, sortedCandidates);
         }
       } else {
         setSlotSources((prev) => ({
@@ -6059,7 +6072,7 @@ export default function WatchPage() {
   }, [slotSources, phase, quality]);
 
   /* ── Play a specific source — show loading modal then switch to player ── */
-  function handlePlaySrc(src: FetchedSrc) {
+  function handlePlaySrc(src: FetchedSrc, mirrorCandidates?: FetchedSrc[]) {
     /* Playback is starting — stop any not-yet-fired scheduled fetches from the auto-fetch-all
        wave to cap unnecessary scraper traffic (in-flight requests are left to finish so they
        can still populate the full server list). */
@@ -6069,20 +6082,20 @@ export default function WatchPage() {
     const clickedTier = getSrcQualityTier(src);
 
     /* Deterministic Browser-Safe Stream Routing (mirrors mobile v1.0.11):
-       - Browser-direct CDNs (Kawaii, Pixeldrain, MediaFire, Drive, OK/VK, BuzzHeavier)
+       - Browser-direct CDNs (Kawaii, MediaFire, Drive, OK/VK, BuzzHeavier)
          play DIRECTLY first (0% VPS bandwidth) with silent VPS proxy fallback as server #2.
-       - VPS-only sites (SA, NOVA VIP) and CORS/Referer-locked HLS (RE, RE DUB, AD 2, MP)
-         route cleanly through VPS proxy (with directSegs=1 stripped for browser CORS safety). */
+       - Multiple mirror links returned for the selected provider are queued in priority order. */
     const servers: Record<Quality, string[]> = {
       "1080p FHD": [],
       "720p HD": [],
       "480p SD": [],
       "360p SD": [],
     };
-    if (clickedUrl) servers[clickedTier].push(clickedUrl);
-    for (const fb of plan.fallbackUrls) {
-      if (fb && !servers[clickedTier].includes(fb)) servers[clickedTier].push(fb);
-    }
+    const expanded = expandWebPlaybackCandidates(
+      mirrorCandidates && mirrorCandidates.length > 0 ? mirrorCandidates : [src],
+    );
+    if (clickedUrl && !expanded.includes(clickedUrl)) expanded.unshift(clickedUrl);
+    servers[clickedTier].push(...expanded);
 
     /* Store download URL + subtitle URL for player */
     setPlayerDlUrl(getDownloadUrl(src) || undefined);

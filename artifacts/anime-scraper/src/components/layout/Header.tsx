@@ -23,10 +23,10 @@ export function Header({ onMenuClick }: HeaderProps) {
         target="_blank"
         rel="noreferrer"
         dir="rtl"
-        className="flex min-h-7 items-center justify-center gap-1.5 border-b border-cyan-500/15 bg-cyan-500/[0.08] px-3 py-1 text-center text-[11px] font-bold font-['Cairo'] text-cyan-300 transition-colors hover:bg-cyan-500/[0.14]"
+        className="flex min-h-6 items-center justify-center gap-1.5 border-b border-cyan-500/15 bg-cyan-500/[0.07] px-3 py-0.5 text-center text-[10px] font-bold font-['Cairo'] text-cyan-300/90 transition-colors hover:bg-cyan-500/[0.14]"
       >
         <span aria-hidden="true">✈</span>
-        <span>تابع أخبار وتحديثات Anime NOVA وانضم لقناتنا الرسمية على تيليجرام</span>
+        <span>قناة Anime NOVA على تلجرام — انضم الآن</span>
       </a>
 
       {/* Unified Mobile Header Layout: Left Menu button | Right Search Pill + | ANIME NOVA */}
