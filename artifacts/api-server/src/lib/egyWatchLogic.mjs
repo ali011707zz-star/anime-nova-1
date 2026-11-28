@@ -1,7 +1,7 @@
 /**
- * Pure decoupled logic for EgyWatch (EasyPlex) matching, server code mapping
- * (`EG`, `TK`, `UQ`, `EB`, `VS`), extractor rule routing, and media URL parsing.
- * Shared identically between API server and NOVA FILM mobile client.
+ * Pure, dependency-free EgyWatch matching, host classification, JS unpacking,
+ * media extraction, HLS quality detection, and content-hygiene logic.
+ * Shared across backend (`api-server`) and mobile (`nova-film`).
  */
 
 export const EGYWATCH_BASES = [
@@ -19,32 +19,75 @@ export const EGYWATCH_HEADERS = {
 };
 
 export const EGYWATCH_BROWSER_UA =
-  "Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36";
+  "Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36";
 
-// Host -> mawdhou3.com scraper rules ported from EgywatchHostExtractor.kt
-export const EGYWATCH_HOST_RULES = {
-  faselhd: { endpoint: "scripttestfasel.php", method: "GET", queryKey: "api" },
-  fasel: { endpoint: "scripttestfasel.php", method: "GET", queryKey: "api" },
-  uqload: { endpoint: "scrapefinal/uqload.php", method: "GET", queryKey: "api" },
-  vidspeed: { endpoint: "scrapefinal/vidspeed.php", method: "POST", queryKey: "api" },
-  vidspeeds: { endpoint: "scrapefinal/vidspeed.php", method: "POST", queryKey: "api" },
-  vidsp: { endpoint: "scrapefinal/vidspeed.php", method: "POST", queryKey: "api" },
-  vidoba: { endpoint: "scrapefinal/vidoba.php", method: "POST", queryKey: "api" },
-  streamwish: { endpoint: "scrapefinal/streamwish.php", method: "POST", queryKey: "api" },
-  filelions: { endpoint: "scrapefinal/filelions.php", method: "POST", queryKey: "api" },
-  vidhide: { endpoint: "test.php", method: "GET", queryKey: "api" },
-  vidhidepre: { endpoint: "test.php", method: "GET", queryKey: "api" },
-  egybestvid: { endpoint: "test.php", method: "GET", queryKey: "api" },
-  vudeo: { endpoint: "test.php", method: "GET", queryKey: "api" },
-  liiivideo: { endpoint: "scrapefinal/scriptalvid.php", method: "GET", queryKey: "api" },
-  hdup20: { endpoint: "scrapefinal/hdup20.php", method: "GET", queryKey: "api" },
-  vidnest: { endpoint: "scrapefinal/vidnest.php", method: "GET", queryKey: "api" },
-  turbovidhls: { endpoint: "scrapefinal/turbovidhls.php", method: "GET", queryKey: "api" },
-  dnscheckr: { endpoint: "fasel/geturl.php", method: "GET", queryKey: "api" },
-  updown: { endpoint: "scrapefinal/updown.php", method: "POST", queryKey: "api" },
-  byse: { endpoint: "test.php", method: "GET", queryKey: "api" },
-  vidhls: { endpoint: "test.php", method: "GET", queryKey: "api" },
-};
+// Retained for backward-compat exports; extraction now unpacks directly without slow third-party PHP scrapers.
+export const EGYWATCH_HOST_RULES = {};
+
+// Hosts verified to be dead, Cloudflare-blocked (HTTP 403), 404, redirect-hijacked, or empty JSON shells.
+const DEAD_HOST_PATTERNS = [
+  "googlefasv",
+  "googlefasd",
+  "fasel-hd",
+  "faselhd",
+  "vidtube",
+  "vidhls",
+  "earnvids",
+  "streamwish",
+  "flaswish",
+  "hdup20",
+  "hdup400",
+  "okprime",
+  "mzfi.me",
+  "savefiles",
+  "hd-vk",
+  "arabseed",
+  "upns.online",
+  "cimanowtv",
+  "vfaststream",
+  "mwdy.cc",
+  "miravd",
+  "vidaraa",
+  "morencius",
+];
+
+/**
+ * Unpacks Dean Edwards `eval(function(p,a,c,k,e,d)...)` packed JavaScript blocks
+ * used by XFileSharing / JWPlayer video hosts (egybestvid, vidspeed, vidoba, anafast,
+ * stmruby, 1vid, film77, mp4plus, uqload, arabveturk, okhd, hanerix, etc.).
+ */
+export function unpackPackedJs(html) {
+  if (!html || typeof html !== "string" || !html.includes("eval(function(p,a,c,k,e,")) {
+    return "";
+  }
+  const out = [];
+  const re =
+    /eval\(function\(p,a,c,k,e,[dr]\)\{[\s\S]*?\}\(\s*(['"])([\s\S]*?)\1\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(['"])([\s\S]*?)\5\.split\(['"]\|['"]\)/g;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    try {
+      let p = m[2].replace(/\\(['"\\])/g, "$1");
+      const a = parseInt(m[3], 10);
+      let c = parseInt(m[4], 10);
+      const k = m[6].split("|");
+      if (!Number.isFinite(a) || a < 2 || a > 62 || !Number.isFinite(c) || c > 20000) continue;
+      const encodeBase = (n) => {
+        const prefix = n < a ? "" : encodeBase(Math.floor(n / a));
+        const rem = n % a;
+        return prefix + (rem > 35 ? String.fromCharCode(rem + 29) : rem.toString(36));
+      };
+      while (c--) {
+        if (k[c]) {
+          p = p.replace(new RegExp(`\\b${encodeBase(c)}\\b`, "g"), k[c]);
+        }
+      }
+      out.push(p);
+    } catch {
+      // Ignore malformed packed block
+    }
+  }
+  return out.join("\n");
+}
 
 /**
  * Normalize Arabic & Latin titles for accurate fuzzy matching.
@@ -81,15 +124,46 @@ export function extractHostName(urlStr) {
   }
 }
 
+function normalizeVideoHeaders(video) {
+  const headers = {};
+  if (video && typeof video.useragent === "string" && video.useragent.trim()) {
+    headers["User-Agent"] = video.useragent.trim();
+  }
+  if (video && typeof video.header === "string" && video.header.trim()) {
+    const h = video.header.trim();
+    if (/^https?:\/\//i.test(h)) {
+      headers.Referer = h;
+    } else if (h.includes(":")) {
+      const idx = h.indexOf(":");
+      const k = h.slice(0, idx).trim();
+      const val = h.slice(idx + 1).trim();
+      if (k && val) headers[k] = val;
+    }
+  }
+  return headers;
+}
+
 /**
- * Classify a raw EgyWatch video entry into one of the user-approved 2-letter server codes:
- * - `EG`: VIP Fast / Fasel (multi-quality direct HLS)
- * - `TK`: Server Turki / eisk.badmoussi.com (direct Turkish HLS)
- * - `UQ`: Uqload (direct HLS/MP4 — fast playback + phone download)
- * - `EB`: Egybest / Server Egy / CimaBox (direct 720p/MP4 — great for phone download + ADM)
- * - `VS`: VidSpeed / Vidoba / HDUp20 / Liiivideo / StreamWish / Filelions / Anafast
+ * Returns true ONLY if the URL itself points to a real media stream (.m3u8 / .mp4 / /hls2/ / .urlset)
+ * and NOT an HTML embed webpage (.html, /embed-, /e/, /v/, ?p=...).
+ */
+export function isDirectPlayableMediaUrl(urlStr) {
+  const u = String(urlStr || "").trim();
+  if (!/^https?:\/\//i.test(u)) return false;
+  if (/\.(html|htm|php|png|jpg|jpeg|webp|gif|svg|vtt|srt|js|css|ico)(\?|$)/i.test(u)) return false;
+  if (/\/embed[\/-]|\/embed\.|\/e\/|\/v\/|\?p=\d+/i.test(u)) return false;
+  return /\.(m3u8|mp4)(\?|$)|\/hls\d*\/|\.urlset\//i.test(u);
+}
+
+/**
+ * Classify a raw EgyWatch video entry into one of the 5 user-approved 2-letter server codes:
+ * - `TK`: Server Turki (`eisk.badmoussi.com` / `hls.3isk.beauty`) — fast Arabic/Turkish/Dubbed HLS
+ * - `EG`: StreamRuby (`stmruby.*` — CinemaScope 1080p/800p HLS) & direct worker feeds (`developer-pro.workers.dev`)
+ * - `EB`: EgybestVid (`egybestvid.*` — 720p direct/embed HLS), `1vid.*` (720p), `film77.*` (720p), `mp4plus.*` (direct MP4)
+ * - `UQ`: Uqload (`uqload.*` — direct HLS/MP4)
+ * - `VS`: Fast XFileSharing HLS mirrors (`v.vidsp.net`, `vidspeed.*`, `vidoba.*`, `anafast.*`, `arabveturk.*`, `okhd.*`, `hanerix.*`, `pluss24.*`)
  *
- * Returns null for dead/unsupported hosts (like broken googlefasV/googlefasD encrypted endpoints).
+ * Strictly skips dead/403/404 hosts AND never marks HTML embed pages as `mode: "direct"`.
  */
 export function classifyEgyWatchServer(video) {
   if (!video || typeof video !== "object") return null;
@@ -99,51 +173,73 @@ export function classifyEgyWatchServer(video) {
   const serverRaw = String(video.server || video.name || "").trim();
   const sLower = serverRaw.toLowerCase();
   const host = extractHostName(link);
-  const label = extractHostLabel(link);
+  if (!host) return null;
 
-  // Skip known dead/encrypted Google redirectors that return HTTP 400 Invalid encrypted URL
-  if (host.includes("googlefasv") || host.includes("googlefasd") || sLower.includes("server google")) {
+  // Immediately skip known dead / Cloudflare-blocked / 404 / redirect-hijacked hosts
+  if (
+    sLower.includes("server google") ||
+    DEAD_HOST_PATTERNS.some((p) => host.includes(p))
+  ) {
     return null;
   }
 
-  // Skip pure download-redirect wrappers that aren't media links unless direct mp4/m3u8
-  const isDirectMedia =
-    /\.(m3u8|mp4)(\?|$)/i.test(link) ||
-    Boolean(video.hls === 1 || video.hls === true);
+  // Strictly inspect the URL itself — NEVER trust `video.hls === 1` because EgyWatch sets hls=1 on HTML embed URLs!
+  const isDirectMedia = isDirectPlayableMediaUrl(link);
 
-  // 1. Server Turki (`TK`)
-  if (
-    sLower.includes("turki") ||
-    host.includes("badmoussi") ||
-    host.includes("3isk")
-  ) {
+  // 1. Server Turki (`TK`) — highest priority for Turkish / Dubbed / Arabic series
+  if (host.includes("badmoussi") || host.includes("3isk") || sLower.includes("turki")) {
+    if (host.includes("badmoussi")) {
+      return {
+        code: "TK",
+        site: "egywatch_tk",
+        label: "السيرفر TK",
+        priority: 1,
+        mode: "turki_api",
+        link,
+        serverRaw,
+        rule: null,
+        headers: normalizeVideoHeaders(video),
+      };
+    }
+    if (isDirectMedia) {
+      return {
+        code: "TK",
+        site: "egywatch_tk",
+        label: "السيرفر TK",
+        priority: 1,
+        mode: "direct",
+        link,
+        serverRaw,
+        rule: null,
+        headers: normalizeVideoHeaders(video),
+      };
+    }
+    return null;
+  }
+
+  // 2. High-quality `EG` (StreamRuby CinemaScope 1080p/800p + Cloudflare direct workers)
+  if (host.includes("stmruby") || host.includes("streamruby")) {
     return {
-      code: "TK",
-      site: "egywatch_tk",
-      label: "السيرفر TK",
-      priority: 1,
-      mode: host.includes("badmoussi") ? "turki_api" : isDirectMedia ? "direct" : "embed",
+      code: "EG",
+      site: "egywatch_eg",
+      label: "السيرفر EG",
+      priority: 2,
+      mode: isDirectMedia ? "direct" : "embed",
       link,
       serverRaw,
       rule: null,
       headers: normalizeVideoHeaders(video),
     };
   }
-
-  // 2. VIP Fast / Fasel (`EG`)
-  if (
-    sLower.includes("vip fast") ||
-    sLower.includes("vip") && (host.includes("fasel") || host.includes("developer-pro") || host.includes("liiivideo")) ||
-    host.includes("fasel") ||
-    host.includes("dnscheckr")
-  ) {
+  if (host.includes("developer-pro.workers.dev")) {
     const mode = isDirectMedia
       ? "direct"
-      : host.includes("developer-pro.workers.dev") && link.includes("/video?url=")
+      : link.includes("/video?url=")
         ? "json_worker"
-        : host.includes("developer-pro.workers.dev") && link.includes("/get-links")
+        : link.includes("/get-links")
           ? "redirect_worker"
-          : "scraper";
+          : null;
+    if (!mode) return null;
     return {
       code: "EG",
       site: "egywatch_eg",
@@ -152,63 +248,77 @@ export function classifyEgyWatchServer(video) {
       mode,
       link,
       serverRaw,
-      rule: EGYWATCH_HOST_RULES[label] || EGYWATCH_HOST_RULES.faselhd,
+      rule: null,
       headers: normalizeVideoHeaders(video),
     };
   }
 
-  // 3. Uqload (`UQ`)
-  if (sLower.includes("uqload") || label === "uqload" || host.includes("uqload")) {
-    return {
-      code: "UQ",
-      site: "egywatch_uq",
-      label: "السيرفر UQ",
-      priority: 3,
-      mode: isDirectMedia ? "direct" : "scraper",
-      link,
-      serverRaw,
-      rule: EGYWATCH_HOST_RULES.uqload,
-      headers: normalizeVideoHeaders(video),
-    };
-  }
-
-  // 4. Egybest / Server Egy / CimaBox (`EB`)
+  // 3. `EB` (EgybestVid 720p, 1Vid 720p, Film77 720p, Mp4Plus direct MP4)
   if (
-    sLower.includes("egybest") ||
-    sLower.includes("server egy") ||
-    sLower.includes("cimabox") ||
     host.includes("egybestvid") ||
-    host.includes("developer-pro.workers.dev")
+    host.includes("1vid.") ||
+    host.includes("film77.") ||
+    host.includes("mp4plus.")
   ) {
-    const mode = isDirectMedia
-      ? "direct"
-      : link.includes("/video?url=")
-        ? "json_worker"
-        : link.includes("/get-links")
-          ? "redirect_worker"
-          : EGYWATCH_HOST_RULES[label]
-            ? "scraper"
-            : "embed";
     return {
       code: "EB",
       site: "egywatch_eb",
       label: "السيرفر EB",
-      priority: 4,
-      mode,
+      priority: host.includes("egybestvid") || host.includes("1vid.") ? 3 : 4,
+      mode: isDirectMedia ? "direct" : "embed",
       link,
       serverRaw,
-      rule: EGYWATCH_HOST_RULES[label] || null,
+      rule: null,
       headers: normalizeVideoHeaders(video),
     };
   }
 
-  // 5. Direct MP4/HLS without known brand name -> `EB`
+  // 4. `UQ` (Uqload direct HLS/MP4)
+  if (host.includes("uqload")) {
+    return {
+      code: "UQ",
+      site: "egywatch_uq",
+      label: "السيرفر UQ",
+      priority: 5,
+      mode: isDirectMedia ? "direct" : "embed",
+      link,
+      serverRaw,
+      rule: null,
+      headers: normalizeVideoHeaders(video),
+    };
+  }
+
+  // 5. `VS` (Verified working fast XFileSharing HLS hosts)
+  if (
+    host.includes("vidsp.") ||
+    host.includes("vidspeed.") ||
+    host.includes("vidoba.") ||
+    host.includes("anafast.") ||
+    host.includes("arabveturk.") ||
+    host.includes("okhd.") ||
+    host.includes("hanerix.") ||
+    host.includes("pluss24.")
+  ) {
+    return {
+      code: "VS",
+      site: "egywatch_vs",
+      label: "السيرفر VS",
+      priority: host.includes("vidsp.") ? 4 : 6,
+      mode: isDirectMedia ? "direct" : "embed",
+      link,
+      serverRaw,
+      rule: null,
+      headers: normalizeVideoHeaders(video),
+    };
+  }
+
+  // Direct .m3u8 / .mp4 on any other non-blacklisted host
   if (isDirectMedia) {
     return {
       code: "EB",
       site: "egywatch_eb",
       label: "السيرفر EB",
-      priority: 4,
+      priority: 7,
       mode: "direct",
       link,
       serverRaw,
@@ -217,59 +327,18 @@ export function classifyEgyWatchServer(video) {
     };
   }
 
-  // 6. VidSpeed / Vidoba / HDUp20 / Liiivideo / StreamWish / Filelions / Anafast (`VS`)
-  const rule = EGYWATCH_HOST_RULES[label] || null;
-  if (
-    rule ||
-    sLower.includes("vidspeed") ||
-    sLower.includes("vidsp") ||
-    sLower.includes("vidoba") ||
-    sLower.includes("anafast") ||
-    sLower.includes("streamwish") ||
-    sLower.includes("filelions") ||
-    sLower.includes("hdup") ||
-    sLower.includes("aflam") ||
-    sLower.includes("vidhls") ||
-    /^(360|480|720|1080)p$/i.test(sLower)
-  ) {
-    return {
-      code: "VS",
-      site: "egywatch_vs",
-      label: "السيرفر VS",
-      priority: 5,
-      mode: rule ? "scraper" : "embed",
-      link,
-      serverRaw,
-      rule,
-      headers: normalizeVideoHeaders(video),
-    };
-  }
-
   return null;
 }
 
-function normalizeVideoHeaders(video) {
-  const out = {};
-  if (video?.useragent && typeof video.useragent === "string" && video.useragent.trim()) {
-    out["User-Agent"] = video.useragent.trim();
-  }
-  const ref = String(video?.referer || video?.header || "").trim();
-  if (ref && /^https?:\/\//i.test(ref)) {
-    out.Referer = ref;
-  }
-  return out;
-}
-
 /**
- * Pick the best matching movie/series/anime candidate from EgyWatch search results.
- * Prioritizes exact `tmdb_id` match (score 1000+), then normalized Arabic/English title match.
+ * Pick the best matching EgyWatch item from `/search` candidates.
+ * Strongly prefers exact `tmdb_id` match, then normalized Arabic/English title match,
+ * and respects dubbed vs subbed preference (`anime` = dubbed series in EgyWatch).
  */
 export function pickBestEgyWatchMatch(candidates, target) {
   if (!Array.isArray(candidates) || candidates.length === 0) return null;
-
   const targetTmdbId = Number(target?.tmdbId || 0) || 0;
-  const targetType = String(target?.tmdbType || target?.type || "movie").toLowerCase();
-  const wantMovie = targetType === "movie";
+  const wantMovie = target?.tmdbType === "movie" || target?.type === "movie";
   const wantDubbed = Boolean(target?.preferDubbed);
   const targetYear = Number(target?.year || 0) || 0;
 
@@ -280,37 +349,41 @@ export function pickBestEgyWatchMatch(candidates, target) {
   let best = null;
 
   for (const item of candidates) {
-    if (!item || !item.id) continue;
+    if (!item || typeof item !== "object" || !item.id) continue;
     const rawType = String(item.type || "").toLowerCase();
     const isItemMovie = rawType === "movie";
     const isItemAnime = rawType === "anime";
-    const isItemSerie = rawType === "serie" || rawType === "series" || isItemAnime;
+    const isItemSeries = rawType === "serie" || rawType === "series" || rawType === "tv" || isItemAnime;
 
     if (wantMovie && !isItemMovie) continue;
-    if (!wantMovie && !isItemSerie) continue;
+    if (!wantMovie && !isItemSeries) continue;
+
+    const itemTmdbId = Number(item.tmdb_id || item.tmdbId || 0) || 0;
+    const rawName = String(item.name || item.title || item.original_name || "").trim();
+    const normName = normalizeEgyTitle(rawName);
+    const normOrig = normalizeEgyTitle(item.original_name || "");
+    const isDubTitle = isItemAnime || /مدبلج/.test(rawName);
 
     let score = 0;
-    const itemTmdbId = Number(item.tmdb_id || 0) || 0;
-    const rawName = String(item.name || item.title || "").trim();
-    const normName = normalizeEgyTitle(rawName);
-    const isDubTitle = /مدبلج/.test(rawName) || isItemAnime;
 
     if (targetTmdbId > 0 && itemTmdbId === targetTmdbId) {
       score += 1000;
     }
 
-    if (normName && targetTitles.length > 0) {
+    if (targetTitles.length > 0) {
       let bestTitleScore = 0;
       for (const tt of targetTitles) {
-        if (normName === tt) {
-          bestTitleScore = Math.max(bestTitleScore, 500);
-        } else if (normName.includes(tt) || tt.includes(normName)) {
-          const ratio = Math.min(normName.length, tt.length) / Math.max(normName.length, tt.length);
-          bestTitleScore = Math.max(bestTitleScore, Math.round(250 + ratio * 200));
-        } else {
-          const aTokens = new Set(tt.split(" ").filter((w) => w.length >= 2));
-          const bTokens = new Set(normName.split(" ").filter((w) => w.length >= 2));
-          if (aTokens.size > 0 && bTokens.size > 0) {
+        for (const cand of [normName, normOrig]) {
+          if (!cand) continue;
+          if (cand === tt) {
+            bestTitleScore = Math.max(bestTitleScore, 500);
+          } else if (cand.length >= 4 && tt.length >= 4 && (cand.includes(tt) || tt.includes(cand))) {
+            const ratio = Math.min(cand.length, tt.length) / Math.max(cand.length, tt.length);
+            bestTitleScore = Math.max(bestTitleScore, Math.round(280 + ratio * 180));
+          } else {
+            const aTokens = new Set(tt.split(" ").filter((w) => w.length >= 2));
+            const bTokens = new Set(cand.split(" ").filter((w) => w.length >= 2));
+            if (aTokens.size === 0 || bTokens.size === 0) continue;
             let common = 0;
             for (const w of aTokens) if (bTokens.has(w)) common++;
             const overlap = common / Math.max(aTokens.size, bTokens.size);
@@ -323,17 +396,14 @@ export function pickBestEgyWatchMatch(candidates, target) {
       score += bestTitleScore;
     }
 
-    // Must match either tmdb_id OR reasonably strong title
     if (score < 260) continue;
 
-    // Dubbed vs subbed preference
     if (wantDubbed) {
       score += isDubTitle ? 120 : -80;
     } else {
       score += isDubTitle ? -60 : 40;
     }
 
-    // Year proximity bonus
     const itemYear = Number(String(item.release_date || item.first_air_date || "").slice(0, 4)) || 0;
     if (targetYear > 1950 && itemYear > 1950) {
       if (itemYear === targetYear) score += 60;
@@ -356,8 +426,9 @@ export function pickBestEgyWatchMatch(candidates, target) {
 }
 
 /**
- * Parse extracted direct media URLs (.m3u8 / .mp4) from EgyWatch scraper responses,
- * Server Turki JSON, Cloudflare JSON workers, or raw JWPlayer embed HTML.
+ * Parse ONLY direct playable media URLs (.m3u8 / .mp4) from Server Turki JSON,
+ * Cloudflare JSON workers, or raw/Dean-Edwards-packed JWPlayer HTML embeds.
+ * Strictly rejects HTML embed wrappers (`isDirect: false`, `/embed/`, `.html`).
  */
 export function parseExtractedMediaLinks(body) {
   if (!body || typeof body !== "string") return [];
@@ -369,41 +440,38 @@ export function parseExtractedMediaLinks(body) {
 
   const pushUrl = (rawUrl, rawQuality) => {
     const u = String(rawUrl || "").trim().replace(/\\\//g, "/");
-    if (!/^https?:\/\//i.test(u)) return;
-    if (/\.(png|jpg|jpeg|webp|gif|svg|vtt|srt|js|css)(\?|$)/i.test(u)) return;
+    if (!isDirectPlayableMediaUrl(u)) return;
     const dedupKey = u.includes(".m3u8") ? u.split("?")[0] : u;
     if (seen.has(dedupKey)) return;
     seen.add(dedupKey);
     const quality = normalizeQualityLabel(rawQuality, u);
-    const kind = u.includes(".m3u8") || u.includes("/hls/") ? "hls" : "direct";
+    const kind = u.includes(".m3u8") || /\/hls\d*\//i.test(u) || u.includes(".urlset") ? "hls" : "direct";
     out.push({ url: u, quality, kind });
   };
 
-  // Try JSON parse first
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
     try {
       const parsed = JSON.parse(trimmed);
-      // 1. Server Turki double-encoded shape: { data: [{ data: "{\"url\":\"https://...m3u8\"}" }] }
       if (Array.isArray(parsed?.data)) {
         for (const entry of parsed.data) {
           if (typeof entry?.data === "string" && entry.data.trim().startsWith("{")) {
             try {
               const inner = JSON.parse(entry.data);
+              // Server Turki returns `isDirect: false` for HTML embed iframes — skip them!
+              if (inner?.isDirect === false) continue;
               if (inner?.url) pushUrl(inner.url, inner.quality || entry.name);
               if (inner?.file) pushUrl(inner.file, inner.quality || entry.name);
             } catch {}
-          } else if (entry?.url) {
+          } else if (entry?.url && entry?.isDirect !== false) {
             pushUrl(entry.url, entry.quality || entry.label);
           }
         }
       }
-      // 2. Worker shape: { availableQualities: [{ quality, url }] }
       if (Array.isArray(parsed?.availableQualities)) {
         for (const q of parsed.availableQualities) {
           pushUrl(q?.url || q?.file, q?.quality || q?.label);
         }
       }
-      // 3. mawdhou3.com shape: { filtered_content: [...], Quality: [...] }
       if (Array.isArray(parsed?.filtered_content)) {
         const quals = parsed.Quality || parsed.qualities || [];
         parsed.filtered_content.forEach((item, idx) => {
@@ -411,7 +479,6 @@ export function parseExtractedMediaLinks(body) {
           else if (item && typeof item === "object") pushUrl(item.file || item.url, item.label || item.quality || quals[idx]);
         });
       }
-      // 4. Generic sources / links arrays
       for (const key of ["sources", "links"]) {
         if (Array.isArray(parsed?.[key])) {
           for (const item of parsed[key]) {
@@ -420,7 +487,6 @@ export function parseExtractedMediaLinks(body) {
           }
         }
       }
-      // 5. Direct single file / url field
       if (typeof parsed?.file === "string") pushUrl(parsed.file, parsed.quality || parsed.label);
       if (typeof parsed?.url === "string") pushUrl(parsed.url, parsed.quality || parsed.label);
       if (typeof parsed?.link === "string") pushUrl(parsed.link, parsed.quality || parsed.label);
@@ -429,18 +495,21 @@ export function parseExtractedMediaLinks(body) {
 
   if (out.length > 0) return out;
 
-  // Fallback regex extraction for JWPlayer / raw HTML embeds
+  // Unpack any Dean Edwards p,a,c,k,e,d script blocks before scanning HTML
+  const unpacked = unpackPackedJs(trimmed);
+  const haystack = unpacked ? `${trimmed}\n${unpacked}` : trimmed;
+
   const jwRegex = /file\s*:\s*["'](https?:\/\/[^"']+)["']/gi;
   let m;
-  while ((m = jwRegex.exec(trimmed)) !== null) {
-    const rest = trimmed.slice(m.index, m.index + 180);
+  while ((m = jwRegex.exec(haystack)) !== null) {
+    const rest = haystack.slice(m.index, m.index + 200);
     const lbl = rest.match(/label\s*:\s*["']([^"']+)["']/i)?.[1] || "";
     pushUrl(m[1], lbl);
   }
 
   if (out.length === 0) {
     const directRegex = /https?:\/\/[^\s"'<>\\]+\.(?:m3u8|mp4)(?:\?[^\s"'<>\\]*)?/gi;
-    while ((m = directRegex.exec(trimmed)) !== null) {
+    while ((m = directRegex.exec(haystack)) !== null) {
       pushUrl(m[0], "");
     }
   }
@@ -448,22 +517,40 @@ export function parseExtractedMediaLinks(body) {
   return out;
 }
 
+/**
+ * Inspect `#EXT-X-STREAM-INF` lines inside a live HLS master manifest to determine
+ * the true highest resolution (handles CinemaScope 1920x800 as 1080p, 1280x720 as 720p,
+ * 854x480 / 640x360 as 480p).
+ */
+export function detectQualityFromM3u8(m3u8Text, fallbackQuality = "720p") {
+  if (!m3u8Text || typeof m3u8Text !== "string") return fallbackQuality;
+  let maxW = 0;
+  let maxH = 0;
+  const re = /RESOLUTION=(\d+)x(\d+)/gi;
+  let m;
+  while ((m = re.exec(m3u8Text)) !== null) {
+    const w = parseInt(m[1], 10) || 0;
+    const h = parseInt(m[2], 10) || 0;
+    if (w > maxW) maxW = w;
+    if (h > maxH) maxH = h;
+  }
+  if (maxW === 0 && maxH === 0) return fallbackQuality;
+  if (maxW >= 3000 || maxH >= 1800) return "4K";
+  if (maxW >= 1600 || maxH >= 900 || (maxW >= 1500 && maxH >= 780)) return "1080p";
+  if (maxW >= 1100 || maxH >= 600) return "720p";
+  return "480p";
+}
+
 export function normalizeQualityLabel(rawQuality, url = "") {
-  const combined = `${rawQuality || ""} ${url || ""}`;
-  if (/2160|4k/i.test(combined)) return "4K";
-  if (/1080|fhd/i.test(combined)) return "1080p";
-  if (/720|\bhd\b/i.test(combined)) return "720p";
-  if (/480/i.test(combined)) return "480p";
-  if (/360/i.test(combined)) return "360p";
+  const q = String(rawQuality || "").trim();
+  const u = String(url || "").trim();
+  if (/(?:2160|\b4k\b)/i.test(q) || /[/_.-]2160p?[/_.-]/i.test(u)) return "4K";
+  if (/(?:1080|\bfhd\b)/i.test(q) || /[/_.-]1080p?[/_.-]/i.test(u)) return "1080p";
+  if (/(?:720|\bhd\b)/i.test(q) || /[/_.-]720p?[/_.-]/i.test(u)) return "720p";
+  if (/(?:480|360|\bsd\b)/i.test(q) || /[/_.-](?:480|360)p?[/_.-]/i.test(u)) return "480p";
   return "720p";
 }
 
-/**
- * Pure content-hygiene checks used to keep Animation and Foreign Series clean:
- * - Blocks Japanese anime from leaking into Animation Movies/Series.
- * - Blocks unreleased future movies/series from showing dead 0-server posters.
- * - Blocks Asian (Chinese/Korean/Japanese) dramas from leaking into Western Series.
- */
 export function isJapaneseAnimeRaw(raw) {
   if (!raw || typeof raw !== "object") return false;
   const lang = String(raw.original_language || raw.originalLanguage || "").toLowerCase().trim();

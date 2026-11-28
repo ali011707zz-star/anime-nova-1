@@ -42,9 +42,11 @@ export interface ExtractedMediaLink {
   kind: "hls" | "direct";
 }
 
+export function unpackPackedJs(html: string): string;
 export function normalizeEgyTitle(raw: string): string;
 export function extractHostLabel(urlStr: string): string;
 export function extractHostName(urlStr: string): string;
+export function isDirectPlayableMediaUrl(urlStr: string): boolean;
 export function classifyEgyWatchServer(video: any): ClassifiedEgyWatchServer | null;
 export function pickBestEgyWatchMatch(
   candidates: any[],
@@ -60,6 +62,7 @@ export function pickBestEgyWatchMatch(
   },
 ): EgyWatchMatchResult | null;
 export function parseExtractedMediaLinks(body: string): ExtractedMediaLink[];
+export function detectQualityFromM3u8(m3u8Text: string, fallbackQuality?: string): string;
 export function normalizeQualityLabel(rawQuality?: string, url?: string): string;
 export function isJapaneseAnimeRaw(raw: any): boolean;
 export function isUnreleasedDate(dateStr?: string, todayIso?: string): boolean;

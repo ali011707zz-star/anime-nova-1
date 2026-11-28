@@ -2280,8 +2280,15 @@ router.get("/sources-stream", async (req: Request, res: Response) => {
       const tmdbEn = await resolveTmdbTitleEn(effectiveRealTmdbId, type).catch(() => "");
       if (tmdbEn) effectiveTitleEn = tmdbEn;
     }
-    if (effectiveRealTmdbId) {
-      sendEvent("meta", { realTmdbId: effectiveRealTmdbId, titleEn: effectiveTitleEn });
+    const metaVerifiedEw = lookupVerifiedEgyWatchItem(tmdbId);
+    if (effectiveRealTmdbId || metaVerifiedEw) {
+      sendEvent("meta", {
+        realTmdbId: effectiveRealTmdbId,
+        titleEn: effectiveTitleEn,
+        egyWatchId: metaVerifiedEw?.egyWatchId || null,
+        egyWatchType: metaVerifiedEw?.egyWatchType || null,
+        preferDubbed: metaVerifiedEw?.egyWatchType === "anime" || metaVerifiedEw?.audioLabel === "مدبلج عربي",
+      });
     }
     let emitted = 0;
     const tgFilmSources = await getTelegramFilmSources({
@@ -2298,7 +2305,8 @@ router.get("/sources-stream", async (req: Request, res: Response) => {
       sendEvent("source", src);
       emitted++;
     }
-    // EgyWatch Arabic/Turkish/Indian/Dubbed/Global direct servers (EG, TK, UQ, EB, VS)
+    // Run EgyWatch (if requested by server) AND Multi-CDN (/api/animation/sources-stream) IN PARALLEL!
+    // Mobile client v2+ passes skipServerEw=1 because the phone extracts EgyWatch directly using its own IP.
     const skipServerEw = String(req.query.skipServerEw || "") === "1";
     const verifiedEw = lookupVerifiedEgyWatchItem(tmdbId);
     const ewIdParam = Number.parseInt(String(req.query.ewId || "0"), 10) || verifiedEw?.egyWatchId || 0;
@@ -2306,79 +2314,94 @@ router.get("/sources-stream", async (req: Request, res: Response) => {
     const preferDubbed = String(req.query.preferDubbed || "") === "1" || ewTypeParam === "anime" || verifiedEw?.audioLabel === "مدبلج عربي";
     const titleArParam = String(req.query.titleAr || verifiedEw?.titleAr || titleParam || "").trim();
 
+    const parallelTasks: Array<Promise<unknown>> = [];
+
     if (!skipServerEw) {
-      try {
-        await resolveEgyWatchStreams({
-          tmdbId: effectiveRealTmdbId,
-          tmdbType: type,
-          titleAr: titleArParam,
-          titleEn: effectiveTitleEn || verifiedEw?.titleEn || titleParam,
-          year: verifiedEw?.year,
-          season,
-          ep,
-          preferDubbed,
-          egyWatchId: ewIdParam || null,
-          egyWatchType: ewTypeParam || null,
-          onSource: (ewSrc) => {
-            sendEvent("source", ewSrc);
-            emitted++;
-          },
-        });
-      } catch {}
+      parallelTasks.push(
+        Promise.race([
+          resolveEgyWatchStreams({
+            tmdbId: effectiveRealTmdbId,
+            tmdbType: type,
+            titleAr: titleArParam,
+            titleEn: effectiveTitleEn || verifiedEw?.titleEn || titleParam,
+            year: verifiedEw?.year,
+            season,
+            ep,
+            preferDubbed,
+            egyWatchId: ewIdParam || null,
+            egyWatchType: ewTypeParam || null,
+            onSource: (ewSrc) => {
+              if (!res.writableEnded) {
+                sendEvent("source", ewSrc);
+                emitted++;
+              }
+            },
+          }).catch(() => 0),
+          new Promise((r) => setTimeout(r, 5500)),
+        ]),
+      );
     }
 
-        // Also query multi-CDN providers (/api/animation/sources-stream) if titleEn is available
     if (effectiveTitleEn) {
-      try {
-        const port = Number(process.env.PORT || 5000);
-        const tok = issueAnonToken().token;
-        const qs = new URLSearchParams({
-          tmdbId: String(effectiveRealTmdbId || ""),
-          type,
-          season: String(season),
-          ep: String(ep),
-          title: effectiveTitleEn,
-          mobile: "1",
-        });
-        const up = await fetch(`http://127.0.0.1:${port}/api/animation/sources-stream?${qs.toString()}`, {
-          headers: {
-            "x-app-token": tok,
-            "x-nova-client": "nova-anime-mobile-v1",
-            "x-nova-package": "com.nova.anime",
-            "x-nova-version": "1.0.0",
-          },
-          signal: AbortSignal.timeout(9000),
-        });
-        if (up.ok && up.body) {
-          const reader = up.body.getReader();
-          const dec = new TextDecoder();
-          let buf = "";
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buf += dec.decode(value, { stream: true });
-            const blocks = buf.split("\n\n");
-            buf = blocks.pop() || "";
-            for (const b of blocks) {
-              const evMatch = b.match(/^event:\s*(\S+)/m);
-              const dtMatch = b.match(/^data:\s*(.+)$/m);
-              if (evMatch?.[1] === "source" && dtMatch?.[1]) {
-                try {
-                  const sObj = JSON.parse(dtMatch[1]);
-                  if (sObj && (sObj.url || sObj.directUrl || sObj.proxyUrl) && !/dahmer/i.test(String(sObj.label || sObj.site || ""))) {
-                    const direct = toDirectOnlySource(sObj);
-                    if (direct) {
-                      sendEvent("source", direct);
-                      emitted++;
-                    }
+      parallelTasks.push(
+        (async () => {
+          try {
+            const port = Number(process.env.PORT || 5000);
+            const tok = issueAnonToken().token;
+            const qs = new URLSearchParams({
+              tmdbId: String(effectiveRealTmdbId || ""),
+              type,
+              season: String(season),
+              ep: String(ep),
+              title: effectiveTitleEn,
+              mobile: "1",
+            });
+            const up = await fetch(`http://127.0.0.1:${port}/api/animation/sources-stream?${qs.toString()}`, {
+              headers: {
+                "x-app-token": tok,
+                "x-nova-client": "nova-anime-mobile-v1",
+                "x-nova-package": "com.nova.anime",
+                "x-nova-version": "1.0.0",
+              },
+              signal: AbortSignal.timeout(7500),
+            });
+            if (up.ok && up.body) {
+              const reader = up.body.getReader();
+              const dec = new TextDecoder();
+              let buf = "";
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buf += dec.decode(value, { stream: true });
+                const blocks = buf.split("\n\n");
+                buf = blocks.pop() || "";
+                for (const blk of blocks) {
+                  const evMatch = blk.match(/^event:\s*(\S+)/m);
+                  const dtMatch = blk.match(/^data:\s*(.+)$/m);
+                  if (evMatch?.[1] === "source" && dtMatch?.[1]) {
+                    try {
+                      const sObj = JSON.parse(dtMatch[1]);
+                      if (sObj && (sObj.url || sObj.directUrl || sObj.proxyUrl) && !/dahmer/i.test(String(sObj.label || sObj.site || ""))) {
+                        const direct = toDirectOnlySource(sObj);
+                        if (direct && !res.writableEnded) {
+                          sendEvent("source", direct);
+                          emitted++;
+                        }
+                      }
+                    } catch {}
                   }
-                } catch {}
+                }
               }
             }
-          }
-        }
-      } catch {}
+          } catch {}
+        })(),
+      );
     }
+
+    if (parallelTasks.length > 0) {
+      await Promise.allSettled(parallelTasks);
+    }
+
     // Bonus live streams from TopCinema & EgyDead if vault yielded fewer than 4 servers
     if (emitted < 4 && effectiveTitleEn) {
       try {

@@ -6,6 +6,7 @@ import {
   EGYWATCH_HEADERS,
   EGYWATCH_SCRAPER_BASE,
   classifyEgyWatchServer,
+  detectQualityFromM3u8,
   parseExtractedMediaLinks,
   pickBestEgyWatchMatch,
   type ClassifiedEgyWatchServer,
@@ -22,7 +23,7 @@ import type { ExternalFilmSummary } from "./filmExternalSources.js";
 
 const TMDB_KEY = process.env.TMDB_API_KEY || "4ef0d7355d9ffb5151e987764708ce96";
 const TMDB_BASE = "https://api.themoviedb.org/3";
-const CACHE_FILE = "/tmp/nova-egywatch-catalog-v2.json";
+const CACHE_FILE = "/tmp/nova-egywatch-catalog-v3.json";
 const REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 export type EgyWatchVerifiedCategory =
@@ -182,17 +183,17 @@ async function hasPlayableEgyWatchVideos(
   ewType: "movie" | "serie" | "anime",
 ): Promise<{ ok: boolean; seasonsCount?: number }> {
   if (ewType === "movie") {
-    const det = await egyWatchApiFetch(`media/detail/${ewId}/${EGYWATCH_API_CODE}`, 7000);
+    const det = await egyWatchApiFetch(`media/detail/${ewId}/${EGYWATCH_API_CODE}`, 4500);
     const vids = Array.isArray(det?.videos) ? det.videos : [];
     const usable = vids.some((v: any) => Boolean(classifyEgyWatchServer(v)));
     return { ok: usable };
   }
   const showPath = ewType === "anime" ? `animes/show/${ewId}` : `series/show/${ewId}`;
   const seasonPath = ewType === "anime" ? "animes/season" : "series/season";
-  const det = await egyWatchApiFetch(`${showPath}/${EGYWATCH_API_CODE}`, 7000);
+  const det = await egyWatchApiFetch(`${showPath}/${EGYWATCH_API_CODE}`, 4500);
   const seasons = Array.isArray(det?.seasons) ? det.seasons : [];
   if (seasons.length === 0) return { ok: false };
-  const sData = await egyWatchApiFetch(`${seasonPath}/${seasons[0].id}/${EGYWATCH_API_CODE}`, 7000);
+  const sData = await egyWatchApiFetch(`${seasonPath}/${seasons[0].id}/${EGYWATCH_API_CODE}`, 4500);
   const eps = Array.isArray(sData?.episodes) ? sData.episodes : [];
   const sampleEps = eps.slice(0, 2);
   const usable = sampleEps.some(
@@ -232,10 +233,10 @@ async function indexDubbedSeriesFromEgyWatch(): Promise<VerifiedFilmItem[]> {
 
   const verified = await runPool(rawItems.slice(0, 56), 6, async (item): Promise<VerifiedFilmItem | null> => {
     const ewId = Number(item.id);
-    const det = await egyWatchApiFetch(`animes/show/${ewId}/${EGYWATCH_API_CODE}`, 7000);
+    const det = await egyWatchApiFetch(`animes/show/${ewId}/${EGYWATCH_API_CODE}`, 4500);
     const seasons = Array.isArray(det?.seasons) ? det.seasons : [];
     if (seasons.length === 0) return null;
-    const sData = await egyWatchApiFetch(`animes/season/${seasons[0].id}/${EGYWATCH_API_CODE}`, 7000);
+    const sData = await egyWatchApiFetch(`animes/season/${seasons[0].id}/${EGYWATCH_API_CODE}`, 4500);
     const eps = Array.isArray(sData?.episodes) ? sData.episodes : [];
     const playable = eps.slice(0, 2).some(
       (ep: any) => Array.isArray(ep?.videos) && ep.videos.some((v: any) => Boolean(classifyEgyWatchServer(v))),
@@ -300,10 +301,10 @@ async function indexRamadanArabicSeries(): Promise<VerifiedFilmItem[]> {
 
   const verified = await runPool(rawItems.slice(0, 32), 6, async (item): Promise<VerifiedFilmItem | null> => {
     const ewId = Number(item.id);
-    const det = await egyWatchApiFetch(`series/show/${ewId}/${EGYWATCH_API_CODE}`, 7000);
+    const det = await egyWatchApiFetch(`series/show/${ewId}/${EGYWATCH_API_CODE}`, 4500);
     const seasons = Array.isArray(det?.seasons) ? det.seasons : [];
     if (seasons.length === 0) return null;
-    const sData = await egyWatchApiFetch(`series/season/${seasons[0].id}/${EGYWATCH_API_CODE}`, 7000);
+    const sData = await egyWatchApiFetch(`series/season/${seasons[0].id}/${EGYWATCH_API_CODE}`, 4500);
     const eps = Array.isArray(sData?.episodes) ? sData.episodes : [];
     const playable = eps.slice(0, 2).some(
       (ep: any) => Array.isArray(ep?.videos) && ep.videos.some((v: any) => Boolean(classifyEgyWatchServer(v))),
@@ -377,7 +378,7 @@ async function indexRegionalCategoryViaTmdbAndEgyWatch(
     );
     let match = null;
     for (const q of queries) {
-      const sr = await egyWatchApiFetch(`search/${encodeURIComponent(q)}/${EGYWATCH_API_CODE}`, 7000);
+      const sr = await egyWatchApiFetch(`search/${encodeURIComponent(q)}/${EGYWATCH_API_CODE}`, 4500);
       const list = Array.isArray(sr?.search) ? sr.search : Array.isArray(sr?.data) ? sr.data : [];
       if (list.length === 0) continue;
       const pick = pickBestEgyWatchMatch(list, {
@@ -518,7 +519,7 @@ export async function getEgyWatchSeriesSeasons(
 ): Promise<{ seasons: any[]; episodes: any[] } | null> {
   const showPath = ewType === "anime" ? `animes/show/${ewId}` : `series/show/${ewId}`;
   const seasonPath = ewType === "anime" ? "animes/season" : "series/season";
-  const det = await egyWatchApiFetch(`${showPath}/${EGYWATCH_API_CODE}`, 7000);
+  const det = await egyWatchApiFetch(`${showPath}/${EGYWATCH_API_CODE}`, 4500);
   const rawSeasons = Array.isArray(det?.seasons) ? det.seasons : [];
   if (rawSeasons.length === 0) return null;
 
@@ -538,7 +539,7 @@ export async function getEgyWatchSeriesSeasons(
     seasons[0];
 
   const sData = targetSeason?._ewSeasonId
-    ? await egyWatchApiFetch(`${seasonPath}/${targetSeason._ewSeasonId}/${EGYWATCH_API_CODE}`, 7000)
+    ? await egyWatchApiFetch(`${seasonPath}/${targetSeason._ewSeasonId}/${EGYWATCH_API_CODE}`, 4500)
     : null;
   const rawEps = Array.isArray(sData?.episodes) ? sData.episodes : [];
 
@@ -568,143 +569,100 @@ export async function getEgyWatchSeriesSeasons(
 }
 
 /**
+ * Verify a candidate direct HLS/MP4 URL is genuinely playable right now (HTTP 200/206, valid #EXTM3U or video bytes)
+ * and read its true resolution from the master manifest.
+ */
+async function verifyAndDetectQuality(
+  url: string,
+  kind: "hls" | "direct",
+  fallbackQuality: string,
+  headers: Record<string, string>,
+): Promise<{ ok: boolean; quality: string }> {
+  try {
+    const reqHeaders: Record<string, string> = {
+      ...headers,
+      ...(kind === "direct" ? { Range: "bytes=0-511" } : {}),
+    };
+    const r = await fetch(url, { headers: reqHeaders, signal: AbortSignal.timeout(3200) });
+    if (!r.ok && r.status !== 206) return { ok: false, quality: fallbackQuality };
+    const ct = String(r.headers.get("content-type") || "").toLowerCase();
+    if (kind === "hls") {
+      const txt = await r.text();
+      if (!txt.includes("#EXTM3U")) return { ok: false, quality: fallbackQuality };
+      return { ok: true, quality: detectQualityFromM3u8(txt, fallbackQuality) };
+    }
+    if (ct.includes("text/html") || ct.includes("application/json")) {
+      return { ok: false, quality: fallbackQuality };
+    }
+    return { ok: true, quality: fallbackQuality };
+  } catch {
+    return { ok: false, quality: fallbackQuality };
+  }
+}
+
+/**
  * Extract direct playable HLS/MP4 URLs for a single classified EgyWatch server.
+ * Uses direct embed unpacking (no slow third-party PHP scrapers), omits Referer on playback
+ * (XFileSharing CDNs return HTTP 403 when Referer is sent), and live-verifies each stream.
  */
 async function extractSingleClassifiedServer(
   srv: ClassifiedEgyWatchServer,
 ): Promise<Array<{ url: string; quality: string; kind: "hls" | "direct"; headers: Record<string, string> }>> {
-  const baseHeaders: Record<string, string> = {
+  const fetchHeaders: Record<string, string> = {
     "User-Agent": srv.headers["User-Agent"] || EGYWATCH_BROWSER_UA,
-    ...(srv.headers.Referer ? { Referer: srv.headers.Referer } : {}),
   };
-
-  let originRef = "";
-  try {
-    originRef = `${new URL(srv.link).origin}/`;
-  } catch {}
   const playHeaders: Record<string, string> = {
     "User-Agent": EGYWATCH_BROWSER_UA,
-    ...(originRef ? { Referer: originRef } : {}),
   };
 
+  let candidates: Array<{ url: string; quality: string; kind: "hls" | "direct" }> = [];
+
   if (srv.mode === "direct") {
-    return [
+    candidates = [
       {
         url: srv.link,
         quality: /\b1080/i.test(srv.serverRaw + srv.link) ? "1080p" : /\b480/i.test(srv.serverRaw) ? "480p" : "720p",
         kind: srv.link.includes(".m3u8") ? "hls" : "direct",
-        headers: playHeaders,
       },
     ];
-  }
-
-  if (srv.mode === "turki_api") {
-    try {
-      const r = await fetch(srv.link, { headers: baseHeaders, signal: AbortSignal.timeout(7000) });
-      if (!r.ok) return [];
-      const body = await r.text();
-      return parseExtractedMediaLinks(body).map((m) => ({
-        ...m,
-        headers: { "User-Agent": EGYWATCH_BROWSER_UA, Referer: "https://3isk.news/" },
-      }));
-    } catch {
-      return [];
-    }
-  }
-
-  if (srv.mode === "json_worker") {
-    try {
-      const r = await fetch(srv.link, { headers: baseHeaders, signal: AbortSignal.timeout(7000) });
-      if (!r.ok) return [];
-      const body = await r.text();
-      return parseExtractedMediaLinks(body).map((m) => ({ ...m, headers: { "User-Agent": EGYWATCH_BROWSER_UA } }));
-    } catch {
-      return [];
-    }
-  }
-
-  if (srv.mode === "redirect_worker") {
+  } else if (srv.mode === "redirect_worker") {
     try {
       const r = await fetch(srv.link, {
-        headers: baseHeaders,
+        headers: fetchHeaders,
         redirect: "manual",
-        signal: AbortSignal.timeout(7000),
+        signal: AbortSignal.timeout(3800),
       });
       const loc = r.headers.get("location");
       if (loc && /^https?:\/\//i.test(loc)) {
-        return [
-          {
-            url: loc,
-            quality: "720p",
-            kind: loc.includes(".m3u8") ? "hls" : "direct",
-            headers: { "User-Agent": EGYWATCH_BROWSER_UA },
-          },
-        ];
+        candidates = [{ url: loc, quality: "720p", kind: loc.includes(".m3u8") ? "hls" : "direct" }];
       }
     } catch {}
-    return [];
-  }
-
-  if (srv.mode === "scraper" && srv.rule) {
-    const scraperUrl = `${EGYWATCH_SCRAPER_BASE}${srv.rule.endpoint}?${srv.rule.queryKey}=${encodeURIComponent(srv.link)}`;
+  } else {
+    // turki_api, json_worker, embed (direct fetch + built-in Dean Edwards JS unpacker)
     try {
-      // Try GET ?api=... first (fastest and works for VIP Fast, Uqload, EgybestVid, HDUp20, Liiivideo)
-      const r = await fetch(scraperUrl, {
-        headers: { "User-Agent": EGYWATCH_BROWSER_UA, Referer: EGYWATCH_SCRAPER_BASE },
-        signal: AbortSignal.timeout(7000),
-      });
+      const r = await fetch(srv.link, { headers: fetchHeaders, signal: AbortSignal.timeout(4000) });
       if (r.ok) {
         const body = await r.text();
-        const links = parseExtractedMediaLinks(body);
-        if (links.length > 0) {
-          return links.map((m) => ({ ...m, headers: playHeaders }));
-        }
+        candidates = parseExtractedMediaLinks(body);
       }
     } catch {}
-
-    // If POST rule and GET didn't yield links, fetch embed HTML and POST to scraper
-    if (srv.rule.method === "POST") {
-      try {
-        const embedRes = await fetch(srv.link, { headers: baseHeaders, signal: AbortSignal.timeout(6000) });
-        if (embedRes.ok) {
-          const html = await embedRes.text();
-          const direct = parseExtractedMediaLinks(html);
-          if (direct.length > 0) {
-            return direct.map((m) => ({ ...m, headers: playHeaders }));
-          }
-          const form = new URLSearchParams({ content: html, url: srv.link });
-          const postRes = await fetch(`${EGYWATCH_SCRAPER_BASE}${srv.rule.endpoint}`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/x-www-form-urlencoded",
-              "User-Agent": EGYWATCH_BROWSER_UA,
-              Referer: EGYWATCH_SCRAPER_BASE,
-            },
-            body: form.toString(),
-            signal: AbortSignal.timeout(7000),
-          });
-          if (postRes.ok) {
-            const pBody = await postRes.text();
-            const links = parseExtractedMediaLinks(pBody);
-            if (links.length > 0) {
-              return links.map((m) => ({ ...m, headers: playHeaders }));
-            }
-          }
-        }
-      } catch {}
-    }
   }
 
-  // Direct embed HTML scrape fallback (e.g., anafast)
-  try {
-    const embedRes = await fetch(srv.link, { headers: baseHeaders, signal: AbortSignal.timeout(6000) });
-    if (embedRes.ok) {
-      const html = await embedRes.text();
-      return parseExtractedMediaLinks(html).map((m) => ({ ...m, headers: playHeaders }));
-    }
-  } catch {}
+  if (candidates.length === 0) return [];
 
-  return [];
+  const verified: Array<{ url: string; quality: string; kind: "hls" | "direct"; headers: Record<string, string> }> = [];
+  for (const c of candidates.slice(0, 2)) {
+    const check = await verifyAndDetectQuality(c.url, c.kind, c.quality, playHeaders);
+    if (check.ok) {
+      verified.push({
+        url: c.url,
+        kind: c.kind,
+        quality: check.quality,
+        headers: playHeaders,
+      });
+    }
+  }
+  return verified;
 }
 
 export interface ServerEgyWatchSource {
@@ -750,7 +708,7 @@ export async function resolveEgyWatchStreams(params: {
       new Set([params.titleAr, params.titleEn].map((q) => String(q || "").trim()).filter((q) => q.length >= 2)),
     );
     for (const q of queries) {
-      const sr = await egyWatchApiFetch(`search/${encodeURIComponent(q)}/${EGYWATCH_API_CODE}`, 7000);
+      const sr = await egyWatchApiFetch(`search/${encodeURIComponent(q)}/${EGYWATCH_API_CODE}`, 4500);
       const list = Array.isArray(sr?.search) ? sr.search : Array.isArray(sr?.data) ? sr.data : [];
       if (list.length === 0) continue;
       const best = pickBestEgyWatchMatch(list, {
@@ -773,12 +731,12 @@ export async function resolveEgyWatchStreams(params: {
 
   let rawVideos: any[] = [];
   if (ewType === "movie") {
-    const det = await egyWatchApiFetch(`media/detail/${ewId}/${EGYWATCH_API_CODE}`, 7000);
+    const det = await egyWatchApiFetch(`media/detail/${ewId}/${EGYWATCH_API_CODE}`, 4500);
     rawVideos = Array.isArray(det?.videos) ? det.videos : [];
   } else {
     const showPath = ewType === "anime" ? `animes/show/${ewId}` : `series/show/${ewId}`;
     const seasonPath = ewType === "anime" ? "animes/season" : "series/season";
-    const det = await egyWatchApiFetch(`${showPath}/${EGYWATCH_API_CODE}`, 7000);
+    const det = await egyWatchApiFetch(`${showPath}/${EGYWATCH_API_CODE}`, 4500);
     const seasons = Array.isArray(det?.seasons) ? det.seasons : [];
     const seasonNum = Math.max(1, Number(params.season || 1));
     const epNum = Math.max(1, Number(params.ep || 1));
@@ -787,7 +745,7 @@ export async function resolveEgyWatchStreams(params: {
       seasons[Math.min(seasons.length - 1, seasonNum - 1)] ||
       seasons[0];
     if (targetSeason?.id) {
-      const sData = await egyWatchApiFetch(`${seasonPath}/${targetSeason.id}/${EGYWATCH_API_CODE}`, 7000);
+      const sData = await egyWatchApiFetch(`${seasonPath}/${targetSeason.id}/${EGYWATCH_API_CODE}`, 4500);
       const eps = Array.isArray(sData?.episodes) ? sData.episodes : [];
       const targetEp =
         eps.find((e: any) => Number(e?.episode_number) === epNum) ||
@@ -838,7 +796,7 @@ export async function resolveEgyWatchStreams(params: {
           kind: media.kind,
           type: media.kind,
           quality: media.quality,
-          tier: media.quality === "1080p" || media.quality === "4K" ? "1080p FHD" : "720p HD",
+          tier: media.quality === "4K" ? "4K UHD" : media.quality === "1080p" ? "1080p FHD" : media.quality === "480p" || media.quality === "360p" ? "480p SD" : "720p HD",
           headers: media.headers,
           isArabic: true,
           hardsubbed: true,
